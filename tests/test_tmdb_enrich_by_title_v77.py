@@ -51,9 +51,28 @@ class EnrichTmdbByTitleTests(unittest.TestCase):
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.plan = self.run_dir / "plan.jsonl"
         rows = [
-            {"row_id": "S|aaa", "proposed_title": "12 Hommes en colere", "proposed_year": 1957, "proposed_source": "nfo", "confidence": 87},
-            {"row_id": "S|bbb", "proposed_title": "Inconnu Total", "proposed_year": 2099, "proposed_source": "name", "confidence": 65},
-            {"row_id": "S|ccc", "proposed_title": "Deja TMDb", "proposed_year": 2000, "proposed_source": "tmdb", "confidence": 90, "tmdb_id": 999},
+            {
+                "row_id": "S|aaa",
+                "proposed_title": "12 Hommes en colere",
+                "proposed_year": 1957,
+                "proposed_source": "nfo",
+                "confidence": 87,
+            },
+            {
+                "row_id": "S|bbb",
+                "proposed_title": "Inconnu Total",
+                "proposed_year": 2099,
+                "proposed_source": "name",
+                "confidence": 65,
+            },
+            {
+                "row_id": "S|ccc",
+                "proposed_title": "Deja TMDb",
+                "proposed_year": 2000,
+                "proposed_source": "tmdb",
+                "confidence": 90,
+                "tmdb_id": 999,
+            },
         ]
         with open(self.plan, "w", encoding="utf-8") as fp:
             for r in rows:

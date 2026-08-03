@@ -88,7 +88,8 @@ class CheckDuplicatesBrowserTests(unittest.TestCase):
         self.assertTrue(res.get("ok"), res)
         groups = res.get("groups") or []
         self.assertGreaterEqual(
-            len(groups), 1,
+            len(groups),
+            1,
             f"check_duplicates({{}}) doit montrer le groupe de doublons (vue navigateur). groups={groups}",
         )
 

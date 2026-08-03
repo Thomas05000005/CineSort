@@ -11,13 +11,15 @@ Double diff exige :
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f3_binaire_arbitraire_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
 
-from cinesort.infra.probe.tooling import safe_tool_path
 from cinesort.domain.perceptual.ffmpeg_runner import resolve_ffmpeg_path
+from cinesort.infra.probe.tooling import safe_tool_path
 
 
 def _avant_raw(ffprobe_setting: str) -> str:

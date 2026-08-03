@@ -4,7 +4,66 @@ niveau "<LEVEL>".
 Ouverture de PRs avec fixes : <OPEN_PRS>.
 
 
-CONTEXTE PROJET (mai 2026 - a jour) :
+=========================================================================
+BUDGET D'OUVERTURE - REGLE LA PLUS IMPORTANTE DE CE DOCUMENT
+=========================================================================
+Le backlog ouvert de ce depot a atteint ~180 PR et ~250 issues, constitue
+en tres grande majorite par les executions PRECEDENTES de cet audit. Il
+n'est plus lu par personne : produire davantage ne rend plus service, ca
+enterre les vrais problemes sous le bruit.
+
+Avant toute ouverture, COMPTE l'existant :
+  gh pr list --state open --limit 300 --json number,title
+  gh issue list --state open --limit 400 --json number,title
+
+Puis applique ce budget, par execution :
+- au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs, petits,
+  testes et sans arbitrage produit ;
+- au plus 5 issues ouvertes, reservees aux findings de severite HIGH ou
+  superieure ;
+- 0 ouverture tant que le total ouvert depasse 150 : dans ce cas tu ne
+  fais que COMMENTER l'existant et proposer des fermetures.
+
+Regles de non-duplication, dans cet ordre :
+1. Le finding est-il deja CORRIGE sur main ? Verifie dans le code, pas
+   dans ta memoire. Si oui : n'ouvre rien, et si une issue ouverte le
+   decrit encore, commente-la pour proposer sa fermeture.
+2. Est-il deja decrit dans une issue/PR ouverte ? Si oui : commente
+   l'existante. N'en cree JAMAIS une seconde.
+3. Sinon seulement, et dans la limite du budget, ouvre.
+
+Preferer TOUJOURS : 1 issue de synthese listant N findings, plutot que
+N issues. Un finding sans correctif sur ne merite pas de PR.
+
+Enfin : une PR que tu ouvres doit pouvoir etre mergee. Si elle ne
+s'applique plus, si sa CI est rouge pour une raison qui t'est propre, ou
+si elle depend d'un arbitrage produit, ne l'ouvre pas - decris-la.
+
+=========================================================================
+
+CONTEXTE PROJET (mis a jour le 2026-08-02) :
+- Deux grosses campagnes de correction ont ete absorbees par main depuis
+  la redaction initiale de ce document. NE PAS re-signaler leurs findings
+  sans avoir verifie le code courant :
+  * `529fcd0` ultra-audit (2026-07-16) : 41 findings (1 CRITICAL, 19 HIGH,
+    21 MEDIUM) - granularite des operations destructives, row_id 64 bits,
+    score qualite en deux passes, exports, tri et accents.
+  * `2e213a60` revue post-merge (2026-08-02) : 35 findings (11 HIGH,
+    20 MEDIUM, 4 LOW) - tolerance sqlite3.Error dans le journal d'apply
+    et l'undo, plafonds de tier verrouillants, arbitrage longest-match des
+    sidecars, caches incrementaux, races frontend, restauration DB.
+  * `9df19d3b` : Pillow 12.3.0 + setuptools 83.0.0 (14 alertes Dependabot).
+- ETAT CI A CONNAITRE : la CI est ROUGE sur main lui-meme (ruff 0.15.22
+  resolu par la borne `<0.16` : erreurs de lint + drift de formatage
+  pre-existants). Un check rouge sur une PR ne dit donc RIEN de sa qualite.
+  Ne t'en sers pas comme critere, et n'ouvre pas d'issue a ce sujet : le
+  chantier est identifie et suivi separement.
+- Tests : 6592 unitaires passent (perimetre CI, hors e2e/manual/live/stress).
+  Il subsiste ~22 echecs PRE-EXISTANTS connus (flaky Windows sur verrous de
+  fichiers, perf, isolation Playwright) : ne pas les re-signaler comme neufs.
+- Seuil de couverture en CI : 75% (abaisse depuis 80% apres la migration B).
+
+CONTEXTE PROJET (structure, toujours valable) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
   * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
   * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
@@ -14,14 +73,16 @@ CONTEXTE PROJET (mai 2026 - a jour) :
 - Repository pattern installe sur SQLiteStore : store.probe, store.scan,
   store.quality, store.run, store.apply, store.perceptual, store.anomaly.
   Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
-- Strangler Fig + Facade pattern : CineSortApi expose 5 facades
-  (api.run, api.settings, api.quality, api.integrations, api.library)
-  avec 50 methodes publiques. Les anciennes methodes directes sont
-  privatisees en `_X_impl(...)`.
+- Strangler Fig + Facade pattern : CineSortApi expose 6 facades
+  (api.run, api.settings, api.quality, api.integrations, api.library,
+  api.runtime). Les anciennes methodes directes sont privatisees en
+  `_X_impl(...)`. NB : ce document annoncait 5 facades jusqu'au 2026-08-02,
+  `api.runtime` etait oubliee.
 - Lazy imports residuels acceptables : seulement dans cinesort/app/cleanup.py
   (cycle cleanup <-> apply_core, non lie a domain->app). Tout autre lazy
   import nouveau doit etre justifie ou converti en top-level.
-- Tests : 4277 unitaires passent, coverage seuil 80% en CI.
+- Tests : cf. bloc « mis a jour le 2026-08-02 » plus haut (6592 unitaires,
+  seuil de couverture 75%). Le chiffre « 4277 / 80% » de mai est perime.
 
 
 Analyse transverse (si target=transverse) :

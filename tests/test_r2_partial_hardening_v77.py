@@ -5,7 +5,6 @@ analyze_quality_batch scope=validated) qui n'avaient AUCUN test.
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cinesort.ui.api import film_support, quality_support
@@ -52,13 +51,22 @@ class FilmHistoryEventsTests(unittest.TestCase):
 
     def test_history_populated_from_events_key(self) -> None:
         api = MagicMock()
-        row = {"row_id": "r1", "proposed_title": "X", "proposed_year": 2020,
-               "candidates": [{"tmdb_id": 27205}], "folder": "C:/f", "video": "x.mkv"}
+        row = {
+            "row_id": "r1",
+            "proposed_title": "X",
+            "proposed_year": 2020,
+            "candidates": [{"tmdb_id": 27205}],
+            "folder": "C:/f",
+            "video": "x.mkv",
+        }
         events = [{"type": "scan", "run_id": "run1"}, {"type": "apply", "run_id": "run1"}]
-        with patch.object(film_support, "_resolve_run_id", return_value="run1"), \
-             patch.object(film_support, "_find_plan_row", return_value=row), \
-             patch.object(film_support.film_history_support, "get_film_history",
-                          return_value={"ok": True, "events": events}):
+        with (
+            patch.object(film_support, "_resolve_run_id", return_value="run1"),
+            patch.object(film_support, "_find_plan_row", return_value=row),
+            patch.object(
+                film_support.film_history_support, "get_film_history", return_value={"ok": True, "events": events}
+            ),
+        ):
             # store/perceptual/quality renvoient None gracieusement
             api._get_or_create_infra.return_value = (MagicMock(), None)
             api.settings.get_settings.return_value = {"state_dir": "/tmp"}
@@ -68,10 +76,13 @@ class FilmHistoryEventsTests(unittest.TestCase):
     def test_history_empty_when_no_events(self) -> None:
         api = MagicMock()
         row = {"row_id": "r1", "proposed_title": "X", "proposed_year": 2020, "candidates": []}
-        with patch.object(film_support, "_resolve_run_id", return_value="run1"), \
-             patch.object(film_support, "_find_plan_row", return_value=row), \
-             patch.object(film_support.film_history_support, "get_film_history",
-                          return_value={"ok": True, "events": []}):
+        with (
+            patch.object(film_support, "_resolve_run_id", return_value="run1"),
+            patch.object(film_support, "_find_plan_row", return_value=row),
+            patch.object(
+                film_support.film_history_support, "get_film_history", return_value={"ok": True, "events": []}
+            ),
+        ):
             api._get_or_create_infra.return_value = (MagicMock(), None)
             api.settings.get_settings.return_value = {"state_dir": "/tmp"}
             out = film_support._get_film_full_impl(api, "run1", "r1")

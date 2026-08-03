@@ -43,9 +43,7 @@ class ReleaseNameParserTests(unittest.TestCase):
     """Tests unitaires du parser pour s'assurer qu'il extrait bien les specs."""
 
     def test_parse_uhd_dv_hdr_bluray_dts_hd_x265(self) -> None:
-        info = parse_release_name(
-            "12 Angry Men (1957) 2160p DV HDR BluRay DTS-HD MA 1.0 x265-GROUP.mkv"
-        )
+        info = parse_release_name("12 Angry Men (1957) 2160p DV HDR BluRay DTS-HD MA 1.0 x265-GROUP.mkv")
         self.assertEqual(info.resolution_hint, "2160p")
         self.assertEqual(info.width_hint, 3840)
         self.assertEqual(info.height_hint, 2160)
@@ -78,9 +76,7 @@ class ReleaseNameParserTests(unittest.TestCase):
         self.assertEqual(info.audio_channels_hint, "2.0")
 
     def test_parse_atmos_truehd(self) -> None:
-        info = parse_release_name(
-            "Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR.TrueHD.Atmos.7.1-SWTYBLZ.mkv"
-        )
+        info = parse_release_name("Dune.Part.Two.2024.2160p.UHD.BluRay.x265.10bit.HDR.TrueHD.Atmos.7.1-SWTYBLZ.mkv")
         self.assertEqual(info.resolution_hint, "2160p")
         self.assertEqual(info.codec_hint, "hevc")
         self.assertEqual(info.bit_depth_hint, 10)
@@ -125,9 +121,7 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
             film_year=1957,
         )
         # Le score brut reste eleve (le nom est riche).
-        self.assertGreaterEqual(
-            result["score"], 70, f"score trop faible: {result['score']} ({result['reasons']})"
-        )
+        self.assertGreaterEqual(result["score"], 70, f"score trop faible: {result['score']} ({result['reasons']})")
         # Mais le tier est CAP a Silver max parce que le probe a echoue.
         self.assertEqual(
             result["tier"],
@@ -157,9 +151,7 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
             expected_year=2010,
             film_year=2010,
         )
-        self.assertGreaterEqual(
-            result["score"], 55, f"score trop faible: {result['score']} ({result['reasons']})"
-        )
+        self.assertGreaterEqual(result["score"], 55, f"score trop faible: {result['score']} ({result['reasons']})")
         # Cap force a Silver max (probe FAILED).
         self.assertEqual(
             result["tier"],
@@ -219,9 +211,7 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
         )
         # Le probe donne la resolution (mesuree, pas de penalite incertitude),
         # le nom comble codec/HDR/audio.
-        self.assertGreaterEqual(
-            result["score"], 55, f"score trop faible: {result['score']} ({result['reasons']})"
-        )
+        self.assertGreaterEqual(result["score"], 55, f"score trop faible: {result['score']} ({result['reasons']})")
 
     def test_full_probe_overrides_name_for_codec(self) -> None:
         """Probe FULL avec codec HEVC + nom contradictoire (x264) -> probe gagne."""
@@ -235,9 +225,7 @@ class QualityScoreFallbackToNameTests(unittest.TestCase):
                 "bit_depth": 10,
                 "hdr10": True,
             },
-            "audio_tracks": [
-                {"codec": "truehd", "channels": 8, "language": "eng", "bitrate": 4000000}
-            ],
+            "audio_tracks": [{"codec": "truehd", "channels": 8, "language": "eng", "bitrate": 4000000}],
             "sources": {},
         }
         # Le nom dit x264 mais le probe dit HEVC : le probe doit gagner.
@@ -351,9 +339,7 @@ class FailedProbeTierCapTests(unittest.TestCase):
                 "hdr_dolby_vision": True,
                 "hdr10_plus": False,
             },
-            "audio_tracks": [
-                {"codec": "truehd atmos", "channels": 8, "language": "eng", "bitrate": 4_000_000}
-            ],
+            "audio_tracks": [{"codec": "truehd atmos", "channels": 8, "language": "eng", "bitrate": 4_000_000}],
             "sources": {},
         }
         result = compute_quality_score(

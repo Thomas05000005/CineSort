@@ -73,7 +73,7 @@
       "doublons": "Doublons",
       "history": "Historique",
       "qij": "QIJ",
-      "settings": "Parametres",
+      "settings": "Paramètres",
       "help": "Aide"
     },
     "aria_label": "Navigation CineSort v5",
@@ -84,7 +84,7 @@
     "expand": "Deployer",
     "counter_aria": "Compteur {{label}}",
     "title_with_shortcut": "{{label}} ({{shortcut}})",
-    "integration_disabled_title": "{{label}} non configure — clique pour l'activer dans Parametres",
+    "integration_disabled_title": "{{label}} non configure — clique pour l'activer dans Paramètres",
     "update_badge_title": "Nouvelle version : {{version}}"
   },
   "topbar": {

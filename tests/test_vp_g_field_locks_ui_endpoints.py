@@ -21,7 +21,6 @@ from __future__ import annotations
 import inspect
 import sys
 import unittest
-from typing import Any
 
 sys.path.insert(0, ".")
 
@@ -37,9 +36,17 @@ class _FakeRepo:
         self._locks: dict[tuple[str, str], dict] = {}
 
     def set_lock(self, film_id, field_name, locked_value, *, run_id="", row_id="", source="ui_lock"):
-        self.calls.append(("set_lock", (film_id, field_name, locked_value), {
-            "run_id": run_id, "row_id": row_id, "source": source,
-        }))
+        self.calls.append(
+            (
+                "set_lock",
+                (film_id, field_name, locked_value),
+                {
+                    "run_id": run_id,
+                    "row_id": row_id,
+                    "source": source,
+                },
+            )
+        )
         self._locks[(film_id, field_name)] = {
             "locked_value": locked_value,
             "source": source,

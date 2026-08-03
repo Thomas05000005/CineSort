@@ -109,7 +109,7 @@ class CustomTemplateForkGuardTests(unittest.TestCase):
         plan_jsonl = run_dir / "plan.jsonl"
         self.assertTrue(plan_jsonl.exists(), f"plan.jsonl manquant: {plan_jsonl}")
         decisions: Dict[str, Dict[str, Any]] = {}
-        with open(plan_jsonl, "r", encoding="utf-8") as f:
+        with open(plan_jsonl, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -154,7 +154,8 @@ class CustomTemplateForkGuardTests(unittest.TestCase):
 
         # 1) Dossier cible (rendu du template custom) IDENTIQUE entre ON et OFF
         self.assertEqual(
-            dir_on, dir_off,
+            dir_on,
+            dir_off,
             f"FORK SEMANTIQUE DETECTE : le rendu du template custom "
             f"{self.CUSTOM_TEMPLATE!r} differe entre ON et OFF. "
             f"ON dir={dir_on!r} OFF dir={dir_off!r}. STOP REMONTER.",
@@ -167,15 +168,16 @@ class CustomTemplateForkGuardTests(unittest.TestCase):
         # 3) Le DOSSIER (rendu template custom) contient bien le separateur __
         #    Preuve que le template custom est applique, pas le default silencieux
         self.assertIn(
-            "__", dir_on,
+            "__",
+            dir_on,
             f"Le template custom {self.CUSTOM_TEMPLATE!r} ne semble pas "
             f"applique. dir_on={dir_on!r}. Soit le preset 'custom' n'est pas "
             f"lu, soit le default a ete substitue en silence.",
         )
         self.assertIn(
-            "__", dir_off,
-            f"Le template custom {self.CUSTOM_TEMPLATE!r} ne semble pas "
-            f"applique. dir_off={dir_off!r}.",
+            "__",
+            dir_off,
+            f"Le template custom {self.CUSTOM_TEMPLATE!r} ne semble pas applique. dir_off={dir_off!r}.",
         )
 
 
