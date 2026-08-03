@@ -74,7 +74,10 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "cleanup_orphans": "WRITE_ONLY - toggle parametres.js:154, aucun lecteur backend",
     "dry_run_apply": "WRITE_ONLY - toggle dry-run cote UI (traitement.js) ; le backend lit le flag dry_run du payload run/apply, pas ce setting",
     "effect_speed": "WRITE_ONLY - effet client-side (variables CSS d'animation)",
-    "excluded_patterns": "WRITE_ONLY - multi-path parametres.js:52, aucun lecteur backend",
+    # NB : excluded_patterns RETIRE 2026-08-03 — desormais LU par
+    # build_cfg_from_settings (settings_support.py) -> Config.excluded_patterns
+    # -> core.iter_videos, qui retire du plan tout fichier video matche. Le
+    # reglage borne enfin le pipeline destructif au lieu de l'annoncer.
     "expert_mode": "WRITE_ONLY - effet client-side (parametres.js:3337 classList 'is-expert')",
     "glow_intensity": "WRITE_ONLY - effet client-side (variables CSS)",
     "light_intensity": "WRITE_ONLY - effet client-side (variables CSS)",
