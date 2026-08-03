@@ -10,6 +10,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from tests._jsexec import require_node, run_module_test
+
 _ROOT = Path(__file__).resolve().parents[1]
 _HISTORIQUE_JS = _ROOT / "web" / "dashboard" / "views" / "historique.js"
 _APP_JS = _ROOT / "web" / "dashboard" / "app.js"
@@ -50,13 +52,124 @@ class ApplyTabDetailTests(unittest.TestCase):
     def test_apply_ops_render(self) -> None:
         self.assertIn("_renderApplyOps", self.js)
 
-    def test_apply_op_labels(self) -> None:
-        # 4 types d'op : rename / move / quarantine / delete_mark.
-        for term in ("Renommé", "Déplacé", "Quarantaine", "Marqué suppression"):
-            self.assertIn(term, self.js, f"manque label op : {term}")
-
     def test_apply_counters(self) -> None:
         self.assertIn("historique-apply-counter", self.js)
+
+
+# --- Libelles d'operations : teste au RUNTIME -----------------------------
+#
+# Historique : ce test comparait 4 chaines litterales ("Renommé", "Déplacé"...)
+# au source de historique.js. Il est passe au ROUGE quand le fix d'audit
+# 2026-05-25 (v1.5.3, Vague F) a reformule les libelles pour ne plus laisser
+# croire que le fichier video est renomme ("Dossier renommé : ... (fichier
+# conservé)"). Le test punissait donc une CORRECTION, et n'aurait rien detecte
+# si la logique de _opLabel s'etait inversee tout en gardant les mots.
+#
+# Il est reecrit ici en test de COMPORTEMENT : on execute le vrai _opLabel sous
+# Node (harnais tests/_jsexec.py) et on verifie l'invariant produit, pas la
+# forme du source. L'invariant central vient de la regle projet "ne jamais
+# renommer le fichier video" : seul le DOSSIER est renomme, et un deplacement
+# de fichier a nom identique doit le dire explicitement.
+
+_OPLABEL_STUBS = """
+const escapeHtml = (s) => String(s);
+const apiPost = async () => ({});
+const getNavSignal = () => null;
+const navigateTo = () => {};
+const rightPanel = { setSections: () => {}, setTitle: () => {} };
+const dangerConfirmModal = () => {};
+const showModal = () => {};
+const closeModal = () => {};
+const showToast = () => {};
+const buildEmptyState = () => "";
+"""
+
+_OPLABEL_EXTRA = "export { _opLabel as __opLabel };\n"
+
+_OPLABEL_DRIVER = """
+const cases = {
+  rename: { op_type: "rename", src_path: "/m/Ancien Dossier", dst_path: "/m/Nouveau Dossier (2011)" },
+  move_dir: { op_type: "move_dir", src_path: "/m/A", dst_path: "/m/B (2011)" },
+  move_same: { op_type: "move", src_path: "/a/film.mkv", dst_path: "/b/film.mkv" },
+  move_renamed: { op_type: "move", src_path: "/a/s01e01.mkv", dst_path: "/b/S01E02.mkv" },
+  quarantine: { op_type: "quarantine", src_path: "/m/douteux.mkv", dst_path: "" },
+  delete_mark: { op_type: "delete_mark", src_path: "/m/apvirer.mkv", dst_path: "" },
+  unknown: { op_type: "hardlink", src_path: "/m/x.mkv", dst_path: "/m/y.mkv" },
+};
+const out = {};
+for (const [name, op] of Object.entries(cases)) out[name] = M.__opLabel(op);
+__emit(out);
+"""
+
+
+class ApplyOpLabelRuntimeTests(unittest.TestCase):
+    """_opLabel : un libelle par type d'operation, execute pour de vrai."""
+
+    _labels: dict | None = None
+
+    def _labels_or_skip(self) -> dict:
+        require_node(self)
+        if ApplyOpLabelRuntimeTests._labels is None:
+            ApplyOpLabelRuntimeTests._labels = run_module_test(
+                _HISTORIQUE_JS,
+                stubs=_OPLABEL_STUBS,
+                extra=_OPLABEL_EXTRA,
+                driver=_OPLABEL_DRIVER,
+            )
+        return ApplyOpLabelRuntimeTests._labels
+
+    def test_each_op_type_gets_a_distinct_non_empty_label(self) -> None:
+        labels = self._labels_or_skip()
+        # Les 4 familles de la spec + le fallback doivent produire un libelle
+        # non vide, avec une icone, et rester distinguables entre elles.
+        seen: dict[str, str] = {}
+        for name in ("rename", "move_same", "quarantine", "delete_mark", "unknown"):
+            lbl = labels[name]
+            self.assertTrue(lbl["text"].strip(), f"{name} : libelle vide")
+            self.assertTrue(lbl["icon"].strip(), f"{name} : icone vide")
+            self.assertNotIn(lbl["text"], seen, f"{name} : libelle identique a {seen.get(lbl['text'])}")
+            seen[lbl["text"]] = name
+
+    def test_rename_says_folder_and_never_claims_the_video_was_renamed(self) -> None:
+        # Invariant produit (fix Vague F + regle projet) : apply_core ne renomme
+        # QUE le dossier parent. Le libelle doit donc nommer le dossier et
+        # rassurer sur le fichier ; il ne doit pas parler de fichier renomme.
+        labels = self._labels_or_skip()
+        for name in ("rename", "move_dir"):
+            text = labels[name]["text"].lower()
+            self.assertIn("dossier", text, f"{name} : le libelle doit dire que c'est le DOSSIER")
+            self.assertIn("conserv", text, f"{name} : le libelle doit dire que le fichier est conserve")
+            self.assertNotIn("fichier renomm", text, f"{name} : ne doit pas annoncer un renommage de fichier")
+            self.assertNotIn("vidéo renomm", text, f"{name} : ne doit pas annoncer un renommage de video")
+
+    def test_move_distinguishes_same_name_from_real_rename(self) -> None:
+        # Un move a basename identique = deplacement pur : le libelle doit le
+        # dire. Un move a basename different (episodes TV) doit au contraire
+        # afficher les DEUX noms pour que l'operateur voie le renommage.
+        labels = self._labels_or_skip()
+        same = labels["move_same"]["text"]
+        self.assertIn("conserv", same.lower(), "move a nom identique : doit dire 'nom conservé'")
+        self.assertIn("film.mkv", same)
+
+        renamed = labels["move_renamed"]["text"]
+        self.assertIn("s01e01.mkv", renamed.lower())
+        self.assertIn("s01e02.mkv", renamed.lower())
+        self.assertNotEqual(same, renamed, "les deux cas de move doivent etre distingues")
+
+    def test_quarantine_and_delete_mark_name_their_destination(self) -> None:
+        labels = self._labels_or_skip()
+        self.assertIn("_review", labels["quarantine"]["text"])
+        self.assertIn("douteux.mkv", labels["quarantine"]["text"])
+        self.assertIn("suppression", labels["delete_mark"]["text"].lower())
+        self.assertIn("apvirer.mkv", labels["delete_mark"]["text"])
+
+    def test_unknown_op_type_is_translated_not_raw_english(self) -> None:
+        # Fallback FR (iter11) : jamais l'op_type brut seul en tete de libelle.
+        labels = self._labels_or_skip()
+        text = labels["unknown"]["text"]
+        self.assertTrue(text[0].isupper(), f"fallback non capitalise : {text}")
+        self.assertIn("x.mkv", text)
+        self.assertIn("y.mkv", text)
 
 
 class DoublonsTabDetailTests(unittest.TestCase):

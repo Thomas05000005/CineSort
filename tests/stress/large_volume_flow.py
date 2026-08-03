@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
 
 # Cf issue #83 : import direct au lieu de via re-export domain.core.
 # core.find_duplicate_targets reste accede via core.X (wrapper qui injecte

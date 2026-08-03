@@ -9,7 +9,9 @@ Le splash screen est desormais gere par pywebview dans app.py (splash HTML).
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
+from pathlib import Path
 
 
 def _attach_console_if_api_mode() -> None:
@@ -25,4 +27,22 @@ def _attach_console_if_api_mode() -> None:
     sys.stderr = open("CONOUT$", "w", encoding="utf-8")  # noqa: SIM115
 
 
+def _enable_debug_via_flag_file() -> None:
+    """V-DEBUG 2026-06-08 : active CINESORT_DEBUG=1 si %APPDATA%/CineSort/debug.flag existe.
+
+    Permet de declencher le debug verbose token/auth en prod (binaire dist) sans
+    rebuild ni edition de settings.json, simplement en creant un fichier vide.
+    Non-intrusif : si le fichier est absent (defaut prod), le mode debug reste OFF.
+    Si CINESORT_DEBUG est deja positionne dans l'env, on respecte (setdefault).
+    """
+    try:
+        flag = Path(os.environ.get("APPDATA", "")) / "CineSort" / "debug.flag"
+        if flag.is_file():
+            os.environ.setdefault("CINESORT_DEBUG", "1")
+    except Exception:
+        # Best-effort only : ne jamais bloquer le boot pour un probleme de flag.
+        pass
+
+
 _attach_console_if_api_mode()
+_enable_debug_via_flag_file()

@@ -1,0 +1,23 @@
+{
+  "threads": 8,
+  "iters": 40,
+  "writes_total": 320,
+  "I1_lectures_sans_exception": true,
+  "I2_valeurs_incoherentes": [],
+  "I3_fichier_final_valide": true,
+  "valeur_finale": "Coll_7_39",
+  "valeur_finale_coherente": true,
+  "erreurs": [
+    "WRITE t2.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.30384.1781694944025962200.b0ea8788' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t3.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.39328.1781694944035931300.fd3b1544' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t4.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.23068.1781694944045360000.d7df41a4' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t5.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.42112.1781694944056209100.416033b9' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t6.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.25284.1781694944068139600.53448677' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t7.0: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.21624.1781694944082647400.eff74c6a' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t0.1: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.37452.1781694944092274700.26a91382' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t1.1: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.11944.1781694944104280600.ccf4d2c5' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t2.1: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.30384.1781694944114655600.a3130e2b' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'",
+    "WRITE t3.1: PermissionError: [WinError 5] Accès refusé: 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json.tmp.25800.39328.1781694944128625700.795b4b82' -> 'C:\\\\Users\\\\blanc\\\\AppData\\\\Local\\\\Temp\\\\cs_conc_set_5vb7umsb\\\\settings.json'"
+  ],
+  "VERDICT": "INCOHERENCE DETECTEE"
+}

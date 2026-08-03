@@ -10,8 +10,8 @@ from typing import Any, Dict
 
 import cinesort.infra.state as state
 from cinesort.domain.film_history import get_film_timeline, list_films_overview
-from cinesort.ui.api.settings_support import normalize_user_path
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.settings_support import normalize_user_path
 
 
 def get_film_history(api: Any, film_id: str) -> Dict[str, Any]:

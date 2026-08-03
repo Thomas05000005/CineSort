@@ -38,11 +38,15 @@ _PAUSABLE_DB_STATES = frozenset(
 )
 
 # Etats DB autorises a transiter vers RUNNING via resume.
+# H13 fix (hotfix2) : alignement strict avec la clause SQL de
+# `RunRepository.mark_run_resumed` (`WHERE status IN ('PAUSED', 'SAVED')`).
+# AWAITING_VALIDATION exige une action utilisateur explicite (validation
+# du diff) et ne doit PAS etre repris via cet endpoint generic — sinon
+# l'UI annoncait OK puis la DB refusait la transition (incoherence).
 _RESUMABLE_DB_STATES = frozenset(
     {
         RunStatus.PAUSED.value,
         RunStatus.SAVED.value,
-        RunStatus.AWAITING_VALIDATION.value,
     }
 )
 
@@ -60,8 +64,19 @@ def pause_run(api: Any, run_id: str) -> Dict[str, Any]:
        RUNNING / AWAITING_VALIDATION).
     3. Retourne `{ok, run_id, status: "PAUSED"}` ou un `_err_response`.
     """
-    logger.debug("api: pause_run run_id=%s", run_id)
-    return _pause_or_save(api, run_id, saved=False, status_label=RunStatus.PAUSED.value)
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint critique de pilotage du run.
+    try:
+        logger.debug("api: pause_run run_id=%s", run_id)
+        return _pause_or_save(api, run_id, saved=False, status_label=RunStatus.PAUSED.value)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("pause_run failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "pause_run_failed",
+            "message": str(exc),
+            "user_message": "Impossible de mettre le run en pause.",
+        }
 
 
 @requires_valid_run_id
@@ -217,17 +232,9 @@ def _pause_or_save(api: Any, run_id: str, *, saved: bool, status_label: str) -> 
             status=current_status,
         )
 
-    # Signaling JobRunner d'abord (best-effort) pour que le worker s'arrete
-    # sur la prochaine iteration. Si le run n'est plus en memoire (apres
-    # redemarrage app), pas de signaling — on persiste juste l'etat.
-    rs = api._get_run(run_id)
-    if rs is not None:
-        try:
-            rs.runner.request_pause(run_id)
-        # except Exception : le signaling est best-effort, on persiste quand meme
-        except Exception as exc:
-            logger.warning("pause_run: signaling failure run_id=%s err=%s", run_id, exc)
-
+    # BUG-012 fix : persister l'etat DB d'abord pour eviter une incoherence ou
+    # le worker est bloque par pause_event tandis que la DB voit toujours RUNNING
+    # (si la transition DB etait refusee apres signaling). Symetrique a resume_run.
     ok = store.run.mark_run_paused(run_id, saved=saved)
     if not ok:
         return _err_response(
@@ -237,5 +244,22 @@ def _pause_or_save(api: Any, run_id: str, *, saved: bool, status_label: str) -> 
             log_module=__name__,
             run_id=run_id,
         )
+
+    # Signaling JobRunner apres persistance reussie (best-effort) pour que le
+    # worker s'arrete sur la prochaine iteration. Si le run n'est plus en memoire
+    # (apres redemarrage app), pas de signaling — l'etat DB est suffisant.
+    #
+    # HOTFIX3 fix : transmettre le flag `saved` au runner pour qu'il aligne le
+    # snapshot memoire sur le meme target status que la DB (SAVED si
+    # save_for_later, sinon PAUSED). Le fix C3 hotfix2 forcait inconditionnellement
+    # snapshot=PAUSED, ce qui creait une nouvelle desync snapshot=PAUSED /
+    # DB=SAVED dans le flux save_for_later.
+    rs = api._get_run(run_id)
+    if rs is not None:
+        try:
+            rs.runner.request_pause(run_id, saved=saved)
+        # except Exception : le signaling est best-effort, l'etat DB est deja persiste
+        except Exception as exc:
+            logger.warning("pause_run: signaling failure run_id=%s err=%s", run_id, exc)
 
     return {"ok": True, "run_id": run_id, "status": status_label}

@@ -13,8 +13,7 @@ from cinesort.infra.probe.constants import (
     WINGET_INSTALL_TIMEOUT_S,
 )
 
-from .tooling import RunnerFn, default_runner
-
+from .tooling import EXPECTED_BINARY_NAMES, RunnerFn, _binary_name_allowed, default_runner
 
 _MIN_VERSIONS = {
     "ffprobe": "5.0",
@@ -46,10 +45,9 @@ _SUPPORTED_TOOLS = ("ffprobe", "mediainfo")
 # Mapping tool_name -> noms acceptes (sensible casse-insensible). On accepte
 # le nom Windows (.exe) et le nom Unix (sans extension) pour la portabilite
 # tests/CI Linux.
-_EXPECTED_BINARY_NAMES = {
-    "ffprobe": frozenset({"ffprobe.exe", "ffprobe"}),
-    "mediainfo": frozenset({"mediainfo.exe", "mediainfo", "MediaInfo.exe"}),
-}
+# Source de verite unique dans tooling.py (applique aussi par _resolve_tool_path
+# AVANT execution, cf AUDIT 2026-06-10). Alias pour compat des references locales.
+_EXPECTED_BINARY_NAMES = EXPECTED_BINARY_NAMES
 _STATUS_OK = "ok"
 _STATUS_MISSING = "missing"
 _STATUS_INVALID = "invalid_executable"
@@ -147,7 +145,13 @@ def _candidate_paths_for_tool(
     *, tool_name: str, explicit_path: str, state_dir: Path, which_fn, scan_winget_packages: bool
 ) -> List[Tuple[str, str]]:
     candidates: List[Tuple[str, str]] = []
-    if explicit_path:
+    # R8-093 (filet F3) : le chemin explicite (settings) est EXECUTE en argv[0]
+    # par _build_tool_status/_probe_version_line ([path, -version]) -> appliquer la
+    # MEME garde whitelist que tooling._resolve_tool_path (R8-032/R8-081), sinon
+    # un .exe arbitraire configure (calc.exe/malware.exe) etait lance via
+    # detect_probe_tools (endpoints REST get_probe_tools_status/recheck). Les autres
+    # candidats (managed/winget/path) derivent de _TOOL_EXECUTABLES -> deja surs.
+    if explicit_path and _binary_name_allowed(tool_name, explicit_path):
         candidates.append(("explicit", explicit_path))
 
     # Chercher dans state_dir/tools/ et aussi a cote de l'executable (tools/)

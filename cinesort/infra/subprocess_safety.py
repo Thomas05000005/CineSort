@@ -146,8 +146,27 @@ def tracked_popen(
     Yields:
         L'objet Popen, deja enregistre dans le registre global.
     """
+    # H11 fix: garantir qu'un Popen reussi est TOUJOURS enregistre + cleanup,
+    # meme si une exception asynchrone (KeyboardInterrupt, MemoryError) survient
+    # entre Popen() et _register(), ou si _register() lui-meme leve.
+    #
+    # Pattern : Popen dans un try ; des qu'il retourne, on doit garantir que
+    # le child sera tue. On enregistre IMMEDIATEMENT dans un try/except qui
+    # nettoie le child si _register echoue. Le yield est ensuite protege par
+    # try/finally qui kill+unregister inconditionnellement.
     proc = subprocess.Popen(cmd, **kwargs)
-    _register(proc)
+    # A partir d'ici, proc existe : on doit GARANTIR son cleanup.
+    try:
+        _register(proc)
+    except BaseException:
+        # _register a leve (MemoryError sur set.add, KeyboardInterrupt, etc.).
+        # Le child est cree mais non trace : on le kill immediatement pour
+        # eviter l'orphelin, puis on relance.
+        _kill_and_wait(proc, _KILL_WAIT_TIMEOUT_S)
+        # Tentative best-effort de desinscription au cas ou add() aurait
+        # partiellement reussi avant l'exception (peu probable, mais safe).
+        _unregister(proc)
+        raise
     try:
         yield proc
     finally:

@@ -27,7 +27,6 @@ from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
 from cinesort.ui.api.facades import RuntimeFacade
 
-
 # ---------------------------------------------------------------------------
 # RuntimeFacade : exposition + delegation
 # ---------------------------------------------------------------------------
