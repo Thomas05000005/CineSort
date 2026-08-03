@@ -64,11 +64,7 @@ class SimilarFilmsFacade:
         return {
             "enabled": SIMILAR_FILMS_FEATURE_FLAG,
             "extension_loaded": False,
-            "reason": (
-                None
-                if SIMILAR_FILMS_FEATURE_FLAG
-                else "feature_flag_disabled"
-            ),
+            "reason": (None if SIMILAR_FILMS_FEATURE_FLAG else "feature_flag_disabled"),
         }
 
     # ---------- Endpoint scaffold ----------

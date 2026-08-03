@@ -4,7 +4,9 @@ GET settings masque rest_api_token -> Afficher/Copier exposait '********' (401
 sur l'appareil distant). Endpoint dedie qui revele le vrai Bearer, refuse aux
 requetes distantes (is_remote_request).
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 
@@ -19,7 +21,7 @@ class RevealRestTokenTests(unittest.TestCase):
         src = _API.read_text(encoding="utf-8")
         self.assertIn("def _reveal_rest_token_impl(self)", src)
         idx = src.find("def _reveal_rest_token_impl")
-        body = src[idx:idx + 1500]
+        body = src[idx : idx + 1500]
         self.assertIn("if is_remote_request():", body)
         self.assertIn('"rest_api_token": token', body)
 

@@ -90,10 +90,7 @@ def _css_files() -> list[Path]:
 
 
 def _usage_files() -> list[Path]:
-    return sorted(
-        p for p in (WEB / "dashboard").rglob("*")
-        if p.suffix in (".js", ".mjs", ".html") and p.is_file()
-    )
+    return sorted(p for p in (WEB / "dashboard").rglob("*") if p.suffix in (".js", ".mjs", ".html") and p.is_file())
 
 
 def _strip_block_comments(text: str) -> str:
@@ -109,7 +106,7 @@ def _strip_block_comments(text: str) -> str:
         k = text.find("*/", j + 2)
         if k < 0:
             k = n - 2
-        out.append("".join(c if c == "\n" else " " for c in text[j:k + 2]))
+        out.append("".join(c if c == "\n" else " " for c in text[j : k + 2]))
         i = k + 2
     return "".join(out)
 
@@ -138,13 +135,15 @@ def _parse_css(path: Path, defined: dict, hex_findings: list) -> None:
         if m and not is_tokens:
             prop, value = m.group(1), m.group(2)
             for hm in HEX_RE.finditer(value):
-                hex_findings.append({
-                    "file": _rel(path),
-                    "line": buf_line + text[:m.start(2) + hm.start()].count("\n"),
-                    "hex": hm.group(0).lower(),
-                    "property": prop.strip(),
-                    "selector": " > ".join(s[:80] for s in prelude_stack) or "(top)",
-                })
+                hex_findings.append(
+                    {
+                        "file": _rel(path),
+                        "line": buf_line + text[: m.start(2) + hm.start()].count("\n"),
+                        "hex": hm.group(0).lower(),
+                        "property": prop.strip(),
+                        "selector": " > ".join(s[:80] for s in prelude_stack) or "(top)",
+                    }
+                )
 
     for ch in raw:
         if ch == "\n":
@@ -189,7 +188,7 @@ def _split_template(value: str):
             elif value[k] == "}":
                 depth -= 1
             k += 1
-        parts.append(("e", value[j + 2:k - 1]))
+        parts.append(("e", value[j + 2 : k - 1]))
         i = k
     return parts
 
@@ -363,10 +362,15 @@ def _extract() -> _State:
         for m in JS_HEX_RE.finditer(text):
             hx = m.group(0).lower()
             if hx in TIER_HEXES:
-                hex_findings.append({
-                    "file": _rel(f), "line": _lineno(text, m.start()),
-                    "hex": hx, "property": "(js/html)", "selector": "",
-                })
+                hex_findings.append(
+                    {
+                        "file": _rel(f),
+                        "line": _lineno(text, m.start()),
+                        "hex": hx,
+                        "property": "(js/html)",
+                        "selector": "",
+                    }
+                )
 
     st.tier_hex_hits = [h for h in hex_findings if h["hex"] in TIER_HEXES]
     return st
@@ -383,14 +387,13 @@ class CssContractTests(unittest.TestCase):
 
     # ------------------------------------------------------------ contrat 1
     def test_tier_hex_only_in_tokens_css(self) -> None:
-        observed = Counter(
-            (h["file"], h["hex"]) for h in self.state.tier_hex_hits
-        )
+        observed = Counter((h["file"], h["hex"]) for h in self.state.tier_hex_hits)
         # tokens.css est exclu par construction (_parse_css is_tokens +
         # usage_files ne couvre pas web/shared) ; ceinture-bretelles :
-        for (fp, _hx) in observed:
+        for fp, _hx in observed:
             self.assertNotEqual(
-                fp, "web/shared/tokens.css",
+                fp,
+                "web/shared/tokens.css",
                 "tokens.css ne doit jamais figurer dans les violations (bug du scan)",
             )
 
@@ -411,7 +414,7 @@ class CssContractTests(unittest.TestCase):
                     f"(KNOWN_TIER_HEX en autorise {known}).\n"
                     + "\n".join(locs)
                     + "\n  -> Correction : remplacer le hex en dur par "
-                    f"var(--tier-<x>-solid) defini dans web/shared/tokens.css "
+                    "var(--tier-<x>-solid) defini dans web/shared/tokens.css "
                     "(charte tier INVARIANTE, memoire user #2). "
                     "Ne PAS ajouter d'entree a KNOWN_TIER_HEX."
                 )
@@ -431,10 +434,7 @@ class CssContractTests(unittest.TestCase):
                 )
 
         if problems:
-            self.fail(
-                "Contrat INVARIANTES TIER viole "
-                f"({len(problems)} probleme(s)) :\n\n" + "\n\n".join(problems)
-            )
+            self.fail(f"Contrat INVARIANTES TIER viole ({len(problems)} probleme(s)) :\n\n" + "\n\n".join(problems))
 
     # ------------------------------------------------------------ contrat 2
     def test_used_classes_are_defined_or_baselined(self) -> None:
@@ -485,8 +485,7 @@ class CssContractTests(unittest.TestCase):
 
         if problems:
             self.fail(
-                "Contrat CLASSES UTILISEES/DEFINIES viole "
-                f"({len(problems)} famille(s)) :\n\n" + "\n\n".join(problems)
+                f"Contrat CLASSES UTILISEES/DEFINIES viole ({len(problems)} famille(s)) :\n\n" + "\n\n".join(problems)
             )
 
 

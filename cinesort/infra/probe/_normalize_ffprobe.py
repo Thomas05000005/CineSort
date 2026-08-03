@@ -173,9 +173,7 @@ def _extract_ffprobe(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         str(fmt_tags.get("encoder") or fmt_tags.get("ENCODER") or fmt_tags.get("writing_application") or "").strip()
         or None
     )
-    container_creation_time = (
-        str(fmt_tags.get("creation_time") or fmt_tags.get("CREATION_TIME") or "").strip() or None
-    )
+    container_creation_time = str(fmt_tags.get("creation_time") or fmt_tags.get("CREATION_TIME") or "").strip() or None
 
     out: Dict[str, Any] = {
         "container": container,

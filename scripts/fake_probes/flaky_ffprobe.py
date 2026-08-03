@@ -15,13 +15,14 @@ Activation:
 
 NE PAS modifier code produit (cinesort/).
 """
+
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tempfile
 from pathlib import Path
-
 
 COUNTER_FILE = Path(tempfile.gettempdir()) / "cinesort_fake_probe_count.txt"
 
@@ -43,26 +44,18 @@ def _write_counter(n: int) -> None:
 def main() -> int:
     fail_n = int(os.environ.get("FLAKY_PROBE_FAIL_FIRST_N", "2"))
     if os.environ.get("FLAKY_PROBE_RESET") == "1":
-        try:
+        with contextlib.suppress(OSError):
             COUNTER_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
 
     count = _read_counter() + 1
     _write_counter(count)
 
     if count <= fail_n:
-        sys.stderr.write(
-            f"[fake_probe flaky_ffprobe] attempt {count}/{fail_n} -> FAIL "
-            f"(args={sys.argv[1:]!r})\n"
-        )
+        sys.stderr.write(f"[fake_probe flaky_ffprobe] attempt {count}/{fail_n} -> FAIL (args={sys.argv[1:]!r})\n")
         sys.stderr.write("ffprobe: simulated I/O error (SMB timeout)\n")
         return 1
 
-    sys.stderr.write(
-        f"[fake_probe flaky_ffprobe] attempt {count} -> OK "
-        f"(args={sys.argv[1:]!r})\n"
-    )
+    sys.stderr.write(f"[fake_probe flaky_ffprobe] attempt {count} -> OK (args={sys.argv[1:]!r})\n")
     # Minimal JSON exploitable cote parse (vide format/streams = degradation visible)
     sys.stdout.write('{"streams": [], "format": {}}\n')
     return 0

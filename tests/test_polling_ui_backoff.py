@@ -22,10 +22,7 @@ import re
 import unittest
 from pathlib import Path
 
-_TRAITEMENT_JS = (
-    Path(__file__).resolve().parent.parent
-    / "web" / "dashboard" / "views" / "traitement.js"
-)
+_TRAITEMENT_JS = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "views" / "traitement.js"
 
 
 class TestSequenceBackoff(unittest.TestCase):

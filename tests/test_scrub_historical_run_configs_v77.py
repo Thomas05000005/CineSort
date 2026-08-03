@@ -85,7 +85,8 @@ class ScrubHistoricalRunConfigsTests(unittest.TestCase):
 
     def test_nested_settings_dict_also_scrubbed(self) -> None:
         _insert_run(
-            self.conn, "r-nested",
+            self.conn,
+            "r-nested",
             {"settings": {"jellyfin_api_key": "jf-SECRET", "root": "C:/films"}},
         )
         report = scrub_historical_run_configs(self.store)

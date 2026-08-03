@@ -250,7 +250,7 @@ class OllamaClient:
         return (
             "Tu es un cinephile francophone. Redige un synopsis court (3-5 "
             f"phrases, FR) pour le film '{title}'{year_part}. Reponds en JSON "
-            "strict : { \"synopsis\": \"...\" }."
+            'strict : { "synopsis": "..." }.'
         )
 
     @staticmethod
@@ -263,5 +263,5 @@ class OllamaClient:
             "Analyse ces metadonnees de film et propose 5 a 8 tags semantiques "
             "FR (ambiance, tropes, sous-genres). Pas de spoiler. "
             f"Metadonnees : {compact}. Reponds en JSON strict : "
-            "{ \"tags\": [\"...\", \"...\"] }."
+            '{ "tags": ["...", "..."] }.'
         )
