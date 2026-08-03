@@ -2500,8 +2500,28 @@ def apply_collection_item(
     # peut exceder 260 chars meme si sub_dir reste valide.
     # ITER7 : cfg.lowercase_extensions ajuste la casse du suffixe cible
     # (n'allonge pas le chemin, mais on garde la coherence avec dst_video).
+    #
+    # Issue #661 : les SIDECARS etaient exclus de ce kill-switch alors que la
+    # branche TV les couvre (GATE 3 / TV-MAXPATH). En collection les sidecars
+    # GARDENT leur nom source (`sub_dir / sidecar.name`), et une chaine de
+    # suffixes (.fr.forced.srt, .en.sdh.sup) depasse couramment la longueur de
+    # la video. L'item echouait donc EN COURS DE ROUTE (OSError obscur au
+    # premier sidecar trop long, puis rollback intra-row) au lieu d'etre
+    # proprement saute en amont avec SKIP_PATH_TOO_LONG. On calcule donc les
+    # cibles sidecars AVANT tout deplacement et on les soumet au meme gate.
+    # La liste calculee ici est ensuite REUTILISEE par la boucle de move : un
+    # second classify_sidecars donnerait une reponse potentiellement differente
+    # (le dossier a bouge entre-temps) et ferait mentir le gate.
     _candidate_video_path = sub_dir / _video_name_with_ext_case(cfg, video)
-    _path_err = check_path_length_killswitch(str(_candidate_video_path))
+    _sidecar_targets: list[Tuple[Path, Path]] = [
+        (sidecar, sub_dir / sidecar.name)
+        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+    ]
+    _path_err: Optional[str] = None
+    for _cp in [str(_candidate_video_path)] + [str(_dst) for (_, _dst) in _sidecar_targets]:
+        _path_err = check_path_length_killswitch(_cp)
+        if _path_err is not None:
+            break
     if _path_err is not None:
         log("WARN", _path_err)
         try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
@@ -2561,8 +2581,7 @@ def apply_collection_item(
                 dedup_seen_ops.discard(k)
 
     try:
-        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-            dst = sub_dir / sidecar.name
+        for sidecar, dst in _sidecar_targets:
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
                 op_key = (
