@@ -510,6 +510,7 @@
     "title_undo_done": "Annulation terminée",
     "title_scan_error": "Erreur d'analyse",
     "title_critical_error": "Erreur critique",
+    "title_undo_unavailable": "Application NON annulable",
     "scan_done_body": "{{count}} film(s) détecté(s) en {{elapsed}}s.",
     "apply_done_body": "{{renames}} renommé(s), {{moves}} déplacé(s), {{errors}} erreur(s).",
     "undo_done_body": "{{done}} restauré(s), {{failed}} échec(s)."

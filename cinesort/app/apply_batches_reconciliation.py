@@ -198,7 +198,12 @@ def _apply_end_marker(state_dir: Any, *, run_id: str, batch_id: str) -> Optional
         from cinesort.app.apply_audit import read_apply_audit  # noqa: PLC0415
 
         events = read_apply_audit(run_dir_for(state_dir, str(run_id)), batch_id=str(batch_id))
-    except (OSError, ValueError, TypeError, AttributeError):
+    # ImportError est indispensable ici : cet import est LOCAL, donc il s'execute
+    # au boot, et il n'herite d'AUCUNE des autres entrees. Sans lui, un module
+    # d'audit absent (build EXE ampute, installation partielle) sortirait de
+    # `reconcile_pending_batches` par le haut et sauterait la reconciliation de
+    # TOUS les batches, y compris celle qui existait avant cette PR.
+    except (ImportError, OSError, ValueError, TypeError, AttributeError):
         _logger.debug("apply_end marker: lecture impossible pour %s", batch_id, exc_info=True)
         return None
     for event in reversed(events or []):

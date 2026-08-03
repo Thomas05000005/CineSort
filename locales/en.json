@@ -454,6 +454,7 @@
     "title_undo_done": "Undo finished",
     "title_scan_error": "Scan error",
     "title_critical_error": "Critical error",
+    "title_undo_unavailable": "Apply CANNOT be undone",
     "scan_done_body": "{{count}} movie(s) detected in {{elapsed}}s.",
     "apply_done_body": "{{renames}} renamed, {{moves}} moved, {{errors}} error(s).",
     "undo_done_body": "{{done}} restored, {{failed}} failed."

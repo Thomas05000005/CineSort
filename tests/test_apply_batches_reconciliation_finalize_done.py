@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cinesort.app.apply_batches_reconciliation import (
     STATUS_ROLLED_BACK_BY_BOOT,
@@ -238,6 +240,28 @@ class ReconcileFinalizesProvenBatchTests(unittest.TestCase):
         self.assertEqual(first["finalized_done"], 1)
         self.assertEqual(second["pending_found"], 0, "le batch n'est plus PENDING, rien a refaire")
         self.assertEqual(self._status(), "DONE")
+
+    def test_module_d_audit_absent_ne_casse_pas_la_reconciliation(self) -> None:
+        """L'import de `apply_audit` est LOCAL, donc il s'execute au boot.
+
+        `ImportError` n'herite d'aucune des autres entrees du tuple : sans elle,
+        un module d'audit absent (build ampute) sortait de
+        `reconcile_pending_batches` par le haut et sautait la reconciliation de
+        TOUS les batches, y compris celle qui existait avant cette PR.
+        """
+        self._seed_pending_batch()
+        _write_audit_marker(self.state_dir)
+
+        with mock.patch.dict(sys.modules, {"cinesort.app.apply_audit": None}):
+            report = reconcile_pending_batches(
+                self.store,
+                max_age_hours=0.0,
+                now_ts=self.now,
+                state_dir=self.state_dir,
+            )
+
+        self.assertEqual(report["finalized_done"], 0, "sans preuve lisible, aucun re-armement")
+        self.assertEqual(self._status(), STATUS_ROLLED_BACK_BY_BOOT, "la reconciliation historique doit avoir tourne")
 
     def test_journal_audit_illisible_ne_casse_pas_le_boot(self) -> None:
         self._seed_pending_batch()

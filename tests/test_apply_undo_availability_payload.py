@@ -44,16 +44,37 @@ class _CloseStore:
         return None
 
 
+class _RecordingNotify:
+    """Centre de notifications minimal : enregistre les evenements publies.
+
+    `raise_on` fait lever la publication d'un event_type precis, pour verifier
+    qu'un centre de notifications casse ne fait pas echouer un apply REUSSI.
+    """
+
+    def __init__(self, *, raise_on: Optional[str] = None) -> None:
+        self.calls: List[Tuple[str, str, str, str]] = []
+        self._raise_on = raise_on
+
+    def notify(self, event_type: str, title: str, body: str, level: str = "info") -> None:
+        self.calls.append((str(event_type), str(title), str(body), str(level)))
+        if self._raise_on is not None and str(event_type) == self._raise_on:
+            raise RuntimeError("centre de notifications indisponible")
+
+    def errors(self) -> List[Tuple[str, str, str, str]]:
+        return [call for call in self.calls if call[3] == "error"]
+
+
 class _BodyHarness:
     """Monte le strict necessaire pour executer `_apply_changes_body`."""
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any, notify: Optional[_RecordingNotify] = None) -> None:
         self.logs: List[Tuple[str, str]] = []
         self.store = store
+        self.notify = notify or _RecordingNotify()
         self.api = SimpleNamespace(
             _get_run=lambda _run_id: None,
             _app_version="test",
-            _notify=SimpleNamespace(notify=lambda *a, **k: None),
+            _notify=self.notify,
             _dispatch_plugin_hook=lambda *a, **k: None,
             _dispatch_email=lambda *a, **k: None,
             log_api_exception=lambda *a, **k: None,
@@ -77,13 +98,31 @@ class _BodyHarness:
         }
 
 
-def _run_body(store: Any, *, batch_id: Optional[str] = "batch-42") -> Dict[str, Any]:
-    harness = _BodyHarness(store)
+def _run_body_with_harness(
+    store: Any,
+    *,
+    batch_id: Optional[str] = "batch-42",
+    ops: int = 500,
+    applied_count: int = 500,
+    notify: Optional[_RecordingNotify] = None,
+) -> Tuple[Dict[str, Any], _BodyHarness]:
+    """Execute `_apply_changes_body` et rend AUSSI le harness (notifications).
+
+    `ops` = nombre d'operations journalisees (0 quand `insert_apply_batch` a
+    echoue : `record_apply_op` sort avant d'incrementer le compteur).
+    `applied_count` = ce que l'apply a REELLEMENT fait sur disque, independant
+    du journal.
+    """
+    harness = _BodyHarness(store, notify=notify)
 
     def _fake_execute(*_a: Any, **kwargs: Any) -> Any:
         kwargs["batch_state"][0] = batch_id
-        kwargs["batch_state"][1] = 500
-        return core_mod.ApplyResult(applied_count=500, considered_rows=500), batch_id, 500
+        kwargs["batch_state"][1] = int(ops)
+        return (
+            core_mod.ApplyResult(applied_count=int(applied_count), considered_rows=500),
+            batch_id,
+            int(ops),
+        )
 
     with (
         mock.patch.object(apply_support, "_validate_apply", return_value=harness.ctx()),
@@ -93,7 +132,7 @@ def _run_body(store: Any, *, batch_id: Optional[str] = "batch-42") -> Dict[str, 
         mock.patch.object(apply_support, "_trigger_jellyfin_refresh", return_value=None),
         mock.patch.object(apply_support, "_trigger_plex_refresh", return_value=None),
     ):
-        return apply_support._apply_changes_body(
+        out = apply_support._apply_changes_body(
             harness.api,
             "run-1",
             {},
@@ -104,6 +143,11 @@ def _run_body(store: Any, *, batch_id: Optional[str] = "batch-42") -> Dict[str, 
             cleanup_reason_label=lambda value: str(value),
             apply_atomic=False,
         )
+    return out, harness
+
+
+def _run_body(store: Any, **kwargs: Any) -> Dict[str, Any]:
+    return _run_body_with_harness(store, **kwargs)[0]
 
 
 class CleanupApplyReportsFinalizationTests(unittest.TestCase):
@@ -156,13 +200,37 @@ class ApplyPayloadAnnouncesUndoLossTests(unittest.TestCase):
         )
 
     def test_apply_sans_journal_annonce_undo_indisponible(self) -> None:
-        """`insert_apply_batch` en echec -> apply_batch_id None -> aucun undo possible."""
-        out = _run_body(_CloseStore(), batch_id=None)
+        """`insert_apply_batch` en echec -> apply_batch_id None -> aucun undo possible.
+
+        Cas du 2026-08-02, reproduit fidelement : sans batch, `record_apply_op`
+        sort AVANT d'incrementer son compteur, donc `op_index` reste a 0 alors
+        que 500 films ont bel et bien bouge. L'alerte ne doit donc PAS dependre
+        du seul compteur d'operations journalisees.
+        """
+        out = _run_body(_CloseStore(), batch_id=None, ops=0, applied_count=500)
 
         self.assertTrue(out.get("ok"))
         self.assertIsNone(out.get("apply_batch_id"))
         self.assertIs(out.get("undo_available"), False)
         self.assertTrue(str(out.get("journal_warning") or "").strip())
+
+    def test_batch_clos_done_mais_vide_n_annonce_pas_un_undo_fantome(self) -> None:
+        """Zero operation journalisee : `undo_available: True` serait un mensonge."""
+        out = _run_body(_CloseStore(), ops=0, applied_count=0)
+
+        self.assertIs(out.get("journal_finalized"), True)
+        self.assertIs(out.get("undo_available"), False, "rien n'a ete journalise, il n'y a rien a annuler")
+
+    def test_apply_qui_n_a_rien_touche_ne_declenche_pas_de_fausse_alerte(self) -> None:
+        """Un apply sans aucun deplacement n'a rien perdu, meme si la DB lache."""
+        out, harness = _run_body_with_harness(
+            _CloseStore(sqlite3.OperationalError("database is locked")),
+            ops=0,
+            applied_count=0,
+        )
+
+        self.assertNotIn("journal_warning", out, "crier au loup ici userait l'alerte")
+        self.assertEqual(harness.notify.errors(), [])
 
     def test_chemin_nominal_annonce_undo_disponible(self) -> None:
         """NON-REGRESSION : sans incident, la reponse annonce l'undo comme disponible."""
@@ -178,6 +246,41 @@ class ApplyPayloadAnnouncesUndoLossTests(unittest.TestCase):
             out,
             "aucun avertissement ne doit polluer un apply nominal",
         )
+
+
+class UndoLossReachesTheUserTests(unittest.TestCase):
+    """Un champ de payload que personne n'affiche resterait un silence.
+
+    Le centre de notifications est le seul canal qui SURVIT a la fermeture de
+    l'ecran d'apply — et son miroir est inconditionnel (`NotifyService.notify`
+    appelle le hook du centre avant tout filtrage de toasts desktop).
+    """
+
+    def test_perte_d_undo_publiee_dans_le_centre_de_notifications(self) -> None:
+        out, harness = _run_body_with_harness(_CloseStore(sqlite3.OperationalError("database is locked")))
+
+        errors = harness.notify.errors()
+        self.assertEqual(len(errors), 1, f"une notification d'erreur attendue, obtenu {harness.notify.calls}")
+        _event, title, body, _level = errors[0]
+        self.assertTrue(title.strip())
+        self.assertNotIn("notifications.title_undo_unavailable", title, "cle i18n non resolue")
+        self.assertEqual(body, out.get("journal_warning"))
+
+    def test_apply_nominal_ne_publie_aucune_alerte(self) -> None:
+        _out, harness = _run_body_with_harness(_CloseStore())
+
+        self.assertEqual(harness.notify.errors(), [])
+
+    def test_centre_de_notifications_casse_ne_fait_pas_echouer_l_apply(self) -> None:
+        """Refaire echouer un apply disque REUSSI serait re-creer le defaut F11."""
+        out, _harness = _run_body_with_harness(
+            _CloseStore(sqlite3.OperationalError("database is locked")),
+            notify=_RecordingNotify(raise_on="error"),
+        )
+
+        self.assertTrue(out.get("ok"), f"la notification est best-effort : {out}")
+        self.assertIs(out.get("undo_available"), False)
+        self.assertTrue(str(out.get("journal_warning") or "").strip())
 
 
 if __name__ == "__main__":

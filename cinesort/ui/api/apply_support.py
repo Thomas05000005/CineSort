@@ -2911,8 +2911,14 @@ def _apply_changes_body(
         #
         # `undo_available` couvre aussi le cas ou `insert_apply_batch` a echoue
         # (OSError/TypeError/ValueError -> apply_batch_id None, apply poursuivi
-        # sans journal) et le dry-run (rien a annuler).
-        undo_available = bool(not dry_run and apply_batch_id is not None and journal_finalized)
+        # sans journal) et le dry-run (rien a annuler). Il exige EN PLUS au moins
+        # une operation journalisee (`op_index`) : un batch clos DONE mais vide
+        # n'est pas plus annulable qu'un batch PENDING, et annoncer
+        # `undo_available: True` a une UI qui proposerait alors un bouton
+        # « Annuler » inoperant serait le meme mensonge dans l'autre sens.
+        undo_available = bool(
+            not dry_run and apply_batch_id is not None and journal_finalized and int(op_index or 0) > 0
+        )
         payload: Dict[str, Any] = {
             "ok": True,
             "result": result.__dict__,
@@ -2920,9 +2926,33 @@ def _apply_changes_body(
             "journal_finalized": bool(journal_finalized),
             "undo_available": undo_available,
         }
-        if not dry_run and not undo_available:
-            payload["journal_warning"] = t("errors.undo_unavailable_after_apply")
-            log_fn("WARN", payload["journal_warning"])
+        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque :
+        # `applied_count` vient du resultat (donc reste vrai quand
+        # `insert_apply_batch` a echoue et que `op_index` est reste a 0), et
+        # `op_index` couvre les operations journalisees hors rows (nettoyage
+        # residuel). Un apply qui n'a rien deplace n'a rien perdu : crier au loup
+        # sur ce cas-la userait l'alerte exactement quand elle doit porter.
+        disk_touched = int(applied_count or 0) > 0 or int(op_index or 0) > 0
+        if not dry_run and disk_touched and not undo_available:
+            warning = t("errors.undo_unavailable_after_apply")
+            payload["journal_warning"] = warning
+            log_fn("WARN", warning)
+            # Un champ de payload que personne n'affiche serait un troisieme
+            # silence. Le centre de notifications (la cloche) est le seul canal
+            # qui SURVIT a la fermeture de l'ecran d'apply, et le miroir vers lui
+            # est inconditionnel (NotifyService.notify) : il ne depend d'aucun
+            # reglage de toasts desktop.
+            try:
+                api._notify.notify(
+                    "error",
+                    t("notifications.title_undo_unavailable"),
+                    warning,
+                    level="error",
+                )
+            except Exception:
+                # Un echec de notification ne doit pas transformer un apply
+                # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
+                _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
         return payload
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
