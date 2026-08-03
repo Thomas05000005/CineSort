@@ -63,8 +63,18 @@ logger = logging.getLogger(__name__)
 def plan_row_media_path(row: Mapping[str, Any]) -> str:
     """Chemin du media d'une PlanRow serialisee (`folder` + `video`).
 
+    Ce n'est pas une derivation inventee ici : c'est deja la facon dont le
+    depot localise le fichier d'une PlanRow, cf
+    `library_actions_support._rematch_tmdb_and_update_plan` (`folder_path /
+    target["video"]`, puis `video_path.exists()`).
+
     Retourne le dossier seul quand `video` est vide (cas d'une PlanRow
     "single" dont le fichier n'a pas ete resolu), et "" si les deux manquent.
+
+    Le chemin est celui du PLAN : apres un apply qui a deplace le dossier il
+    peut etre perime jusqu'au re-scan. `plan_row_fs_facts` degrade alors a
+    (0.0, 0), soit exactement la valeur que `added_ts` avait en permanence
+    avant ce correctif — aucune regression possible de ce cote.
     """
     folder = str(row.get("folder") or "").strip()
     video = str(row.get("video") or "").strip()

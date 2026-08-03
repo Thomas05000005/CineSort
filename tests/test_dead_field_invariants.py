@@ -212,6 +212,12 @@ class PlanRowKeyContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             rows, seen = self._build(pathlib.Path(td))
         self.assertEqual(len(rows), 1)
+        # Le canari LEVE des la 1re clef fantome, donc arriver ici suffit
+        # deja. On verifie en plus qu'il a bien ete SOLLICITE : un canari que
+        # `_build_library_rows` n'interrogerait plus (payload remplace,
+        # court-circuit...) passerait sinon en silence, ce qui serait le meme
+        # faux vert que celui qu'on corrige.
+        self.assertTrue({"folder", "video", "row_id"} <= seen, f"canari non sollicite : {sorted(seen)}")
         phantom = sorted(k for k in seen if k not in _ALLOWED_PLAN_ROW_KEYS)
         self.assertEqual(phantom, [], f"clefs fantomes lues : {phantom}")
 
@@ -232,7 +238,7 @@ class PlanRowKeyContractTests(unittest.TestCase):
 
     def test_missing_media_degrades_without_raising(self):
         """Root debranche / dossier deplace : (0.0, 0), jamais d'exception."""
-        row = {"folder": r"Z:\\introuvable", "video": "absent.mkv"}
+        row = {"folder": r"Z:\introuvable", "video": "absent.mkv"}
         self.assertEqual(library_support.plan_row_fs_facts(row, {}), (0.0, 0))
         self.assertTrue(library_support.plan_row_media_path(row).endswith("absent.mkv"))
 
