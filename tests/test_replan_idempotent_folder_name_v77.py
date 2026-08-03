@@ -54,9 +54,7 @@ class ReplanIdempotentFolderNameTests(unittest.TestCase):
 
         # Replan facon caller : cfg.root = dossier du film, + library_root explicite.
         cfg = core.Config(root=self.folder, enable_tmdb=False)
-        row = replan_single_row(
-            cfg, self.folder, self.video, kind="single", library_root=self.lib_root
-        )
+        row = replan_single_row(cfg, self.folder, self.video, kind="single", library_root=self.lib_root)
         self.assertIsNotNone(row)
         self.assertEqual(
             int(row.detected_year),

@@ -29,6 +29,7 @@ Override explicite via `connect_sqlite(db_path, profile='nas_smb')` ou
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -263,10 +264,8 @@ def _record_pragma_history(
                 "_record_pragma_history: commit a echoue (%s) -- rollback",
                 commit_exc,
             )
-            try:
+            with contextlib.suppress(sqlite3.Error):
                 conn.rollback()
-            except sqlite3.Error:
-                pass
     except sqlite3.OperationalError as exc:
         # Cas attendu : table absente (migration 028 pas encore appliquee).
         # On log en DEBUG car ce n'est pas une erreur fonctionnelle.
@@ -280,10 +279,8 @@ def _record_pragma_history(
             "_record_pragma_history: insertion a echoue (%s) -- audit perdu",
             exc,
         )
-        try:
+        with contextlib.suppress(sqlite3.Error):
             conn.rollback()
-        except sqlite3.Error:
-            pass
 
 
 def apply_pragmas(
@@ -365,9 +362,7 @@ def resolve_profile(
     if explicit_profile is not None:
         if explicit_profile not in PROFILES:
             valid = ", ".join(_profile_keys())
-            raise ValueError(
-                f"Profil PRAGMA inconnu: {explicit_profile!r}. Valides: {valid}"
-            )
+            raise ValueError(f"Profil PRAGMA inconnu: {explicit_profile!r}. Valides: {valid}")
         return explicit_profile
     return detect_storage_type(db_path)
 

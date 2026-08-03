@@ -13,7 +13,7 @@ import socket
 import sys
 import tempfile
 import zipfile
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
 from urllib.parse import urlparse
@@ -64,9 +64,7 @@ _ENV_SHA256_FFMPEG = "CINESORT_FFMPEG_SHA256"
 _ENV_SHA256_MEDIAINFO = "CINESORT_MEDIAINFO_SHA256"
 
 
-def _resolve_expected_sha256(
-    env_var: str, override: Optional[str], constant: Optional[str]
-) -> Optional[str]:
+def _resolve_expected_sha256(env_var: str, override: Optional[str], constant: Optional[str]) -> Optional[str]:
     """Resout le SHA256 attendu : override kwarg > variable d'env > constante."""
     if override is not None:
         return override
@@ -74,6 +72,7 @@ def _resolve_expected_sha256(
     if env_val:
         return env_val
     return constant
+
 
 # Timeout socket pour urlretrieve : sans cela, un serveur muet (hosts en panne,
 # firewall corporate qui drop) fait hang l'install indefiniment.
@@ -127,20 +126,18 @@ def _verify_archive(
         logger.warning(
             "auto_install: integrity UNVERIFIED for %s (no pinned SHA256). "
             "Actual sha256=%s. Pin EXPECTED_SHA256_* to enable fail-closed verification.",
-            label, actual,
+            label,
+            actual,
         )
         return
     expected_norm = expected_sha256.strip().lower()
     if actual.lower() != expected_norm:
         # Fail closed : on detruit l'archive pour empecher toute extraction
         # ulterieure par erreur, et on leve une exception explicite.
-        try:
+        with suppress(OSError):
             os.remove(zip_path)
-        except OSError:
-            pass
         raise IntegrityError(
-            f"SHA256 mismatch pour {label} : "
-            f"attendu={expected_norm}, reel={actual}. Install refuse (fail-closed)."
+            f"SHA256 mismatch pour {label} : attendu={expected_norm}, reel={actual}. Install refuse (fail-closed)."
         )
     logger.info("auto_install: SHA256 verifie OK pour %s (%s)", label, actual)
 

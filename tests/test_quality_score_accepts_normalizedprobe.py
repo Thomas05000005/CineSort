@@ -8,6 +8,7 @@ Tier=Silver max sur TOUS les films, scoring lit le nom uniquement.
 Mutation testing : si on retire la branche is_dataclass dans compute_quality_score
 (retour direct au isinstance(...,dict) only), CE test casse (verifie ci-dessous).
 """
+
 from __future__ import annotations
 
 import unittest
@@ -34,9 +35,7 @@ class NormalizedProbeDataclassAcceptedTests(unittest.TestCase):
                     "pix_fmt": "yuv420p10le",
                     "color_primaries": "bt2020",
                     "color_transfer": "smpte2084",
-                    "side_data_list": [
-                        {"side_data_type": "DOVI configuration record", "dv_profile": 7}
-                    ],
+                    "side_data_list": [{"side_data_type": "DOVI configuration record", "dv_profile": 7}],
                 },
                 {
                     "codec_type": "audio",
@@ -71,18 +70,30 @@ class NormalizedProbeDataclassAcceptedTests(unittest.TestCase):
 
         # 1) Le scoring DOIT marquer la resolution comme MESUREE (probe), pas deduite du nom.
         reasons_joined = " | ".join(result["reasons"])
-        self.assertIn("2160p mesuree", reasons_joined,
-                      f"Le scoring ignore le probe FULL et deduit du nom. reasons={result['reasons']}")
-        self.assertNotIn("2160p deduite du nom", reasons_joined,
-                         f"Le scoring deduit du nom alors que le probe est FULL. reasons={result['reasons']}")
+        self.assertIn(
+            "2160p mesuree",
+            reasons_joined,
+            f"Le scoring ignore le probe FULL et deduit du nom. reasons={result['reasons']}",
+        )
+        self.assertNotIn(
+            "2160p deduite du nom",
+            reasons_joined,
+            f"Le scoring deduit du nom alors que le probe est FULL. reasons={result['reasons']}",
+        )
 
         # 2) Le bitrate REEL doit etre detecte (pas '-8 Debit video non detecte')
-        self.assertNotIn("Debit video non detecte", reasons_joined,
-                         f"Le bitrate video=58000kbps reel n'est pas detecte. reasons={result['reasons']}")
+        self.assertNotIn(
+            "Debit video non detecte",
+            reasons_joined,
+            f"Le bitrate video=58000kbps reel n'est pas detecte. reasons={result['reasons']}",
+        )
 
         # 3) Le tier brut doit etre Gold ou Platinum (pas cape Silver).
-        self.assertIn(result["tier"], ("Gold", "Platinum"),
-                      f"UHD REMUX DV TrueHD probe FULL devrait etre Gold/Platinum, recu {result['tier']}")
+        self.assertIn(
+            result["tier"],
+            ("Gold", "Platinum"),
+            f"UHD REMUX DV TrueHD probe FULL devrait etre Gold/Platinum, recu {result['tier']}",
+        )
 
     def test_dataclass_failed_probe_caps_to_silver(self) -> None:
         """Cap probe FAILED reste applique sur un VRAI dataclass aussi."""
@@ -99,15 +110,23 @@ class NormalizedProbeDataclassAcceptedTests(unittest.TestCase):
             profile=default_quality_profile(),
         )
         # Cap Silver maximum
-        self.assertEqual(result["tier"], "Silver",
-                         f"probe FAILED + nom premium doit etre cape Silver, recu {result['tier']}")
+        self.assertEqual(
+            result["tier"], "Silver", f"probe FAILED + nom premium doit etre cape Silver, recu {result['tier']}"
+        )
 
     def test_dict_input_still_works_backward_compat(self) -> None:
         """Retro-compat : un dict simule continue de fonctionner."""
         probe_dict = {
             "probe_quality": "FULL",
-            "video": {"width": 3840, "height": 2160, "codec": "hevc", "bitrate": 58_000_000,
-                      "bit_depth": 10, "hdr_dolby_vision": True, "hdr10": True},
+            "video": {
+                "width": 3840,
+                "height": 2160,
+                "codec": "hevc",
+                "bitrate": 58_000_000,
+                "bit_depth": 10,
+                "hdr_dolby_vision": True,
+                "hdr10": True,
+            },
             "audio_tracks": [{"codec": "truehd", "channels": 8, "language": "fra", "is_atmos": True}],
             "subtitles": [],
         }
@@ -117,8 +136,7 @@ class NormalizedProbeDataclassAcceptedTests(unittest.TestCase):
             profile=default_quality_profile(),
         )
         reasons_joined = " | ".join(result["reasons"])
-        self.assertIn("2160p mesuree", reasons_joined,
-                      f"dict input mode mesure casse. reasons={result['reasons']}")
+        self.assertIn("2160p mesuree", reasons_joined, f"dict input mode mesure casse. reasons={result['reasons']}")
 
 
 if __name__ == "__main__":

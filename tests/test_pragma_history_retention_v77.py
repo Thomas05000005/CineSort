@@ -13,6 +13,7 @@ _PRAGMA_HISTORY_MAX_ROWS lignes les plus recentes (par id PK monotone).
 GATE : apres N > cap inserts, la table contient exactement `cap` lignes, et ce
 sont les plus recentes (les anciennes sont purgees).
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -71,9 +72,7 @@ class PragmaHistoryRetentionTests(unittest.TestCase):
             cap = _PRAGMA_HISTORY_MAX_ROWS
             n = cap + 50
             self._seed(conn, db_path, n)
-            min_id, max_id = conn.execute(
-                "SELECT MIN(id), MAX(id) FROM pragma_history"
-            ).fetchone()
+            min_id, max_id = conn.execute("SELECT MIN(id), MAX(id) FROM pragma_history").fetchone()
             # Les anciennes lignes (id <= n-cap) ont ete purgees, les plus
             # recentes conservees.
             self.assertEqual(max_id, n)

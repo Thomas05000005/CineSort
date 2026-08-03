@@ -20,6 +20,7 @@ Mutation testing : on patche dataclasses.is_dataclass pour qu'il retourne False,
 le code re-tombe dans la branche `else -> {}` historique -> les assertions
 critiques cassent. Preuve collee dans la sortie du subagent.
 """
+
 from __future__ import annotations
 
 import unittest

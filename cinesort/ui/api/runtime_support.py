@@ -290,9 +290,7 @@ def get_or_create_infra(
             )
 
             _settings_for_profile = read_settings(state_dir)
-            _override = _normalize_storage_profile(
-                _settings_for_profile.get("storage_profile_override")
-            )
+            _override = _normalize_storage_profile(_settings_for_profile.get("storage_profile_override"))
             pragma_profile_kwarg = None if _override == "auto" else _override
         except Exception as exc:
             _logger.debug(
@@ -360,8 +358,7 @@ def get_or_create_infra(
                 batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
                 if batches_report.get("pending_found", 0) > 0:
                     _logger.info(
-                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned "
-                        "(%d completed, %d rolled_back)",
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
                         batches_report["pending_found"],
                         batches_report.get("completed", 0),
                         batches_report.get("rolled_back", 0),

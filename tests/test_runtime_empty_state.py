@@ -117,12 +117,9 @@ def test_empty_state_bibliotheque_filter_no_match_then_reset(dashboard_page) -> 
         )
 
     assert "Aucun film" in (empty_present["messageText"] or ""), (
-        f"THEN: texte empty state Bibliotheque attendu contient 'Aucun film', "
-        f"vu {empty_present['messageText']!r}"
+        f"THEN: texte empty state Bibliotheque attendu contient 'Aucun film', vu {empty_present['messageText']!r}"
     )
-    assert empty_present["hasResetBtn"] is True, (
-        "THEN: bouton [data-bibliotheque-reset] attendu visible pour reset."
-    )
+    assert empty_present["hasResetBtn"] is True, "THEN: bouton [data-bibliotheque-reset] attendu visible pour reset."
 
     # WHEN : reset le filtre (= equivalent "item ajoute" pour le cycle).
     reset_clicked = dashboard_page.evaluate(
@@ -204,11 +201,8 @@ def test_empty_state_historique_no_filter_match_then_present(dashboard_page) -> 
         forbidden_en = ["No runs", "Empty", "No data"]
         for forbid in forbidden_en:
             assert forbid not in snapshot["emptyText"], (
-                f"Empty state historique contient l'anglais brut '{forbid}'. "
-                f"Texte vu : {snapshot['emptyText']!r}"
+                f"Empty state historique contient l'anglais brut '{forbid}'. Texte vu : {snapshot['emptyText']!r}"
             )
     else:
         # Contenu present : pas d'empty state attendu, ok.
-        assert snapshot["hasContent"] is True, (
-            "Ni contenu ni empty state Historique : vue dans un etat invalide."
-        )
+        assert snapshot["hasContent"] is True, "Ni contenu ni empty state Historique : vue dans un etat invalide."
