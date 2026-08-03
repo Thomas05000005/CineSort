@@ -96,6 +96,14 @@ def _folder_fs_facts(folder: str, cache: Dict[str, Dict[str, Tuple[float, int]]]
     38 ms au total, soit 45 us par film — face aux ~15 s que met deja la vue
     Bibliotheque, c'est sous le bruit.
 
+    Reserve honnete (reintroduite apres la revue adversaire du 2026-08-03) :
+    ce chiffre est celui d'un SSD LOCAL. Sur un root SMB/NAS c'est un
+    aller-retour reseau par dossier distinct, et le `fs_cache` ne vit que le
+    temps d'UN appel a `_build_library_rows` — qui compte 9 appelants
+    (bibliotheque, podiums, timeline, audit qualite, audit decennies, export,
+    rollup, compteurs par chip, filtres). Rien n'est memoise d'un ecran a
+    l'autre : chaque vue repaie l'enumeration.
+
     Pourquoi ne pas lire la DB plutot que le disque : `probe_cache` et
     `incremental_file_hashes` portent bien des colonnes (path, size, mtime),
     mais ce sont des CACHES dont la mtime fait partie de la clef — la valeur

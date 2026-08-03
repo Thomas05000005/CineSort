@@ -211,8 +211,14 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
     # l'attribut absent (`api._store = MagicMock()`).
     # On passe par le helper PARTAGE `library_support._get_store` — 6 sites
     # dans library_support, plus history_support (x2) et run_read_support (x2)
-    # — au lieu de re-deriver un enieme acces au store. Il porte deja le bon
-    # tuple d'exceptions (dont `sqlite3.Error`, qui n'herite PAS d'OSError).
+    # — au lieu de re-deriver un enieme acces au store.
+    #
+    # Portee EXACTE de cette phrase (revue adversaire 2026-08-03) : c'est
+    # `_get_store` — et lui seul — qui attrape `sqlite3.Error` (qui n'herite
+    # PAS d'OSError) en plus d'OSError/AttributeError/KeyError/RuntimeError/
+    # TypeError/ValueError, cf library_support.py:1539. L'AUTRE helper adopte
+    # par ce correctif, `_resolve_run_id`, ne l'attrape pas — voir la reserve
+    # documentee sur `_resolve_latest_run_id` ci-dessous.
     store = _get_store(api)
     if store is None:
         return []
@@ -258,6 +264,24 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     les yeux — les deux doivent resoudre "latest" sur le MEME run, sinon
     l'ecart se recreera a la premiere divergence entre les deux
     implementations.
+
+    Reserve (revue adversaire 2026-08-03) : `_resolve_run_id` attrape
+    `(OSError, AttributeError, KeyError, TypeError, ValueError)` —
+    library_support.py:1028 — SANS `sqlite3.Error`. Sur une base corrompue ce
+    site propage donc `sqlite3.DatabaseError` la ou l'ancien corps rendait
+    `None`. Trois raisons de ne pas l'elargir ici :
+      - ce n'est PAS une regression : l'ancien corps ne rendait `None` que
+        parce que `api._store` levait `AttributeError` avant tout acces DB —
+        `sqlite3.Error` n'y etait jamais atteignable non plus ;
+      - le chemin est de toute facon deja mort en amont : `run_simulation`
+        appelle `_get_active_profile` (donc
+        `api._active_quality_profile_payload()`, qui touche la meme base)
+        AVANT `_load_reports_for_scope`, et son `except` ne couvre pas
+        `sqlite3.Error` — la base corrompue leve la, a l'identique sur la
+        merge-base ;
+      - surtout : avaler `sqlite3.Error` ici transformerait une base corrompue
+        en « aucun run disponible », c'est-a-dire exactement la disparition
+        silencieuse que ce correctif combat.
     """
     return _resolve_run_id(api, None)
 
