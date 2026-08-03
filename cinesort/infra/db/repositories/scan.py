@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
 
-
 # Taille de lot pour les DELETE ... IN (...) de purge. Une clause `NOT IN` avec
 # un placeholder par entrée conservée dépasse SQLITE_MAX_VARIABLE_NUMBER (999 sur
 # SQLite < 3.32) dès qu'une racine contient plus d'entrées que la limite →
