@@ -20,6 +20,7 @@ reconciliations et n'est efface que par une preuve : une piste MUXEE COMPLETE.
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 import unittest
@@ -179,10 +180,8 @@ class ForcedOnlyScanFlagTests(unittest.TestCase):
         self.full = self.folder / "Film (2020).fr.srt"
 
     def tearDown(self) -> None:
-        try:
+        with contextlib.suppress(Exception):  # teardown best-effort
             self.store.close()
-        except Exception:  # noqa: BLE001 - teardown best-effort
-            pass
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _scan(self, run_id: str):
