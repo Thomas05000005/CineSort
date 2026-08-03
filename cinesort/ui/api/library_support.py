@@ -94,11 +94,16 @@ def _folder_fs_facts(folder: str, cache: Dict[str, Dict[str, Tuple[float, int]]]
 
     Cout mesure (853 films, 3 entrees par dossier, SSD local, 2026-08-03) :
     38 ms au total, soit 45 us par film — face aux ~15 s que met deja la vue
-    Bibliotheque, c'est sous le bruit. Sur un root SMB/NAS c'est un
-    aller-retour par dossier, la ou la donnee n'existe nulle part ailleurs
-    (aucune table ne persiste la mtime d'un fichier video indexable par
-    chemin : `probe_cache` et `incremental_file_hashes` ont la mtime dans
-    leur CLE primaire, pas en colonne interrogeable).
+    Bibliotheque, c'est sous le bruit.
+
+    Pourquoi ne pas lire la DB plutot que le disque : `probe_cache` et
+    `incremental_file_hashes` portent bien des colonnes (path, size, mtime),
+    mais ce sont des CACHES dont la mtime fait partie de la clef — la valeur
+    stockee est celle constatee AU MOMENT du probe, elle n'est jamais mise a
+    jour quand le fichier bouge, et la ligne n'existe pas du tout pour un
+    film jamais probe. Afficher « date d'ajout » depuis cette source
+    rendrait une date fausse en silence, c'est-a-dire exactement la classe
+    de bug qu'on corrige ici. Le disque est la seule source honnete.
     """
     known = cache.get(folder)
     if known is not None:
