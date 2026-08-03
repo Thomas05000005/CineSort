@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- R8-078 — fixture jetable : prouve le piège de focus de la modale reset (trapFocus partagé).
+     Compare un overlay AVEC trapFocus (focus piégé) vs SANS (focus s'échappe vers le fond). -->
+<html lang="fr">
+<head><meta charset="utf-8"></head>
+<body>
+<button id="bgBtn">Bouton de fond (hors modale)</button>
+
+<!-- Modale AVEC trapFocus (comportement APRÈS le fix R8-078) -->
+<div id="modalTrap" role="alertdialog" aria-modal="true">
+  <input id="trap_input" type="text">
+  <button id="trap_cancel">Annuler</button>
+  <button id="trap_confirm">Confirmer</button>
+</div>
+
+<!-- Modale SANS trapFocus (comportement AVANT le fix) -->
+<div id="modalNoTrap" role="alertdialog" aria-modal="true">
+  <input id="notrap_input" type="text">
+  <button id="notrap_cancel">Annuler</button>
+  <button id="notrap_confirm">Confirmer</button>
+</div>
+
+<script type="module">
+import { trapFocus } from "/web/dashboard/components/modal.js";
+// Applique le trap UNIQUEMENT sur la 1re modale (la 2e simule l'état AVANT).
+trapFocus(document.getElementById("modalTrap"));
+window.__focusId = () => (document.activeElement ? document.activeElement.id : null);
+window.__focus = (id) => { document.getElementById(id).focus(); return document.activeElement.id; };
+</script>
+</body>
+</html>

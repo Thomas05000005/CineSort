@@ -1,0 +1,22 @@
+{
+  "state": {
+    "hash": "#/accueil",
+    "loginVisible": false,
+    "tokenInputVisible": false,
+    "shellHidden": false,
+    "bodyLen": 17662,
+    "title": "CineSort — Dashboard"
+  },
+  "console": [
+    "[log] [BOOT-DEBUG] handlers installed",
+    "[warning] [state] markTokenAbsent (natif) : aucun token en storage, deblocage differe %dms 800",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) ",
+    "[debug] [dash-api] _safeBearer: token absent ou vide (token=%o) "
+  ]
+}

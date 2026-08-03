@@ -2,8 +2,8 @@
 
 Migration #85 phase B3 (2026-05-16) : meme pattern que B1/B2 :
 - Code metier vit DANS ScanRepository
-- _ScanMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _ScanMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.scan (heritage MRO supprime en B8)
 
 Methodes exposees :
     clear_all_incremental_caches, get_incremental_file_hash,

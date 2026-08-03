@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from typing import Any, Callable, Optional
+from contextlib import contextmanager, suppress
+from typing import Any, Callable, ContextManager, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,12 @@ logger = logging.getLogger(__name__)
 # Le concept : "fonction qui execute une commande et retourne CompletedProcess".
 RunnerFn = Callable[..., subprocess.CompletedProcess]
 
+# Signature compatible avec cinesort.infra.subprocess_safety.tracked_popen :
+# context manager qui yield un Popen avec cleanup garanti.
+PopenRunnerFn = Callable[..., ContextManager[subprocess.Popen]]
+
 _runner: Optional[RunnerFn] = None
+_popen_runner: Optional[PopenRunnerFn] = None
 
 
 def set_runner(fn: RunnerFn) -> None:
@@ -39,6 +45,17 @@ def set_runner(fn: RunnerFn) -> None:
     """
     global _runner
     _runner = fn
+
+
+def set_popen_runner(fn: PopenRunnerFn) -> None:
+    """Configure le context manager Popen tracke (cf tracked_popen).
+
+    Appele au boot par cinesort/__init__.py qui injecte
+    cinesort.infra.subprocess_safety.tracked_popen. Les tests peuvent
+    override via cette API pour injecter un mock.
+    """
+    global _popen_runner
+    _popen_runner = fn
 
 
 def get_runner() -> RunnerFn:
@@ -70,3 +87,37 @@ def tracked_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
     set_runner().
     """
     return get_runner()(*args, **kwargs)
+
+
+@contextmanager
+def tracked_popen(*args: Any, **kwargs: Any) -> Iterator[subprocess.Popen]:
+    """Context manager Popen avec cleanup garanti (alias service-locator).
+
+    Wrapper autour de cinesort.infra.subprocess_safety.tracked_popen, injecte
+    au boot via set_popen_runner(). Permet aux modules domain (perceptual)
+    de creer des subprocess avec pipe-IO + cleanup garanti sans dependre
+    directement de la couche infra (respect du contrat import-linter).
+
+    Fallback : si aucun popen-runner n'est configure, log warning + fallback
+    sur subprocess.Popen brut SANS le wrapper de cleanup. C'est de la defense
+    en profondeur (eviter un crash) mais cela perd la garantie zombie-free.
+    """
+    if _popen_runner is None:
+        logger.warning(
+            "domain._runners: popen_runner non configure, fallback subprocess.Popen brut. "
+            "Verifier que cinesort/__init__.py est charge au boot."
+        )
+        # Fallback minimal sans tracking : on cree le Popen, on tue+wait
+        # au cleanup pour limiter le risque de zombie.
+        proc = subprocess.Popen(*args, **kwargs)
+        try:
+            yield proc
+        finally:
+            if proc.poll() is None:
+                with suppress(OSError):
+                    proc.kill()
+                with suppress(subprocess.TimeoutExpired, OSError):
+                    proc.wait(timeout=1.0)
+        return
+    with _popen_runner(*args, **kwargs) as proc:
+        yield proc

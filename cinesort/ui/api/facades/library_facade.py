@@ -119,6 +119,14 @@ class LibraryFacade(_BaseFacade):
         """
         return self._api._search_tmdb_impl(query=query, year=year)
 
+    def clear_tmdb_override(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule l'override TMDb manuel. Cf _clear_tmdb_override_impl."""
+        return self._api._clear_tmdb_override_impl(run_id, row_id)
+
+    def unmark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule le marquage pour suppression. Cf _unmark_for_deletion_impl."""
+        return self._api._unmark_for_deletion_impl(run_id, row_id)
+
     def mark_for_deletion(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
         """Spec 06 §3.7 : marque un film pour le bucket suppression utilisateur.
 
@@ -232,3 +240,46 @@ class LibraryFacade(_BaseFacade):
         Cf cinesort.ui.api.library_audit_support.get_incomplete_sagas.
         """
         return library_audit_support.get_incomplete_sagas(self._api)
+
+    # ---------- Vague P / VP-G : Field locks Jellyfin-style ----------
+    # Cablage final des endpoints attendus par lib-validation.js (cf audit
+    # docs/internal/AUDIT_VP_G_LIB_VALIDATION_V5_LEGACY.md). Les routes
+    # `/api/library/{set,clear,list}_field_lock(s)` sont exposees par
+    # introspection rest_server pass 2.
+
+    def set_field_lock(
+        self,
+        film_id: str,
+        field_name: str,
+        locked_value: Any = None,
+        source: str = "ui_lock",
+    ) -> Dict[str, Any]:
+        """VP-G : pose un verrou champ-par-champ Jellyfin-style.
+
+        Cf cinesort.ui.api.library_support.set_field_lock pour la doc complete.
+        """
+        return library_support.set_field_lock(
+            self._api,
+            film_id=film_id,
+            field_name=field_name,
+            locked_value=locked_value,
+            source=source,
+        )
+
+    def clear_field_lock(self, film_id: str, field_name: str) -> Dict[str, Any]:
+        """VP-G : retire un verrou champ-par-champ.
+
+        Cf cinesort.ui.api.library_support.clear_field_lock pour la doc complete.
+        """
+        return library_support.clear_field_lock(
+            self._api,
+            film_id=film_id,
+            field_name=field_name,
+        )
+
+    def list_field_locks(self, film_id: str) -> Dict[str, Any]:
+        """VP-G : liste tous les verrous d'un film (pour render cadenas UI).
+
+        Cf cinesort.ui.api.library_support.list_field_locks pour la doc complete.
+        """
+        return library_support.list_field_locks(self._api, film_id=film_id)

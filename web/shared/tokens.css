@@ -8,34 +8,53 @@
  * ============================================================================
  */
 
+/* ============================================================================
+ * V1.4 — Cascade @layer (ordre canonique, plus a droite = plus prioritaire)
+ * ----------------------------------------------------------------------------
+ *   reset       : normalize / box-sizing
+ *   tokens      : variables CSS (tokens.css + themes.css)
+ *   primitives  : helpers structurels bas niveau
+ *   components  : composants design system non-prefixes
+ *   utilities   : helpers atomiques (utilities.css)
+ *   legacy      : dashboard/styles.css et autres heritages a migrer
+ *   v5          : composants v5 (.v5-*) — gagne sur legacy en cas de conflit
+ *
+ * Les styles non-wrappes dans un @layer restent inconditionnellement prioritaires
+ * sur tous les layers (regle CSS standard) -> migration progressive sans casse.
+ * Tier hex (Gold #FFD700, Silver #C0C0C0, Bronze #CD7F32, Platinum #E5E4E2)
+ * et severities restent INVARIANTES.
+ * ============================================================================
+ */
+@layer reset, tokens, primitives, components, utilities, legacy, v5;
+
 :root {
   /* ===========================================================
    * Tier colors — INVARIABLES dans tous les themes
    * =========================================================== */
 
-  /* Platinum (or vif) */
-  --tier-platinum-solid:  #FFD700;
-  --tier-platinum-glow:   rgba(255, 215, 0, 0.25);
-  --tier-platinum-bg:     rgba(255, 215, 0, 0.08);
-  --tier-platinum-border: rgba(255, 215, 0, 0.35);
+  /* Platinum (metal platine) */
+  --tier-platinum-solid:  #E5E4E2;
+  --tier-platinum-glow:   rgba(229, 228, 226, 0.25);
+  --tier-platinum-bg:     rgba(229, 228, 226, 0.08);
+  --tier-platinum-border: rgba(229, 228, 226, 0.35);
 
-  /* Gold (vert validation) */
-  --tier-gold-solid:  #22C55E;
-  --tier-gold-glow:   rgba(34, 197, 94, 0.25);
-  --tier-gold-bg:     rgba(34, 197, 94, 0.08);
-  --tier-gold-border: rgba(34, 197, 94, 0.35);
+  /* Gold (or vif) */
+  --tier-gold-solid:  #FFD700;
+  --tier-gold-glow:   rgba(255, 215, 0, 0.25);
+  --tier-gold-bg:     rgba(255, 215, 0, 0.08);
+  --tier-gold-border: rgba(255, 215, 0, 0.35);
 
-  /* Silver (bleu neutre positif) */
-  --tier-silver-solid:  #3B82F6;
-  --tier-silver-glow:   rgba(59, 130, 246, 0.25);
-  --tier-silver-bg:     rgba(59, 130, 246, 0.08);
-  --tier-silver-border: rgba(59, 130, 246, 0.35);
+  /* Silver (argent) */
+  --tier-silver-solid:  #C0C0C0;
+  --tier-silver-glow:   rgba(192, 192, 192, 0.25);
+  --tier-silver-bg:     rgba(192, 192, 192, 0.08);
+  --tier-silver-border: rgba(192, 192, 192, 0.35);
 
-  /* Bronze (orange warning doux) */
-  --tier-bronze-solid:  #F59E0B;
-  --tier-bronze-glow:   rgba(245, 158, 11, 0.25);
-  --tier-bronze-bg:     rgba(245, 158, 11, 0.08);
-  --tier-bronze-border: rgba(245, 158, 11, 0.35);
+  /* Bronze (bronze) */
+  --tier-bronze-solid:  #CD7F32;
+  --tier-bronze-glow:   rgba(205, 127, 50, 0.25);
+  --tier-bronze-bg:     rgba(205, 127, 50, 0.08);
+  --tier-bronze-border: rgba(205, 127, 50, 0.35);
 
   /* Reject (rouge action) */
   --tier-reject-solid:  #EF4444;
@@ -79,9 +98,21 @@
 
   --text-primary:   #E8ECF1;
   --text-secondary: #8B97AB;
-  --text-muted:     #6B7A95;
+  /* Fix audit 2026-06-07 a11y AA : #6B7A95 sur fond luxe #0B111A donnait
+     ratio ~3.55:1 < AA 4.5:1 (texte normal). Eclairci vers #9BA8BD
+     (ratio ~5:1) pour conformite AA sur 154 occurrences. */
+  --text-muted:     #9BA8BD;
   --text-disabled:  #4B5563;
   --text-inverse:   #0F1419;
+
+  /* Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high DV-006 : alias text-1/2/3
+     utilises massivement dans shared/components.css (341 occurrences) sans
+     etre definis -> fallback navigateur (currentColor/inherit) qui rendait
+     parfois les titres en blanc cru (effet "card border blanc" sur fond
+     sombre quand le titre debordait via box-shadow). Alias defensif. */
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
 
   /* ===========================================================
    * Typography
@@ -192,9 +223,14 @@
   --z-top-bar:     300;
   --z-overlay:     500;
   --z-modal:       600;
-  --z-toast:       800;
-  --z-palette:     900;
   --z-tooltip:     1000;
+  /* Z3-bis (revue Lot C-fix) : toasts et palette au-dessus de la famille
+   * drawers de vue (1500 : bibliotheque-drawer-host, aide-doc-drawer) —
+   * a 800/900 ils etaient masques par tout drawer ouvert. Echelle haute
+   * complete : drawers 1500 -> toast 1600 -> palette 1700 -> film-detail
+   * 10001 -> danger modal 10100 (cf components.css bloc dangerConfirmModal). */
+  --z-toast:       1600;
+  --z-palette:     1700;
 
   /* ===========================================================
    * Layout

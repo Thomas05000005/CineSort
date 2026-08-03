@@ -164,6 +164,38 @@ class CheckForUpdatesTests(unittest.TestCase):
             assert info is not None
             self.assertEqual(info.latest_version, "7.7.0")
 
+    def test_cache_non_numeric_ts_falls_back_to_network(self) -> None:
+        # ts non-numerique (ecriture partielle / edition manuelle) ne doit pas
+        # faire crasher float() : on retombe sur un refetch reseau.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            cache.write_text(
+                json.dumps({"ts": "garbage", "payload": _fake_payload(tag="7.7.0")}),
+                encoding="utf-8",
+            )
+            payload = _fake_payload(tag="7.8.0")
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(payload)) as m:
+                info = check_for_updates("7.6.0", "foo/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1)
+            assert info is not None
+            self.assertEqual(info.latest_version, "7.8.0")
+
+    def test_cache_null_ts_falls_back_to_network(self) -> None:
+        # ts=null en JSON -> data.get("ts") renvoie None -> float(None) leverait
+        # TypeError sans la garde. On doit refetcher proprement.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            cache.write_text(
+                json.dumps({"ts": None, "payload": _fake_payload(tag="7.7.0")}),
+                encoding="utf-8",
+            )
+            payload = _fake_payload(tag="7.8.0")
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(payload)) as m:
+                info = check_for_updates("7.6.0", "foo/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1)
+            assert info is not None
+            self.assertEqual(info.latest_version, "7.8.0")
+
 
 class BuildUpdateInfoTests(unittest.TestCase):
     def test_picks_first_exe_asset(self) -> None:

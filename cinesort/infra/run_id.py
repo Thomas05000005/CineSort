@@ -4,7 +4,6 @@ import re
 from typing import Optional
 from uuid import uuid4
 
-
 RUN_ID_PATTERN = re.compile(r"^\d{8}_\d{6}_\d{3}$")
 
 

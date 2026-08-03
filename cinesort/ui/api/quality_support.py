@@ -75,8 +75,13 @@ def _resolve_ids_from_scope(api: Any, run_id: str, scope: str) -> Dict[str, Any]
     validated_ids: Optional[set] = None
     if scope == "validated":
         try:
-            val_payload = api.load_validation(run_id)
-        except (OSError, TypeError, ValueError):
+            # AUDIT 2026-06-10 (REAL 2/2) : api.load_validation n'existe pas
+            # (methode legacy supprimee) -> AttributeError NON rattrapee ici ->
+            # HTTP 500 sur analyze_quality_batch scope=validated (chemin reel
+            # qij.js). On passe par la facade run.load_validation + on rattrape
+            # AttributeError defensivement.
+            val_payload = api.run.load_validation(run_id)
+        except (AttributeError, OSError, TypeError, ValueError):
             val_payload = None
         validated_ids = _extract_validated_ids(val_payload)
     collected: List[str] = []
@@ -221,7 +226,13 @@ def analyze_quality_batch(
         return _err_response(t("errors.no_rows_for_quality"), category="state", level="info", log_module=__name__)
 
     if not api._acquire_quality_batch_slot(run_id):
-        return _err_response(t("errors.quality_already_running"), category="state", level="info", log_module=__name__)
+        return _err_response(
+            t("errors.quality_already_running"),
+            category="state",
+            level="info",
+            log_module=__name__,
+            http_status=409,
+        )
 
     try:
         # V5-04 : pre-warm cache probe en parallele AVANT le scoring serie.

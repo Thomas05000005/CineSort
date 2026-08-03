@@ -39,7 +39,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from cinesort.domain.quality_score import validate_quality_profile
 
-
 SCHEMA_NAME = "cinesort.quality_profile"
 SCHEMA_VERSION_MAX = 1
 MAX_JSON_BYTES = 128 * 1024  # 128 KB — un profil est petit, évite DoS
