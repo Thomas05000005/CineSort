@@ -14,6 +14,7 @@ Couvre :
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -22,13 +23,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import json
-
 from cinesort.app.quarantine_ttl import (
+    _TTL_MANIFEST_NAME,
     DEFAULT_TTL_DAYS,
     REVIEW_FOLDER_NAME,
     TTL_SUBDIRS,
-    _TTL_MANIFEST_NAME,
     list_review_bucket_files,
     purge_review_bucket,
     purge_review_bucket_all,
@@ -65,9 +64,7 @@ def _seed_arrival(root: Path, rel: str, days_ago: float) -> None:
     manifest_path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _write_file(
-    p: Path, content: bytes = b"x", days_ago: float = 0.0, *, root: Path = None
-) -> Path:
+def _write_file(p: Path, content: bytes = b"x", days_ago: float = 0.0, *, root: Path = None) -> Path:
     """Ecrit un fichier de quarantaine.
 
     `days_ago` simule l'anciennete d'ENTREE en quarantaine : on fixe le mtime ET
@@ -124,12 +121,8 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_purge_old_files_in_conflicts(self) -> None:
         # 1 vieux fichier (40j) + 1 recent (1j) avec TTL 30j
-        old = _write_file(
-            self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root
-        )
-        recent = _write_file(
-            self.root / "_review" / "_conflicts" / "recent.mkv", days_ago=1, root=self.root
-        )
+        old = _write_file(self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root)
+        recent = _write_file(self.root / "_review" / "_conflicts" / "recent.mkv", days_ago=1, root=self.root)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertEqual(res["deleted"], 1)
@@ -158,9 +151,7 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_arrival_manifest_excluded_from_inventory(self) -> None:
         # Le manifest interne ne doit jamais etre compte ni purge comme contenu.
-        _write_file(
-            self.root / "_review" / "_conflicts" / "a.bin", days_ago=40, root=self.root
-        )
+        _write_file(self.root / "_review" / "_conflicts" / "a.bin", days_ago=40, root=self.root)
         inv = list_review_bucket_files(self.cfg)
         rels = {e["rel"] for e in inv["files"]}
         self.assertNotIn(_TTL_MANIFEST_NAME, rels)
@@ -171,9 +162,7 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
         # 1 vieux fichier par sous-dossier TTL
         old_files = []
         for sub in TTL_SUBDIRS:
-            f = _write_file(
-                self.root / "_review" / sub / "x.bin", days_ago=60, root=self.root
-            )
+            f = _write_file(self.root / "_review" / sub / "x.bin", days_ago=60, root=self.root)
             old_files.append(f)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertEqual(res["deleted"], len(TTL_SUBDIRS))
@@ -188,9 +177,7 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
             root=self.root,
         )
         # Un fichier conflits ancien pour confirmer que le TTL marche par ailleurs
-        purged = _write_file(
-            self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root
-        )
+        purged = _write_file(self.root / "_review" / "_conflicts" / "old.mkv", days_ago=40, root=self.root)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertFalse(purged.exists())
@@ -198,12 +185,8 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_top_level_quarantine_row_purged(self) -> None:
         # Row top-level : `_review/<folder>/...` (cas quarantine_unapproved=True)
-        old = _write_file(
-            self.root / "_review" / "MyFilm (2020)" / "movie.mkv", days_ago=40, root=self.root
-        )
-        recent = _write_file(
-            self.root / "_review" / "MyFilm (2020)" / "subs.srt", days_ago=1, root=self.root
-        )
+        old = _write_file(self.root / "_review" / "MyFilm (2020)" / "movie.mkv", days_ago=40, root=self.root)
+        recent = _write_file(self.root / "_review" / "MyFilm (2020)" / "subs.srt", days_ago=1, root=self.root)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertTrue(res["ok"])
         self.assertFalse(old.exists())
@@ -213,9 +196,7 @@ class PurgeReviewBucketBasicTests(unittest.TestCase):
 
     def test_empty_dirs_removed_after_purge(self) -> None:
         # Fichier ancien dans sous-dossier profond : on purge le fichier + le sous-dossier vide.
-        f = _write_file(
-            self.root / "_review" / "_leftovers" / "deep" / "x.bin", days_ago=99, root=self.root
-        )
+        f = _write_file(self.root / "_review" / "_leftovers" / "deep" / "x.bin", days_ago=99, root=self.root)
         res = purge_review_bucket(self.cfg, ttl_days=30)
         self.assertEqual(res["deleted"], 1)
         self.assertFalse(f.exists())
@@ -323,9 +304,7 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
                 return {"ok": True, "deleted": 0}
 
         api = SimpleNamespace(run=_FakeRun())
-        thread = start_quarantine_ttl_cron(
-            api, ttl_days=30, initial_delay_s=60.0, interval_s=3600.0
-        )
+        thread = start_quarantine_ttl_cron(api, ttl_days=30, initial_delay_s=60.0, interval_s=3600.0)
         try:
             self.assertIsNotNone(thread)
             self.assertTrue(thread.is_alive())
@@ -354,7 +333,7 @@ class TriggerNowTests(unittest.TestCase):
     def test_trigger_now_swallows_attribute_error(self) -> None:
         # api sans facade.run -> ne doit pas exploser.
         api = SimpleNamespace()
-        trigger_now(api, ttl_days=15)  # noqa : assert pas d'exception
+        trigger_now(api, ttl_days=15)  # l'absence d'exception EST l'assertion
 
     def test_trigger_now_swallows_runtime_error(self) -> None:
         class _BoomRun:
@@ -362,7 +341,7 @@ class TriggerNowTests(unittest.TestCase):
                 raise RuntimeError("boom")
 
         api = SimpleNamespace(run=_BoomRun())
-        trigger_now(api, ttl_days=15)  # noqa : assert pas d'exception
+        trigger_now(api, ttl_days=15)  # l'absence d'exception EST l'assertion
 
 
 class DefaultTtlDaysTests(unittest.TestCase):

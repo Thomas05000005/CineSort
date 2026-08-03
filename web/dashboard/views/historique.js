@@ -645,10 +645,19 @@ function _renderInspectorTabs() {
 /* --- Inspector detailed tabs (Phase 5) ------------------------------ */
 
 function _filmStatusLabel(film) {
-  // Map vers Approuvé/Rejeté/Doublon/Suppression
+  // Map vers Approuvé/Rejeté/Reporté/Doublon/Suppression.
+  const dec = String(film.decision || film.status || "").toLowerCase();
+  // H8 (2026-07-15) : la DÉCISION utilisateur explicite (tri-état
+  // accepted/approved/rejected/deferred exposé par history_support.py depuis
+  // validation.json) PRIME sur le tier qualité. Avant, `tier === "reject"` était
+  // testé AVANT de lire `film.decision` : un film au tier `reject` mais
+  // explicitement ACCEPTÉ affichait encore « Rejeté ». On ne retombe sur le tier
+  // (ni sur la détection doublon/suppression) QUE si `decision` est vide.
+  if (dec === "accepted" || dec === "approved") return { label: "Approuvé", cls: "is-approved" };
+  if (dec === "rejected") return { label: "Rejeté", cls: "is-rejected" };
+  if (dec === "deferred") return { label: "Reporté", cls: "is-deferred" };
   const tier = String(film.tier || "").toLowerCase();
   if (tier === "reject") return { label: "Rejeté", cls: "is-rejected" };
-  const dec = String(film.decision || film.status || "").toLowerCase();
   if (dec.includes("duplicate") || dec === "duplicate" || film.is_duplicate) return { label: "Doublon", cls: "is-duplicate" };
   if (dec.includes("delete") || dec === "delete_marked") return { label: "Suppression", cls: "is-deleted" };
   if (dec.includes("reject")) return { label: "Rejeté", cls: "is-rejected" };
@@ -1369,6 +1378,13 @@ export function unmountRunDetailPage() {
     document.removeEventListener("click", _onActionClick);
     _documentListenerAttached = false;
   }
+  // M19 (audit ultra 2026-07-13) : idem unmountHistorique — purge des caches par
+  // run_id (voir la note detaillee la-bas). La page standalone /run/:id partage
+  // _historyStatsCache / _filmsCacheByRun avec la timeline ; sans reset ici, un
+  // aller-retour /run/:id -> /historique servait un detail perime. Refetch au
+  // remontage via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _standaloneRunId = null;
   _standaloneContainer = null;
 }
@@ -1428,6 +1444,14 @@ export function unmountHistorique() {
     clearTimeout(_searchDebounceId);
     _searchDebounceId = null;
   }
+  // M19 (audit ultra 2026-07-13) : purge des caches par run_id au demontage.
+  // _historyStatsCache / _filmsCacheByRun sont module-level et n'etaient invalides
+  // que par delete_run / undo / bouton Recharger. Sans reset au unmount, un
+  // remontage ulterieur (autre run selectionne, apply survenu entre-temps)
+  // reaffichait des stats / films PERIMES d'un run different. Sur-invalider est
+  // sans danger : tout remontage refetch via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _runs = [];
   _selectedRunId = null;
 }

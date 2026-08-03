@@ -40,8 +40,11 @@ class DoublonsCacheTests(unittest.TestCase):
 
     def test_decision_paths_force_resync(self) -> None:
         # Les chemins de decision resynchronisent en forcant (pas de cache stale).
-        self.assertEqual(self.js.count("await _loadGroups(true)"), 2,
-                         "Les 2 resync de decision (_decideFromCard + _autoDecideAll) doivent forcer.")
+        self.assertEqual(
+            self.js.count("await _loadGroups(true)"),
+            2,
+            "Les 2 resync de decision (_decideFromCard + _autoDecideAll) doivent forcer.",
+        )
 
 
 if __name__ == "__main__":

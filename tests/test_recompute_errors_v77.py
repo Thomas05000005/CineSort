@@ -5,7 +5,9 @@ get_quality_report renvoie {ok:False} sans lever -> errors restait 0, toast vert
 "N/N re-calcules" meme quand tous les films echouaient. Backend compte
 {ok:False} ; front lit data.errors et choisit error/warn/success.
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

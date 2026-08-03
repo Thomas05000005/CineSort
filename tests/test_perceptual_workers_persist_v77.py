@@ -54,9 +54,7 @@ class PerceptualWorkersPersistTests(unittest.TestCase):
         # perceptual_workers. L'alias *_count n'est plus qu'un fallback legacy
         # pour payloads partiels REST. Cf test_perceptual_workers_ui_roundtrip_v77
         # pour le GATE du flux UI reel (GET complet -> edition -> save).
-        section = _save_section_perceptual(
-            {"perceptual_workers": 4, "perceptual_workers_count": 99}
-        )
+        section = _save_section_perceptual({"perceptual_workers": 4, "perceptual_workers_count": 99})
         self.assertEqual(section["perceptual_workers"], 4)
 
     def test_default_absent_is_auto(self) -> None:

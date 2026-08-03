@@ -108,9 +108,7 @@ def _list_inprogress_rollbacks(store: Any) -> List[str]:
     ids: List[str] = []
     with store._managed_conn() as conn:  # type: ignore[attr-defined]
         try:
-            cur = conn.execute(
-                "SELECT batch_id FROM apply_batch_modes WHERE rollback_status = 'IN_PROGRESS'"
-            )
+            cur = conn.execute("SELECT batch_id FROM apply_batch_modes WHERE rollback_status = 'IN_PROGRESS'")
             for r in cur.fetchall():
                 bid = str(r[0] or "").strip()
                 if bid:
@@ -306,9 +304,7 @@ def reconcile_pending_batches(
             _logger.exception("reconcile_pending_batches: classify failed for %s", bid)
             verdict = "rolled_back"
 
-        final_status = (
-            STATUS_COMPLETED_BY_BOOT if verdict == "completed" else STATUS_ROLLED_BACK_BY_BOOT
-        )
+        final_status = STATUS_COMPLETED_BY_BOOT if verdict == "completed" else STATUS_ROLLED_BACK_BY_BOOT
         try:
             _close_batch(store, batch_id=bid, status=final_status, now_ts=now)
         except (sqlite3.Error, OSError, AttributeError):
@@ -318,8 +314,7 @@ def reconcile_pending_batches(
         if verdict == "completed":
             report["completed"] += 1
             _logger.info(
-                "reconcile_pending_batches: batch %s (run=%s) marked %s "
-                "(no failed ops, cleanup completing)",
+                "reconcile_pending_batches: batch %s (run=%s) marked %s (no failed ops, cleanup completing)",
                 bid,
                 rid,
                 final_status,
