@@ -17,15 +17,19 @@ defaut, ou saute un filtre. Consequences observees et testees ici :
   au defaut (#639).
 - `str(value or "")` : `to_optional_bool` avale `False` et `0` en `None` (#785).
 
-Correctif unique : le helper partage `cinesort.domain.conversions.to_int(...)`
-(deja canonique : settings_support.py:1555, quality_score.py:423) ou un test
-`is None` explicite. La derniere classe de ce fichier est la regle grep-able de
-revue qui empeche la famille de se reconstituer sur ces fichiers.
+Correctif : le helper partage `cinesort.domain.conversions.to_int(...)` (deja
+canonique : settings_support.py:1555, quality_score.py:423) la ou l'invalide
+peut retomber sur le defaut, sinon un test `is None` explicite. Calibration est
+dans le second cas : son entree est un `profile_json` arbitraire, donc un poids
+present mais illisible reste FAIL-CLOSED (warning + aucune suggestion) au lieu
+de retomber en silence sur 60/30/10.
+
+La derniere classe de ce fichier est la regle grep-able de revue qui empeche la
+famille de se reconstituer sur ces fichiers.
 """
 
 from __future__ import annotations
 
-import io
 import re
 import shutil
 import tempfile
@@ -267,6 +271,44 @@ class CalibrationZeroWeightTests(unittest.TestCase):
         self.assertEqual(r["from"], weights)
         self.assertEqual(sum(r["to"].values()), 100)
 
+    def test_unparsable_weight_stays_fail_closed(self) -> None:
+        """Un poids PRESENT mais illisible ne doit pas retomber en silence sur 60/30/10.
+
+        `current_weights` vient d'un `profile_json` arbitraire
+        (cinesort_api.py:2616-2617). Corriger la sentinelle falsy ne doit pas
+        transformer ce chemin fail-closed en repli silencieux : la suggestion
+        porterait sur un profil qui n'est PAS celui de l'utilisateur.
+        """
+        for bad in ("abc", [], {}, object()):
+            with self.subTest(bad=bad):
+                r = suggest_weight_adjustment(
+                    self._bias("video", "overscore"),
+                    {"video": bad, "audio": 30, "extras": 10},
+                )
+                self.assertIsNone(r, f"poids illisible {bad!r} : aucune suggestion ne doit etre emise")
+
+    def test_unparsable_weight_is_logged_not_silent(self) -> None:
+        """Le renoncement doit se VOIR : un echec ne devient jamais un succes muet."""
+        with self.assertLogs("cinesort.domain.calibration", level="WARNING") as caught:
+            r = suggest_weight_adjustment(
+                self._bias("video", "overscore"),
+                {"video": "abc", "audio": 30, "extras": 10},
+            )
+        self.assertIsNone(r)
+        self.assertTrue(
+            any("illisible" in m for m in caught.output),
+            f"le poids illisible doit etre journalise en WARNING, obtenu : {caught.output}",
+        )
+
+    def test_numeric_string_weight_still_parsed(self) -> None:
+        """Non-regression : une valeur LISIBLE (str numerique) reste acceptee."""
+        r = suggest_weight_adjustment(
+            self._bias("video", "overscore"),
+            {"video": "60", "audio": "30", "extras": "0"},
+        )
+        assert r is not None
+        self.assertEqual(r["from"], {"video": 60, "audio": 30, "extras": 0})
+
 
 class ToOptionalBoolSentinelTests(unittest.TestCase):
     """#785 — cinesort/domain/conversions.py:139."""
@@ -302,19 +344,46 @@ class ToOptionalBoolSentinelTests(unittest.TestCase):
         self.assertIs(to_optional_bool("oui"), True)
 
 
+# Types de tokens blanchis par `_code_lines`.
+#
+# Depuis Python 3.12 (PEP 701) une f-string n'est PLUS un token `STRING`
+# unique : le tokenizer la decoupe en FSTRING_START / FSTRING_MIDDLE /
+# FSTRING_END, et seul FSTRING_MIDDLE porte le texte litteral. Sans ces types,
+# le litteral d'une f-string n'etait pas blanchi et un simple
+# `logger.info(f"seuil {x} or 90 applique")` faisait rougir la regle sur du
+# code parfaitement innocent — le seul remede aurait alors ete un
+# `# sentinel-ok:` mensonger. Les expressions entre accolades restent, elles,
+# du VRAI code et doivent continuer a declencher la regle (`f"{v or 90}"`).
+#
+# `getattr` : tolerance si le tokenizer n'expose pas ces types (Python <= 3.11,
+# ou l'ancien token STRING unique couvrait deja les f-strings).
+_BLANKED_TOKEN_TYPES = frozenset(
+    t
+    for t in (
+        tokenize.COMMENT,
+        tokenize.STRING,
+        getattr(tokenize, "FSTRING_START", None),
+        getattr(tokenize, "FSTRING_MIDDLE", None),
+        getattr(tokenize, "FSTRING_END", None),
+    )
+    if t is not None
+)
+
+
 def _code_lines(path: Path) -> List[Tuple[int, str, str]]:
     """Retourne [(lineno, code_sans_commentaire_ni_str, ligne_brute)] pour *path*.
 
-    Les commentaires et litteraux chaine sont blanchis (remplaces par des
-    espaces, donc les colonnes sont conservees) : la regle ne doit pas se
-    declencher sur un commentaire ou un docstring qui CITE l'idiome interdit
-    (`... or 90`) pour l'expliquer.
+    Les commentaires et litteraux chaine — f-strings COMPRISES, cf
+    `_BLANKED_TOKEN_TYPES` — sont blanchis (remplaces par des espaces, donc les
+    colonnes sont conservees) : la regle ne doit pas se declencher sur un
+    commentaire ou un docstring qui CITE l'idiome interdit (`... or 90`) pour
+    l'expliquer.
     """
     raw = path.read_text(encoding="utf-8").splitlines()
     blanked = list(raw)
     with path.open("rb") as fh:
         for tok in tokenize.tokenize(fh.readline):
-            if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+            if tok.type not in _BLANKED_TOKEN_TYPES:
                 continue
             (r1, c1), (r2, c2) = tok.start, tok.end
             for row in range(r1, r2 + 1):
@@ -347,6 +416,12 @@ class SentinelFalsyReviewRuleTests(unittest.TestCase):
 
     PATTERN = re.compile(r"\bor\s+[1-9][0-9]*(?:\.[0-9]+)?\b")
     WAIVER = "# sentinel-ok:"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_sentinel_rule_")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_grappe_files_have_no_nonzero_or_default(self) -> None:
         offenders = []
@@ -399,15 +474,41 @@ class SentinelFalsyReviewRuleTests(unittest.TestCase):
             with self.subTest(src=src):
                 self.assertIsNone(self.PATTERN.search(src))
 
-    def test_comment_citing_the_idiom_is_ignored(self) -> None:
-        """Un commentaire qui cite l'idiome ne doit pas declencher la regle."""
-        src = "# on n'ecrit surtout pas `x or 90` ici\nx = to_int(v, 90)\n"
-        stripped = " ".join(
-            tok.string
-            for tok in tokenize.generate_tokens(io.StringIO(src).readline)
-            if tok.type not in (tokenize.COMMENT, tokenize.STRING) and tok.string
+    def test_code_lines_blanks_comments_strings_and_fstrings(self) -> None:
+        """`_code_lines` blanchit commentaire, chaine ET f-string — et rien d'autre.
+
+        Ce test APPELLE le helper reellement utilise par la regle. Sa version
+        precedente reimplementait le blanchiment en ligne avec `generate_tokens`
+        et ne prouvait donc rien sur `_code_lines` : c'est exactement ainsi que
+        le trou f-string (PEP 701, Python 3.12+) etait passe inapercu.
+        """
+        src = (
+            "x = to_int(v, 90)\n"  # L1 : le correctif -> aucun hit
+            "# on n'ecrit surtout pas `x or 90` ici\n"  # L2 : commentaire -> blanchi
+            's = "documentation : x or 90"\n'  # L3 : chaine simple -> blanchie
+            'msg = f"seuil {x} or 90 applique"\n'  # L4 : litteral de f-string -> blanchi
+            "y = x or 90\n"  # L5 : VRAI idiome -> hit attendu
+            'msg2 = f"valeur {v or 90}"\n'  # L6 : vrai code DANS une f-string -> hit attendu
         )
-        self.assertIsNone(self.PATTERN.search(stripped))
+        sample = Path(self._tmp) / "sample_code_lines.py"
+        sample.write_text(src, encoding="utf-8")
+
+        hits = {lineno: self.PATTERN.search(code) is not None for lineno, code, _raw in _code_lines(sample)}
+
+        self.assertFalse(hits[1], "le correctif `to_int(v, 90)` ne doit pas declencher la regle")
+        self.assertFalse(hits[2], "un COMMENTAIRE qui cite l'idiome ne doit pas declencher la regle")
+        self.assertFalse(hits[3], "un litteral CHAINE qui cite l'idiome ne doit pas declencher la regle")
+        self.assertFalse(
+            hits[4],
+            "le texte litteral d'une F-STRING doit etre blanchi (FSTRING_MIDDLE, PEP 701) : "
+            "sinon un simple log f-string fait rougir la CI sur du code innocent",
+        )
+        self.assertTrue(hits[5], "auto-test : le VRAI idiome `x or 90` doit etre detecte")
+        self.assertTrue(
+            hits[6],
+            "auto-test : une EXPRESSION `v or 90` dans une f-string est du vrai code "
+            "et doit rester detectee (ne pas blanchir tout le token f-string)",
+        )
 
 
 if __name__ == "__main__":
