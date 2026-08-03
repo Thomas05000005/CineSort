@@ -15,15 +15,17 @@ Double diff : (1) attaque fermee ; (2) usage legitime (desktop loopback / LAN da
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f3_poster_trusted_diff.py
 """
+
 from __future__ import annotations
+
 import email.message
 import io
 import json
 import tempfile
 from pathlib import Path
 
-from cinesort.infra.rest_server import _CineSortHandler
 from cinesort.infra.integrations import poster_proxy
+from cinesort.infra.rest_server import _CineSortHandler
 
 
 def _mk_handler(client_ip: str, headers: dict):
@@ -98,21 +100,21 @@ def run():
             fetch_calls["n"] = 0
             h = FakeHTTP()
             poster_proxy.serve_poster(h, state, cache_root, {"id": "999", "size": "w500"}, allow_fetch=False)
-            miss_untrusted_no_fetch = (h.status == 404 and fetch_calls["n"] == 0)
+            miss_untrusted_no_fetch = h.status == 404 and fetch_calls["n"] == 0
             print(f"  untrusted + MISS  : status={h.status} fetch_calls={fetch_calls['n']} (attendu 404 / 0)")
 
             # (2a) LEGITIME : untrusted + cache HIT -> 200 servi, AUCUN fetch (lecture ok).
             fetch_calls["n"] = 0
             h = FakeHTTP()
             poster_proxy.serve_poster(h, state, cache_root, {"id": "550", "size": "w500"}, allow_fetch=False)
-            hit_untrusted_served = (h.status == 200 and fetch_calls["n"] == 0)
+            hit_untrusted_served = h.status == 200 and fetch_calls["n"] == 0
             print(f"  untrusted + HIT   : status={h.status} fetch_calls={fetch_calls['n']} (attendu 200 / 0)")
 
             # (2b) LEGITIME : trusted (allow_fetch=True) + MISS -> fetch TENTE (gate effectif).
             fetch_calls["n"] = 0
             h = FakeHTTP()
             poster_proxy.serve_poster(h, state, cache_root, {"id": "999", "size": "w500"}, allow_fetch=True)
-            miss_trusted_fetches = (fetch_calls["n"] == 1)
+            miss_trusted_fetches = fetch_calls["n"] == 1
             print(f"  trusted   + MISS  : status={h.status} fetch_calls={fetch_calls['n']} (attendu fetch=1)")
         finally:
             poster_proxy._build_or_get_tmdb_client = orig
@@ -122,7 +124,9 @@ def run():
     results["R8095_trusted_miss_fetches"] = miss_trusted_fetches
 
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (effets de bord poster gates par _poster_trusted_caller ; lecture cache intacte)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (effets de bord poster gates par _poster_trusted_caller ; lecture cache intacte)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

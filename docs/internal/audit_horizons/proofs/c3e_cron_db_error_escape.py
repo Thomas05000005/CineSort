@@ -15,21 +15,26 @@ Harnais (pur, aucun effet de bord) :
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/c3e_cron_db_error_escape.py
 """
+
 from __future__ import annotations
+
 import json
 import sqlite3
-import types
 
-from cinesort.app import retention_cleanup, quarantine_ttl
+from cinesort.app import quarantine_ttl, retention_cleanup
 
 
 class _FakeRun:
-    def __init__(self, exc): self._exc = exc
-    def cleanup_old_runs(self, retention_days): raise self._exc
+    def __init__(self, exc):
+        self._exc = exc
+
+    def cleanup_old_runs(self, retention_days):
+        raise self._exc
 
 
 class _FakeApi:
-    def __init__(self, exc): self.run = _FakeRun(exc)
+    def __init__(self, exc):
+        self.run = _FakeRun(exc)
 
 
 def _probe(fn, exc):
@@ -49,8 +54,8 @@ def run():
     out["T1_retention_sqlite_lock"] = {
         "comportement": _probe(retention_cleanup._run_cleanup_once, db_lock),
         "VERDICT": "BUG CONFIRME (cron meurt sur verrou DB)"
-                   if "RE-LEVE" in _probe(retention_cleanup._run_cleanup_once, db_lock)
-                   else "robuste",
+        if "RE-LEVE" in _probe(retention_cleanup._run_cleanup_once, db_lock)
+        else "robuste",
     }
     # quarantine cron : meme pattern (_run_purge_once)
     out["T1b_quarantine_sqlite_lock"] = {
@@ -61,8 +66,8 @@ def run():
     out["T2_controle_OSError"] = {
         "comportement": _probe(retention_cleanup._run_cleanup_once, OSError("disk glitch")),
         "VERDICT": "harnais DISCRIMINE (OSError swallow, sqlite re-leve)"
-                   if "SWALLOW" in _probe(retention_cleanup._run_cleanup_once, OSError("x"))
-                   else "ne discrimine pas",
+        if "SWALLOW" in _probe(retention_cleanup._run_cleanup_once, OSError("x"))
+        else "ne discrimine pas",
     }
 
     # T3 : confirmer que sqlite3.OperationalError n'est PAS dans le tuple attrape

@@ -1,0 +1,61 @@
+perceptual_auto_on_quality active mais perceptual_enabled=False -> analyse perceptuelle skip (active aussi le moteur).
+apply: PermissionError row_id=S|474ac176 folder=C:\Users\blanc\AppData\Local\Temp\lotd42_lock_h52rwirg\root\Locked.Movie.2020 err=[WinError 5] Accès refusé: 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_lock_h52rwirg\\root\\Locked.Movie.2020' -> 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_lock_h52rwirg\\root\\Locked Movie (2020)'
+=== SCENARIO SAGA (R8-085) ===
+rows: [('S|20c9f205', 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_saga_jzypyccs\\root\\Saga Movie (2020)', 'Saga Movie', 2020), ('S|88811446', 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_saga_jzypyccs\\root\\Saga.Two.2021.1080p', 'Saga Two 2021', 2021)]
+save_settings api2: True
+dry ok: True {'renames': 1, 'skipped': 1, 'applied_count': 1, 'total_rows': 2, 'considered_rows': 2}
+DRY DIFF: ([], [], [])
+real ok: True batch: 1783541399028_a4b03a343bfd4bf2a17ca3e6d213087b
+res: {'renames': 1, 'skipped': 1, 'applied_count': 1, 'total_rows': 2, 'considered_rows': 2} {'skip_noop_deja_conforme': 1}
+APPLY DIFF: [
+ [
+  "D:Saga.Two.2021.1080p",
+  "F:Saga.Two.2021.1080p/Saga.Two.2021.1080p.fr.srt",
+  "F:Saga.Two.2021.1080p/Saga.Two.2021.1080p.mkv"
+ ],
+ [
+  "D:_Collection",
+  "D:_Collection/Test Saga",
+  "D:_Collection/Test Saga/Saga Two 2021 (2021)",
+  "F:_Collection/Test Saga/Saga Two 2021 (2021)/Saga.Two.2021.1080p.fr.srt",
+  "F:_Collection/Test Saga/Saga Two 2021 (2021)/Saga.Two.2021.1080p.mkv"
+ ],
+ []
+]
+coll dir exists: True content: ['Saga Two 2021 (2021)']
+ops: [('MOVE_DIR', 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_saga_jzypyccs\\root\\Saga.Two.2021.1080p', '->', 'C:\\Users\\blanc\\AppData\\Local\\Temp\\lotd42_saga_jzypyccs\\root\\_Collection\\Test Saga\\Saga Two 2021 (2021)')]
+undo: True UNDONE_DONE {'done': 1, 'skipped': 0, 'failed': 0, 'irreversible': 0}
+UNDO DIFF vs snap0: [
+ [],
+ [
+  "D:_Collection",
+  "D:_Collection/Test Saga"
+ ],
+ []
+]
+TMP: C:\Users\blanc\AppData\Local\Temp\lotd42_saga_jzypyccs
+=== SCENARIO FICHIER VERROUILLE ===
+real ok: True errors: 1 renames: 1
+error_messages: ["FICHIER VERROUILLE : 'Locked.Movie.2020' est ouvert dans un autre logiciel (VLC ? lecteur video ? indexeur Windows ?). Ferme-le et relance l'apply pour ce film."]
+skip_reasons: {'skip_erreur_precedente': 1}
+locked folder intact: True
+APPLY DIFF: [
+ [
+  "D:Free.Movie.2021",
+  "F:Free.Movie.2021/Free.Movie.2021.mkv"
+ ],
+ [
+  "D:Free Movie (2021)",
+  "F:Free Movie (2021)/Free.Movie.2021.mkv"
+ ],
+ []
+]
+pending_moves: 0
+ops: [('MOVE_DIR', 'Free.Movie.2021', 'PENDING')]
+undo: True UNDONE_DONE {'done': 1, 'skipped': 0, 'failed': 0, 'irreversible': 0}
+UNDO DIFF vs snap0: [
+ [],
+ [],
+ []
+]
+TMP: C:\Users\blanc\AppData\Local\Temp\lotd42_lock_h52rwirg

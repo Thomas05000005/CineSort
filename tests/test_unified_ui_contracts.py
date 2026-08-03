@@ -31,8 +31,15 @@ class UnifiedUiContractTests(unittest.TestCase):
         self.assertIn("/dashboard/", self.app_py)
 
     def test_app_injects_token_for_native_mode(self):
-        self.assertIn("__CINESORT_NATIVE__", self.app_py)
-        self.assertIn("cinesort.dashboard.token", self.app_py)
+        # Contrat ACTUEL : app.py ne fait plus d'injection JS de
+        # window.__CINESORT_NATIVE__ — il passe le token et le flag natif en
+        # query string (?ntoken=XXX&native=1) dans main_url ; c'est app.js
+        # (_detectNativeBoot) qui lit native=1 et pose __CINESORT_NATIVE__.
+        self.assertIn("ntoken=", self.app_py)
+        self.assertIn("native=1", self.app_py)
+        # Cote JS : detection native depuis la query + pose du flag global.
+        self.assertIn('params.get("native")', self.dash_app_js)
+        self.assertIn("__CINESORT_NATIVE__", self.dash_app_js)
 
     def test_app_falls_back_to_legacy_if_no_server(self):
         self.assertIn("rest_server is not None", self.app_py)
