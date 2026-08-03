@@ -85,9 +85,7 @@ class DuplicatesNoRowMutationTests(unittest.TestCase):
                 "check_duplicates ne doit PAS injecter 'year_missing' dans les "
                 "warning_flags partages (pollution KPI Conflits).",
             )
-            self.assertEqual(
-                row.warning_flags, [], "warning_flags doit rester inchange."
-            )
+            self.assertEqual(row.warning_flags, [], "warning_flags doit rester inchange.")
             self.assertEqual(
                 set(row.warning_flags) & set(_CONFLICT_FLAGS),
                 set(),
@@ -97,9 +95,7 @@ class DuplicatesNoRowMutationTests(unittest.TestCase):
         # (2) La decision de doublon reste correcte : year=0 -> regroupement par
         #     titre seul -> 1 groupe d'identite (le comportement metier survit au
         #     retrait de la mutation).
-        self.assertEqual(
-            data1["total_groups"], 1, "les 2 copies sans annee doivent former 1 groupe."
-        )
+        self.assertEqual(data1["total_groups"], 1, "les 2 copies sans annee doivent former 1 groupe.")
         self.assertEqual(
             data2["total_groups"],
             data1["total_groups"],

@@ -14,7 +14,9 @@ ligne auto_install.py:169 ; cf docs/internal/r8/R8_CORRECTIONS.md, etats capturÃ
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_081_falsifiability.py
 """
+
 from __future__ import annotations
+
 import tempfile
 from pathlib import Path
 
@@ -70,7 +72,9 @@ def run() -> None:
         and results["etat2_rouge_sur_bug"].startswith("RED OK")
         and results["etat3_vert_apres_revert"] == "PASS"
     )
-    print(f"\nVERDICT : {'FALSIFIABLE PROUVEE (vert/rouge/vert)' if falsifiable else 'NON falsifiable -> instrument suspect'}")
+    print(
+        f"\nVERDICT : {'FALSIFIABLE PROUVEE (vert/rouge/vert)' if falsifiable else 'NON falsifiable -> instrument suspect'}"
+    )
 
 
 if __name__ == "__main__":

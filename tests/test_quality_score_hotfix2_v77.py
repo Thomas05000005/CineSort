@@ -224,32 +224,40 @@ class NormalizeBitrateVideoTests(unittest.TestCase):
         self.assertIsNone(_normalize_video_bitrate_kbps(-1))
         self.assertIsNone(_normalize_video_bitrate_kbps(-50000))
 
-    def test_4k_uhd_remux_140000_kbps_preserved(self) -> None:
-        # 4K UHD REMUX legitime a 140 Mbps = 140000 kbps. Doit rester
-        # tel quel (sinon classe a tort en "low bitrate" -> penalite).
-        self.assertEqual(_normalize_video_bitrate_kbps(140000), 140000)
-        self.assertEqual(_normalize_video_bitrate_kbps(120000), 120000)
+    # ------------------------------------------------------------------
+    # F16 (revue post-merge 2026-07-18) — l'ENTREE est TOUJOURS en bits/s.
+    #
+    # Ces tests encodaient l'heuristique « n > 500000 -> bps, sinon deja kbps ».
+    # Cette heuristique est fausse : la couche probe est le seul producteur de
+    # `video.bitrate` et normalise tout via conversions.to_optional_bitrate, qui
+    # rend des bits/s. Un 4K REMUX a 140 Mbps arrive donc a 140_000_000, jamais
+    # a 140_000 ; et 140_000 signifie bel et bien 140 kb/s.
+    # C'est exactement la meme correction que R8-038 avait deja faite cote audio.
+    # ------------------------------------------------------------------
 
-    def test_threshold_500000_split_bps_to_kbps(self) -> None:
-        # 500001 doit etre traite comme bps (> seuil 500 000) -> /1000.
+    def test_4k_uhd_remux_conserve_en_bps(self) -> None:
+        # 4K UHD REMUX a 140 Mbps : la probe stocke 140_000_000 bps.
+        self.assertEqual(_normalize_video_bitrate_kbps(140_000_000), 140000)
+        self.assertEqual(_normalize_video_bitrate_kbps(120_000_000), 120000)
+
+    def test_division_inconditionnelle_bps_vers_kbps(self) -> None:
         self.assertEqual(_normalize_video_bitrate_kbps(500001), 500)
         # 8 000 000 (8 Mbps en bps) -> 8000 kbps.
         self.assertEqual(_normalize_video_bitrate_kbps(8000000), 8000)
         # 50 000 000 (50 Mbps en bps) -> 50000 kbps.
         self.assertEqual(_normalize_video_bitrate_kbps(50000000), 50000)
 
-    def test_threshold_below_kept_as_kbps(self) -> None:
-        # 200 000 reste tel quel (limite physique : pas de video 200 000 kbps
-        # = 200 Mbps probable en kbps).
-        self.assertEqual(_normalize_video_bitrate_kbps(200000), 200000)
-        # 5000 kbps (5 Mbps) typique 1080p.
-        self.assertEqual(_normalize_video_bitrate_kbps(5000), 5000)
-        # 18000 kbps (UHD light).
-        self.assertEqual(_normalize_video_bitrate_kbps(18000), 18000)
+    def test_valeurs_sous_l_ancien_seuil_sont_aussi_des_bps(self) -> None:
+        # Le coeur du finding : 450 kb/s reels (450_000 bps) etaient lus comme
+        # 450_000 kb/s -> "+18 Debit excellent" au lieu du malus -18.
+        self.assertEqual(_normalize_video_bitrate_kbps(450_000), 450)
+        self.assertEqual(_normalize_video_bitrate_kbps(200_000), 200)
+        self.assertEqual(_normalize_video_bitrate_kbps(5_000_000), 5000)
+        self.assertEqual(_normalize_video_bitrate_kbps(18_000_000), 18000)
 
     def test_string_input_parsed(self) -> None:
         # Compat _to_float - les valeurs string doivent etre parsees.
-        self.assertEqual(_normalize_video_bitrate_kbps("5000"), 5000)
+        self.assertEqual(_normalize_video_bitrate_kbps("5000000"), 5000)
         self.assertEqual(_normalize_video_bitrate_kbps("8000000"), 8000)
 
     def test_string_garbage_returns_none(self) -> None:
@@ -260,8 +268,8 @@ class NormalizeBitrateVideoTests(unittest.TestCase):
     def test_backward_compat_alias(self) -> None:
         # `_normalize_bitrate_kbps` doit etre alias de la variante video.
         self.assertIs(_normalize_bitrate_kbps, _normalize_video_bitrate_kbps)
-        # Verification semantique via une valeur 4K UHD REMUX.
-        self.assertEqual(_normalize_bitrate_kbps(140000), 140000)
+        # Verification semantique via une valeur 4K UHD REMUX (140 Mbps en bps).
+        self.assertEqual(_normalize_bitrate_kbps(140_000_000), 140000)
 
 
 class NormalizeBitrateAudioTests(unittest.TestCase):
@@ -300,10 +308,14 @@ class NormalizeBitrateAudioTests(unittest.TestCase):
         self.assertEqual(_normalize_audio_bitrate_kbps(192000), 192)
         self.assertEqual(_normalize_audio_bitrate_kbps(6000000), 6000)
 
-    def test_separation_from_video_path(self) -> None:
-        """Le path audio/video reste séparé (memo C5 patch) : 140 000 reste 140 000
-        pour la vidéo (seuil bps vidéo = 500 000), mais /1000 pour l'audio."""
-        self.assertEqual(_normalize_video_bitrate_kbps(140000), 140000)
+    def test_video_et_audio_partagent_le_meme_invariant(self) -> None:
+        """F16 : les deux chemins lisent des bits/s et divisent inconditionnellement.
+
+        Le « path separe » du memo C5 reposait sur l'idee qu'une valeur video
+        sous 500 000 etait deja en kbps. C'est faux : la probe rend toujours des
+        bits/s. Les deux normalisations sont donc desormais alignees.
+        """
+        self.assertEqual(_normalize_video_bitrate_kbps(140000), 140)
         self.assertEqual(_normalize_audio_bitrate_kbps(140000), 140)
 
 

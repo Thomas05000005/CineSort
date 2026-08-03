@@ -54,8 +54,11 @@ class GlobalStatsHardeningTests(unittest.TestCase):
     def _seed_run(self, run_id: str) -> None:
         ts = time.time()
         self.store.run.insert_run_pending(
-            run_id=run_id, root=str(self.root), state_dir=str(self.state_dir),
-            config={}, created_ts=ts - 1,
+            run_id=run_id,
+            root=str(self.root),
+            state_dir=str(self.state_dir),
+            config={},
+            created_ts=ts - 1,
         )
         self.store.run.mark_run_running(run_id, started_ts=ts)
         self.store.run.mark_run_done(run_id, stats={"planned_rows": 2}, ended_ts=ts + 5)
@@ -69,7 +72,8 @@ class GlobalStatsHardeningTests(unittest.TestCase):
         # On stubbe get_quality_counts_for_runs pour lever RuntimeError au
         # milieu de get_global_stats (apres get_runs_summary, avant tier_data).
         with mock.patch.object(
-            self.store.quality, "get_quality_counts_for_runs",
+            self.store.quality,
+            "get_quality_counts_for_runs",
             side_effect=RuntimeError("simulated dependency failure"),
         ):
             result = dashboard_support.get_global_stats(self.api, limit_runs=10)
@@ -90,7 +94,8 @@ class GlobalStatsHardeningTests(unittest.TestCase):
         self._seed_run("20260526_120000_b")
 
         with mock.patch.object(
-            self.store.quality, "get_global_tier_distribution",
+            self.store.quality,
+            "get_global_tier_distribution",
             side_effect=AttributeError("missing method on stub"),
         ):
             result = dashboard_support.get_global_stats(self.api, limit_runs=10)
@@ -126,11 +131,17 @@ class DashboardCountAlignmentTests(unittest.TestCase):
 
     def _make_row(self, rid: str, title: str = "X") -> Dict[str, Any]:
         return {
-            "row_id": rid, "kind": "single",
-            "folder": str(self.root / title), "video": str(self.root / title / f"{title}.mkv"),
-            "proposed_title": title, "proposed_year": 2020,
-            "proposed_source": "name", "confidence": 70,
-            "confidence_label": "med", "candidates": [], "notes": "",
+            "row_id": rid,
+            "kind": "single",
+            "folder": str(self.root / title),
+            "video": str(self.root / title / f"{title}.mkv"),
+            "proposed_title": title,
+            "proposed_year": 2020,
+            "proposed_source": "name",
+            "confidence": 70,
+            "confidence_label": "med",
+            "candidates": [],
+            "notes": "",
         }
 
     def _write_plan(self, run_id: str, rows: list) -> None:
@@ -142,12 +153,17 @@ class DashboardCountAlignmentTests(unittest.TestCase):
     def _insert_run(self, run_id: str, planned_snapshot: int) -> None:
         ts = time.time()
         self.store.run.insert_run_pending(
-            run_id=run_id, root=str(self.root), state_dir=str(self.state_dir),
-            config={}, created_ts=ts - 1,
+            run_id=run_id,
+            root=str(self.root),
+            state_dir=str(self.state_dir),
+            config={},
+            created_ts=ts - 1,
         )
         self.store.run.mark_run_running(run_id, started_ts=ts)
         self.store.run.mark_run_done(
-            run_id, stats={"planned_rows": planned_snapshot}, ended_ts=ts + 5,
+            run_id,
+            stats={"planned_rows": planned_snapshot},
+            ended_ts=ts + 5,
         )
 
     def test_total_movies_reads_plan_jsonl_when_rows_memory_diverges(self) -> None:
@@ -186,7 +202,8 @@ class DashboardCountAlignmentTests(unittest.TestCase):
         # AVANT fix : len(rows) = 3
         # APRES fix : count_plan_rows = 8
         self.assertEqual(
-            section["kpis"]["total_movies"], 8,
+            section["kpis"]["total_movies"],
+            8,
             "total_movies doit refleter plan.jsonl (8), pas len(rows tronque) (3)",
         )
 
@@ -246,11 +263,17 @@ class DashboardCountAlignedWithStatusTests(unittest.TestCase):
 
     def _make_row(self, rid: str, title: str = "X") -> Dict[str, Any]:
         return {
-            "row_id": rid, "kind": "single",
-            "folder": str(self.root / title), "video": str(self.root / title / f"{title}.mkv"),
-            "proposed_title": title, "proposed_year": 2020,
-            "proposed_source": "name", "confidence": 70,
-            "confidence_label": "med", "candidates": [], "notes": "",
+            "row_id": rid,
+            "kind": "single",
+            "folder": str(self.root / title),
+            "video": str(self.root / title / f"{title}.mkv"),
+            "proposed_title": title,
+            "proposed_year": 2020,
+            "proposed_source": "name",
+            "confidence": 70,
+            "confidence_label": "med",
+            "candidates": [],
+            "notes": "",
         }
 
     def _write_plan(self, run_id: str, n: int) -> None:
@@ -263,14 +286,19 @@ class DashboardCountAlignedWithStatusTests(unittest.TestCase):
     def _insert_run(self, run_id: str, planned_snapshot: int, total_db: int) -> None:
         ts = time.time()
         self.store.run.insert_run_pending(
-            run_id=run_id, root=str(self.root), state_dir=str(self.state_dir),
-            config={}, created_ts=ts - 1,
+            run_id=run_id,
+            root=str(self.root),
+            state_dir=str(self.state_dir),
+            config={},
+            created_ts=ts - 1,
         )
         self.store.run.mark_run_running(run_id, started_ts=ts)
         # Forcer total separement de planned_rows via update direct (pour
         # tester le fallback divergent quand plan.jsonl absent).
         self.store.run.mark_run_done(
-            run_id, stats={"planned_rows": planned_snapshot}, ended_ts=ts + 5,
+            run_id,
+            stats={"planned_rows": planned_snapshot},
+            ended_ts=ts + 5,
         )
         # patch direct du champ total (discover_total) pour simuler le bug 853/855
         with self.store._managed_conn() as conn:
@@ -345,11 +373,13 @@ class DashboardCountAlignedWithStatusTests(unittest.TestCase):
         # AVANT fix : 120 / 130 / 130 (divergence)
         # APRES fix : 120 / 120 / 120 (cohere via compute_total_fallback)
         self.assertEqual(
-            dashboard_total, history_total,
+            dashboard_total,
+            history_total,
             f"dashboard ({dashboard_total}) != history ({history_total}) sans plan.jsonl",
         )
         self.assertEqual(
-            dashboard_total, status_total,
+            dashboard_total,
+            status_total,
             f"dashboard ({dashboard_total}) != status ({status_total}) sans plan.jsonl",
         )
         self.assertEqual(dashboard_total, 120, "Doit prioriser stats.planned_rows")
