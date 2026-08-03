@@ -53,8 +53,8 @@ def main() -> int:
 
     # Verifier que pytest-playwright est installe
     try:
-        import pytest  # noqa: F401
         import playwright  # noqa: F401
+        import pytest  # noqa: F401
     except ImportError:
         print("[e2e] pytest-playwright non installe. Lancez : pip install pytest-playwright")
         return 1

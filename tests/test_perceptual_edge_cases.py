@@ -19,17 +19,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from cinesort.ui.api.perceptual_support import (
-    _build_settings_dict,
-    get_perceptual_report,
-)
-from cinesort.domain.perceptual.constants import CALIBRATION_ENABLED, CALIBRATION_MIN_FILMS
 from cinesort.domain.perceptual.composite_score import (
     build_perceptual_result,
     compute_global_score,
 )
+from cinesort.domain.perceptual.constants import CALIBRATION_ENABLED, CALIBRATION_MIN_FILMS
 from cinesort.domain.perceptual.models import AudioPerceptual, VideoPerceptual
-
+from cinesort.ui.api.perceptual_support import (
+    _build_settings_dict,
+    get_perceptual_report,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -36,7 +36,8 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
-from typing import Optional
+import time as _time
+from typing import Dict, List, Optional
 
 # Sentinelle "valeur absente" pour les formatters texte. "-" est conventionnel
 # (cf logs syslog/Apache) et plus lisible que "None" ou chaine vide.
@@ -164,6 +165,68 @@ class LogContextFilter(logging.Filter):
 _INSTALLED = False
 
 
+# Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception
+class RepeatedExceptionDedupFilter(logging.Filter):
+    """Rate-limit les LogRecord porteurs d'une exc_info repetee.
+
+    Pourquoi : un bug en boucle peut produire des centaines/milliers de stack
+    traces identiques par minute (cycle de retry, watcher, etc.) qui saturent
+    les fichiers logs et masquent les autres messages.
+
+    Strategie : par cle ``(logger_name, exception_type, msg[:80])``, on garde
+    un sliding window de 60 s et on laisse passer au plus ``max_per_minute``
+    records. Au-dela on supprime silencieusement.
+
+    Thread-safety : Python GIL protege les operations dict + list assignments
+    utilisees ici, suffisant pour notre usage best-effort.
+    """
+
+    def __init__(self, max_per_minute: int = 5):
+        super().__init__()
+        self._max = int(max_per_minute)
+        self._counts: Dict[str, List[float]] = {}
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        if record.exc_info is None:
+            return True
+        exc_type_obj = record.exc_info[0]
+        exc_type = exc_type_obj.__name__ if exc_type_obj else "?"
+        # msg brut (pas formate) pour eviter les variations de % args
+        msg_part = str(record.msg)[:80]
+        key = f"{record.name}:{exc_type}:{msg_part}"
+        now = _time.monotonic()
+        timestamps = self._counts.setdefault(key, [])
+        # cleanup > 60s
+        timestamps[:] = [t for t in timestamps if now - t < 60.0]
+        if len(timestamps) >= self._max:
+            return False
+        timestamps.append(now)
+        return True
+
+
+_DEDUP_INSTALLED = False
+
+
+def install_repeated_exception_dedup(max_per_minute: int = 5) -> None:
+    """Attache RepeatedExceptionDedupFilter au root logger + handlers existants.
+
+    Idempotent : appelable plusieurs fois sans dupliquer le filter. A appeler
+    une fois au boot dans app.py:main / app.py:main_api, apres l'installation
+    des handlers.
+    """
+    global _DEDUP_INSTALLED
+    if _DEDUP_INSTALLED:
+        return
+    flt = RepeatedExceptionDedupFilter(max_per_minute=max_per_minute)
+    root = logging.getLogger()
+    if not any(isinstance(f, RepeatedExceptionDedupFilter) for f in root.filters):
+        root.addFilter(flt)
+    for handler in root.handlers:
+        if not any(isinstance(f, RepeatedExceptionDedupFilter) for f in handler.filters):
+            handler.addFilter(flt)
+    _DEDUP_INSTALLED = True
+
+
 def install_log_context_filter() -> None:
     """Installe LogContextFilter sur le root logger ET sur tous ses handlers.
 
@@ -204,8 +267,10 @@ def reset_for_tests() -> None:
     Ne touche PAS aux filters deja installes sur des loggers/handlers — le
     test doit gerer sa propre isolation logger si besoin.
     """
-    global _INSTALLED
+    global _INSTALLED, _DEDUP_INSTALLED
     _INSTALLED = False
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : reset le flag dedup pour isolation tests
+    _DEDUP_INSTALLED = False
     clear_run_id()
     clear_request_id()
 

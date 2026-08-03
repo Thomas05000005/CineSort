@@ -397,13 +397,20 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
 
 
 def _resolve_db_path(api: Any) -> Optional[Path]:
-    """Retrouve le chemin du fichier SQLite cinesort.db dans le state_dir."""
+    """Retrouve le chemin canonique du fichier SQLite dans le state_dir.
+
+    AUDIT 2026-06-10 (REAL 2/2) : retournait `state_dir/cinesort.db` alors que la
+    vraie DB est `state_dir/db/cinesort.sqlite` (db_path_for_state_dir). db_path
+    .exists() etait donc toujours False -> reset_database retournait ok=True
+    "Aucune DB existante a supprimer" : le wipe DB promis par l'UI ne se
+    produisait JAMAIS, sans erreur visible.
+    """
     state_path = _resolve_state_dir(api)
     if state_path is None:
         return None
-    # cinesort.db par convention. Cf cinesort/infra/db/store.py.
-    candidate = state_path / "cinesort.db"
-    return candidate
+    from cinesort.infra.db import db_path_for_state_dir  # noqa: PLC0415
+
+    return db_path_for_state_dir(state_path)
 
 
 def reset_database(api: Any) -> Dict[str, Any]:

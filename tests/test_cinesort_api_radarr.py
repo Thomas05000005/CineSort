@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import cinesort.ui.api.cinesort_api as backend
 
@@ -120,7 +120,11 @@ class TestGetRadarrStatus(unittest.TestCase):
 
             result = self.api.integrations.get_radarr_status(run_id="run1")
             self.assertFalse(result["ok"])
-            self.assertIn("network down", result["message"])
+            # Sprint 2 audit P0 #4 (SEC-leak) : safe_integration_error remplace le
+            # texte d'exception ("network down") par un message i18n generique pour
+            # eviter de fuiter le detail au client. Alignement avec le test de la
+            # ligne 198 (test_upgrade_radarr_error).
+            self.assertIn("logs serveur", result["message"])
 
 
 class TestRequestRadarrUpgrade(unittest.TestCase):
