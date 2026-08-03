@@ -167,7 +167,7 @@ jobs:
           echo "$modules" | head -20
 
       - name: Run Claude audit
-        uses: anthropics/claude-code-action@20c8abf165d5f85ab3fc970db9498436377dc9d1 # v1
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Modele : Opus 5 (dernier modele, MAJ 2026-08-02 depuis Opus 4.8).
