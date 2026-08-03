@@ -180,7 +180,7 @@ const NATIVE_FLAG_KEY = "cinesort.native";
   }
 })();
 
-import { registerRoute, requireAuth, startRouter, navigateTo } from "./core/router.js";
+import { registerRoute, requireAuth, startRouter, navigateTo, currentRoute } from "./core/router.js";
 import { apiPost, cachedGetSettings } from "./core/api.js";
 import { initI18n, setLocale } from "./core/i18n.js";
 
@@ -510,11 +510,33 @@ document.addEventListener("v5:notif-count", (ev) => {
 // Cf #92 quick win #2 : refresh immediat des badges sidebar apres un undo.
 // Sans ca, les compteurs restent stales jusqu'au tick 30s de l'interval,
 // donnant l'impression que l'undo n'a pas fonctionne (perte de confiance).
+//
+// Ultra-audit 2026-08-03 (N01) : ce listener etait ORPHELIN — aucun module
+// n'emettait plus `cinesort:undo` depuis la migration ESM, donc les badges
+// restaient bien stales jusqu'au tick 30 s. Les deux proprietaires reels de
+// l'undo (views/traitement.js `_onUndoExecute` et views/historique.js
+// `_doUndoApply`) emettent desormais l'evenement apres un undo REUSSI.
 window.addEventListener("cinesort:undo", () => {
   // Best-effort : si la fonction n'est pas encore declaree (avant boot
   // complet), l'event est juste ignore.
   if (typeof _loadSidebarCounters === "function") {
     _loadSidebarCounters().catch(() => { /* silencieux */ });
+  }
+});
+
+// Ultra-audit 2026-08-03 (N09) : `cinesort:refresh` etait dispatche a DEUX
+// endroits (F5 dans core/keyboard.js, entree « Rafraichir la vue » de la
+// palette Ctrl+K) et ecoute a ZERO. La palette se fermait sans rien
+// rafraichir, alors que son hint annonce « Equivalent F5 ».
+// On re-monte la route courante : navigateTo() sur un hash identique
+// re-dispatche un hashchange, ce qui fait passer le router par le cleanup de
+// la vue puis son init() — donc un vrai refetch, sans rechargement complet.
+window.addEventListener("cinesort:refresh", () => {
+  try {
+    const route = currentRoute();
+    if (route) navigateTo(route);
+  } catch (e) {
+    console.warn("[app] cinesort:refresh", e);
   }
 });
 

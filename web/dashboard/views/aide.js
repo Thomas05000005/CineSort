@@ -101,7 +101,10 @@ const _SHORTCUTS = [
   { keys: ["Ctrl", "B"], label: "Replier ou déployer la sidebar" },
   { keys: ["Ctrl", "I"], label: "Afficher ou masquer l'inspecteur droit" },
   { keys: ["Ctrl", ","], label: "Aller à Paramètres" },
-  { keys: ["Ctrl", "Z"], label: "Annuler le dernier apply (depuis Bibliothèque)" },
+  // Ctrl+Z retire (ultra-audit 2026-08-03 N01/N08) : le raccourci etait inerte
+  // depuis la migration ESM. L'undo passe par ses boutons dedies (Traitement
+  // etape 5, Historique > « Annuler l'apply »), derriere confirmation.
+  { keys: ["F5"], label: "Rafraîchir la vue courante" },
   { keys: ["Esc"], label: "Fermer modal / palette / drawer" },
   { keys: ["?"], label: "Afficher cette aide" },
   { keys: ["↑", "↓"], label: "Navigation dans listes (films, doublons, runs)" },

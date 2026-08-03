@@ -2,6 +2,7 @@
 
 import { getToken, clearToken, awaitToken } from "./state.js";
 import { isCacheable, saveSnapshot, loadSnapshot, formatStaleness } from "./cache.js";
+import { showToast } from "../components/toast.js";
 
 /* --- Indicateur de connexion (C8) ---------------------------- */
 let _connFailureStreak = 0;
@@ -30,6 +31,40 @@ function _noteSuccess() {
 function _noteFailure() {
   _connFailureStreak += 1;
   _setConnStatus(_connFailureStreak >= _CONN_FAIL_THRESHOLD ? "conn-dot--error" : "conn-dot--warn");
+}
+
+/* --- Snapshot hors ligne : signalement utilisateur (N33) ------------------
+ *
+ * Ultra-audit 2026-08-03 : sur une reponse 5xx, apiPost sert un instantane
+ * localStorage vieux de 24 h au maximum en y posant `_offline` et
+ * `_stale_age`. Ces deux cles n'avaient AUCUN lecteur dans tout web/ (une
+ * seule occurrence chacune : celle qui les produit), et le payload rendu
+ * franchit les gardes des appelants (`data.ok === false` est faux, la cle
+ * `ok` etant simplement ABSENTE des payloads concernes). Resultat : l'ecran
+ * se peuplait de valeurs perimees sans le moindre indice — l'indicateur de
+ * connexion `_setConnStatus` n'en est pas un, l'element #dashConnStatus
+ * qu'il cible n'existe nulle part dans le DOM de l'application.
+ *
+ * On rend donc le repli VISIBLE. Throttle : un serveur a terre fait tomber
+ * plusieurs endpoints caches d'affilee au boot, on ne veut pas empiler autant
+ * de toasts que d'appels.
+ */
+const _OFFLINE_NOTICE_THROTTLE_MS = 15000;
+let _lastOfflineNoticeTs = 0;
+
+function _notifyOfflineSnapshot(staleAge) {
+  const now = Date.now();
+  if (_lastOfflineNoticeTs && now - _lastOfflineNoticeTs < _OFFLINE_NOTICE_THROTTLE_MS) return;
+  _lastOfflineNoticeTs = now;
+  try {
+    showToast({
+      type: "warning",
+      text: `Serveur injoignable — données hors ligne (${staleAge}).`,
+      duration: 10000,
+    });
+  } catch (e) {
+    console.warn("[dash-api] notification hors ligne impossible", e);
+  }
 }
 
 /**
@@ -546,7 +581,11 @@ async function _apiPostImpl(method, params, url, body, signal) {
     /* J14 : fallback cache si disponible */
     const cached = loadSnapshot(method);
     if (cached) {
-      return { status: resp.status, data: { ...cached.data, _offline: true, _stale_age: formatStaleness(cached.ageSeconds) } };
+      const staleAge = formatStaleness(cached.ageSeconds);
+      // N33 : servir un instantane perime est acceptable, le faire en silence
+      // ne l'est pas — l'utilisateur doit savoir qu'il ne lit pas l'etat reel.
+      _notifyOfflineSnapshot(staleAge);
+      return { status: resp.status, data: { ...cached.data, _offline: true, _stale_age: staleAge } };
     }
     return { status: resp.status, data: { ok: false, message: `Serveur indisponible (HTTP ${resp.status}). Reessayez dans quelques instants.` } };
   }

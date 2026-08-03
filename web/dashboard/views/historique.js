@@ -786,14 +786,35 @@ function _renderDoublonsList(runStats) {
   `;
 }
 
-function _renderLogViewer(runStats, runId) {
+/** Ultra-audit 2026-08-03 (N29) — chemin du journal sur disque.
+ *  `run_dir` vient de runs_history (dashboard_support.py) ; on n'y ajoute le
+ *  nom de fichier qu'avec le separateur deja present dans le chemin. */
+function _uiLogPath(runDir) {
+  const dir = String(runDir || "").trim();
+  if (!dir) return "";
+  const sep = dir.includes("\\") ? "\\" : "/";
+  return `${dir.replace(/[\\/]+$/, "")}${sep}ui_log.txt`;
+}
+
+function _renderLogViewer(runStats, runId, runDir) {
   const lines = Array.isArray(runStats.log_lines) ? runStats.log_lines : [];
   if (lines.length === 0) {
+    // Ultra-audit 2026-08-03 (N29) : le journal live n'existe qu'en memoire du
+    // process (api._runs, alimente au demarrage du run) ; get_status repond
+    // `logs: []` pour tout run d'une session anterieure et get_history_stats
+    // n'a jamais porte `log_lines`. « Aucun log disponible » etait donc exact
+    // mais laissait croire que le journal n'existait plus, et le bouton
+    // « Recharger » ne pouvait rien y changer. Le fichier, lui, est bien sur
+    // disque : on dit pourquoi c'est vide et ou aller le lire.
+    const logPath = _uiLogPath(runDir);
+    const message = logPath
+      ? `Aucun log en mémoire pour ce run. Le journal live n'est conservé que par la session qui a lancé le run : il est vide après un redémarrage de CineSort. Le journal complet reste sur disque : ${logPath}`
+      : "Aucun log en mémoire pour ce run. Le journal live n'est conservé que par la session qui a lancé le run : il est vide après un redémarrage de CineSort. Le journal complet reste sur disque, dans le dossier du run (ui_log.txt).";
     return `
       <div class="historique-log-viewer-actions">
         <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-historique-action="reload-log" data-run-id="${escapeHtml(runId)}">↻ Recharger</button>
       </div>
-      ${_emptyInline("Aucun log disponible pour ce run.", "history")}
+      ${_emptyInline(message, "history")}
     `;
   }
   const content = lines.map((l) => escapeHtml(String(l))).join("\n");
@@ -821,7 +842,9 @@ function _renderInspectorTabContent(run) {
     case "apply":   return _renderApplyOps(runStats);
     case "doublons": return _renderDoublonsList(runStats);
     case "log":
-    default:        return _renderLogViewer(runStats, runId);
+    // N29 : `run` vient de runs_history et porte `run_dir` — runStats (payload
+    // get_history_stats) ne l'a pas.
+    default:        return _renderLogViewer(runStats, runId, run.run_dir);
   }
 }
 
@@ -1181,6 +1204,11 @@ async function _doUndoApply(runId) {
     const _payload = (res && res.data) || res || {};
     if (res && _payload.ok !== false) {
       showToast({ type: "success", text: "Apply annulé. Fichiers restaurés." });
+      // Ultra-audit 2026-08-03 (N01) : app.js ecoute `cinesort:undo` pour
+      // recharger les compteurs de sidebar (#92 quick win #2). L'evenement
+      // n'etait plus emis par personne depuis la migration ESM.
+      try { window.dispatchEvent(new CustomEvent("cinesort:undo")); }
+      catch (e) { console.warn("[historique] dispatch cinesort:undo", e); }
       // Refresh dashboard + cache + UI.
       _historyStatsCache.delete(runId);
       await _refreshRuns();

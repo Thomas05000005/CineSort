@@ -7,8 +7,7 @@
  * - Ctrl+, : aller a Parametres
  * - Ctrl+K : command palette
  * - Ctrl+S : sauvegarder (emet event "cinesort:save-request")
- * - Ctrl+Z : undo (depuis Bibliotheque apres apply)
- * - F5 : rafraichir
+ * - F5 : rafraichir (emet event "cinesort:refresh", ecoute par app.js)
  * - F1 / ? : aide
  * - Escape : fermer modale / palette
  */
@@ -42,7 +41,6 @@ function _showHelp() {
       <tr><td><kbd>Ctrl</kbd>+<kbd>I</kbd></td><td>Afficher ou masquer l'inspecteur droit</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Aller a Parametres</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Enregistrer</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Annuler la derniere application (depuis Bibliotheque)</td></tr>
       <tr><td><kbd>F5</kbd></td><td>Rafraichir la vue</td></tr>
       <tr><td><kbd>?</kbd> ou <kbd>F1</kbd></td><td>Afficher cette aide</td></tr>
       <tr><td><kbd>Escape</kbd></td><td>Fermer la modale</td></tr>
@@ -122,17 +120,19 @@ export function initKeyboard() {
       return;
     }
 
-    // 4b. Ctrl+Z : undo last apply (#92 quick win #3).
-    // Geste universel attendu par tous les power users. Skip si focus est
-    // dans un input/textarea (sinon on bloque l'undo natif du navigateur
-    // dans les champs texte). Le handler dispatche un event que les vues
-    // interessees ecoutent (typiquement library/lib-apply.js).
-    if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.altKey && !e.shiftKey) {
-      if (_isInputFocused()) return;
-      e.preventDefault();
-      window.dispatchEvent(new CustomEvent("cinesort:undo-shortcut"));
-      return;
-    }
+    // 4b. Ctrl+Z : SUPPRIME (ultra-audit 2026-08-03, N01/N08).
+    //
+    // Le raccourci (#92 quick win #3) dispatchait `cinesort:undo-shortcut`, un
+    // evenement que PLUS AUCUN module n'ecoutait : son unique auditeur vivait
+    // dans library/lib-apply.js, disparu a la migration ESM. Ctrl+Z consommait
+    // donc la frappe (preventDefault) pour ne rien faire, pendant que la modale
+    // d'aide et /aide promettaient « Annuler la derniere application ».
+    //
+    // On ne le recable PAS sur run/undo_last_apply : l'undo est une action
+    // dangereuse qui exige une confirmation explicite (regle projet). Une
+    // frappe nue ne doit jamais declencher un deplacement de fichiers. L'undo
+    // reste accessible par ses deux boutons dedies (Traitement etape 5 et
+    // Historique -> « Annuler l'apply »), tous deux derriere dangerConfirmModal.
 
     // 5. F1 : aide
     if (e.key === "F1") {

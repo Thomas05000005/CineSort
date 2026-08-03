@@ -1355,6 +1355,14 @@ async function _onUndoPreview() {
   }
 }
 
+/** Ultra-audit 2026-08-03 (N01) — signale un undo REUSSI au shell.
+ *  app.js recharge les compteurs de sidebar sur cet evenement. Best-effort :
+ *  un environnement sans CustomEvent ne doit jamais faire echouer l'undo. */
+function _emitUndoDone() {
+  try { window.dispatchEvent(new CustomEvent("cinesort:undo")); }
+  catch (e) { console.warn("[traitement] dispatch cinesort:undo", e); }
+}
+
 function _onUndoExecute() {
   if (!_runInfo?.runId) return;
   const undo = _runInfo?.pendingUndo;
@@ -1390,6 +1398,11 @@ function _onUndoExecute() {
           return;
         }
         showToast({ type: "success", text: "Annulation appliquée. Restauration effectuée.", duration: 6000 });
+        // Ultra-audit 2026-08-03 (N01) : app.js ecoute `cinesort:undo` pour
+        // rafraichir immediatement les compteurs de la sidebar (#92 quick
+        // win #2). Personne n'emettait plus cet evenement depuis la migration
+        // ESM : les badges restaient stales jusqu'au tick 30 s.
+        _emitUndoDone();
         await _loadRunInfo();
         _renderInPlace();
       } catch {
@@ -2229,8 +2242,53 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   });
 }
 
+/** Ultra-audit 2026-08-03 (N35) — nombre d'operations en ECHEC dans la reponse
+ *  de run/apply.
+ *
+ *  apply_support.py retourne `{"ok": True, "result": ApplyResult.__dict__}`
+ *  SANS aucune condition sur `result.errors` : un fichier verrouille (seeding
+ *  torrent, VLC, indexeur Windows) donne ok=True avec errors>=1 et le film n'a
+ *  pas bouge. Le front ne testait que `data.ok !== false` et affichait un toast
+ *  VERT « Apply termine » — le seul canal ou l'echec etait visible etait
+ *  ui_log.txt sur disque. On lit desormais le compteur reel.
+ *
+ *  @returns {{count: number, messages: string[]}}
+ */
+function _applyResultErrors(res) {
+  const result = (res && res.data && res.data.result) || {};
+  const count = Number(result.errors || 0);
+  const messages = Array.isArray(result.error_messages) ? result.error_messages.map(String) : [];
+  return { count: count > 0 ? count : 0, messages };
+}
+
+/** Toast de fin d'apply : vert si zero echec, orange (warning) sinon, avec le
+ *  premier message d'erreur backend pour que l'utilisateur sache QUOI regarder. */
+function _showApplyDoneToast(res, { dryRun }) {
+  const { count, messages } = _applyResultErrors(res);
+  if (count > 0) {
+    const detail = messages.length ? ` — ${messages[0]}` : "";
+    showToast({
+      type: "warning",
+      text: `${dryRun ? "Dry-run terminé" : "Apply terminé"} avec ${count} échec${count > 1 ? "s" : ""}${detail}`,
+      duration: 12000,
+    });
+    return;
+  }
+  showToast({
+    type: "success",
+    text: dryRun ? "Dry-run terminé. Aucun fichier modifié." : "Apply terminé · Undo possible 24h",
+    duration: dryRun ? 5000 : 7000,
+  });
+}
+
 async function _handleApplyNow() {
   if (!_runInfo?.runId) return;
+  // Ultra-audit 2026-08-03 (N13) : la modale danger se ferme maintenant AVANT
+  // de lancer l'apply (pour laisser voir la barre de progression), ce qui
+  // re-expose le bouton « Appliquer maintenant ». Sans cette garde, un second
+  // clic partirait pendant l'apply en cours et se ferait rejeter en 409 par
+  // le slot guard backend, avec un toast d'erreur trompeur.
+  if (_applyStatus?.running) return;
   const decisions = _buildDecisions();
   const opCount = Object.values(decisions).filter((d) => d.ok).length;
 
@@ -2264,7 +2322,7 @@ async function _handleApplyNow() {
       }, { signal: _signal() });
       if (res?.data?.ok !== false) {
         if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
-        showToast({ type: "success", text: "Dry-run terminé. Aucun fichier modifié.", duration: 5000 });
+        _showApplyDoneToast(res, { dryRun: true });
         await _loadRunInfo();
         _renderInPlace();
       } else {
@@ -2294,11 +2352,35 @@ async function _handleApplyNow() {
     return;
   }
 
+  // Ultra-audit 2026-08-03 (N07) : la modale annoncait `${opCount} fichiers
+  // renommés/déplacés`, or opCount est le nombre de FILMS APPROUVÉS, pas le
+  // nombre d'opérations disque. Les deux divergent réellement : apply_core
+  // marque `NOOP_DEJA_CONFORME` et sort AVANT d'incrémenter `res.renames`, donc
+  // sur une bibliothèque déjà rangée la modale annonçait « 250 » quand 12
+  // dossiers seulement allaient bouger — en contredisant le « Résumé des
+  // opérations » affiché juste au-dessus, qui lit `_applyPreview.totals`.
+  // Second mensonge corrigé : apply ne renomme JAMAIS le fichier vidéo (règle
+  // projet, seeding torrent), uniquement le dossier parent.
+  const previewTotals = _applyPreview?.totals || null;
+  const previewRenames = Number(previewTotals?.renames || 0);
+  const previewMoves = Number(previewTotals?.moves || 0);
+  const opsLine = previewTotals
+    ? `${previewRenames} renommage${previewRenames > 1 ? "s" : ""} de dossier · ${previewMoves} déplacement${previewMoves > 1 ? "s" : ""} de fichier`
+    : `${opCount} film${opCount > 1 ? "s" : ""} approuvé${opCount > 1 ? "s" : ""} (plan exact non calculé)`;
+
   // Apply reel : modale danger avec countdown 3s
   dangerConfirmModal({
     title: "Confirmer l'application sur le filesystem ?",
+    // Ultra-audit 2026-08-03 (N13) : la modale se fermait dans le `finally` de
+    // `await onConfirm()`. `apply_changes` étant synchrone côté backend, son
+    // overlay (position fixed, z-index 10100, noir 65 % + blur) restait
+    // plusieurs minutes au-dessus de la barre de progression que `onConfirm`
+    // venait justement de démarrer : bouton grisé, aucun spinner, progression
+    // floutée. La confirmation ayant déjà rempli son office au clic, on ferme
+    // avant de lancer l'action.
+    closeBeforeConfirm: true,
     items: [
-      `${opCount} fichiers renommés/déplacés`,
+      opsLine,
       `Quarantaine : ${_applyOptions.quarantine ? "activée" : "désactivée"}`,
       `CSV : ${_applyOptions.export_csv ? "exporté" : "non exporté"}`,
       // Vague P / VP-A : indicateur mode atomique dans le recap pre-apply
@@ -2341,7 +2423,7 @@ async function _handleApplyNow() {
         }, { signal: _signal() });
         if (res?.data?.ok !== false) {
           if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
-          showToast({ type: "success", text: "Apply terminé · Undo possible 24h", duration: 7000 });
+          _showApplyDoneToast(res, { dryRun: false });
           await _loadRunInfo();
           _renderInPlace();
         } else {
