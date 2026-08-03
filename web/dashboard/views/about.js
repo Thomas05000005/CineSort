@@ -35,8 +35,11 @@ function _ensureStyle() {
   document.head.appendChild(style);
 }
 
-const PROJECT_GITHUB_URL = "https://github.com/PLACEHOLDER/cinesort";
-const PROJECT_ISSUES_URL = `${PROJECT_GITHUB_URL}/issues`;
+// Fix audit 2026-06-07 UX high : depot CineSort pas encore public. Les liens
+// pointaient vers un URL placeholder (-> 404 GitHub a chaque clic). Tant que
+// le depot n'est pas publie, on rend les liens inertes (texte indicatif).
+const PROJECT_GITHUB_URL = "";
+const PROJECT_ISSUES_URL = "";
 const FALLBACK_VERSION_LABEL = "version indisponible";
 const LOGS_PATH_HINT = "%LOCALAPPDATA%\\CineSort\\logs\\cinesort.log";
 const DEPENDENCIES_TOP5 = [
@@ -53,12 +56,15 @@ async function _readAppInfo() {
   // si l'API echoue (offline, backend down, route absente sur ancienne version).
   try {
     const res = await apiPost("runtime/get_app_version", {});
-    if (res && typeof res === "object" && res.ok !== false) {
+    // LOTC-M1 : apiPost renvoie l'enveloppe REST {status, data} — le payload
+    // facade vit dans res.data (fallback res a plat pour compat bridge natif).
+    const info = res && typeof res === "object" && res.data && typeof res.data === "object" ? res.data : res;
+    if (info && typeof info === "object" && info.ok !== false) {
       return {
-        version: typeof res.version === "string" && res.version.trim() ? res.version.trim() : "",
-        build_date: typeof res.build_date === "string" ? res.build_date.trim() : "",
-        git_sha: typeof res.git_sha === "string" ? res.git_sha.trim() : "",
-        python_version: typeof res.python_version === "string" ? res.python_version.trim() : "",
+        version: typeof info.version === "string" && info.version.trim() ? info.version.trim() : "",
+        build_date: typeof info.build_date === "string" ? info.build_date.trim() : "",
+        git_sha: typeof info.git_sha === "string" ? info.git_sha.trim() : "",
+        python_version: typeof info.python_version === "string" ? info.python_version.trim() : "",
       };
     }
   } catch (err) {
@@ -85,8 +91,8 @@ function _versionMetaHtml(info) {
 function _bodyHtml(info) {
   const safeInfo = info || { version: "", build_date: "", git_sha: "", python_version: "" };
   const v = escapeHtml(safeInfo.version || FALLBACK_VERSION_LABEL);
-  const issuesHref = escapeHtml(PROJECT_ISSUES_URL);
-  const repoHref = escapeHtml(PROJECT_GITHUB_URL);
+  // Fix audit 2026-06-07 UX high : liens depot/issues retires tant que le
+  // depot CineSort n'est pas public (cf PROJECT_GITHUB_URL = "" plus haut).
   const logsPath = escapeHtml(LOGS_PATH_HINT);
   return `
     <section class="about-section">
@@ -97,7 +103,7 @@ function _bodyHtml(info) {
 
     <section class="about-section">
       <h4 class="about-section__title">Licence</h4>
-      <p>Distribue sous <strong>licence MIT</strong>. Code libre, modifiable et redistribuable. <a href="${repoHref}" target="_blank" rel="noopener noreferrer">Voir le depot GitHub</a>.</p>
+      <p>Distribue sous <strong>licence MIT</strong>. Code libre, modifiable et redistribuable. <span class="text-muted">(Depot public a venir.)</span></p>
     </section>
 
     <section class="about-section">
@@ -110,7 +116,7 @@ function _bodyHtml(info) {
 
     <section class="about-section">
       <h4 class="about-section__title">Support</h4>
-      <p>Un bug ? Une suggestion ? <a href="${issuesHref}" target="_blank" rel="noopener noreferrer">Ouvrir une issue sur GitHub</a>.</p>
+      <p>Un bug ? Une suggestion ? <span class="text-muted">(Depot public a venir.)</span> En attendant, joignez le fichier de logs ci-dessous a votre rapport.</p>
       <div class="about-logs">
         <div class="about-logs__label">Fichier de logs (sur la machine hote) :</div>
         <code class="about-logs__path" data-testid="about-logs-path">${logsPath}</code>

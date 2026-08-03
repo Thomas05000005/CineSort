@@ -1,0 +1,5508 @@
+{
+  "matrice": "M6_i18n",
+  "generated_at": "2026-07-08T10:30:40+00:00",
+  "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m6_i18n.py",
+  "pattern_reel": "import { t } from core/i18n.js ; t('cle'), t(`...${x}`), t(item.labelKey) + labelKey:'cle' ; fetch /locales/<locale>.json ; fallback _FALLBACK_FR hardcode dans i18n.js ; pas de data-i18n",
+  "stats": {
+    "OK": 157,
+    "MANQUANTE_FR": 0,
+    "MANQUANTE_EN": 0,
+    "ORPHELINE": 519,
+    "INCERTAIN": 70,
+    "TEXTE_EN_DUR": 20
+  },
+  "resume": {
+    "cles_fr": 747,
+    "cles_en": 747,
+    "cles_referencees_statiques": 157,
+    "prefixes_dynamiques": {},
+    "appels_t_identifiant": [
+      "web/dashboard/components/sidebar-v5.js:48 (t(item.labelKey))",
+      "web/dashboard/components/top-bar-v5.js:17 (t(theme.labelKey))"
+    ],
+    "fichiers_web_scannes": 76
+  },
+  "findings": [
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "_meta.comment",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='i18n CineSort v7.7.0. Catégories: settings, qij, library, pr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "_meta.locale",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='fr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "_meta.name",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Français'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "_meta.owner",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='V6-01 + V6-02'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "_meta.version",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='1.2.0'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.actions",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Actions'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.all",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tout'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Appliquer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.back",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Retour'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "common.cancel",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.cancelled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Annulé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.close",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Fermer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.code",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Code'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.completed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Terminé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Confirmer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.copied",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Copié'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.copy",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Copier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.copy_failed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Copie échouée'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.count",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Nombre'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.delete",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Supprimer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.details",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Détails'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.edit",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Modifier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.empty",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vide'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.error_network",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✗ Erreur réseau'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.error_unknown",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur inconnue'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.failed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Échec'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.info",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Info'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.less",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Moins'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.loading",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement…'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.loading_short",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.more",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plus'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.next",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Suivant'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.no_data",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune donnée.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.none",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.ok",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='OK'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.open",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Ouvrir'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.preview",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aperçu'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.reload",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Recharger'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.reset",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinit.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.retry",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réessayer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.running",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='En cours'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.save",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sauvegarder'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.search",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Rechercher'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.see_details",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Voir les détails'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.see_more",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Voir plus'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.show_hide",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Afficher / masquer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Succès'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.test",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tester'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.testing",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Test...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.tier",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Titre'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.undo",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Annuler'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.unknown",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Inconnu'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.warning",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Avertissement'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "common.year",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Année'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.current_data",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Données actuelles : ...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.current_data_known",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Données actuelles : {{items}} fichiers ({{size}} MB)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.current_data_unavailable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Données actuelles : indisponibles'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.last_chance",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='DERNIÈRE CHANCE : continuer le reset ?\n(un backup sera créé '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.prompt_confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tu vas supprimer {{items}} fichiers ({{size}} MB).\n\nTape \"RE'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_backup",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Un backup ZIP automatique est créé avant la suppression dans'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinitialiser...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_desc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Supprime ta base de donnees, tes parametres, l'historique de'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Reset terminé.\n\nBackup créé : {{path}}\n\nL'application va se '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur : {{msg}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_preserve",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<strong>Préserve</strong> : tes fichiers vidéo (jamais touch'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.reset_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinitialiser toutes mes données'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Zone de danger'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "danger_zone.wrong_confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mauvaise confirmation. Reset annulé.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.apply_already_in_progress",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.apply_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Une application est déjà en cours.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.audit_log_read_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.cannot_apply_changes",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.cannot_finish_quality_analysis",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.cannot_load_plan",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.cannot_prepare_undo",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.cannot_undo_last_apply",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.config_invalid",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Configuration invalide : {{detail}}.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.connection_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.disk_full",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Espace disque insuffisant pour effectuer cette opération.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.disk_space_insufficient",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.duplicate_check_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.ffmpeg_missing",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='ffmpeg est introuvable. Installez-le depuis Réglages > Outil'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.file_locked",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Le fichier {{path}} est verrouillé par un autre processus.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.integration_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.internal_run_id_unexpected",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.invalid_locale",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.jellyfin_key_empty",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.jellyfin_unauthorized",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Authentification Jellyfin échouée (vérifier la clé API).'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.jellyfin_url_empty",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.media_not_found_for_row",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.network_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur réseau : {{detail}}'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_apply",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_apply_available",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_batch",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_op_available",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_op_pending",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_reversible_op_to_undo",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_root_accessible",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.no_rows_for_quality",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.omdb_test_failed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur test OMDb : {{detail}}'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.payload_decisions_invalid",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.payload_row_ids_invalid",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.payload_settings_invalid",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.payload_tmdb_ids_invalid",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.perceptual_disabled",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.perceptual_file_a_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.perceptual_file_b_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.permission_denied",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Permission refusée pour {{path}}.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.persistence_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.plan_empty_or_missing",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.plan_not_found",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.plan_not_ready",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.plan_unavailable",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.plex_unauthorized",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Authentification Plex échouée (vérifier le jeton).'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.preview_undo_only",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.preview_undo_per_film_ready",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.preview_undo_ready",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.preview_undo_selective",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.qr_generation_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.quality_already_running",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.radarr_unauthorized",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Authentification Radarr échouée (vérifier la clé API).'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.rest_unauthorized",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Authentification requise. Fournis un jeton Bearer valide.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.root_not_found",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.root_required_save",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.root_required_scan",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.row_ids_required",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.run_deletion_failed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.run_id_required",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.run_invalid_id",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.run_not_found",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.scan_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Un scan est déjà en cours.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.settings_invalid",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Les réglages fournis sont invalides.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.smtp_failed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Échec d'envoi de l'e-mail : {{detail}}.'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.tmdb_key_empty",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.tmdb_rate_limited",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Limite TMDb atteinte. Patiente quelques secondes.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "errors.tmdb_unavailable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='TMDb est inaccessible (vérifiez votre clé API et votre conne'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_atomic_refused",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_atomic_refused_detailed",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_done",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_done_with_anomalies",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_selective_done",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.undo_selective_done_with_anomalies",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "errors.unknown_error",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Apply — exécute le plan pour de vrai (modifie le disque). Cr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.banding",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Banding — artefact visuel : bandes visibles dans les ciels e'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.chromaprint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chromaprint — empreinte audio générée par fpcalc. Détecte qu'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.composite_score_v2",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Composite Score V2 — moteur de scoring de seconde génération'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.confidence",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Niveau de certitude du match TMDb. 0.95+ = certain (.nfo + i'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.dolby_vision",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Dolby Vision (DV) — standard HDR premium avec métadonnées dy'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.drc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='DRC (Dynamic Range Compression) — niveau de compression audi'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.dry_run",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mode aperçu sans modification réelle des fichiers.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.ebu_r128",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='EBU R128 (loudness) — standard européen de mesure du loudnes'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.edition",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Édition (Director's Cut, Extended, IMAX, etc.) — version par'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.grain_v2",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse de grain v2 — classification perceptuelle du grain d'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.hdr10",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='HDR10 — standard High Dynamic Range de base, métadonnées sta'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.jellyfin",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Jellyfin — serveur multimédia open source. CineSort peut déc'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.lpips",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='LPIPS (Learned Perceptual Image Patch Similarity) — mesure s'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.multi_root",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Multi-racine — capacité à scanner plusieurs dossiers racines'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.naming_preset",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Preset de nommage — modèle de renommage prédéfini. 5 presets'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.nfo",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='NFO — fichier de métadonnées XML (format Kodi/Jellyfin/Emby)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.perceptual",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse perceptuelle — analyse la qualité réelle de l'image '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.perceptual_score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score qualité visuelle calculé par analyse d'images (luminan'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.plan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plan — liste des changements proposés (renommages + déplacem'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.plex",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plex — serveur multimédia propriétaire. CineSort se connecte'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.plugin_hook",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plugin hook — script externe (Python, .bat, .ps1) déclenché '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.probe",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Action d'analyser un fichier vidéo pour en extraire les cara'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.quality_profile",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Profil qualité — ensemble de poids et de seuils pour le syst'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.quarantine",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Quarantaine — le dossier `_review/` où les fichiers invalide'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.radarr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Radarr — gestionnaire automatisé de collection de films. Cin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.reencode",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Ré-encodage (dégradé) — fichier ré-encodé avec un bitrate tr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.run",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Run — exécution complète d'un scan (identifiant unique, jour'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.saga_collection",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Saga / Collection (TMDb) — regroupement de films liés (par e'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.score_v1",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Composite Score V1 — système de scoring legacy (pré-v7.5.0).'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.score_v2",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Composite Score V2 — note composite sur 100 (CinemaLux v2). '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.smart_playlist",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Smart playlist — filtre sauvegardé dans la vue bibliothèque '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.ssim",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='SSIM (Structural Similarity Index) — compare deux images sur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.tier",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Niveau de qualité d'un film (Premium / Bon / Moyen / Mauvais'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.tmdb",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='The Movie Database — base de données collaborative de films '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.undo",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Annulation d'une opération apply (rollback complet du batch)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.upscale",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Upscale (suspect) — fichier annoncé en 4K mais avec un bitra'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "glossary.watch_folder",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Watch folder (auto-monitor) — mode de surveillance : CineSor'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.copy_path_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Copier le chemin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.diagnostic",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Diagnostic exportable : Paramètres > Logs > Exporter diagnos'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_auto_approve.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Quand un film a un score élevé et une confiance forte (match'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_auto_approve.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment fonctionne l'auto-approbation ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_configure_integrations.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Section Paramètres > Intégrations. Pour Jellyfin : URL du se'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_configure_integrations.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment configurer Jellyfin / Plex / Radarr ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_dashboard_connection.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérifie : (1) Paramètres > API REST est activée ; (2) tu uti'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_dashboard_connection.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Le dashboard distant ne se connecte pas'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_decisions_lost.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Les décisions de validation sont persistées dans la base SQL'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_decisions_lost.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mes décisions ont disparu après rafraîchissement, pourquoi ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_dry_run.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Un dry-run simule l'application des changements sans rien dé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_dry_run.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Qu'est-ce qu'un dry-run ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_export_report.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Après un scan : Bibliothèque > Application > bouton « Export'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_export_report.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment exporter un rapport de mon analyse ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_first_scan.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Va dans Paramètres > Dossiers racine, ajoute le dossier cont'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_first_scan.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment lancer mon premier scan ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_install_antivirus.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Faux positif courant pour les EXE Python compilés avec PyIns'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_install_antivirus.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mon antivirus dit que CineSort est dangereux'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_install_ffmpeg.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Paramètres > Outils vidéo > bouton « Installer automatiqueme'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_install_ffmpeg.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment installer ffmpeg / mediainfo ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_offline_mode.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Oui pour le scan et l'application locaux. Non pour l'enrichi'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_offline_mode.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Puis-je utiliser CineSort sans connexion Internet ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_perceptual_mode.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='L'analyse perceptuelle regarde la qualité réelle de l'image '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_perceptual_mode.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Qu'est-ce que le mode perceptuel ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_scan_no_movies.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérifie dans cet ordre : (1) le dossier racine est-il access'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_scan_no_movies.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mon scan ne trouve aucun film, que faire ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_share_logs.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Paramètres > Logs > bouton « Exporter diagnostic ». Le fichi'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_share_logs.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment partager mes logs pour signaler un bug ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_tier_meaning.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='C'est la note finale de qualité du film sur 5 niveaux. Plati'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_tier_meaning.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Que signifient les tiers Platinum / Gold / Silver / Bronze /'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_undo_apply.answer",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='CineSort tient un journal de chaque déplacement/renommage (t'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq.q_undo_apply.question",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Comment annuler une application ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.faq_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Foire aux questions'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.first_run",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Premier lancement ? Lancez le wizard depuis Réglages > Démar'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.full_docs",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Documentation complète'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.local_logs",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Logs locaux (à joindre à ton rapport)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.no_results_faq",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune question ne correspond à ta recherche.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.no_results_glossary",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun terme ne correspond à ta recherche.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.open_logs_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Ouvrir le dossier des logs'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.report_bug",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Signaler un bug ou poser une question'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.report_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Signaler un bug sur GitHub'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.search_placeholder",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Rechercher une question, un terme…'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcut_help",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Appuyez sur ? pour afficher les raccourcis clavier.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcuts_global",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Actions globales'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcuts_intro",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mémorise ces combinaisons pour gagner du temps. Les raccourc'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcuts_navigation",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Navigation'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcuts_section_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Raccourcis clavier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.shortcuts_validation",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Validation (vue Validation active)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.support",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Support'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.support_intro",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tu n'as pas trouvé ta réponse ? Plusieurs canaux sont dispon'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "help.support_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Besoin de plus d'aide ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "library.filter_tier",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Filtrer par tier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "library.no_results",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun film ne correspond aux filtres.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "library.search_placeholder",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Rechercher un film…'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "library.technical_analysis_incomplete",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "library.technical_analysis_partial",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "library.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bibliothèque'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "library.total_films",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{count}} films au total'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "notifications.apply_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Application terminée ({{count}} fichiers)'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.apply_done_body",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "notifications.error_generic",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Une erreur s'est produite : {{detail}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "notifications.scan_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse terminée ({{count}} films)'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.scan_done_body",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.title_apply_done",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.title_critical_error",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.title_scan_done",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.title_scan_error",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.title_undo_done",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "notifications.undo_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Annulation terminée ({{count}} opérations)'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "notifications.undo_done_body",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "processing.scan_running",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse en cours…'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "processing.step_apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Application'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "processing.step_review",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Révision'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "processing.step_scan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "processing.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Traitement'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_check_sync",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérifier cohérence'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_checking",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérification...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_libraries",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bibliothèques'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_loading",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_settings",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Paramètres'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_test",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tester'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.btn_testing",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Test...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.jellyfin",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Jellyfin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.key_undefined",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='(non définie)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libraries_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bibliothèques'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_count",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{count}} bibliothèque(s).'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_items",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Items'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_modal_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{label}} — Bibliothèques'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_name",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Nom'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_type",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Type'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.libs_unavailable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Non disponibles.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.modal_error_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.plex",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plex'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.radarr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Radarr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.status_connected",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Connecté'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.status_disabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Désactivé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.status_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.status_not_configured",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Non configuré'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.status_ready",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Prêt'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.subtitle",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Connexions externes (Jellyfin, Plex, Radarr, TMDb). Test con'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_error_body",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<p>Erreur : {{detail}}</p>'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_error_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur sync'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_field",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Champ'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_ghosts_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Fantômes dans {{label}} ({{count}})'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_local",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Local'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_local_path",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chemin local'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_mismatch_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Divergences ({{count}})'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_missing_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Manquants dans {{label}} ({{count}})'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_modal_full_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{label}} — Rapport de synchronisation'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_modal_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{label}} — Sync'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_no_data",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Données non disponibles.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_not_in_radarr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Films absents de Radarr ({{count}})'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_summary_jellyfin",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<strong>{{matched}}</strong> films cohérents — <strong>{{mis'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_summary_radarr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<strong>{{matched}}</strong> films matchés — <strong>{{notIn'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_action",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Action'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_btn",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Demander upgrade'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_fail",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✗ Échec'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_ok",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Demandé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_requesting",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Demande...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score actuel'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.sync_upgrade_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Candidats upgrade Radarr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.tab_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intégrations'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.tmdb",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='TMDb'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.integrations.url_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='URL'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.btn_cancel",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='⏹ Annuler'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.btn_export_nfo",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='📁 .nfo'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.btn_history",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Historique runs'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.btn_live",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Logs en direct'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.btn_scan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Lancer un scan'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.empty",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun événement à afficher.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.export_error_network",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✗ Erreur réseau.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.export_nfo_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Export NFO...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.export_nfo_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ {{count}} fichier(s) .nfo créés'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.export_no_data",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune donnée.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.export_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Exporté'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.exporting",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Export...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.found_films",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{count}} films trouvés...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.header_subtitle_many",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{count}} {{run}} enregistrés.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.header_subtitle_one",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{count}} {{run}} enregistré.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.init",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Initialisation...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.kpi_avg_score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score moyen'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.kpi_errors",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreurs'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.kpi_films",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Films'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.no_active_run",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun run en cours. Lance un scan depuis l'onglet Traitement'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.no_runs",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun run enregistré.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.progress_eta",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr=' — ETA {{eta}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.progress_pct",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{idx}}/{{total}} ({{pct}}%)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.run_finished",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='=== Run terminé ==='"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.run_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Run en cours :'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.selected_none",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.selected_run_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Run sélectionné :'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_aria",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Trier les runs'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Trier par :'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.date_asc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Date (plus ancien)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.date_desc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Date (plus recent)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.score_asc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score (bas)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.score_desc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score (haut)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.status_asc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Statut (A-Z)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.sort_options.status_desc",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Statut (Z-A)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.journal.tab_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Journal'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.loading_integrations",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement Intégrations...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.loading_journal",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement Journal...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.average",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Moyen'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.batch_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse en cours...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.batch_no_run",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun run disponible.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.batch_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Analyse lancée'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_analyze_all",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='▶ Analyser tous les validés'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_custom_rules",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='⚙ Règles custom'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_custom_rules_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Éditer les règles personnalisées (G6)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_export_profile",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='⬇ Exporter profil'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_import_profile",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='⬆ Importer profil'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_reset_profile",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='↺ Réinitialiser profil'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_scan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Lancer un scan'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_simulate",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='🎛 Simuler un preset'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.btn_simulate_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Simuler un preset qualité (G5)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.chart_no_quality",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune analyse de qualité. Lance un scan.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.chart_no_trend",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plusieurs runs nécessaires pour la tendance.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.export_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur export profil.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.good",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bon'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.import_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur import profil.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.import_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Profil importé.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.kpi_avg_score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score moyen'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.kpi_films",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Films analysés'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.kpi_platinum",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Platinum'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.kpi_trend",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tendance'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.no_data_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Lance un scan + une analyse pour voir le score perceptuel de'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.no_data_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucun film analysé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.no_dim_data",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune donnée pour cette dimension.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.outlier_modal_body",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<p>Row ID : <code>{{rid}}</code></p><p class=\"v5u-text-muted'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.outlier_modal_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Film outlier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.outliers_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Films à plus de 2σ sous la moyenne — clic = détails'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.poor",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mauvais'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.premium",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Premium'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.reset_profile_confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinitialiser le profil de scoring ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.reset_profile_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Profil réinitialisé.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.rollup.codec",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Codec'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.rollup.decade",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Décennie'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.rollup.era_grain",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Ère grain'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.rollup.franchise",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Franchise'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.rollup.resolution",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Résolution'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_anomalies",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Anomalies fréquentes'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_audio",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Audio'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_distribution",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Distribution {{tier}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_hdr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='HDR'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_outliers",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Outliers (score < {{threshold}})'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_resolutions",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Résolutions'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_rollup",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Scoring par dimension'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_technical",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Distribution technique'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.section_trend",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tendance {{score}} 30j'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.subtitle",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Distribution V2, tendance 30j, regroupement par dimension. A'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.tab_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Qualité'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.table_avg_score",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score moyen'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.table_distribution_tiers",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Distribution {{tier}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.table_films",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Films'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.quality.table_year",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Année'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.tabs.aria_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sections QIJ'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.tabs.integrations",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='🔌 Intégrations'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.tabs.journal",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='📋 Journal'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "qij.tabs.quality",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='📊 Qualité'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.badge_full",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='configuré'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.badge_partial",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='partiel'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.configured_count_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{configured}}/{{total}} configurés'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.essential.root_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Dossier racine'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.essential.save_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sauvegarder'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.essential.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réglages essentiels'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.expert_mode.hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Désactivé par défaut. Active pour tweaker timeouts, ports, r'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.expert_mode.label_html",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='<strong>Mode expert</strong> — afficher tous les paramètres '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.animation_intense",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intense'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.animation_level",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Niveau animation'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.animation_moderate",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Modéré'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.animation_subtle",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Subtil'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.api_key",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Clé API'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.auto_approve_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Approbation auto'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.auto_approve_threshold",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Seuil confiance (%)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.cleanup_residual",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Nettoyer fichiers résiduels'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.collection_folder_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Regrouper les sagas en _Collection/'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.composite_score_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='V1 par défaut. V2 utilise des poids et règles d'ajustement e'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.composite_score_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Score composite'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.composite_score_v1",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Composite Score V1 (stable)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.composite_score_v2",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Composite Score V2 (avancé)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.effect_speed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vitesse animations (%)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_on_apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Après apply'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_on_scan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Après scan'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_smtp_host",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='SMTP host'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_smtp_password",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mot de passe'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_smtp_port",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='SMTP port'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_smtp_tls",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='STARTTLS'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_smtp_user",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Utilisateur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.email_to",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Destinataire'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.enable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.enable_tv_detection",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Détection séries TV'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.field_required_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Champ obligatoire'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.glow_intensity",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intensité glow (%)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.jellyfin_refresh_on_apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Refresh auto après apply'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.jellyfin_sync_watched",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sync watched'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.light_intensity",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intensité lumière (%)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.move_empty_folders",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Déplacer dossiers vides vers _Vide'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_movie_template",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Template film'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Preset'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset_custom",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Custom'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset_default",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Défaut'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset_jellyfin",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Jellyfin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset_plex",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plex'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_preset_quality",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Qualité'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.naming_tv_template",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Template série'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.notifications_apply_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Apply terminé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.notifications_enable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.notifications_errors",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreurs critiques'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.notifications_scan_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Scan terminé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.notifications_undo_done",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Undo terminé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.onboarding_completed",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Wizard premier lancement terminé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.parallelism_auto",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Auto'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.parallelism_max",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Max'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.parallelism_mode",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mode parallélisme'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.parallelism_safe",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sécurisé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.parallelism_serial",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Séquentiel'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_audio_deep",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Audio analyse approfondie'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_audio_fingerprint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Audio fingerprint (§3)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_audio_mel",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mel spectrogram (§12)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_audio_spectral",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Spectral cutoff (§9)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_auto_on_scan",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Auto-lancer sur scan'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer l'analyse perceptuelle'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_frames_count",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Frames analysées'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_grain_intelligence",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Grain Intelligence v2 (§15)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_hdr10_plus",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='HDR10+ detection (§5)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_lpips",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='LPIPS ONNX (§11)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_ssim_self_ref",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='SSIM self-ref / fake 4K (§13)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.perceptual_timeout",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Timeout par film (s)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.plex_refresh_on_apply",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Refresh après apply'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.plex_token",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Token'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.plugins_enable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer plugins'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.plugins_timeout",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Timeout (s)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.probe_backend",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Backend'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.probe_timeout",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Timeout probe (s)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_api_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer API REST'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_api_port",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Port'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_api_token",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Clé d'accès (Bearer)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_cert_path",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chemin certificat'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_https_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer HTTPS'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.rest_key_path",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chemin clé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.restart_api",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='🔄 Redémarrer le service API'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.roots_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Séparés par ; ou par ligne'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.roots_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chemins racine'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.subtitle_detection",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Détection sous-titres'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.subtitle_languages",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Langues attendues'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.subtitle_languages_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Séparées par ;'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.theme_cinema",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Cinéma'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.theme_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Thème'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.theme_luxe",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Luxe'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.theme_neon",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Neon'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.theme_studio",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Studio'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.tmdb_api_key",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Clé API TMDb'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.tmdb_cache_ttl",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Durée du cache TMDb (jours)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.tmdb_cache_ttl_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Au-delà, les fiches sont rafraîchies. Purge automatique au d'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.type_unsupported",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='{{label}} (type {{type}} non supporte)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.update_repo",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Dépôt GitHub (owner/repo)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.update_repo_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vide = check désactivé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.update_status",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='État des mises à jour'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.url",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='URL'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.watch_enabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Activer la surveillance'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.fields.watch_interval",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intervalle (min)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.group_not_found",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Groupe introuvable.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.analyse",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.apparence",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Apparence'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.avance",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Avancé'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.bibliotheque",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bibliothèque'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.integrations",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intégrations'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.nommage",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Nommage'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.notifications",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Notifications'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.serveur",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Serveur distant'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.groups.sources",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sources'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.jellyfin.api_key_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Clé API'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.jellyfin.section_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Intégration Jellyfin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.jellyfin.url_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='URL du serveur'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.no_section_match",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune section ne correspond a votre recherche.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.preview_effects.btn_glow",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bouton glow'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.preview_effects.card_glow",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Card glow'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.preview_effects.hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Bouge les sliders ci-dessus pour voir l'effet en temps réel '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.preview_effects.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aperçu effets visuels'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.copy_url",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='📋 Copier l'URL'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.loading",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement…'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.no_token",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune clé d'accès. Régénère-en une avec le bouton 🔄 ci-dess'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.rest_disabled",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Active \"API REST\" ci-dessus pour générer un QR code et une U'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.scan_hint",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Scanne le QR ou ouvre l'URL sur n'importe quel appareil du r'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.section_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='📱 Accès distant (QR code + URL)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.url_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='URL dashboard distant'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.qr.url_placeholder",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='http://<ton-ip>:8642/dashboard/'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.reset_section_confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinitialiser la section \"{{label}}\" ?'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.reset_section_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Réinitialiser cette section'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_test_fail",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✗ {{msg}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_test_ok",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ OK {{server}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_token_copy_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Copier'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_token_regen_confirm",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Générer une nouvelle clé d'accès ?\n\nTous les appareils conne'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_token_regen_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Nouvelle clé. Sauvegarde auto en cours, puis redémarre le '"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.rest_token_regen_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Régénérer'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.restart_fail",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✗ {{msg}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.restart_in_progress",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Redémarrage...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.restart_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Service redémarré'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.save_ago",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='il y a {{seconds}}s'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.save_error",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='⚠ Echec sauvegarde : {{msg}}'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.save_error_network",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Erreur reseau (sauvegarde impossible)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.save_now",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='à l'instant'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.save_success",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✓ Sauvegardé {{when}}'"
+    },
+    {
+      "verdict": "INCERTAIN",
+      "categorie": "referencee_backend_seulement",
+      "element": "settings.saved_at",
+      "preuve": [
+        "cinesort/ (grep literal)"
+      ],
+      "detail": "cle absente de web/ mais literal present dans le backend python"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.cleanup",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Nettoyage'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.desktop",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Desktop'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.effects",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Effets visuels'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.email",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Rapports email'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.https",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='HTTPS (optionnel)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.jellyfin",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Jellyfin'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.onboarding",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Onboarding'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.organization",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Organisation'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.parallelism",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Parallélisme'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.perceptual",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Analyse perceptuelle'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.plex",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plex'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.plugins",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Plugins hooks'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.probe",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Probe'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.radarr",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Radarr'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.rest",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='API REST'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.roots",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Dossiers racines'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.scoring",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Scoring qualité'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.subtitles",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Sous-titres'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.templates",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Templates de renommage'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.theme",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Thème'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.tmdb",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='TMDb'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.updates",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mises à jour'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sections.watch",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Surveillance auto (watch folder)'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sidebar_aria",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Catégories paramètres'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sidebar_no_match",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Aucune correspondance'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.sidebar_search_placeholder",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Rechercher...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.tmdb.api_key_label",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Clé API'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.tmdb.section_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Connexion TMDb'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.tmdb.test_button",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tester la connexion'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.auto_check",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérifier automatiquement au démarrage'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.available_current",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Tu utilises la v{{current}}.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.available_title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='🎉 Nouvelle version disponible'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.check_now",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérifier maintenant'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.checking",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Vérification...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.download_github",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Télécharger sur GitHub'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.loading",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Chargement...'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.no_info",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Pas d'info disponible. Clique sur \"Vérifier maintenant\".'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.status_unavailable",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Statut indisponible.'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.title",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='Mises à jour'"
+    },
+    {
+      "verdict": "ORPHELINE",
+      "categorie": "definie_jamais_referencee",
+      "element": "settings.updates.up_to_date",
+      "preuve": [
+        "locales/fr.json"
+      ],
+      "detail": "valeur fr='✅ Tu es à jour (v{{current}}).'"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_attribut",
+      "element": "Fil d'Ariane",
+      "preuve": [
+        "web/dashboard/components/breadcrumb.js:28"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "↑↓ naviguer · Entrée exécuter · Échap fermer",
+      "preuve": [
+        "web/dashboard/components/command-palette.js:101"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucune commande",
+      "preuve": [
+        "web/dashboard/components/command-palette.js:135"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_attribut",
+      "element": "Rechercher une commande...",
+      "preuve": [
+        "web/dashboard/components/command-palette.js:99"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "🏆 Recommandé",
+      "preuve": [
+        "web/dashboard/components/duplicate-comparator-modal.js:278"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Critère",
+      "preuve": [
+        "web/dashboard/components/duplicate-comparator-modal.js:296"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucun critère détaillé disponible pour cette paire.",
+      "preuve": [
+        "web/dashboard/components/duplicate-comparator-modal.js:309"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Impossible de charger le film.",
+      "preuve": [
+        "web/dashboard/components/film-detail.js:137"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "↻ Re-scanner",
+      "preuve": [
+        "web/dashboard/components/film-detail.js:228"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Confiance d'identification",
+      "preuve": [
+        "web/dashboard/components/film-detail.js:241"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucune donnée.",
+      "preuve": [
+        "web/dashboard/components/home-charts.js:27"
+      ],
+      "detail": "existe dans les locales (valeur identique)"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucun film classe.",
+      "preuve": [
+        "web/dashboard/components/home-charts.js:30"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Pas assez de donnees.",
+      "preuve": [
+        "web/dashboard/components/home-charts.js:83"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucune alerte. Tout va bien.",
+      "preuve": [
+        "web/dashboard/components/home-widgets.js:64"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Aucun film recent.",
+      "preuve": [
+        "web/dashboard/components/home-widgets.js:102"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_attribut",
+      "element": "En hausse",
+      "preuve": [
+        "web/dashboard/components/kpi-card.js:31"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_attribut",
+      "element": "En baisse",
+      "preuve": [
+        "web/dashboard/components/kpi-card.js:32"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Date d'ajout apres",
+      "preuve": [
+        "web/dashboard/components/library-advanced-drawer.js:127"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Date d'ajout avant",
+      "preuve": [
+        "web/dashboard/components/library-advanced-drawer.js:132"
+      ],
+      "detail": "texte visible non passe par t()"
+    },
+    {
+      "verdict": "TEXTE_EN_DUR",
+      "categorie": "texte_dur_text_node",
+      "element": "Filtres avances",
+      "preuve": [
+        "web/dashboard/components/library-advanced-drawer.js:144"
+      ],
+      "detail": "texte visible non passe par t()"
+    }
+  ]
+}

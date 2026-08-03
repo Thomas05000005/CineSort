@@ -1,0 +1,11 @@
+=== S-025 (busy_timeout profil NAS) ===
+  busy_timeout avec 5000 (NOUVEAU prod) : 30000 (attendu 30000 = profil NAS preserve)
+  busy_timeout avec 8000 (ANCIEN prod)  : 8000 (le bug : profil ecrase a 8000)
+
+=== S-026 (atomic_write_json retry os.replace) ===
+  os.replace appele 3x (2 PermissionError + 1 OK) ; exception finale : None
+  write reussi (n=42)  : True (AVANT le fix : 1er PermissionError -> write PERDU)
+  controle borne : 5 tentatives puis re-leve=True (attendu 5 + re-leve)
+
+VERDICT : CORRIGE (busy_timeout NAS preserve + atomic_write resilient)
+RESUME: {"S025_profil_nas_preserve_avec_5000": true, "S026_atomic_write_retry": true, "S026_borne_5_tentatives": true}

@@ -12,10 +12,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
-from unittest import mock
 
 
 class SettingsRobustnessTests(unittest.TestCase):
@@ -203,15 +203,22 @@ class SettingsRobustnessTests(unittest.TestCase):
         loaded = api.settings.get_settings()
         mask = "\u2022" * 8
 
-        # SEC-H2 : tmdb_api_key et jellyfin_api_key sont MAINTENANT masques aussi
-        for field in ("tmdb_api_key", "jellyfin_api_key", "plex_token", "radarr_api_key", "email_smtp_password"):
+        # SEC-H2 : tmdb_api_key et jellyfin_api_key sont MAINTENANT masques aussi.
+        # SEC-H3 (security-first) : rest_api_token est AUSSI re-masque (BUG 1 corrige) ;
+        # la revelation explicite passe par POST /api/settings/reveal_rest_token (loopback).
+        for field in (
+            "tmdb_api_key",
+            "jellyfin_api_key",
+            "plex_token",
+            "radarr_api_key",
+            "email_smtp_password",
+            "rest_api_token",
+        ):
             self.assertEqual(loaded[field], mask, f"{field} doit etre masque : {loaded.get(field)}")
             self.assertTrue(loaded.get(f"_has_{field}"), f"_has_{field} doit etre True")
 
-        # Le token REST est retourne EN CLAIR (BUG 1 fix, comportement preserve)
-        self.assertEqual(loaded["rest_api_token"], "my-rest-secret")
-
-        # SEC-H2 : aucun des secrets ne doit fuiter dans le JSON serialise
+        # SEC-H2 + SEC-H3 : aucun des secrets ne doit fuiter dans le JSON serialise
+        # (rest_api_token inclus depuis SEC-H3).
         import json
 
         serialized = json.dumps(loaded)
@@ -221,6 +228,7 @@ class SettingsRobustnessTests(unittest.TestCase):
             "my-plex-secret-xyz",
             "my-radarr-secret",
             "my-email-password",
+            "my-rest-secret",
         ):
             self.assertNotIn(secret, serialized, f"Secret '{secret}' fuit dans get_settings JSON : {serialized[:200]}")
 

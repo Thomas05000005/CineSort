@@ -41,6 +41,18 @@ class IsSafeExternalUrlTests(unittest.TestCase):
         ok, _ = is_safe_external_url("http://169.254.1.1/")
         self.assertFalse(ok)
 
+    def test_ipv4_mapped_metadata_blocked(self) -> None:
+        # #733 : ::ffff:169.254.169.254 (IPv4-mapped IPv6) doit etre bloque comme metadata.
+        ok, reason = is_safe_external_url("http://[::ffff:169.254.169.254]/latest/meta-data/")
+        self.assertFalse(ok)
+        self.assertIn("link-local", reason.lower())
+
+    def test_ipv6_link_local_blocked(self) -> None:
+        # fe80::/10 : parite avec le link-local IPv4 169.254.0.0/16.
+        ok, reason = is_safe_external_url("http://[fe80::1]:8096/")
+        self.assertFalse(ok)
+        self.assertIn("link-local", reason.lower())
+
     def test_file_scheme_blocked(self) -> None:
         ok, reason = is_safe_external_url("file:///etc/passwd")
         self.assertFalse(ok)
@@ -107,10 +119,10 @@ class ValidateToolPathBinaryNameTests(unittest.TestCase):
 
     def test_validate_rejects_wrong_binary_name(self) -> None:
         """Si on pointe ffprobe vers calc.exe, validate_tool_path doit refuser."""
-        from cinesort.infra.probe.tools_manager import validate_tool_path
-
         # Cree un faux executable au mauvais nom
         import tempfile
+
+        from cinesort.infra.probe.tools_manager import validate_tool_path
 
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "calc.exe"
@@ -124,9 +136,9 @@ class ValidateToolPathBinaryNameTests(unittest.TestCase):
             self.assertIn("invalide", result["message"].lower())
 
     def test_validate_rejects_arbitrary_exe(self) -> None:
-        from cinesort.infra.probe.tools_manager import validate_tool_path
-
         import tempfile
+
+        from cinesort.infra.probe.tools_manager import validate_tool_path
 
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "malware.exe"

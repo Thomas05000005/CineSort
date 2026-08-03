@@ -21,7 +21,6 @@ from cinesort.domain.perceptual.comparison import (
     compute_pixel_diff,
 )
 
-
 # ---------------------------------------------------------------------------
 # compute_pixel_diff (2 tests)
 # ---------------------------------------------------------------------------

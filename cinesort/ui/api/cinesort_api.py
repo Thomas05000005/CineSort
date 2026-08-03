@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -33,7 +34,7 @@ from cinesort.domain.calibration import analyze_feedback_bias, compute_tier_delt
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS, validate_rules
 from cinesort.domain.custom_rules_templates import list_templates
-from cinesort.domain.film_history import _load_plan_rows_from_jsonl
+from cinesort.domain.film_history import _load_plan_rows_from_jsonl, _resolve_run_dir
 from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_locale, t
 from cinesort.domain.naming import (
     PRESETS,
@@ -97,14 +98,24 @@ from cinesort.ui.api.facades import (
 )
 from cinesort.ui.api.quality_simulator_support import (
     clear_cache as _sim_clear,
+)
+from cinesort.ui.api.quality_simulator_support import (
     run_simulation,
     save_custom_preset,
 )
 from cinesort.ui.api.settings_support import (
     _SECRET_MASK,
+)
+from cinesort.ui.api.settings_support import (
     build_cfg_from_run_row as _build_cfg_from_run_row,
+)
+from cinesort.ui.api.settings_support import (
     build_cfg_from_settings as _build_cfg_from_settings_payload,
+)
+from cinesort.ui.api.settings_support import (
     normalize_user_path as _normalize_user_path,
+)
+from cinesort.ui.api.settings_support import (
     read_settings as _read_settings,
 )
 
@@ -114,81 +125,16 @@ logger = logging.getLogger(__name__)
 protection_available = _protection_available
 
 
-class RunState:
-    def __init__(
-        self,
-        run_paths: state.RunPaths,
-        cfg: core.Config,
-        *,
-        runner: JobRunner,
-        store: SQLiteStore,
-    ):
-        self.paths = run_paths
-        self.cfg = cfg
-        self.runner = runner
-        self.store = store
-        self.lock = threading.Lock()
-        self.running = False
-        self.done = False
-        self.error: Optional[str] = None
-
-        self.idx = 0
-        self.total = 0
-        self.current_folder = ""
-        self.started_ts = time.time()
-        self.progress_samples: List[Tuple[float, int]] = []
-        self.speed_ewma = 0.0
-
-        self.logs: List[Dict[str, str]] = []  # {ts, level, msg}
-        self.rows: List[core.PlanRow] = []
-        self.stats: Optional[core.Stats] = None
-
-    def log(self, level: str, msg: str) -> None:
-        ts = time.strftime("%H:%M:%S")
-        item = {"ts": ts, "level": level, "msg": msg}
-        with self.lock:
-            self.logs.append(item)
-            if len(self.logs) > MAX_RUN_LOG_ITEMS:
-                self.logs = self.logs[-MAX_RUN_LOG_ITEMS:]
-        # best-effort UI log persistence
-        try:
-            self.paths.ui_log_txt.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.paths.ui_log_txt, "a", encoding="utf-8") as f:
-                f.write(f"[{ts}] {level}: {msg}\n")
-        # except Exception intentionnel : boundary top-level
-        except Exception as exc:
-            if _env_truthy("CINESORT_DEBUG"):
-                try:
-                    with open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f:
-                        f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
-                except (OSError, PermissionError):
-                    return
-
-    def progress(self, idx: int, total: int, current: str) -> None:
-        now = time.time()
-        with self.lock:
-            prev_idx = self.idx
-            prev_ts = self.progress_samples[-1][0] if self.progress_samples else self.started_ts
-
-            self.idx = idx
-            self.total = total
-            self.current_folder = current
-
-            if idx > prev_idx:
-                dt = max(0.001, now - prev_ts)
-                inst_speed = (idx - prev_idx) / dt
-                # Exponential smoothing to avoid a noisy ETA.
-                alpha = 0.28
-                self.speed_ewma = (
-                    inst_speed if self.speed_ewma <= 0.0 else (alpha * inst_speed + (1.0 - alpha) * self.speed_ewma)
-                )
-            elif self.speed_ewma <= 0.0 and idx > 0:
-                elapsed = max(0.001, now - self.started_ts)
-                self.speed_ewma = idx / elapsed
-
-            self.progress_samples.append((now, idx))
-            if len(self.progress_samples) > 400:
-                self.progress_samples = self.progress_samples[-400:]
+# M-07 (Vague M) : la classe ``RunState`` a ete extraite dans
+# ``cinesort.ui.api._run_state``. Le re-export ci-dessous preserve les imports
+# historiques ``from cinesort.ui.api.cinesort_api import RunState`` utilises par
+# les tests (test_apply_progress, test_vague_h_concurrency, ...) et les facades
+# (apply_support, run_flow_support, ...).
+#
+# Note de design : ``MAX_RUN_LOG_ITEMS`` reste aussi defini ci-dessous (cf
+# L304) pour back-compat module-level. La constante dans ``_run_state.py`` est
+# la reference, celle d'ici doit rester alignee.
+from cinesort.ui.api._run_state import RunState  # noqa: F401  (back-compat re-export)
 
 
 def _read_app_version() -> str:
@@ -267,6 +213,11 @@ class CineSortApi:
         self._apply_inflight_run_ids: set[str] = set()
         self._quality_batch_guard_lock = threading.Lock()
         self._quality_batch_inflight_run_ids: set[str] = set()
+        # Lock pour proteger la sequence read-modify-write des settings (fix TOCTOU
+        # dans _set_locale_impl : sans ce verrou, un save_settings concurrent
+        # execute entre _get_settings_impl() et _save_settings_impl(current) est
+        # ecrase par le payload 'current' lu avant la mutation parallele).
+        self._settings_write_lock = threading.RLock()
         self._max_terminal_runs_in_memory = MAX_TERMINAL_RUNS_IN_MEMORY
         self._last_event_ts: float = time.time()
         self._last_settings_ts: float = time.time()
@@ -320,7 +271,8 @@ class CineSortApi:
     def _dispatch_email(self, event: str, data: Dict[str, Any]) -> None:
         """Dispatch un rapport email si email_enabled. Non-bloquant."""
         try:
-            settings = self._get_settings_impl()
+            # AUDIT 2026-06-10 : secrets en clair (email_smtp_password) pour SMTP.
+            settings = self._internal_settings()
             # NB : module-style pour permettre patch("cinesort.app.email_report.dispatch_email").
             _email_report_mod.dispatch_email(settings, event, data)
         except (ImportError, KeyError, OSError, TypeError, ValueError):
@@ -331,7 +283,7 @@ class CineSortApi:
         return bool(RUN_ID_RE.fullmatch(rid))
 
     def _resolve_payload_state_dir(self, settings: Dict[str, Any]) -> Tuple[Path, bool]:
-        return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._state_dir)
+        return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._get_state_dir())
 
     def _resolve_root_from_payload(
         self,
@@ -345,7 +297,7 @@ class CineSortApi:
             settings,
             state_dir=state_dir,
             state_dir_present=state_dir_present,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             missing_message=missing_message,
         )
@@ -363,10 +315,23 @@ class CineSortApi:
             settings,
             state_dir=state_dir,
             state_dir_present=state_dir_present,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             missing_message=missing_message,
         )
+
+    def _get_state_dir(self) -> Path:
+        """Fix audit 2026-05-25 (v1.5.3) Vague H : lecture atomique de _state_dir.
+
+        Les mutations de ``self._state_dir`` (dans ``_save_settings_impl``) sont
+        protegees par ``self._state_dir_lock``. Sans helper, les lectures
+        directes ``self._state_dir`` pouvaient observer un Path mid-mutation
+        (rare mais possible quand un endpoint REST parallele tourne pendant
+        un ``save_settings``). On retourne une reference atomique sous le
+        lock — Path etant immutable, le snapshot reste valide hors lock.
+        """
+        with self._state_dir_lock:
+            return self._state_dir
 
     def _acquire_apply_slot(self, run_id: str) -> bool:
         with self._apply_guard_lock:
@@ -378,6 +343,30 @@ class CineSortApi:
     def _release_apply_slot(self, run_id: str) -> None:
         with self._apply_guard_lock:
             self._apply_inflight_run_ids.discard(run_id)
+
+    @contextmanager
+    def _apply_slot_guard(self, run_id: str):
+        """Fix audit 2026-05-25 (v1.5.3) Vague H : libere le slot meme en cas d'exception.
+
+        Remplace le pattern manuel ``_acquire_apply_slot`` / ``_release_apply_slot``
+        eparpille (5 sites dans apply_support.py) ou un crash du caller laissait
+        le slot occupe indefiniment. Les callers DOIVENT utiliser ce CM :
+
+            with api._apply_slot_guard(run_id) as acquired:
+                if not acquired:
+                    return _err_response(t("errors.apply_already_in_progress"), ...)
+                # ... reste de la logique apply ...
+
+        Yield ``True`` si le slot a ete acquis (run_id pas deja in-flight),
+        ``False`` sinon. Dans tous les cas le slot est libere a la sortie du
+        ``with`` (succes, return early, exception).
+        """
+        acquired = self._acquire_apply_slot(run_id)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._release_apply_slot(run_id)
 
     def _acquire_quality_batch_slot(self, run_id: str) -> bool:
         with self._quality_batch_guard_lock:
@@ -451,7 +440,7 @@ class CineSortApi:
         endpoint = str(context or "unknown")
         rid = str(run_id or "").strip()
         safe_extra = self._sanitize_log_extra(extra)
-        resolved_state_dir = state_dir if isinstance(state_dir, Path) else self._state_dir
+        resolved_state_dir = state_dir if isinstance(state_dir, Path) else self._get_state_dir()
         resolved_store = store
 
         if rid and self._is_valid_run_id(rid):
@@ -610,12 +599,15 @@ class CineSortApi:
         return runtime_support.generate_unique_run_id(self, store)
 
     def _build_cfg_from_settings(self, settings: Dict[str, Any], root: Path) -> core.Config:
+        # PRAGMA-02 fix : passer state_dir pour que mode "auto" resolve la
+        # valeur effective (4 NAS / 8 SSD) au lieu de retomber sur 1 sequentiel.
         return _build_cfg_from_settings_payload(
             settings,
             root=root,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
             default_empty_folders_folder_name=DEFAULT_EMPTY_FOLDERS_FOLDER_NAME,
             default_residual_cleanup_folder_name=DEFAULT_RESIDUAL_CLEANUP_FOLDER_NAME,
+            state_dir=self._get_state_dir(),
         )
 
     def _cfg_from_run_row(self, row: Dict[str, Any]) -> core.Config:
@@ -728,7 +720,7 @@ class CineSortApi:
     # ---------- settings ----------
     def _get_settings_impl(self) -> Dict[str, Any]:
         return settings_support.get_settings_payload(
-            state_dir=self._state_dir,
+            state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             default_state_dir_example=DEFAULT_STATE_DIR_EXAMPLE,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
@@ -738,10 +730,45 @@ class CineSortApi:
             debug_enabled=_env_truthy("CINESORT_DEBUG"),
         )
 
+    def _internal_settings(self) -> Dict[str, Any]:
+        """Settings AVEC defaults mais secrets EN CLAIR — usage interne uniquement
+        (jamais renvoye au frontend). Pour les consommateurs qui construisent un
+        client Jellyfin/Plex/Radarr/SMTP : sans ca ils relisaient le masque
+        "••••••••" et l'envoyaient comme credential (AUDIT 2026-06-10 -> 401).
+
+        Implementation : on part du payload masque (_get_settings_impl, mockable
+        en test) puis on dé-masque chaque secret depuis le disque — extension du
+        pattern _unmask_or_stored a tout le payload. Un secret deja en clair
+        (valeur != masque, ex cle de test injectee) est conserve tel quel."""
+        settings = self._get_settings_impl()
+        raw = _read_settings(self._get_state_dir())
+        for field in settings_support._SECRET_FIELDS:
+            if str(settings.get(field) or "").strip() == _SECRET_MASK:
+                settings[field] = str(raw.get(field) or "").strip()
+        return settings
+
     def _save_settings_impl(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        # Lock partage avec _set_locale_impl pour serialiser les sequences
+        # read-modify-write des settings et fermer la fenetre TOCTOU.
+        with self._settings_write_lock:
+            return self._save_settings_impl_locked(settings)
+
+    def _save_settings_impl_locked(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        # B05-401-INCOHERENT (Fix A) : capturer l'ancien token AVANT save pour
+        # detecter le changement et hot-reloader le handler REST en memoire.
+        # Sans ce hot-swap, settings.json a le NOUVEAU token mais le handler
+        # valide encore avec l'ANCIEN -> 401 incoherents jusqu'au prochain
+        # restart manuel. Lecture defensive : si _get_settings_impl echoue
+        # pour une raison quelconque, on ne bloque pas la sauvegarde.
+        try:
+            old_settings = self._get_settings_impl()
+        except (OSError, KeyError, TypeError, ValueError):
+            old_settings = {}
+        old_token = str((old_settings or {}).get("rest_api_token") or "").strip()
+
         state_dir, result = settings_support.save_settings_payload(
             settings,
-            current_state_dir=self._state_dir,
+            current_state_dir=self._get_state_dir(),
             default_root=DEFAULT_ROOT,
             default_collection_folder_name=DEFAULT_COLLECTION_FOLDER_NAME,
             default_empty_folders_folder_name=DEFAULT_EMPTY_FOLDERS_FOLDER_NAME,
@@ -762,6 +789,22 @@ class CineSortApi:
             # qu'elle est sauvegardee (i18n_messages.set_locale est tolerant aux
             # valeurs invalides — le clamp a deja eu lieu cote settings).
             self._apply_locale_setting(settings.get("locale"))
+            # B05-401-INCOHERENT (Fix A) : hot-reload du token REST si change
+            # sans redemarrer le serveur (evite la coupure des sessions
+            # legitimes). Si le serveur n'expose pas update_auth_token
+            # (versions anterieures), on no-op silencieusement -> backward compat.
+            new_token = str(settings.get("rest_api_token") or "").strip()
+            if new_token != old_token and self._rest_server is not None:
+                updater_fn = getattr(self._rest_server, "update_auth_token", None)
+                if callable(updater_fn):
+                    try:
+                        updater_fn(new_token)
+                    except (AttributeError, RuntimeError, TypeError) as exc:
+                        logger.warning(
+                            "rest: hot-swap du token REST echoue (%s) — un restart manuel"
+                            " du serveur sera necessaire pour appliquer le nouveau token.",
+                            exc,
+                        )
         return result
 
     # ---------- locale (V6-01 Polish Total v7.7.0) ----------
@@ -807,18 +850,23 @@ class CineSortApi:
         set_locale(normalized)
         # 2) Persistance dans settings.json (passe par save_settings_payload pour
         #    deduper toute la logique de validation/normalisation/backup).
-        try:
-            current = self._get_settings_impl()
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("set_locale: cannot load settings to persist locale: %s", exc)
-            return {"ok": True, "locale": normalized, "persisted": False}
-        current["locale"] = normalized
-        try:
-            self._save_settings_impl(current)
-            persisted = True
-        except (OSError, ValueError, TypeError) as exc:
-            logger.warning("set_locale: persistence failed: %s", exc)
-            persisted = False
+        # Fix TOCTOU : la sequence get -> mutate -> save doit etre atomique pour
+        # eviter qu'un save_settings concurrent execute entre les deux appels
+        # soit integralement ecrase par le payload 'current' (qui contient les
+        # valeurs lues avant la mutation parallele).
+        with self._settings_write_lock:
+            try:
+                current = self._get_settings_impl()
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning("set_locale: cannot load settings to persist locale: %s", exc)
+                return {"ok": True, "locale": normalized, "persisted": False}
+            current["locale"] = normalized
+            try:
+                self._save_settings_impl(current)
+                persisted = True
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning("set_locale: persistence failed: %s", exc)
+                persisted = False
         return {"ok": True, "locale": normalized, "persisted": persisted}
 
     # ---------- V3-05 — Mode démo wizard (premier-run) ----------
@@ -880,6 +928,26 @@ class CineSortApi:
         url = _network_utils_mod.build_dashboard_url(ip, port, is_https)
         return {"ok": True, "ip": ip, "port": port, "https": is_https, "dashboard_url": url}
 
+    def _reveal_rest_token_impl(self) -> Dict[str, Any]:
+        """AUDIT 2026-06-14 (R7-10) : revele le Bearer REST en CLAIR pour les
+        boutons "Afficher/Copier la cle" (Statut Acces distant + Parametres).
+
+        Le GET settings masque rest_api_token (-> '********'), donc afficher/
+        copier exposait les puces -> 401 sur l'appareil distant. Cet endpoint
+        retourne la vraie valeur, mais UNIQUEMENT en local (is_remote_request
+        False) : un client distant ne peut jamais exfiltrer le token via l'API.
+        """
+        if is_remote_request():
+            return _err_response(
+                "Action disponible en local uniquement.",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
+        settings = self._internal_settings()
+        token = str(settings.get("rest_api_token") or "")
+        return {"ok": True, "rest_api_token": token}
+
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
         import io
@@ -933,7 +1001,7 @@ class CineSortApi:
                 log_module=__name__,
                 data=_updater.info_to_dict(None, self._app_version),
             )
-        cache_path = _updater.default_cache_path(self._state_dir)
+        cache_path = _updater.default_cache_path(self._get_state_dir())
         info = _updater.force_check(self._app_version, repo, cache_path=cache_path)
         try:
             settings["update_last_check_ts"] = time.time()
@@ -956,7 +1024,7 @@ class CineSortApi:
         """
         if force_refresh:
             return self._check_for_updates_impl()
-        cache_path = _updater.default_cache_path(self._state_dir)
+        cache_path = _updater.default_cache_path(self._get_state_dir())
         info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
@@ -969,7 +1037,10 @@ class CineSortApi:
             old_server.stop()
             self._rest_server = None
 
-        settings = self._get_settings_impl()
+        # AUDIT 2026-06-10 : _internal_settings (token en clair) — _get_settings_impl
+        # masquait rest_api_token, le serveur redemarrait avec Bearer "••••••••"
+        # (constante publique) et tout client legitime recevait 401.
+        settings = self._internal_settings()
         if not settings.get("rest_api_enabled"):
             return _err_response(
                 "API REST desactivee dans les reglages.", category="runtime", level="warning", log_module=__name__
@@ -979,14 +1050,20 @@ class CineSortApi:
             return _err_response("Aucun token configure.", category="state", level="info", log_module=__name__)
 
         port = int(settings.get("rest_api_port") or 8642)
+        # AUDIT 2026-06-10 : repliquer host + cors_origin du boot (app.py:351-360).
+        # Sans host, le serveur rebind silencieusement sur 127.0.0.1 -> perte de
+        # l'exposition LAN/dashboard distant ; sans cors_origin, retour a "*".
+        host = "0.0.0.0" if settings.get("rest_api_enabled") else "127.0.0.1"
         # NB : module-style pour permettre patch("cinesort.infra.rest_server.RestApiServer").
         server = _rest_server_mod.RestApiServer(
             self,
             port=port,
             token=token,
+            cors_origin=str(settings.get("rest_api_cors_origin") or ""),
             https_enabled=bool(settings.get("rest_api_https_enabled")),
             cert_path=str(settings.get("rest_api_cert_path") or ""),
             key_path=str(settings.get("rest_api_key_path") or ""),
+            host=host,
         )
         server.start()
         self._rest_server = server
@@ -1020,7 +1097,7 @@ class CineSortApi:
         # → AttributeError non catchee → pywebview remontait l'exception au JS
         # → fallback "Purge du cache impossible".
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except Exception as exc:
             _log.exception("api: reset_incremental_cache echec init store")
             return _err_response(
@@ -1067,6 +1144,95 @@ class CineSortApi:
             ),
         }
 
+    # ---------- VO-A-NAS : benchmark perf SQLite sur stockage cible ----------
+    def _run_nas_benchmark_impl(
+        self,
+        n_writes: int = 1000,
+        n_reads: int = 10000,
+    ) -> Dict[str, Any]:
+        """VO-A-NAS : declenche un benchmark perf SQLite sur le stockage cible.
+
+        Cree une table dediee dans la DB CineSort active, mesure les
+        percentiles p50/p95/p99 ecritures + lectures, puis DROP la table.
+        Le rapport est sauvegarde sous
+        ``<state_dir>/diagnostics/nas_benchmark_<ts>.json``.
+
+        Args:
+            n_writes: nombre d'INSERT a executer (clamp 1..100000).
+            n_reads: nombre de SELECT a executer (clamp 1..1000000).
+
+        Returns:
+            dict de la forme {ok, result, report_path}. En cas d'erreur d'init
+            DB : {ok: False, error: ...} via _err_response.
+        """
+        from cinesort.infra.db import db_path_for_state_dir
+        from cinesort.infra.db.nas_validation import (
+            run_nas_benchmark,
+            write_benchmark_report,
+        )
+
+        _log = logging.getLogger(__name__)
+
+        # Clamp pour eviter qu'un appel API distant ne lance un bench de 10M
+        # lignes qui geleait la DB pendant 30 minutes.
+        try:
+            n_writes_clamped = clamp_non_negative_int(n_writes, default=1000)
+        except (TypeError, ValueError):
+            n_writes_clamped = 1000
+        try:
+            n_reads_clamped = clamp_non_negative_int(n_reads, default=10000)
+        except (TypeError, ValueError):
+            n_reads_clamped = 10000
+        n_writes_clamped = max(1, min(n_writes_clamped, 100_000))
+        n_reads_clamped = max(1, min(n_reads_clamped, 1_000_000))
+
+        state_dir = self._get_state_dir()
+        try:
+            db_path = db_path_for_state_dir(state_dir)
+        except Exception as exc:  # noqa: BLE001 -- chemin invalide / OSError
+            _log.exception("api: run_nas_benchmark resolve db_path echec")
+            return _err_response(
+                f"Resolution chemin DB impossible : {type(exc).__name__}: {exc}",
+                category="state",
+                level="error",
+                log_module=__name__,
+            )
+
+        # Best-effort : si la DB n'existe pas encore (cas test / 1er boot
+        # tres precoce), on cree au moins le dossier parent pour que
+        # sqlite3.connect puisse instancier le fichier.
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _log.warning("api: run_nas_benchmark mkdir parent echec : %s", exc)
+
+        try:
+            result = run_nas_benchmark(
+                db_path,
+                n_writes=n_writes_clamped,
+                n_reads=n_reads_clamped,
+            )
+        except Exception as exc:  # noqa: BLE001 -- protection enveloppe
+            _log.exception("api: run_nas_benchmark echec")
+            return _err_response(
+                f"Benchmark echec : {type(exc).__name__}: {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+
+        report_path: Optional[Path] = None
+        try:
+            report_path = write_benchmark_report(result, state_dir)
+        except OSError as exc:
+            _log.warning("api: run_nas_benchmark write_report echec : %s", exc)
+
+        return {
+            "ok": bool(result.get("ok", False)),
+            "result": result,
+            "report_path": str(report_path) if report_path else None,
+        }
+
     # ---------- Helper masque -> cle stockee ----------
     def _unmask_or_stored(self, field: str, value: str) -> str:
         """UX fix : si le frontend renvoie le masque "••••••••" parce que la cle
@@ -1078,7 +1244,7 @@ class CineSortApi:
         """
 
         if str(value or "").strip() == _SECRET_MASK:
-            data = _read_settings(self._state_dir)
+            data = _read_settings(self._get_state_dir())
             return str(data.get(field) or "").strip()
         return str(value or "").strip()
 
@@ -1109,7 +1275,7 @@ class CineSortApi:
 
     def _get_jellyfin_libraries_impl(self) -> Dict[str, Any]:
         """Retourne les bibliothèques Jellyfin configurées."""
-        data = _read_settings(self._state_dir)
+        data = _read_settings(self._get_state_dir())
         url = str(data.get("jellyfin_url") or "").strip()
         api_key = str(data.get("jellyfin_api_key") or "").strip()
         user_id = str(data.get("jellyfin_user_id") or "").strip()
@@ -1140,7 +1306,7 @@ class CineSortApi:
     # ---------- Email ----------
     def _test_email_report_impl(self) -> Dict[str, Any]:
         """Envoie un email test avec des donnees mock."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # secrets en clair pour SMTP (AUDIT 2026-06-10)
         if not settings.get("email_smtp_host") or not settings.get("email_to"):
             return _err_response(
                 "Configurez d'abord le serveur SMTP et le destinataire.",
@@ -1160,7 +1326,7 @@ class CineSortApi:
     # ---------- Jellyfin validation croisee ----------
     def _get_jellyfin_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Jellyfin. Retourne le rapport de coherence."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # jellyfin_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("jellyfin_enabled"):
             return _err_response("Jellyfin non configure.", category="state", level="info", log_module=__name__)
         jf_url = str(settings.get("jellyfin_url") or "").strip()
@@ -1172,7 +1338,7 @@ class CineSortApi:
             )
 
         # Charger les PlanRows du dernier run
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1192,11 +1358,12 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        # Audit 2026-06-02 : le run_dir suit la convention `tri_films_{run_id}`
-        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Sans ce
-        # prefixe, plan_path pointait sur un dossier inexistant et la fonction
-        # retournait silencieusement "Aucun film dans ce run" en prod.
-        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
+        # Audit 2026-06-02 : le vrai dossier de run est `runs/tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Le chemin
+        # etait construit sans le prefixe -> plan.jsonl jamais trouve -> "Aucun
+        # film dans ce run" silencieux en prod. _resolve_run_dir applique la
+        # convention canonique tout en tolerant les runs anterieurs (dossier nu).
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1209,13 +1376,19 @@ class CineSortApi:
             client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
                 info = client.validate_connection()
-                jf_user_id = info.get("user_id", "")
+                if not info.get("ok") or not info.get("user_id"):
+                    err = str(info.get("error") or "user_id introuvable")
+                    return _err_response(
+                        f"Connexion Jellyfin echouee : {err}",
+                        category="resource",
+                        level="error",
+                        log_module=__name__,
+                    )
+                jf_user_id = str(info.get("user_id") or "")
             # BUG 2 : utiliser le scan multi-library pour eviter les tronques
             jellyfin_movies = client.get_all_movies_from_all_libraries(jf_user_id)
         except _jellyfin_mod.JellyfinError as exc:
-            return _err_response(
-                f"Connexion Jellyfin echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         report = build_sync_report(local_rows, jellyfin_movies)
         return {"ok": True, "run_id": target_run_id, **report}
@@ -1244,7 +1417,7 @@ class CineSortApi:
             return _err_response("Aucun film trouve dans le CSV.", category="state", level="info", log_module=__name__)
 
         # Charger les PlanRows du dernier run
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1264,7 +1437,7 @@ class CineSortApi:
             )
 
         # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
-        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1290,7 +1463,7 @@ class CineSortApi:
         purl = (url or "").strip()
         ptok = (token or "").strip()
         if not purl or not ptok:
-            settings = self._get_settings_impl()
+            settings = self._internal_settings()  # plex_token en clair (AUDIT 2026-06-10)
             purl = purl or str(settings.get("plex_url") or "").strip()
             ptok = ptok or str(settings.get("plex_token") or "").strip()
         if not purl or not ptok:
@@ -1307,7 +1480,7 @@ class CineSortApi:
 
     def _get_plex_sync_report_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Compare la bibliotheque locale avec Plex."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # plex_token en clair (AUDIT 2026-06-10)
         if not settings.get("plex_enabled"):
             return _err_response("Plex non configure.", category="state", level="info", log_module=__name__)
         purl = str(settings.get("plex_url") or "").strip()
@@ -1318,7 +1491,7 @@ class CineSortApi:
                 "URL, token ou library Plex manquant.", category="validation", level="info", log_module=__name__
             )
 
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1339,7 +1512,7 @@ class CineSortApi:
             )
 
         # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
-        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1351,9 +1524,7 @@ class CineSortApi:
             client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except _plex_mod.PlexError as exc:
-            return _err_response(
-                f"Connexion Plex echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         report = build_sync_report(local_rows, plex_movies)
         return {"ok": True, "run_id": target_run_id, **report}
@@ -1390,7 +1561,7 @@ class CineSortApi:
 
     def _get_radarr_status_impl(self, run_id: str = "") -> Dict[str, Any]:
         """Rapport Radarr : matching, upgrade candidates."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # radarr_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("radarr_enabled"):
             return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
@@ -1400,7 +1571,7 @@ class CineSortApi:
                 "URL ou cle API Radarr manquante.", category="validation", level="info", log_module=__name__
             )
 
-        state_dir = Path(self._state_dir)
+        state_dir = Path(self._get_state_dir())
         store, _runner = self._get_or_create_infra(state_dir)
 
         runs = store.run.get_runs_summary(limit=5)
@@ -1421,7 +1592,7 @@ class CineSortApi:
             )
 
         # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
-        plan_path = state_dir / "runs" / f"tri_films_{target_run_id}" / "plan.jsonl"
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1432,9 +1603,7 @@ class CineSortApi:
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
         except _radarr_mod.RadarrError as exc:
-            return _err_response(
-                f"Connexion Radarr echouee : {exc}", category="resource", level="error", log_module=__name__
-            )
+            return _safe_integration_error(exc, category="resource", log_module=__name__)
 
         # Collecter les quality reports pour les upgrade candidates
         qr_map: Dict[str, Dict[str, Any]] = {}
@@ -1451,7 +1620,7 @@ class CineSortApi:
 
     def _request_radarr_upgrade_impl(self, radarr_movie_id: int) -> Dict[str, Any]:
         """Demande a Radarr de chercher une meilleure version d'un film."""
-        settings = self._get_settings_impl()
+        settings = self._internal_settings()  # radarr_api_key en clair (AUDIT 2026-06-10)
         if not settings.get("radarr_enabled"):
             return _err_response("Radarr non configure.", category="state", level="info", log_module=__name__)
         rurl = str(settings.get("radarr_url") or "").strip()
@@ -1481,7 +1650,7 @@ class CineSortApi:
         if not okey:
             return _err_response("Cle OMDb requise.", category="validation", level="info", log_module=__name__)
         # Cache temporaire pour le test : pas de pollution du cache prod
-        cache_path = Path(self._state_dir) / "omdb_cache_test.json"
+        cache_path = Path(self._get_state_dir()) / "omdb_cache_test.json"
         # Audit C7 P1 : helper centralise (range 1-60s + fallback robuste).
         try:
             client = OmdbClient(api_key=okey, cache_path=cache_path, timeout_s=clamp_timeout(timeout_s))
@@ -1527,8 +1696,8 @@ class CineSortApi:
         rid = str(sample_row_id or "").strip()
         if rid:
             try:
-                settings = _read_settings(self._state_dir)
-                state_dir = self._state_dir
+                state_dir = self._get_state_dir()
+                settings = _read_settings(state_dir)
                 store, _ = self._get_or_create_infra(state_dir, settings)
                 # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
                 probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
@@ -1660,6 +1829,41 @@ class CineSortApi:
     def _auto_install_probe_tools_impl(self) -> Dict[str, Any]:
         """Telecharge et installe ffprobe + MediaInfo depuis les sources officielles."""
         return probe_support.auto_install_probe_tools(self, detect_probe_tools_fn=detect_probe_tools)
+
+    def _purge_probe_cache_impl(self) -> Dict[str, Any]:
+        """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
+
+        Utile quand un settings.json obsolete a pollue le cache avec des
+        resultats FAILED dus a un path ffprobe/mediainfo introuvable. Apres
+        purge, le prochain scan relance toutes les probes proprement.
+        """
+        _log = logging.getLogger(__name__)
+        try:
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
+        except Exception as exc:  # noqa: BLE001 - boundary top-level
+            _log.exception("api: purge_probe_cache echec init store")
+            return _err_response(
+                f"Store indisponible : {type(exc).__name__}: {exc}",
+                category="state",
+                level="error",
+                log_module=__name__,
+            )
+        try:
+            deleted = int(store.probe.clear_probe_cache())
+        except Exception as exc:  # noqa: BLE001 - boundary top-level
+            _log.exception("api: purge_probe_cache echec purge")
+            return _err_response(
+                f"Purge cache probe echouee : {type(exc).__name__}: {exc}",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
+        _log.info("api: purge_probe_cache entries_deleted=%d", deleted)
+        return {
+            "ok": True,
+            "entries_deleted": deleted,
+            "message": (f"Cache probe purge : {deleted} entrees supprimees. Relance un scan pour re-probe les films."),
+        }
 
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
         """Retourne la probe normalisee (video/audio/sous-titres) d'un film du run."""
@@ -1828,6 +2032,16 @@ class CineSortApi:
         """
         return perceptual_support.queue_perceptual_analyses(self, pairs, options)
 
+    def _queue_perceptual_batch_impl(
+        self, run_id: str, row_ids: Any, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """R5-C : analyse perceptuelle batch SINGLE-film en background (biblio).
+
+        Variante async de analyze_perceptual_batch : retourne un job_id pollable
+        via _get_perceptual_job_status_impl (meme registre que les paires).
+        """
+        return perceptual_support.queue_perceptual_batch(self, run_id, row_ids, options)
+
     def _get_perceptual_job_status_impl(self, job_id: str) -> Dict[str, Any]:
         """Phase 4 doublons : statut d'un batch perceptuel queue."""
         return perceptual_support.get_perceptual_job_status(self, job_id)
@@ -1957,6 +2171,14 @@ class CineSortApi:
         """
         return library_support.mark_for_deletion(self, run_id, row_id)
 
+    def _clear_tmdb_override_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule l'override TMDb manuel (revient au match auto)."""
+        return library_support.clear_tmdb_override(self, run_id, row_id)
+
+    def _unmark_for_deletion_impl(self, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
+        """R7-12 : annule le marquage pour suppression d'un film."""
+        return library_support.unmark_for_deletion(self, run_id, row_id)
+
     def _mark_alert_ignored_impl(self, row_id: str, alert_code: str) -> Dict[str, Any]:
         """Spec 06 §3.3 : persiste "j'ai vu cette alerte, on continue".
 
@@ -2028,12 +2250,42 @@ class CineSortApi:
         return history_support.load_validation(self, run_id, normalize_user_path=_normalize_user_path)
 
     def _save_validation_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Persiste les decisions de validation dans validation.json (atomique)."""
+        """Persiste les decisions de validation dans validation.json (atomique).
+
+        Vague P / VP-D : accepte aussi la cle optionnelle `decision`
+        (`accepted`/`rejected`/`deferred`) en complement du legacy
+        `ok: bool`. Backward compat ABSOLUE : shape retour `{ok, path}`
+        preservee (helper `to_legacy_ok_bool` dans decisions.py).
+        """
         return run_flow_support.save_validation(self, run_id, decisions)
 
     def _check_duplicates_impl(self, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Detecte les collisions de destination entre rows approuvees avant apply."""
         return run_flow_support.check_duplicates(self, run_id, decisions)
+
+    def _check_duplicates_fusion_impl(
+        self,
+        run_id: str,
+        decisions: Dict[str, Dict[str, Any]],
+        *,
+        audio_weight: Optional[float] = None,
+        video_weight: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """V2.4 — Detection fusion Chromaprint + videohash (feature flag opt-in).
+
+        Backward compat ABSOLUE :
+        - `_check_duplicates_impl` legacy ci-dessus reste l'unique chemin
+          actif par defaut.
+        - Cette implementation est gate par `CINESORT_FUSION_DOUBLONS` ; si
+          le flag est off, retourne un stub `{ok, enabled: False, pairs: []}`.
+        """
+        return run_flow_support.check_duplicates_fusion(
+            self,
+            run_id,
+            decisions,
+            audio_weight=audio_weight,
+            video_weight=video_weight,
+        )
 
     def _get_cleanup_residual_preview_impl(self, run_id: str) -> Dict[str, Any]:
         """Preview du nettoyage de fin de run : dossiers vides + residuels identifies."""
@@ -2042,7 +2294,7 @@ class CineSortApi:
     def _get_auto_approved_summary_impl(
         self,
         run_id: str,
-        threshold: int = 85,
+        threshold: Optional[int] = None,
         enabled: bool = False,
         quarantine_corrupted: bool = False,
     ) -> Dict[str, Any]:
@@ -2062,9 +2314,20 @@ class CineSortApi:
             quarantine_corrupted=quarantine_corrupted,
         )
 
-    def _get_tmdb_posters_impl(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
-        """Retourne les URLs de posters TMDb pour les IDs demandes (cache local)."""
-        return tmdb_support.get_tmdb_posters(self, tmdb_ids, size)
+    def _get_tmdb_posters_impl(
+        self, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False
+    ) -> Dict[str, Any]:
+        """Retourne les URLs de posters TMDb pour les IDs demandes (cache local).
+
+        E4 : force_refresh=True purge l'entree cache de chaque ID avant lookup
+        (bouton refresh jaquette de la fiche film).
+        """
+        return tmdb_support.get_tmdb_posters(self, tmdb_ids, size, force_refresh=force_refresh)
+
+    def _enrich_tmdb_ids_by_title_impl(self, run_id: str, row_ids: Any) -> Dict[str, Any]:
+        """R5-H2 : resout + persiste le tmdb_id de films identifies NFO/nom (sans
+        tmdb_id) par recherche titre+annee, pour recuperer leurs jaquettes."""
+        return tmdb_support.enrich_tmdb_ids_by_title(self, run_id, row_ids)
 
     def _search_tmdb_impl(self, query: str, year: Optional[int] = None) -> Dict[str, Any]:
         """Spec 06 3.4 : recherche manuelle TMDb depuis le Modal Film.
@@ -2131,7 +2394,10 @@ class CineSortApi:
         decisions: Dict[str, Dict[str, Any]],
         dry_run: bool,
         quarantine_unapproved: bool,
+        apply_atomic: bool = False,
     ) -> Dict[str, Any]:
+        """Vague P / VP-A : `apply_atomic` opt-in (default False, backward
+        compat ABSOLUE — la signature retourne toujours `{ok: bool, ...}`)."""
         result = apply_support.apply_changes(
             self,
             run_id,
@@ -2141,6 +2407,7 @@ class CineSortApi:
             cleanup_scope_label=_cleanup_scope_label,
             cleanup_status_label=_cleanup_status_label,
             cleanup_reason_label=_cleanup_reason_label,
+            apply_atomic=bool(apply_atomic),
         )
         if not dry_run:
             self._touch_event()
@@ -2163,7 +2430,7 @@ class CineSortApi:
         """
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError):
             store = None
         try:
@@ -2210,7 +2477,7 @@ class CineSortApi:
             return _err_response(msg, category="validation", level="info", log_module=__name__, meta=meta)
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(
                 f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__, meta=meta
@@ -2323,7 +2590,7 @@ class CineSortApi:
         Retourne `{ok, deleted_count}`.
         """
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if not store:
@@ -2343,7 +2610,7 @@ class CineSortApi:
         """
 
         try:
-            store, _runner = self._get_or_create_infra(self._state_dir)
+            store, _runner = self._get_or_create_infra(self._get_state_dir())
         except (OSError, TypeError, ValueError) as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if store is None:
@@ -2443,6 +2710,67 @@ class CineSortApi:
         """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
         return history_support.cleanup_old_runs(self, retention_days=retention_days)
 
+    # ---------- VQ-2 QUARANTAINE-TTL (bucket _review filesystem) ----------
+    def _build_quarantine_cfg(self) -> core.Config:
+        """Construit la cfg pour les operations quarantaine (bucket root/_review).
+
+        AUDIT 2026-06-10 (CRITICAL) : les 3 endpoints appelaient
+        `_build_cfg_from_settings_payload(settings)` avec UN seul argument alors
+        que build_cfg_from_settings exige root + 3 noms de dossiers keyword-only
+        -> TypeError systematique avale -> {ok:False, build_cfg_failed} ->
+        viewer + "Vider maintenant" morts ET le cron TTL ne purgeait JAMAIS le
+        bucket (rendant le fix TTL inoperant). On passe par le helper correct
+        _build_cfg_from_settings qui fournit les 4 kwargs.
+        """
+        settings = self._get_settings_impl()
+        root = _normalize_user_path(settings.get("root"), Path(DEFAULT_ROOT))
+        return self._build_cfg_from_settings(settings, root)
+
+    def _purge_quarantine_bucket_impl(self, ttl_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+        """Purge le bucket FS `_review` des fichiers > TTL jours (defaut 30).
+
+        Appele :
+        - automatiquement au boot par le cron `quarantine_ttl.start_quarantine_ttl_cron`
+        - via le bouton "Vider maintenant" (parametres > Quarantaine) en mode `purge_all=True`
+        - manuellement depuis tests/REST.
+        """
+        from cinesort.app.quarantine_ttl import purge_review_bucket
+
+        try:
+            cfg = self._build_quarantine_cfg()
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return purge_review_bucket(cfg, ttl_days=int(ttl_days), dry_run=bool(dry_run))
+
+    def _purge_quarantine_bucket_all_impl(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Vider INTEGRALEMENT le bucket `_review` (sauf `_duplicates_user_decided`).
+
+        Appele par l'UI bouton "Vider maintenant", protege cote front par
+        dangerConfirmModal (countdown 3s si > 50 fichiers, memoire actions
+        dangereuses).
+        """
+        from cinesort.app.quarantine_ttl import purge_review_bucket_all
+
+        try:
+            cfg = self._build_quarantine_cfg()
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return purge_review_bucket_all(cfg, dry_run=bool(dry_run))
+
+    def _list_quarantine_bucket_impl(self, limit: int = 500) -> Dict[str, Any]:
+        """Inventaire du bucket `_review` pour le viewer UI (route /quarantine_viewer).
+
+        Retourne files (tries mtime DESC), total, taille, ventilation par
+        sous-dossier. Tronque a `limit` entrees (defaut 500).
+        """
+        from cinesort.app.quarantine_ttl import list_review_bucket_files
+
+        try:
+            cfg = self._build_quarantine_cfg()
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"build_cfg_failed: {exc}"}
+        return list_review_bucket_files(cfg, limit=int(limit))
+
     # ---------- Reset (V3-09) ----------
     def _reset_all_user_data_impl(self, confirmation: str = "") -> Dict[str, Any]:
         """V3-09 — Reset toutes les donnees user (avec backup ZIP automatique)."""
@@ -2479,6 +2807,60 @@ class CineSortApi:
         """Active un profil qualite (preset ou custom)."""
 
         return profiles_support.set_active_profile(self, profile_id)
+
+    # ---------- VO-A UI : Advanced PRAGMA settings (storage profile + EXCLUSIVE) ----------
+    def _get_advanced_pragma_settings_impl(self) -> Dict[str, Any]:
+        """VO-A : retourne l'etat des PRAGMA SQLite avances (profil + locking_mode).
+
+        Retourne profil actif (auto/local_ssd/nas_smb), override user, profils
+        disponibles et stockage detecte (heuristique drive type Windows).
+        """
+        return settings_support.get_advanced_pragma_settings_payload(
+            state_dir=self._get_state_dir(),
+        )
+
+    def _set_advanced_pragma_settings_impl(
+        self,
+        profile_name: str,
+        locking_mode_exclusive: bool = False,
+    ) -> Dict[str, Any]:
+        """VO-A : applique le profil PRAGMA et persiste dans settings.json.
+
+        IMPORTANT : la bascule `locking_mode_exclusive=True` est destructive
+        (empeche toute lecture DB en parallele). Le frontend DOIT confirmer
+        via dangerConfirmModal avec countdown 3s avant d'envoyer True ici.
+        """
+        return settings_support.set_advanced_pragma_settings_payload(
+            state_dir=self._get_state_dir(),
+            profile_name=profile_name,
+            locking_mode_exclusive=locking_mode_exclusive,
+        )
+
+    # ---------- VO-B-CONFIG : scan_max_workers (tri-etat auto/manuel) ----------
+    def _get_scan_max_workers_impl(self) -> Dict[str, Any]:
+        """VO-B-CONFIG : retourne l'etat actuel du setting scan_max_workers.
+
+        Voir SettingsFacade.get_scan_max_workers pour la documentation
+        complete et la synergie avec VO-A detect_storage.
+        """
+        return settings_support.get_scan_max_workers_payload(
+            state_dir=self._get_state_dir(),
+        )
+
+    def _set_scan_max_workers_impl(
+        self,
+        mode: str,
+        value: Any = None,
+    ) -> Dict[str, Any]:
+        """VO-B-CONFIG : persiste le setting scan_max_workers + retourne l'etat.
+
+        Voir SettingsFacade.set_scan_max_workers pour la documentation.
+        """
+        return settings_support.set_scan_max_workers_payload(
+            state_dir=self._get_state_dir(),
+            mode=mode,
+            value=value,
+        )
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:

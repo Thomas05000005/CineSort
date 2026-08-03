@@ -31,7 +31,6 @@ from cinesort.ui.api.settings_support import (
 )
 from tests._helpers import find_free_port as _find_free_port
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = PROJECT_ROOT / "locales"
 

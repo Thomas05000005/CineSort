@@ -73,6 +73,25 @@ def get_library_podiums(
     run_id: Optional[str] = None,
     limit: int = 10,
 ) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_library_podiums_impl(api, run_id=run_id, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_library_podiums failed for run_id=%s limit=%s", run_id, limit)
+        return {
+            "ok": False,
+            "error": "podiums_load_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger les podiums.",
+        }
+
+
+def _get_library_podiums_impl(
+    api: Any,
+    run_id: Optional[str] = None,
+    limit: int = 10,
+) -> Dict[str, Any]:
     """Retourne les podiums (release groups, codecs, sources) pour le run cible.
 
     Args:

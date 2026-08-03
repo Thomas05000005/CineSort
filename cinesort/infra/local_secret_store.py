@@ -6,7 +6,6 @@ import os
 from ctypes import wintypes
 from typing import Tuple
 
-
 WINDOWS_DPAPI_CURRENT_USER = "windows_dpapi_current_user"
 SECRET_PROTECTION_UNAVAILABLE = "unavailable"
 SECRET_PROTECTION_NONE = "none"

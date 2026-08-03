@@ -14,14 +14,13 @@ from __future__ import annotations
 import unittest
 
 from cinesort.domain.perceptual.video_analysis import (
+    _parse_filter_output,
     analyze_video_frames,
     block_variance_stats,
     detect_banding,
     effective_bit_depth,
     luminance_histogram,
-    _parse_filter_output,
 )
-
 
 # ---------------------------------------------------------------------------
 # luminance_histogram (2 tests)
@@ -137,16 +136,25 @@ class EffectiveBitDepthTests(unittest.TestCase):
 
 
 class FilterParsingTests(unittest.TestCase):
-    """Tests du parsing de la sortie stderr ffmpeg."""
+    """Tests du parsing de la sortie stderr ffmpeg.
+
+    R8-036 (F4) : ces tests utilisent désormais le format RÉEL produit par
+    `metadata=mode=print` (vérifié ffmpeg 8.1.1) — une ligne `frame:N` par frame
+    + une ligne `lavfi.<clé>=<val>` par métrique. L'ANCIEN format mocké
+    (`YAVG=85 ... block: 22.5`, `blur: 0.0342`) n'était JAMAIS produit par ffmpeg :
+    les tests étaient verts pendant que le vrai pipeline ne parsait rien.
+    """
 
     def test_signalstats_parsing(self) -> None:
         """Les valeurs YAVG, SATAVG, TOUT, VREP sont extraites correctement."""
         stderr = (
-            "[Parsed_signalstats_1 @ 0x1234] "
-            "YMIN=16 YLOW=25 YAVG=85 YHIGH=210 YMAX=235 "
-            "UMIN=90 UMAX=170 VMIN=80 VMAX=175 "
-            "SATMIN=5 SATAVG=42 SATMAX=180 "
-            "TOUT=0.015 VREP=0.008\n"
+            "[Parsed_metadata_4 @ 0x1234] frame:0    pts:0       pts_time:0\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.YMIN=16\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.YAVG=85\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.YMAX=235\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.SATAVG=42\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.TOUT=0.015\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.VREP=0.008\n"
         )
         frames = _parse_filter_output(stderr)
         self.assertEqual(len(frames), 1)
@@ -156,24 +164,44 @@ class FilterParsingTests(unittest.TestCase):
         self.assertAlmostEqual(frames[0]["vrep"], 0.008, places=3)
 
     def test_blockdetect_parsing(self) -> None:
-        """La valeur blockdetect block est extraite."""
+        """La valeur blockdetect (lavfi.block) est extraite."""
         stderr = (
-            "[Parsed_signalstats_1 @ 0x1234] YAVG=100 SATAVG=30 TOUT=0.01 VREP=0.005\n"
-            "[Parsed_blockdetect_2 @ 0x5678] blockdetect block: 22.5\n"
+            "[Parsed_metadata_4 @ 0x1234] frame:0    pts:0       pts_time:0\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.YAVG=100\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.block=22.5\n"
         )
         frames = _parse_filter_output(stderr)
         self.assertEqual(len(frames), 1)
         self.assertAlmostEqual(frames[0]["blockiness"], 22.5)
 
     def test_blurdetect_parsing(self) -> None:
-        """La valeur blurdetect blur est extraite."""
+        """La valeur blurdetect (lavfi.blur) est extraite (échelle réelle ~0-20)."""
         stderr = (
-            "[Parsed_signalstats_1 @ 0x1234] YAVG=100 SATAVG=30 TOUT=0.01 VREP=0.005\n"
-            "[Parsed_blurdetect_3 @ 0x9abc] blurdetect blur: 0.0342\n"
+            "[Parsed_metadata_4 @ 0x1234] frame:0    pts:0       pts_time:0\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.signalstats.YAVG=100\n"
+            "[Parsed_metadata_4 @ 0x1234] lavfi.blur=4.578026\n"
         )
         frames = _parse_filter_output(stderr)
         self.assertEqual(len(frames), 1)
-        self.assertAlmostEqual(frames[0]["blur"], 0.0342, places=4)
+        self.assertAlmostEqual(frames[0]["blur"], 4.578026, places=4)
+
+    def test_multi_frame_grouping(self) -> None:
+        """R8-036 : deux marqueurs frame: -> deux frames distinctes parsées."""
+        stderr = (
+            "[Parsed_metadata_4 @ 0x1] frame:0 pts:0 pts_time:0\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.signalstats.YAVG=80\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.block=10.0\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.blur=5.0\n"
+            "[Parsed_metadata_4 @ 0x1] frame:5 pts:2560 pts_time:0.2\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.signalstats.YAVG=120\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.block=12.0\n"
+            "[Parsed_metadata_4 @ 0x1] lavfi.blur=6.0\n"
+        )
+        frames = _parse_filter_output(stderr)
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(frames[0]["y_avg"], 80)
+        self.assertEqual(frames[1]["y_avg"], 120)
+        self.assertAlmostEqual(frames[1]["blur"], 6.0)
 
 
 # ---------------------------------------------------------------------------
