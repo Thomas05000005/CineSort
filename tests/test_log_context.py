@@ -303,6 +303,7 @@ class RestRequestIdHeaderTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        import os
         import socket
         import tempfile
         import time as _time
@@ -310,6 +311,20 @@ class RestRequestIdHeaderTests(unittest.TestCase):
 
         import cinesort.ui.api.cinesort_api as backend
         from cinesort.infra.rest_server import RestApiServer
+
+        # ITER14 X_REQUEST_ID_SUR_401 (#4) — re-ancrage non-loopback.
+        # Le bypass design (rest_server.py L443-462) retourne True pour TOUT
+        # client 127.0.0.1 sur bind 127.0.0.1, ce qui ferait tomber un POST
+        # sans token sur le legacy guard 410 (faux negatif sur le test 401).
+        # Le kill-switch CINESORT_DISABLE_LOCAL_AUTH=1 court-circuite la 1ere
+        # condition L451-453 et force le code dans la branche Bearer nominale
+        # L463-508 ; sans header Authorization -> _check_auth False ->
+        # _send_unauthorized -> _respond_json(401) -> X-Request-ID emis L607.
+        # Pattern identique au fix ITER5 commit fd3eba3f (test #3 re-ancre).
+        # Memoire user "BYPASS LOOPBACK CONSERVE" : on touche au TEST, pas au
+        # code de prod.
+        cls._saved_disable_local_auth = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH")
+        os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = "1"
 
         cls._tmp = tempfile.mkdtemp(prefix="cinesort_log_ctx_rest_")
         root = Path(cls._tmp) / "root"
@@ -336,10 +351,17 @@ class RestRequestIdHeaderTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        import os
         import shutil
 
         cls.server.stop()
         shutil.rmtree(cls._tmp, ignore_errors=True)
+
+        # Restaurer l'env var pour ne pas polluer les tests freres.
+        if cls._saved_disable_local_auth is None:
+            os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
+        else:
+            os.environ["CINESORT_DISABLE_LOCAL_AUTH"] = cls._saved_disable_local_auth
 
     def _request(self, method: str, path: str, headers: dict | None = None, body: bytes = b"") -> tuple:
         import http.client

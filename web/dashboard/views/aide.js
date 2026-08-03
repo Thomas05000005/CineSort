@@ -22,6 +22,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+import { trapFocus } from "../components/modal.js"; // R8-078b (filet F6-a) : piège de focus partagé
 
 /* --- Donnees statiques (spec 12 §1) ------------------------------------ */
 
@@ -535,6 +536,7 @@ async function _openDocDrawer(topic) {
   drawer.className = "aide-doc-drawer-overlay";
   drawer.innerHTML = _renderDrawerSkeleton(topic.title);
   document.body.appendChild(drawer);
+  trapFocus(drawer); // R8-078b : Tab/Shift+Tab piégés dans le drawer documentation (aria-modal)
   _activeDrawer = drawer;
 
   // Bindings

@@ -1,0 +1,43 @@
+=== PREUVES Lot D chaine EXPORTS — 2026-07-08 (sorties brutes scripts exploration scratchpad) ===
+
+--- explore_exports3.py (preuve LOTD-EXP-01 bytes \r\r\n + contrats reponses + negatifs) ---
+perceptual_auto_on_quality active mais perceptual_enabled=False -> analyse perceptuelle skip (active aussi le moteur).
+contains \r\r\n: True
+count \r\r\n: 2 | count \r\n: 2
+first 120 bytes: b'\xef\xbb\xbfrun_id;row_id;kind;folder;video;proposed_title;proposed_year;proposed_source;confidence;confidence_label;decision_ok;'
+
+export csv response keys: ['format', 'ok', 'path', 'rows_total', 'run_id']
+export html response keys: ['format', 'ok', 'path', 'rows_total', 'run_id']
+export json response keys: ['format', 'ok', 'path', 'rows_total', 'run_id']
+export nfo response keys: ['details', 'dry_run', 'errors', 'ok', 'skipped_existing', 'skipped_no_data', 'written']
+
+bad fmt: {'ok': False, 'message': "Format invalide. Utilisez 'json', 'csv' ou 'html'."}
+bad run: {'ok': False, 'message': 'Run introuvable.'}
+bad nfo run: {'ok': False, 'message': 'Run introuvable.'}
+DONE
+
+--- explore_exports2.py (titres ; et guillemets via nfo -> sanitisation windows_safe, quoting CSV) ---
+row: S|bc4e5e4 | title: 'Amélie, la belle' | source: nfo | nfo: C:\Users\blanc\AppData\Local\Temp\cinesort_lotd_exp2_e0kigq3g\root\Amelie.2001\Amelie.2001.nfo
+row: S|e5c128b8 | title: 'Film; le retour' | source: name | nfo: None
+
+--- lignes brutes CSV (extrait) ---
+'run_id;row_id;kind;folder;video;proposed_title;proposed_year;proposed_source;confidence;confidence_label;decision_ok;decision_title;decision_year;quality_status;quality_score;quali'
+''
+'20260708_220438_986;S|bc4e5e4;single;C:\\Users\\blanc\\AppData\\Local\\Temp\\cinesort_lotd_exp2_e0kigq3g\\root\\Amelie.2001;Amelie.2001.mkv;Amélie, la belle;2001;nfo;79;med;False;Amélie, l'
+''
+
+n header cols: 30
+COLUMN COUNT MISMATCH: 0 vs 30
+parsed title: None | video: None
+parsed title: 'Amélie, la belle' | video: 'Amelie.2001.mkv'
+COLUMN COUNT MISMATCH: 0 vs 30
+parsed title: None | video: None
+parsed title: 'Film; le retour' | video: 'Film; le retour (1999).mkv'
+COLUMN COUNT MISMATCH: 0 vs 30
+parsed title: None | video: None
+
+html quote escaped: False | raw dquote near title: False
+nfo: {'written': 2, 'errors': 0, 'skipped_no_data': 0}
+  parse OK: 'Amélie, la belle' | Amelie.2001.nfo
+  parse OK: 'Film; le retour' | Film; le retour (1999).nfo
+DONE

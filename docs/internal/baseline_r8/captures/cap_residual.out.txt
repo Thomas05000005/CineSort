@@ -1,0 +1,144 @@
+
+==============================================================================
+R8-025 F-DB-01 — busy_timeout NAS ecrase a 8000 (back-compat connection.py)
+==============================================================================
+  connection.py:15: _DEFAULT_BUSY_TIMEOUT_MS = 5000
+  connection.py:21:     busy_timeout_ms: int = _DEFAULT_BUSY_TIMEOUT_MS,
+  connection.py:35:       - `busy_timeout_ms` continue d'etre applique comme PRAGMA busy_timeout
+  connection.py:36:         SI le caller a explicitement fourni une valeur != default 5000 (les
+  connection.py:38:         Sinon le `busy_timeout` du profil prime ;
+  connection.py:70:         timeout=max(1.0, busy_timeout_ms / 1000.0),
+  connection.py:106:         # 3. Backward compat busy_timeout : si le caller a fourni une valeur
+  connection.py:110:         if busy_timeout_ms != _DEFAULT_BUSY_TIMEOUT_MS:
+  connection.py:112:                 conn.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+  connection.py:115:                     "PRAGMA busy_timeout=%d a echoue (%s)",
+  connection.py:116:                     int(busy_timeout_ms),
+  runtime_support.py:305:             busy_timeout_ms=8000,
+  _DEFAULT_BUSY_TIMEOUT_MS==5000 : True
+  -> 8000 (store prod) != 5000 (defaut) => branche back-compat REECRASE le busy_timeout du profil NAS (30000/60000) par 8000
+  VERDICT : CONFIRME (override back-compat ecrase le profil NAS)
+
+==============================================================================
+R8-033 F-CONF-02 — sibling ffmpeg.exe derive de ffprobe_path, non valide
+==============================================================================
+  ffmpeg_runner.py:1: """Runner ffmpeg pour l'analyse perceptuelle — binaire et texte.
+  ffmpeg_runner.py:3: Les fonctions `run_ffmpeg_*` utilisent `tracked_run()` (cf
+  ffmpeg_runner.py:5: ffmpeg.exe sont tues + wait meme en cas d'exception non rattrapee remontant
+  ffmpeg_runner.py:7: laissait des zombies ffmpeg sur Windows (finding R5-CRASH-2 + R4-PERC-4).
+  ffmpeg_runner.py:10: Linux) n'est PAS gere — l'OS tue le parent immediatement, sans laisser
+  ffmpeg_runner.py:40: def resolve_ffmpeg_path(ffprobe_path: str) -> Optional[str]:
+  ffmpeg_runner.py:41:     """Trouve ffmpeg comme sibling de ffprobe (meme dossier, meme package)."""
+  ffmpeg_runner.py:42:     if not ffprobe_path:
+  ffmpeg_runner.py:43:         return shutil.which("ffmpeg")
+  ffmpeg_runner.py:44:     parent = Path(ffprobe_path).parent
+  ffmpeg_runner.py:45:     for name in ("ffmpeg.exe", "ffmpeg"):
+  ffmpeg_runner.py:46:         candidate = parent / name
+  ffmpeg_runner.py:49:     return shutil.which("ffmpeg")
+  ffmpeg_runner.py:52: def run_ffmpeg_binary(cmd: List[str], timeout_s: float) -> Tuple[int, bytes, str]:
+  ffmpeg_runner.py:53:     """Execute ffmpeg et retourne stdout brut (bytes) + stderr texte.
+  ffmpeg_runner.py:55:     Utilise `tracked_run` : le child ffmpeg est garanti d'etre tue + wait
+  ffmpeg_runner.py:58:     logger.debug("ffmpeg: binary %s (timeout=%ds)", cmd[0] if cmd else "?", int(timeout_s))
+  ffmpeg_runner.py:71: def run_ffmpeg_text(cmd: List[str], timeout_s: float) -> Tuple[int, str, str]:
+  ffmpeg_runner.py:72:     """Execute ffmpeg et retourne stdout + stderr en texte.
+  ffmpeg_runner.py:74:     Utilise `tracked_run` : le child ffmpeg est garanti d'etre tue + wait
+  derive le sibling (with_name/parent) : True
+  appelle _binary_name_allowed/validate_tool_path : False
+  VERDICT : CONFIRME (sibling derive sans validation)
+
+==============================================================================
+R8-037 F-PERC-04 — batch perceptuel non annulable (should_cancel non propage)
+==============================================================================
+  run_flow_support.py:535:             # silencieux si toggle=OFF). Lance analyze_perceptual_batch sur les
+  run_flow_support.py:564:                             perc_result = perceptual_support.analyze_perceptual_batch(
+  arglist analyze_perceptual_batch contient should_cancel : False
+  perceptual_support.py:1001:     Hotfix2 (H12) : verifie `api._perceptual_cancel_event` (s'il existe) entre
+  perceptual_support.py:1642:     event = getattr(api, "_perceptual_cancel_event", None)
+  _perceptual_cancel_event assigne un Event() en prod : False
+  VERDICT : CONFIRME (cancel inerte : ni should_cancel propage, ni Event assigne)
+
+==============================================================================
+R8-016 [8] — batch zombie sans expected_ops classe ROLLED_BACK (UPDATE statut seul)
+==============================================================================
+  reconciliation.py:14: | total >= expected_ops ET aucune en erreur     | finalisable  | COMPLETED_BY_BOOT_CLEANUP |
+  reconciliation.py:15: | incomplet / en erreur / completude non prouvee| inconsistant | ROLLED_BACK_BY_BOOT_CLEANUP |
+  reconciliation.py:29: - sinon ROLLED_BACK.
+  reconciliation.py:32: comparaison du compte d'ops enregistrees au `summary_json.expected_ops`.
+  reconciliation.py:36: d'expected_ops fiable, defaut "marker ROLLED_BACK", plus prudent. Cette
+  reconciliation.py:42: ou ROLLED_BACK_BY_BOOT_CLEANUP ne sont plus 'PENDING' donc ignores).
+  reconciliation.py:60: STATUS_ROLLED_BACK_BY_BOOT = "ROLLED_BACK_BY_BOOT_CLEANUP"
+  reconciliation.py:98: def _read_expected_ops(summary_json: str) -> Optional[int]:
+  reconciliation.py:99:     """Extrait `expected_ops` (compte d'ops attendu) du summary_json du batch.
+  reconciliation.py:110:     val = data.get("expected_ops")
+  reconciliation.py:119:     Retourne 'completed' ou 'rolled_back'.
+  reconciliation.py:126:     seul compte. On exige desormais une PREUVE : `expected_ops` dans le summary
+  reconciliation.py:127:     du batch ET total >= expected_ops. Sans cette preuve, defaut ROLLED_BACK
+  reconciliation.py:130:     get_last_reversible_apply_batch) — ROLLED_BACK ne fait que marquer
+  reconciliation.py:133:     - Aucune operation associee : ROLLED_BACK (rien n'a ete fait / incoherent).
+  reconciliation.py:134:     - error_message non-vide OU undo_status='FAILED' : ROLLED_BACK (echec partiel).
+  reconciliation.py:135:     - expected_ops absent/invalide OU total < expected_ops : ROLLED_BACK (non prouve).
+  reconciliation.py:136:     - total >= expected_ops > 0 ET aucun echec : COMPLETED.
+  reconciliation.py:153:             return "rolled_back"
+  reconciliation.py:156:         return "rolled_back"
+  VERDICT : CONFIRME (expected None -> rolled_back, mislabel observabilite, aucune action FS)
+
+==============================================================================
+R8-029 [2] — _save_ttl_manifest write_text sans os.replace (last-writer-wins)
+==============================================================================
+  quarantine_ttl.py:67: # apply deplace les fichiers via atomic_move/shutil.move qui PRESERVE le mtime
+  quarantine_ttl.py:113: def _save_ttl_manifest(root: Path, manifest: Dict[str, float]) -> None:
+  quarantine_ttl.py:117:         path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+  quarantine_ttl.py:143:         _save_ttl_manifest(root, present)
+  corps utilise write_text : True ; os.replace/atomic : False
+  VERDICT : CONFIRME (write_text non atomique, recoupe F-V3-E1)
+
+==============================================================================
+R8-079 F-H5-03 — convention TV non-standard non detectee comme serie
+==============================================================================
+  fonction testee : core.looks_tv_like(folder: Path, videos: List[Path])
+  non-standard (attendu False=non detecte TV) : {'Show.101/.102 (NxNN colle)': False, 'Show.E01/.E02 (E seul)': False, 'Show - 01/02 (- NN)': False}
+  controles standard (attendu True)           : {'Show.S01E01.. (SxxExx)': True, 'Show.1x01.. (NxNN)': True}
+  VERDICT : CONFIRME (conventions non-standard non detectees, standard OK)
+
+==============================================================================
+R8-080 F-H7-02 — flag Jellyfin 'vu' non re-tente sur 503 transitoire (POST hors retry)
+==============================================================================
+  jellyfin_sync.py:159:     if not client or not hasattr(client, "mark_played") or not hasattr(client, "get_all_movies_from_all_libraries"):
+  jellyfin_sync.py:217:         still_pending: Dict[str, str] = {}
+  jellyfin_sync.py:221:                 still_pending[new_norm] = old_norm
+  jellyfin_sync.py:225:             ok = bool(client.mark_played(user_id, item_id))
+  jellyfin_sync.py:237:                 result.errors += 1
+  jellyfin_sync.py:244:                         "reason": "mark_played failed",
+  jellyfin_sync.py:248:         pending = still_pending
+  jellyfin_sync.py:275:         result.errors,
+  appelle client.mark_played : True ; branche d'echec 'mark_played failed' (errors++, pas de re-queue) : True
+  VERDICT : CONFIRME (echec mark_played -> errors++ sans re-tentative dans ce run)
+
+==============================================================================
+R8-081 F-TEST-01 — assertion tautologique (x or True) toujours vraie
+==============================================================================
+  test_auto_install.py:33:         self.assertTrue(d.name == "tools")
+  test_auto_install.py:37:         self.assertTrue(d.exists() or True)  # peut ne pas exister en CI
+  test_auto_install.py:93:                 self.assertTrue(result.endswith("ffprobe.exe"))
+  test_auto_install.py:94:                 self.assertTrue((tools / "ffprobe.exe").exists())
+  test_auto_install.py:95:                 self.assertTrue((tools / "ffmpeg.exe").exists())
+  test_auto_install.py:134:                 self.assertTrue(result.endswith("MediaInfo.exe"))
+  test_auto_install.py:194:             self.assertTrue(os.path.exists(path))  # fichier intact
+  test_auto_install.py:206:             self.assertTrue(os.path.exists(path))
+  table de verite : {'(True or True)': True, '(False or True)': True}
+  VERDICT : CONFIRME (assertTrue(d.exists() or True) passe quoi qu il arrive)
+
+==============================================================================
+RESUME
+==============================================================================
+{
+  "R8-025_busy_timeout_overwrite": true,
+  "R8-033_sibling_unvalidated": true,
+  "R8-037_cancel_inert": true,
+  "R8-016_zombie_mislabel": true,
+  "R8-029_manifest_nonatomic": true,
+  "R8-079_nonstd_tv_missed": true,
+  "R8-080_played_not_retried": true,
+  "R8-081_tautological_assert": true
+}
+
+TOTAL captures confirmees : 8/8

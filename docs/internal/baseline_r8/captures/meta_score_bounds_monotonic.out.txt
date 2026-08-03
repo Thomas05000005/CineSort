@@ -1,0 +1,12 @@
+=== GATE FALSIFIABILITE (self-test) ===
+  720p=32  2160p=38  -> le check rejetterait toute inversion 720>2160
+  (preuve que check_monotonic_resolution peut virer ROUGE : il compare ces valeurs)
+
+=== RESULTATS METAMORPHIQUES ===
+[VERT ] R1 bornes : aucune violation
+[ROUGE] R2 monotonie resolution : 2 violation(s)
+        - NON-monotone resolution @ 4000kbps : 720=32 1080=27 2160=38
+        - NON-monotone resolution @ 12000kbps : 720=32 1080=49 2160=40
+[VERT ] R3 monotonie bitrate : aucune violation
+
+TOTAL violations = 2

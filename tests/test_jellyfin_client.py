@@ -287,6 +287,61 @@ class TestSettingsJellyfinIntegration(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Connexion impossible", result["message"])
 
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : jellyfin-1 — JellyfinError doit etre
+    # catchee dans test_jellyfin_connection, sinon elle s'echappe et l'UI affiche
+    # une stacktrace. On verifie les 2 sites de fuite : (1) get_libraries dans le
+    # bloc d'enrichissement, (2) validate_connection dans le bloc externe.
+    def test_jellyfin_error_in_get_libraries_does_not_escape(self):
+        """Si get_libraries leve JellyfinError(403), on renvoie ok=True avec libs vides."""
+        from cinesort.ui.api.settings_support import test_jellyfin_connection
+
+        mock_client = MagicMock()
+        mock_client.validate_connection.return_value = {
+            "ok": True,
+            "server_name": "TestSrv",
+            "version": "10.9.0",
+            "user_id": "uid",
+            "user_name": "admin",
+            "is_admin": False,
+        }
+        # API key valide pour /System/Info mais pas droit sur /Users/{id}/Views
+        mock_client.get_libraries.side_effect = JellyfinError("Erreur HTTP 403 sur /Users/uid/Views")
+        mock_client.get_movies_count.return_value = 0
+        mock_cls = MagicMock(return_value=mock_client)
+
+        # Le test echouerait avec un raise non catche : on verifie qu'on a un
+        # dict avec ok=True (degradation gracieuse), libraries vide.
+        result = test_jellyfin_connection(
+            "http://host:8096",
+            "valid-key",
+            jellyfin_client_cls=mock_cls,
+        )
+        self.assertIsInstance(result, dict, "test_jellyfin_connection ne doit pas lever JellyfinError")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["libraries"], [])
+        self.assertEqual(result["server_name"], "TestSrv")
+
+    def test_jellyfin_error_in_validate_connection_does_not_escape(self):
+        """Si validate_connection leve JellyfinError direct, on renvoie un err() lisible."""
+        from cinesort.ui.api.settings_support import test_jellyfin_connection
+
+        mock_client = MagicMock()
+        # Cas reel : un client raise JellyfinError("403 Forbidden") plutot que
+        # de retourner {'ok': False, 'error': ...} (chemins moins courants type
+        # erreur reseau dans __init__ ou _get retourne brut une exception).
+        mock_client.validate_connection.side_effect = JellyfinError("403 Forbidden")
+        mock_cls = MagicMock(return_value=mock_client)
+
+        result = test_jellyfin_connection(
+            "http://host:8096",
+            "any-key",
+            jellyfin_client_cls=mock_cls,
+        )
+        # Doit etre un dict avec ok=False et un message defini (pas une stacktrace).
+        self.assertIsInstance(result, dict, "test_jellyfin_connection ne doit pas lever JellyfinError")
+        self.assertFalse(result["ok"])
+        self.assertIn("403", result["message"])
+
 
 class TestGetAllMovies(unittest.TestCase):
     """Tests pour get_all_movies (Phase 2)."""

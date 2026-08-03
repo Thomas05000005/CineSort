@@ -231,8 +231,9 @@ class SaveSectionWatchTests(unittest.TestCase):
         self.assertEqual(_save_section_watch({}), {"watch_enabled": False, "watch_interval_minutes": 5})
 
     def test_interval_clamped(self) -> None:
-        # 0 declenche le `or 5` → fallback 5, pas le clamp min(1)
-        self.assertEqual(_save_section_watch({"watch_interval_minutes": 0})["watch_interval_minutes"], 5)
+        # Mega-hotfix sentinel : 0 etait l'ancien BUG (or 5 -> 5). Desormais
+        # 0 est une valeur entiere legitime, clampee a min(1)=1 par max(1, ...).
+        self.assertEqual(_save_section_watch({"watch_interval_minutes": 0})["watch_interval_minutes"], 1)
         self.assertEqual(_save_section_watch({"watch_interval_minutes": 999})["watch_interval_minutes"], 60)
 
 
@@ -303,7 +304,8 @@ class SaveSectionAppearanceTests(unittest.TestCase):
         self.assertEqual(result["effect_speed"], 50)
         self.assertEqual(result["glow_intensity"], 30)
         self.assertEqual(result["light_intensity"], 20)
-        self.assertEqual(result["effects_mode"], "restraint")
+        # R8-072 (F5) : effects_mode RETIRÉ (fantôme cosmétique, 0 CSS consommateur).
+        self.assertNotIn("effects_mode", result)
         self.assertEqual(result["debug_enabled"], False)
 
     def test_debug_enabled_uses_default_when_absent(self) -> None:

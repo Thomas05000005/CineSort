@@ -27,7 +27,6 @@ from cinesort.domain.perceptual.parallelism import (
 )
 from cinesort.ui.api.perceptual_support import analyze_perceptual_batch
 
-
 # ---------------------------------------------------------------------------
 # resolve_batch_workers
 # ---------------------------------------------------------------------------

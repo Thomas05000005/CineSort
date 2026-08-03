@@ -14,17 +14,21 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constantes couleurs tiers qualité
 # ---------------------------------------------------------------------------
+# AUDIT 2026-06-10 : couleurs tier INVARIANTES (memoire user / CLAUDE.md #2),
+# source canonique web/shared/tokens.css. L'export HTML est un fichier autonome
+# qui ne peut pas charger le CSS de l'app -> duplication CONTROLEE des hex, mais
+# avec les bonnes valeurs (avant : #e2e8f0/#f59e0b/#94a3b8/#ca8a04, fausses).
 _TIER_COLORS = {
-    "platinum": "#e2e8f0",
-    "gold": "#f59e0b",
-    "silver": "#94a3b8",
-    "bronze": "#ca8a04",
-    "reject": "#ef4444",
+    "platinum": "#E5E4E2",
+    "gold": "#FFD700",
+    "silver": "#C0C0C0",
+    "bronze": "#CD7F32",
+    "reject": "#ef4444",  # hors invariant (pas un tier affiche), rouge conserve
     # Retro-compat lecture pour les profils/reports anterieurs a la migration 011
-    "premium": "#e2e8f0",
-    "bon": "#f59e0b",
-    "moyen": "#94a3b8",
-    "faible": "#ca8a04",
+    "premium": "#E5E4E2",
+    "bon": "#FFD700",
+    "moyen": "#C0C0C0",
+    "faible": "#CD7F32",
 }
 _TIER_LABELS = {
     "platinum": "Platinum",

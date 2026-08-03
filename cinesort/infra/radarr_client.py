@@ -62,6 +62,33 @@ class RadarrClient:
             }
         )
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling. Expose CM + close() + __del__ best-effort.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente (idempotent)."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "RadarrClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
