@@ -187,6 +187,11 @@ class RunIdValidationTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _api_with_run_id(self, run_id: str) -> MagicMock:
+        """Fabrique une api dont la BASE renvoie `run_id` comme dernier run DONE.
+
+        Le run_id est injecte par la source reelle (`get_runs_summary`), pas en
+        court-circuitant la garde : aucun mock ne fabrique la condition testee.
+        """
         api = MagicMock()
         api._state_dir = self.state_dir
         api.settings.get_settings.return_value = {"data": {}}
@@ -203,8 +208,16 @@ class RunIdValidationTests(unittest.TestCase):
         self.assertFalse(out["ok"])
 
     def test_run_id_with_forbidden_characters_is_refused(self) -> None:
+        """Un run_id porteur d'espaces et de ponctuation est refuse."""
         out = export_full_library(self._api_with_run_id("run id!"))
         self.assertFalse(out["ok"])
+
+    def test_refused_run_id_is_not_reflected_back_to_the_caller(self) -> None:
+        """La valeur alteree est loggee, jamais renvoyee : pas de reflexion vers l'UI."""
+        tampered = "run id!<script>"
+        out = export_full_library(self._api_with_run_id(tampered))
+        self.assertFalse(out["ok"])
+        self.assertNotIn(tampered, json.dumps(out, ensure_ascii=False))
 
     def test_legitimate_run_id_formats_still_export(self) -> None:
         """Garde-fou anti-regression : les formats reellement produits passent."""
@@ -222,9 +235,11 @@ class RunIdValidationTests(unittest.TestCase):
             _resolve_run_dir(self.state_dir, "../../outside")
 
     def test_resolve_run_dir_returns_none_when_run_purged(self) -> None:
+        """Un run efface du disque est un cas NORMAL : None, pas une exception."""
         self.assertIsNone(_resolve_run_dir(self.state_dir, "20260803_141500_123"))
 
     def test_resolve_run_dir_finds_prefixed_directory(self) -> None:
+        """Le dossier reellement produit par `state.new_run` porte le prefixe `tri_films_`."""
         run_dir = self.state_dir / "runs" / "tri_films_20260803_141500_123"
         run_dir.mkdir()
         self.assertEqual(_resolve_run_dir(self.state_dir, "20260803_141500_123"), run_dir.resolve())

@@ -231,36 +231,42 @@ class TestNfoYearIsolation(unittest.TestCase):
 
     def test_bad_decision_year_is_not_silently_replaced_by_proposed_year(self):
         """Une annee de decision fautive se signale, elle ne retombe pas en douce."""
-        rows = [
-            {
-                "folder": "D:\\Films\\X",
-                "video": "x.mkv",
-                "proposed_title": "X",
-                "decision_year": "????",
-                "proposed_year": 1999,
-            }
-        ]
-        result = export_nfo_for_run(rows, dry_run=True)
-        self.assertEqual(result["errors"], 1)
-        self.assertEqual(result["written"], 0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [
+                {
+                    "folder": tmpdir,
+                    "video": "x.mkv",
+                    "proposed_title": "X",
+                    "decision_year": "????",
+                    "proposed_year": 1999,
+                }
+            ]
+            result = export_nfo_for_run(rows, dry_run=True)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(result["written"], 0)
 
     def test_year_as_numeric_string_still_works(self):
-        rows = [{"folder": "D:\\Films\\X", "video": "x.mkv", "proposed_title": "X", "proposed_year": "2011"}]
-        result = export_nfo_for_run(rows, dry_run=True)
-        self.assertEqual(result["written"], 1)
-        self.assertEqual(result["errors"], 0)
+        """Une annee JSON serialisee en chaine reste une annee valide."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": "2011"}]
+            result = export_nfo_for_run(rows, dry_run=True)
+            self.assertEqual(result["written"], 1)
+            self.assertEqual(result["errors"], 0)
 
     def test_missing_year_is_not_an_error(self):
-        rows = [{"folder": "D:\\Films\\X", "video": "x.mkv", "proposed_title": "X"}]
-        result = export_nfo_for_run(rows, dry_run=True)
-        self.assertEqual(result["written"], 1)
-        self.assertEqual(result["errors"], 0)
+        """Une annee absente reste toleree (annee 0 = omise du NFO), ce n'est pas une erreur."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X"}]
+            result = export_nfo_for_run(rows, dry_run=True)
+            self.assertEqual(result["written"], 1)
+            self.assertEqual(result["errors"], 0)
 
 
 class TestNfoPathContainment(unittest.TestCase):
     """Issue #564 (CWE-22) — le .nfo ne peut pas s'ecrire hors du dossier du film."""
 
     def test_parent_traversal_in_video_is_refused_and_writes_nothing(self):
+        """Un `..` dans `video` remontait d'un cran et ecrivait hors du dossier du film."""
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir) / "film"
             base.mkdir()
@@ -271,6 +277,7 @@ class TestNfoPathContainment(unittest.TestCase):
             self.assertFalse((Path(tmpdir) / "evil.nfo").exists())
 
     def test_absolute_video_path_is_refused(self):
+        """`Path(folder) / video` avec `video` absolu ecrase le folder : la cible sort du dossier."""
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir) / "film"
             base.mkdir()
@@ -312,6 +319,7 @@ class TestNfoProviderIds(unittest.TestCase):
     """Issue #612 — tmdb_id/imdb_id doivent atterrir dans le .nfo."""
 
     def test_row_ids_are_written_into_the_nfo(self):
+        """Bout en bout : les identifiants de la row atterrissent dans le fichier ecrit."""
         with tempfile.TemporaryDirectory() as tmpdir:
             rows = [
                 {
@@ -349,6 +357,7 @@ class TestNfoProviderIds(unittest.TestCase):
             self.assertNotIn("uniqueid", content)
 
     def test_sentinel_zero_tmdb_id_is_treated_as_absent(self):
+        """0 est la sentinelle « absent » du payload amont, pas un identifiant fautif."""
         with tempfile.TemporaryDirectory() as tmpdir:
             rows = [{"folder": tmpdir, "video": "x.mkv", "proposed_title": "X", "proposed_year": 2009, "tmdb_id": 0}]
             export_nfo_for_run(rows, overwrite=True, dry_run=False)
@@ -360,10 +369,12 @@ class TestNfoDefaultUniqueId(unittest.TestCase):
     """Issue #612 — Kodi ne retient que l'uniqueid marque default="true"."""
 
     def test_imdb_becomes_default_when_tmdb_absent(self):
+        """Sans TMDb, IMDb doit porter `default="true"` sinon Kodi perd l'appariement."""
         xml = _build_nfo_xml("Avatar", 2009, imdb_id="tt0499549")
         self.assertIn('<uniqueid type="imdb" default="true">tt0499549</uniqueid>', xml)
 
     def test_exactly_one_default_when_both_ids_present(self):
+        """Kodi ne garde qu'un identifiant par defaut : il ne doit y en avoir qu'un de marque."""
         xml = _build_nfo_xml("Avatar", 2009, tmdb_id="19995", imdb_id="tt0499549")
         self.assertEqual(xml.count('default="true"'), 1)
         self.assertIn('<uniqueid type="tmdb" default="true">19995</uniqueid>', xml)
