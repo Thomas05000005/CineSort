@@ -256,7 +256,7 @@ def preprocess_frame_for_lpips(
         4. Normaliser [0, 255] -> [-1, 1].
         5. (1, 3, target_size, target_size) float32.
     """
-    if not pixels_y or width <= 0 or height <= 0:
+    if pixels_y is None or len(pixels_y) == 0 or width <= 0 or height <= 0:
         return None
     expected = int(width) * int(height)
     if len(pixels_y) != expected:
@@ -371,8 +371,10 @@ def compute_lpips_comparison(
     for frame in selected:
         w = int(frame.get("width", 0))
         h = int(frame.get("height", 0))
-        pa = frame.get("pixels_a") or []
-        pb = frame.get("pixels_b") or []
+        pa = frame.get("pixels_a")
+        pb = frame.get("pixels_b")
+        if pa is None or pb is None:
+            continue
         pre_a = preprocess_frame_for_lpips(pa, w, h)
         pre_b = preprocess_frame_for_lpips(pb, w, h)
         if pre_a is None or pre_b is None:

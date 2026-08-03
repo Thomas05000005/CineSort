@@ -1,0 +1,10 @@
+state_dir jetable: C:\Users\blanc\AppData\Local\Temp\cs_settings_rt_00loz9do
+cles mutees (non-secretes): 99
+
+=== DIVERGENCES round-trip (2/99) ===
+  [DIFF] composite_score_version: ecrit=3  relu=2
+  [DIFF] remember_key: ecrit=True  relu=False
+
+[falsifiabilite] canary relu = ('__ABSENT__',) (si conserve => harnais voit bien les valeurs)
+
+NOTE: une divergence peut etre une NORMALISATION legitime (chemin, alias, clamp) — a juger une par une, PAS un bug automatique.

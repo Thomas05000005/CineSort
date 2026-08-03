@@ -25,7 +25,6 @@ import requests
 
 from cinesort.infra.omdb_client import OmdbClient, _parse_quota_int
 
-
 # --- Helpers ---
 
 

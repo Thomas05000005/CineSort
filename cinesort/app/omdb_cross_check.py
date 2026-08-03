@@ -23,6 +23,7 @@ import re
 import unicodedata
 from typing import Any, Callable, List, Optional, Tuple
 
+from cinesort.domain.confidence_thresholds import confidence_label
 from cinesort.infra.omdb_client import OmdbClient, OmdbResult
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,40 @@ _YEAR_TOLERANCE = 1
 # Pre-compile : _normalize_title_for_compare est appele dans une boucle sur des
 # milliers de rows (cross_check_rows_with_omdb), evite N x recompilation.
 _NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]")
+
+# AUDIT F24 (revue R1) : `notes` fige le couple label/score EN TOUTES LETTRES.
+# core.build_plan_note ouvre la note par "Confiance MED (72/100)." et ce champ
+# est stocke, serialise verbatim dans plan.jsonl, expose par dashboard_support et
+# AFFICHE tel quel a l'utilisateur (traitement.js "Notes :"). Resynchroniser le
+# seul `confidence_label` faisait dire "high" au badge et "MED (72/100)" a la
+# note juste a cote — avant le correctif F24 les deux etaient au moins d'accord.
+_CONFIDENCE_NOTE_RE = re.compile(r"^Confiance\s+[A-Za-z]+\s+\(\d+/100\)\.")
+
+
+def resync_confidence_fields(row: Any, new_confidence: int) -> None:
+    """Aligne `confidence_label` ET la 1re phrase de `notes` sur `new_confidence`.
+
+    Helper PARTAGE par les deux post-process qui mutent `row.confidence`
+    (omdb_cross_check et runtime_probe_check) : ce sont les seuls endroits ou le
+    couple (confidence, label, notes) peut se desynchroniser, aucun consommateur
+    aval ne recalculant ces champs derives.
+
+    Tolerant par construction :
+    - `confidence_label` n'est ecrit que si la row porte le champ (les stubs de
+      test ne l'ont pas toujours) ;
+    - `notes` n'est reecrit que si sa 1re phrase a bien la forme attendue ; une
+      note absente, vide ou d'un autre format est laissee STRICTEMENT intacte
+      (on ne mutile jamais un texte qu'on n'a pas produit).
+    """
+    label = confidence_label(int(new_confidence))
+    if hasattr(row, "confidence_label"):
+        row.confidence_label = label
+    notes = getattr(row, "notes", None)
+    if not isinstance(notes, str) or not notes:
+        return
+    updated, n_sub = _CONFIDENCE_NOTE_RE.subn(f"Confiance {label.upper()} ({int(new_confidence)}/100).", notes, count=1)
+    if n_sub:
+        row.notes = updated
 
 
 def _normalize_title_for_compare(title: str) -> str:
@@ -158,6 +193,17 @@ def cross_check_rows_with_omdb(
         bonus, warning = _compute_adjustment(title, year, omdb_result)
         new_confidence = max(0, min(100, confidence + bonus))
         row.confidence = new_confidence
+        # AUDIT F24 : confidence_label ET notes sont des champs STOCKES
+        # (domain/core.py) jamais recomputes en aval (serialises verbatim dans
+        # plan.jsonl -> dashboard). Sans cette resynchro, une row 72/'med' boostee
+        # a 92 gardait le badge 'med' et restait comptee dans "Cas a verifier", et
+        # une row 88/'high' penalisee a 63 gardait un badge 'high' mensonger.
+        # Revue R1 : `notes` porte le MEME couple en toutes lettres ("Confiance
+        # MED (72/100).") et etait laisse perime -> badge et note se contredisaient.
+        # Garde `bonus` : si OMDb n'a pas d'annee (bonus 0) rien n'a bouge, on ne
+        # touche a rien.
+        if bonus:
+            resync_confidence_fields(row, new_confidence)
 
         if warning:
             flags = getattr(row, "warning_flags", None)

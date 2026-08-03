@@ -151,9 +151,17 @@ class FiltersDrawerTests(unittest.TestCase):
         for d in ("1930", "1950", "2000", "2020"):
             self.assertIn(d, self.js)
 
-    def test_genre_filter_options(self) -> None:
-        for g in ("Action", "Comédie", "Drame", "Science-Fiction"):
-            self.assertIn(g, self.js)
+    def test_genre_filter_removed_dead_control(self) -> None:
+        """AUDIT 2026-06-11 (R4-P7) : la section Genres TMDb est RETIREE du
+        drawer (controle mort - les rows n'embarquent pas les genres TMDb,
+        _row_matches ne peut pas filtrer dessus ; cocher un genre n'avait
+        AUCUN effet). Re-ancrage : l'ancien test exigeait les 19 options.
+        La cle genres:[] reste dans l'etat pour compat."""
+        self.assertNotIn("Genres TMDb</legend>", self.js)
+        for g in ("Comédie", "Science-Fiction", "Téléfilm"):
+            self.assertNotIn(g, self.js)
+        # La cle de compat reste presente dans l'etat.
+        self.assertIn("genres: []", self.js)
 
     def test_source_filter_options(self) -> None:
         for s in ("BluRay", "WEB-DL", "DVD"):

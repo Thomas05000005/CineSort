@@ -6,6 +6,9 @@
  */
 
 import { apiPost } from "./api.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer alert() natifs
+// par showToast pour notifications non destructives (drop & drop est informatif).
+import { showToast } from "../components/toast.js";
 
 let _overlay = null;
 let _counter = 0;
@@ -46,12 +49,14 @@ async function _processDrop(e) {
   const file = files[0];
   const path = file.path || file.webkitRelativePath || "";
   if (!path) {
-    alert("Le glisser-déposer de dossiers requiert le mode natif (desktop). Utilisez le bouton Parcourir dans les Paramètres.");
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+    showToast({ type: "warning", text: "Le glisser-déposer de dossiers requiert le mode natif (desktop). Utilisez le bouton Parcourir dans les Paramètres." });
     return;
   }
   const result = await apiPost("runtime/validate_dropped_path", { path });
   if (!result?.data?.ok) {
-    alert(result?.data?.message || "Chemin invalide.");
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+    showToast({ type: "error", text: result?.data?.message || "Chemin invalide." });
     return;
   }
   const resolved = result.data.path || path;
@@ -60,18 +65,21 @@ async function _processDrop(e) {
   const s = sr?.data || {};
   const roots = Array.isArray(s.roots) ? s.roots.slice() : (s.root ? [s.root] : []);
   if (roots.some(r => String(r).toLowerCase() === resolved.toLowerCase())) {
-    alert("Ce dossier est déjà dans les racines.");
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+    showToast({ type: "info", text: "Ce dossier est déjà dans les racines." });
     return;
   }
   roots.push(resolved);
   const newSettings = { ...s, roots, root: roots[0] };
   const save = await apiPost("settings/save_settings", { settings: newSettings });
   if (save?.data?.ok) {
-    alert(`Dossier ajouté : ${resolved}`);
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+    showToast({ type: "success", text: `Dossier ajouté : ${resolved}` });
     // Recharger la vue courante
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   } else {
-    alert("Impossible d'enregistrer le dossier.");
+    // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace alert() natif
+    showToast({ type: "error", text: "Impossible d'enregistrer le dossier." });
   }
 }
 

@@ -215,7 +215,10 @@ function _renderError(title, msg) {
 
 function _renderScoreSection(d) {
   const score = d.global_score_v2 != null ? Math.round(Number(d.global_score_v2)) : null;
-  const tier = String(d.tier_v2 || d.global_tier_v2 || "unknown").toLowerCase();
+  // VN-B.2 : single source of truth display_tier (echelle V2 lowercase
+  // reconciliee backend). Fallback tier_v2 / global_tier_v2 pour les payloads
+  // pre-VN-B.2.
+  const tier = String(d.display_tier || d.tier_v2 || d.global_tier_v2 || "unknown").toLowerCase();
   const tierLabel = humanize(tier, tier);
   const sev = severityForTier(tier);
   const visualScore = d.visual_score != null ? Number(d.visual_score) : null;

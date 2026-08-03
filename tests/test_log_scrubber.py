@@ -7,6 +7,7 @@ supprimer un log ni lever d'exception.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import unittest
@@ -17,7 +18,6 @@ from cinesort.infra.log_scrubber import (
     reset_for_tests,
     scrub_secrets,
 )
-import contextlib
 
 
 class ScrubSecretsFunctionTests(unittest.TestCase):
@@ -215,6 +215,57 @@ class ScrubFilterIntegrationTests(unittest.TestCase):
         self.logger.info("Message normal sans secret.")
         output = self.stream.getvalue()
         self.assertIn("Message normal sans secret.", output)
+
+    def test_filter_scrubs_non_str_exception_arg(self) -> None:
+        """GATE AUDIT 2026-06-10 : l'idiome logger.x('... : %s', exc) passe un
+        OBJET non-str dont __str__ contient un secret (URL avec api_key=). Avant
+        le fix, seuls les args str etaient scrubbes -> fuite en clair."""
+
+        class _FakeHTTPError(Exception):
+            def __str__(self) -> str:
+                return "401 Client Error for url: https://www.omdbapi.com/?apikey=leakedKey777"
+
+        self.logger.error("OMDb echec : %s", _FakeHTTPError())
+        output = self.stream.getvalue()
+        self.assertIn("[REDACTED]", output)
+        self.assertNotIn("leakedKey777", output)
+
+    def test_filter_preserves_numeric_args(self) -> None:
+        """Un arg numerique (%d) sans secret reste un int : pas de crash de format."""
+        self.logger.error("count=%d ratio=%.2f", 42, 3.14)
+        output = self.stream.getvalue()
+        self.assertIn("count=42", output)
+        self.assertIn("ratio=3.14", output)
+
+
+class InstallReSyncTests(unittest.TestCase):
+    """GATE AUDIT 2026-06-10 : install_global_scrubber re-synchronise le filtre
+    sur les handlers ajoutes APRES un premier appel (cas app.py : install avant
+    basicConfig, le StreamHandler console n'etait pas couvert)."""
+
+    def setUp(self) -> None:
+        reset_for_tests()
+        self.root = logging.getLogger()
+        self._saved = list(self.root.handlers)
+
+    def tearDown(self) -> None:
+        for h in list(self.root.handlers):
+            if h not in self._saved:
+                self.root.removeHandler(h)
+        self.root.filters.clear()
+        reset_for_tests()
+
+    def test_handler_added_after_install_is_covered_on_resync(self) -> None:
+        install_global_scrubber()  # 1er appel (avant basicConfig dans app.py)
+        late_handler = logging.StreamHandler(io.StringIO())
+        self.root.addHandler(late_handler)
+        # Avant re-sync : le handler tardif n'a pas le filtre
+        self.assertFalse(any(isinstance(f, SecretsScrubFilter) for f in late_handler.filters))
+        install_global_scrubber()  # re-sync (apres basicConfig)
+        self.assertTrue(
+            any(isinstance(f, SecretsScrubFilter) for f in late_handler.filters),
+            "le handler ajoute apres le 1er install doit etre couvert au re-sync",
+        )
 
 
 class InstallRotatingLogTests(unittest.TestCase):

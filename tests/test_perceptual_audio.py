@@ -15,14 +15,13 @@ import unittest
 from unittest import mock
 
 from cinesort.domain.perceptual.audio_perceptual import (
-    analyze_audio_perceptual,
+    _compute_audio_score,
     analyze_astats,
+    analyze_audio_perceptual,
     analyze_clipping_segments,
     analyze_loudnorm,
     select_best_audio_track,
-    _compute_audio_score,
 )
-
 
 # ---------------------------------------------------------------------------
 # select_best_audio_track (2 tests)

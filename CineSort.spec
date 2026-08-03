@@ -182,6 +182,24 @@ hiddenimports += [
 # mais collect_submodules garantit une couverture exhaustive sans maintenance manuelle.
 hiddenimports += collect_submodules("cinesort.domain.perceptual")
 
+# Fix audit 2026-05-25 (v1.5.3) Vague H : hiddenimports complementaires
+# - PIL : utilise dynamiquement par perceptual_support.py (encodage PNG frames)
+# - requests.packages.urllib3 / urllib3 : http clients TMDb/Jellyfin/Plex/Radarr
+# - onnxruntime.capi : runtime C natif requis par LPIPS ONNX (§11)
+# - cryptography.hazmat.bindings : bindings natifs requis pour HTTPS REST
+# Vague M post-mortem : collect_submodules('PIL') ramenait ~50 plugins inutiles
+# (ImageTk, AvifImagePlugin, BdfFontFile, etc.). Seul PIL.Image est utilise
+# par perceptual_support.py L825 -> on liste explicitement le minimum.
+hiddenimports += [
+    "PIL",
+    "PIL.Image",
+    "PIL.PngImagePlugin",
+    "requests.packages.urllib3",
+    "urllib3",
+    "onnxruntime.capi",
+    "cryptography.hazmat.bindings",
+]
+
 # ---------------------------------------------------------------------------
 # Data files: web/, migrations SQL, deps dynamiques
 # ---------------------------------------------------------------------------
@@ -202,6 +220,13 @@ migration_datas = [
     for p in Path("cinesort/infra/db/migrations").glob("*.sql")
 ]
 
+# VP-F (Vague P batch 6) : presets statiques (tier_preset_trash_2026.json + alternatifs).
+# DESACTIVES par defaut (AC-3) ; charges via importlib.resources("cinesort.data.presets").
+preset_datas = [
+    (str(p), "cinesort/data/presets")
+    for p in Path("cinesort/data/presets").glob("*.json")
+] if Path("cinesort/data/presets").is_dir() else []
+
 # V6-01 Polish Total v7.7.0 : fichiers de traduction i18n (locales/<lang>.json)
 # servis par /locales/* via REST + lus par cinesort/domain/i18n_messages.py.
 locales_datas = [
@@ -209,10 +234,43 @@ locales_datas = [
     for p in Path("locales").glob("*.json")
 ] if Path("locales").is_dir() else []
 
+# V3.1 SCAFFOLDING — Bundle WebView2 Fixed Version, OPT-IN via env var.
+# Active uniquement quand `CINESORT_BUNDLE_WEBVIEW2=1` est defini AVANT le
+# build (typiquement par un mainteneur preparant une release "fixed runtime").
+# Le repertoire `webview2_fixed/` doit avoir ete pre-rempli via
+# `scripts/download_webview2_fixed.py` (cf docs/RELEASE.md section
+# "Bundle WebView2 (release seulement)"). En l'absence des fichiers ou de la
+# variable d'env, le bundle reste vide -> l'EXE continue d'utiliser le
+# runtime Evergreen installe sur la machine utilisateur (comportement
+# historique, backward-compat ABSOLUE).
+_bundle_webview2_env = str(os.environ.get("CINESORT_BUNDLE_WEBVIEW2", "")).strip().lower()
+_bundle_webview2 = _bundle_webview2_env in {"1", "true", "yes", "on"}
+webview2_fixed_datas = []
+if _bundle_webview2 and Path("webview2_fixed").is_dir():
+    for p in sorted(Path("webview2_fixed").rglob("*")):
+        if not p.is_file():
+            continue
+        rel_parent = p.relative_to("webview2_fixed").parent
+        webview2_fixed_datas.append(
+            (str(p), str(Path("webview2_fixed") / rel_parent))
+        )
+    print(
+        f"[SPEC] V3.1 Bundle WebView2 Fixed ACTIVE — {len(webview2_fixed_datas)} fichiers embarques.",
+        file=sys.stderr,
+    )
+elif _bundle_webview2:
+    print(
+        "[SPEC] V3.1 CINESORT_BUNDLE_WEBVIEW2=1 mais webview2_fixed/ absent. "
+        "Lancer scripts/download_webview2_fixed.py avant le build.",
+        file=sys.stderr,
+    )
+
 datas = (
     web_datas
     + migration_datas
     + locales_datas
+    + preset_datas
+    + webview2_fixed_datas
     + cffi_datas
     + clr_loader_datas
     + pythonnet_datas
@@ -233,7 +291,11 @@ binaries = cffi_binaries + clr_loader_binaries + pythonnet_binaries
 binaries.append((str(_cffi_backend_path), "."))
 
 # ---------------------------------------------------------------------------
-# Excludes — strip unused stdlib and dev-only modules (~15-25 MB saved)
+# Excludes — strip unused stdlib, dev-only modules, and ML deps tirees par
+# defaut depuis le site-packages global (torch=3.5GB, transformers, scipy, ...)
+# Vague M post-mortem : ces packages NE SONT PAS importes par cinesort/ mais
+# PyInstaller les detecte via les hooks contrib quand ils sont installes
+# globalement. Sans excludes, bundle = 2.33 GB ; avec excludes ~150 MB.
 # ---------------------------------------------------------------------------
 
 excludes = [
@@ -251,6 +313,74 @@ excludes = [
     # Exclure cause ImportError sur cette feature - cf audit 2026-05-24.
     # Other unused stdlib
     "curses", "turtledemo", "turtle", "idlelib",
+    # ---- Vague M post-mortem : ML stack tiree par site-packages global ----
+    # torch + ecosystem : aucun import direct dans cinesort/ (lpips_compare
+    # utilise onnxruntime). torch/lib seul fait 3.5 GB de DLLs CUDA.
+    "torch", "torchvision", "torchaudio",
+    "transformers", "tokenizers", "accelerate", "safetensors",
+    "huggingface_hub", "hf_xet",
+    "tensorflow", "tensorboard",
+    # ---- V3.2 preventif (2026-06-05) : excludes torch.cuda + nvidia/cublas ----
+    # Zero-cost quand torch est absent (PyInstaller ignore silencieusement un
+    # exclude qui ne matche rien). Si torch est ajoute plus tard via torch-cpu
+    # (cf docs/internal/notes/torch_cpu_strategy.md), ces excludes protegent
+    # automatiquement contre l'inclusion accidentelle de la stack CUDA (~3.5 GB).
+    "torch.cuda", "torch.distributed",
+    "torch.backends.cuda", "torch.backends.cudnn",
+    "nvidia",
+    "nvidia_cublas_cu12", "nvidia_cuda_cupti_cu12", "nvidia_cuda_nvrtc_cu12",
+    "nvidia_cuda_runtime_cu12", "nvidia_cudnn_cu12", "nvidia_cufft_cu12",
+    "nvidia_curand_cu12", "nvidia_cusolver_cu12", "nvidia_cusparse_cu12",
+    "nvidia_nccl_cu12", "nvidia_nvjitlink_cu12", "nvidia_nvtx_cu12",
+    "cublas", "cudnn",
+    # scipy : 0 import, tire par hook auto. Si besoin futur, reactiver.
+    "scipy",
+    # Notebook/IPython stack : completion code IDE, jamais utilisee runtime
+    "IPython", "ipykernel", "jedi", "parso",
+    "nbformat", "nbconvert", "jupyter", "jupyter_client", "jupyter_core",
+    "notebook", "traitlets", "tornado",
+    # Messaging async/notebook
+    "zmq", "pyzmq",
+    # Templating/parsing non utilises
+    "lxml", "jinja2", "fsspec", "anyio",
+    "sympy", "networkx", "matplotlib", "pandas",
+    "lark", "jsonschema", "jsonschema_specifications", "referencing",
+    # rich/pygments : pas d'usage runtime CineSort
+    "rich", "pygments",
+    # Dev-only (pyproject [optional-dependencies] dev)
+    "playwright",
+    "pytest", "_pytest", "pytest_cov",
+    "hypothesis",
+    "coverage",
+    "ruff",
+    "pre_commit",
+    "importlinter", "import_linter",
+    # numpy : noyau garde, mais sous-modules dev/build inutiles
+    "numpy.distutils", "numpy.f2py", "numpy.testing", "numpy.tests",
+    # onnxruntime : noyau garde (capi), modules training/tools inutiles
+    "onnxruntime.training", "onnxruntime.tools",
+    # PIL : noyau garde (Image, PngImagePlugin via hiddenimports), plugins
+    # exotiques retires (encodage PNG seul est utilise par perceptual_support).
+    "PIL.ImageTk", "PIL.ImageDraw2", "PIL.ImageQt",
+    "PIL.ImageGrab", "PIL.ImageShow", "PIL.ImageWin",
+    "PIL._tkinter_finder",
+    "PIL.AvifImagePlugin", "PIL.BdfFontFile", "PIL.BlpImagePlugin",
+    "PIL.BufrStubImagePlugin", "PIL.ContainerIO", "PIL.CurImagePlugin",
+    "PIL.DcxImagePlugin", "PIL.DdsImagePlugin", "PIL.EpsImagePlugin",
+    "PIL.FitsImagePlugin", "PIL.FliImagePlugin", "PIL.FpxImagePlugin",
+    "PIL.FtexImagePlugin", "PIL.GbrImagePlugin", "PIL.GdImageFile",
+    "PIL.GribStubImagePlugin", "PIL.Hdf5StubImagePlugin",
+    "PIL.IcnsImagePlugin", "PIL.IcoImagePlugin", "PIL.ImImagePlugin",
+    "PIL.ImageMorph", "PIL.ImageTransform", "PIL.ImtImagePlugin",
+    "PIL.IptcImagePlugin", "PIL.McIdasImagePlugin", "PIL.MicImagePlugin",
+    "PIL.MpegImagePlugin", "PIL.MspImagePlugin", "PIL.PSDraw",
+    "PIL.PalmImagePlugin", "PIL.PcdImagePlugin", "PIL.PcfFontFile",
+    "PIL.PdfImagePlugin", "PIL.PixarImagePlugin", "PIL.PsdImagePlugin",
+    "PIL.QoiImagePlugin", "PIL.SgiImagePlugin", "PIL.SpiderImagePlugin",
+    "PIL.SunImagePlugin", "PIL.TarIO", "PIL.TgaImagePlugin",
+    "PIL.WalImageFile", "PIL.WebPImagePlugin", "PIL.WmfImagePlugin",
+    "PIL.XVThumbImagePlugin", "PIL.XbmImagePlugin", "PIL.XpmImagePlugin",
+    "PIL.__main__", "PIL.report",
 ]
 
 # ---------------------------------------------------------------------------
