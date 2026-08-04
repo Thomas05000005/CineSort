@@ -25,6 +25,7 @@ from unittest import mock
 
 sys.path.insert(0, ".")
 
+from cinesort.domain.quality_score import SCORING_RULES_VERSION
 from cinesort.infra.db.sqlite_store import SQLiteStore
 from cinesort.ui.api import quality_report_support
 from cinesort.ui.api.quality_report_support import profile_fingerprint
@@ -145,7 +146,17 @@ class QualityReportStaleProfileTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _seed_report(self, profile: Dict[str, Any], *, with_fingerprint: bool = True) -> None:
-        metrics: Dict[str, Any] = {"engine_version": "CinemaLux_v1", "probe_quality": "OK"}
+        # `scoring_rules_version` : deuxieme garde du meme gate, arrivee par
+        # PR#854 sur main (un changement de REGLE de code perime aussi les
+        # rapports). Elle est seedee a la valeur COURANTE pour que la seule
+        # variable de cette classe reste l'empreinte de profil ; sans elle,
+        # chaque cas « cache refuse » passerait a cause de l'estampille absente
+        # et ne prouverait plus rien du finding N30.
+        metrics: Dict[str, Any] = {
+            "engine_version": "CinemaLux_v1",
+            "probe_quality": "OK",
+            "scoring_rules_version": SCORING_RULES_VERSION,
+        }
         if with_fingerprint:
             metrics["profile_fingerprint"] = profile_fingerprint(profile)
         self.store.quality.upsert_quality_report(

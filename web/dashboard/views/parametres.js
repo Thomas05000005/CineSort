@@ -337,10 +337,12 @@ export const PARAMETRES_GROUPS = [
           hint: "Force un appel à GitHub Releases pour détecter une nouvelle version." },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
+        // "retention_days" RETIRE (2026-08-03) : le champ promettait une purge des
+        // "analyses perceptuelles et scores qualité" qui n'existe nulle part cote
+        // backend (aucun lecteur du reglage). Il ne restait que le seul reglage
+        // reellement branche, sur le cron de purge des runs.
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
           hint: "Au-delà, les runs sont purgés automatiquement.", advanced: true },
-        { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
-          hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
       // VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review + viewer + bouton vider.
       // Cron 24h cote backend purge _review/_conflicts, _conflicts_sidecars,
@@ -1661,23 +1663,58 @@ async function _saveProfileAsNew() {
   });
 }
 
+/* Revue post-merge 2026-08-03 — deux defauts cumules sur la saisie du nom :
+ *
+ * (1) MESSAGE D'ERREUR INVISIBLE. components/modal.js appelle `onClick()` PUIS
+ *     `closeModal()` sans condition, et closeModal fait `overlay.remove()` de
+ *     maniere synchrone : le texte etait donc ecrit dans un noeud DEJA DETACHE
+ *     et n'atteignait jamais l'ecran. La modale rouverte repartait en plus de la
+ *     valeur par defaut, effacant la saisie. Symptome vecu : le champ redevient
+ *     « MonProfil_v1 », rien n'explique pourquoi, l'utilisateur reboucle.
+ *     Correctif : on transmet la saisie ET le motif du refus a la modale
+ *     rouverte, au lieu d'ecrire dans un noeud mort.
+ *
+ * (2) REGEX ASCII DANS UNE UI FRANCAISE. `[A-Za-z0-9 _-]` refusait tout accent :
+ *     « Qualité max », « Ciné 4K » etaient rejetes — le cas courant, pas un cas
+ *     tordu. On accepte desormais lettres et chiffres Unicode, espace,
+ *     apostrophe, tiret et underscore. `/`, `\`, `.`, `:` et les caracteres de
+ *     controle restent exclus (le nom sert d'`id` de profil ; il n'est jamais
+ *     transforme en chemin cote backend — il est stocke dans
+ *     settings.custom_quality_profiles — mais on garde la liste courte).
+ *
+ *     `\p{M}` (marques combinantes) est inclus en plus de `\p{L}` : un « é »
+ *     colle depuis un texte en forme NFD est la sequence « e » + U+0301, que
+ *     `\p{L}` seul refuse. Mesure faite avec la regex reelle : « Qualité max »
+ *     passe en NFC et echouait en NFD. Une marque combinante ne peut etre ni un
+ *     separateur de chemin ni un caractere de controle.
+ */
+const _PROFILE_NAME_RE = /^[\p{L}\p{M}\p{N} '’_-]{3,40}$/u;
+const _PROFILE_NAME_HELP =
+  "3 à 40 caractères. Lettres (accents acceptés), chiffres, espaces, apostrophes, tirets, underscores.";
+const _PROFILE_NAME_DEFAULT = "MonProfil_v1";
+
 /**
  * Modale custom pour demander un nom de profil. Remplace window.prompt() natif
  * (incompatible WebView2, viole la memoire user "JAMAIS window.prompt/confirm/alert").
- * Validation inline : regex [A-Za-z0-9 _-]+, longueur 3..40.
+ *
+ * @param {Function} onSubmit - appele avec le nom valide.
+ * @param {{initialValue?: string, errorMessage?: string}} [opts] - etat reinjecte
+ *        quand la modale se rouvre apres un refus de validation.
  */
-function _promptNewProfileName(onSubmit) {
+function _promptNewProfileName(onSubmit, opts) {
   return new Promise((resolve) => {
-    const NAME_RE = /^[A-Za-z0-9 _\-]{3,40}$/;
+    const initialValue = opts && opts.initialValue != null ? String(opts.initialValue) : _PROFILE_NAME_DEFAULT;
+    const errorMessage = opts && opts.errorMessage ? String(opts.errorMessage) : "";
     const bodyHtml = `
       <p>Saisissez un nom pour le nouveau profil qualité.</p>
       <label class="parametres-profile-name-label" for="parametres-profile-name-input">Nom du profil</label>
-      <input id="parametres-profile-name-input" type="text" class="v5-input" value="MonProfil_v1"
+      <input id="parametres-profile-name-input" type="text" class="v5-input" value="${escapeHtml(initialValue)}"
              autocomplete="off" spellcheck="false" data-parametres-profile-name-input
              style="width:100%;margin-top:4px;">
       <p class="text-muted font-sm mt-2" data-parametres-profile-name-error
-         style="min-height:1.2em;color:#DC2626;">
-        3 à 40 caractères. Lettres, chiffres, espaces, tirets, underscores uniquement.
+         ${errorMessage ? 'role="alert"' : ""}
+         style="min-height:1.2em;${errorMessage ? "color:#DC2626;font-weight:600;" : ""}">
+        ${escapeHtml(errorMessage || _PROFILE_NAME_HELP)}
       </p>
     `;
     showModal({
@@ -1688,15 +1725,17 @@ function _promptNewProfileName(onSubmit) {
         { label: "Créer", cls: "btn-primary", onClick: () => {
           const overlay = document.getElementById("dashModal");
           const input = overlay?.querySelector("[data-parametres-profile-name-input]");
-          const errEl = overlay?.querySelector("[data-parametres-profile-name-error]");
           const value = input?.value?.trim() || "";
-          if (!NAME_RE.test(value)) {
-            if (errEl) {
-              errEl.textContent = "Nom invalide : 3 à 40 caractères, lettres / chiffres / espaces / - / _.";
-              errEl.style.color = "#DC2626";
-            }
-            // Empecher closeModal automatique en re-ouvrant
-            setTimeout(() => { _promptNewProfileName(onSubmit).then(resolve); }, 0);
+          if (!_PROFILE_NAME_RE.test(value)) {
+            // modal.js va fermer la modale quoi qu'il arrive : inutile d'ecrire
+            // dans l'overlay courant (il sera detache). On rouvre en portant le
+            // motif du refus ET la saisie de l'utilisateur.
+            setTimeout(() => {
+              _promptNewProfileName(onSubmit, {
+                initialValue: value,
+                errorMessage: `Nom invalide. ${_PROFILE_NAME_HELP}`,
+              }).then(resolve);
+            }, 0);
             return;
           }
           // OK : execute la callback puis resolve

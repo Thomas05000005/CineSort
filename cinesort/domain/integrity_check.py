@@ -41,9 +41,10 @@ _MAGIC_WMV = bytes([0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11])
 #   M2TS/MTS valide etait faussement classe "header_mismatch".
 _TS_SYNC_BYTE = 0x47
 _TS_PACKET_SIZE = 188
+_TS_PACKET_SIZE_M2TS = 192  # 188 + les 4 octets du TP_extra_header
 _TS_SYNC_COUNT = 3  # verifier 3 sync bytes
 # (offset du 1er sync, taille de paquet) testes dans l'ordre
-_TS_LAYOUTS = ((0, 188), (4, 192))
+_TS_LAYOUTS = ((0, _TS_PACKET_SIZE), (4, _TS_PACKET_SIZE_M2TS))
 
 # Extensions supportees par la verification
 _EXT_TO_FORMAT: Dict[str, str] = {
