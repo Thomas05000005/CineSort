@@ -116,6 +116,24 @@ class TmdbClientHostileTests(unittest.TestCase):
         self.assertIn("HTTP 429", message)
         self.assertIn("rate limit exceeded", message)
 
+    def test_validate_key_scrubs_secret_straddling_the_200_char_cut(self) -> None:
+        # Revue PR#643 (sourcery-ai) : scrub_secrets(r.text[:200]) laissait fuir
+        # un secret coupe par la troncature. Les patterns « valeur entre
+        # guillemets » de log_scrubber exigent le guillemet FERMANT ; couper la
+        # valeur avant lui tue le match et le fragment de cle part en clair vers
+        # l'UI. Ici la cle commence au caractere 180 : 20 de ses caracteres sont
+        # dans la fenetre de 200, le guillemet fermant non.
+        leaked_key = "abcdef0123456789abcdef0123456789"
+        body = "x" * 163 + '{"tmdb_api_key":"' + leaked_key + '"}'
+        self.assertEqual(len(body[:200]), 200, "le corps doit depasser la fenetre de troncature")
+        self.assertNotIn('"}', body[:200], "le guillemet fermant doit tomber APRES la coupure")
+        response = _FakeResponse(status_code=500, payload=ValueError("bad json"), text=body)
+        with mock.patch.object(self.client._session, "get", return_value=response):
+            ok, message = self.client.validate_key()
+        self.assertFalse(ok)
+        self.assertNotIn(leaked_key[:20], message, "fragment de cle API en clair dans le message front")
+        self.assertIn("[REDACTED]", message)
+
     def test_search_movie_returns_empty_list_on_http_5xx(self) -> None:
         response = _FakeResponse(
             status_code=500,
