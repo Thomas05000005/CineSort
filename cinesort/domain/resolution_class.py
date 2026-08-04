@@ -46,10 +46,23 @@ def _positive_int(value: Any) -> int:
     SQLite) : un `int()` nu y leverait ValueError sur une valeur corrompue et
     ferait echouer tout le rapport qualite. On degrade vers 0, ce qui remonte
     `RES_UNKNOWN` donc « pas de verdict » — jamais un faux verdict.
+
+    `OverflowError` est INDISPENSABLE dans le tuple, et c'est le meme piege que
+    la regle 4 du CLAUDE.md (`sqlite3.Error` n'herite pas d'`OSError`) :
+    `OverflowError` derive d'`ArithmeticError`, PAS de `ValueError`. Or le cas
+    est ATTEIGNABLE — `json.loads` accepte `Infinity` et `NaN` par defaut
+    (extension non standard), donc une valeur persistee peut les contenir :
+
+        int(float("nan"))  -> ValueError      (attrape)
+        int(float("inf"))  -> OverflowError   (NON attrape sans cette entree)
+
+    Sans elle, un seul `Infinity` dans `metrics.detected` faisait echouer le
+    rapport qualite entier — exactement ce que cette fonction existe pour
+    empecher. Releve par CodeRabbit sur la PR#908.
     """
     try:
         n = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
     return n if n > 0 else 0
 
