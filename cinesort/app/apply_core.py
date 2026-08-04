@@ -287,7 +287,7 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     """
     import time as _time_mod  # local pour eviter shadow du module ``time`` haut
 
-    digest = hashlib.sha1()
+    digest = hashlib.sha1(usedforsecurity=False)
     start = _time_mod.monotonic()
     chunk_8m = 8 * 1024 * 1024
     try:

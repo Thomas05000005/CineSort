@@ -21,6 +21,7 @@ from cinesort.ui.api.perceptual_support import (
     _build_tmdb_client,
     enrich_quality_report_with_perceptual,
 )
+from cinesort.ui.api.probe_support import probe_settings_from_dict, probe_settings_from_run_row
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
@@ -62,6 +63,43 @@ def detect_nfo_runtime_mismatch(
     }
 
 
+def probe_settings_for_report(api: Any, run_row: Any) -> Dict[str, Any]:
+    """Settings probe du rapport qualite, sans detection d'outils inutile.
+
+    `api._effective_probe_settings_for_runtime` fait DEUX choses :
+
+    a. resoudre `probe_backend` depuis les settings courants (ou, a defaut, la
+       config persistee du run) ;
+    b. auto-remplir `ffprobe_path` / `mediainfo_path` via
+       `tools_manager.detect_probe_tools`.
+
+    (b) balaye le PATH et les dossiers winget a CHAQUE appel : son cache
+    (`probe_support.probe_tools_status_payload`) n'est consulte que lorsque
+    `check_versions=True`, or ce chemin passe `check_versions=False`. Mesure en
+    conditions reelles : 31,06 ms par rapport, dont l'essentiel en
+    `shutil.which` (13 appels -> ~5 900 `nt._path_exists`).
+
+    Quand `probe_backend == none`, (b) est du travail pur perte : `ProbeService`
+    ne lit alors AUCUN chemin d'outil (cf `probe_file`, branche `none`). On
+    resout donc d'abord le backend avec les MEMES primitives que
+    `effective_probe_settings_for_runtime` -- `probe_settings_from_dict` sur les
+    settings courants, avec repli sur la config du run -- et on n'appelle la
+    version complete que si la sonde est reellement active. Cout du raccourci :
+    0,246 ms.
+
+    Aucune heuristique nouvelle n'est introduite : la version complete ne
+    touche JAMAIS `probe_backend`, elle n'ecrit que les deux chemins d'outils.
+    Cet invariant est verrouille par
+    `tests/test_perf_probe_tools_cache_n1.py::EffectiveProbeSettingsInvariantTests`.
+    """
+    current = api.settings.get_settings()
+    base = probe_settings_from_run_row(run_row) if isinstance(run_row, dict) else {}
+    cheap = probe_settings_from_dict(current if current else base)
+    if str(cheap.get("probe_backend") or "") == "none":
+        return cheap
+    return api._effective_probe_settings_for_runtime(run_row)
+
+
 def _extract_confidence_and_explanation(metrics_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     confidence = metrics_obj.get("score_confidence")
     if not isinstance(confidence, dict):
@@ -87,7 +125,7 @@ def _probe_and_score(
     active_profile_id: str,
     active_profile_version: int,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    probe_settings = api._effective_probe_settings_for_runtime(run_row)
+    probe_settings = probe_settings_for_report(api, run_row)
     probe = ProbeService(store)
     probe_result = probe.probe_file(media_path=media_path, settings=probe_settings)
     normalized = probe_result.get("normalized") if isinstance(probe_result.get("normalized"), dict) else {}
