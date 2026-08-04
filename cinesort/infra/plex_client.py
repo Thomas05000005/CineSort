@@ -50,7 +50,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise PlexError(f"URL Plex refusee : {reason}")
     return url
