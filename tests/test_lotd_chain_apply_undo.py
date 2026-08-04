@@ -18,19 +18,23 @@ probe_backend="none", tmdb_enabled=False — aucun binaire externe requis) :
                   dossier intact, 0 demi-etat, 0 entree journal residuelle),
                   les autres rows appliquees et annulables normalement.
 
-Gardes xfail nominatives (bugs reels reportes, PAS corriges ici) :
-  [R8-085] (F-V7-COLLMKDIR, apply_core.py::apply_single ~L1966-1969) :
-    sur un chemin FILM avec collection/saga, `coll_dir.mkdir(parents=True)`
-    est execute AVANT les gardes MAX_PATH/NOOP et SANS `mkdir_counted` :
-      - variante A : film saga deja conforme -> skip NOOP mais le dossier
-        saga vide orphelin est cree quand meme (aucune op MKDIR en DB,
-        l'undo ne le supprimera jamais) ;
-      - variante B : film saga deplace puis UNDO -> le film est restaure mais
-        les dossiers `_Collection/<Saga>/` restent en orphelins vides
-        (restauration PAS a l'identique).
-    Variante preview : dans le code actuel le mkdir est gate `if not dry_run`
-    (dry-run propre) ; la garde dynamique [R8-085-preview] se declenchera si
-    une regression fait apparaitre l'orphelin des la preview.
+Gardes R8-085 (F-V7-COLLMKDIR) — historiquement des `pytest.xfail` dynamiques,
+converties en ASSERTIONS FRANCHES (finding N36) :
+  Le bug d'origine : sur un chemin FILM avec collection/saga,
+  `coll_dir.mkdir(parents=True)` etait execute AVANT les gardes MAX_PATH/NOOP
+  et SANS `mkdir_counted` — variante A (film conforme skippe -> dossier saga
+  vide orphelin non journalise), variante B (film deplace puis UNDO -> les
+  `_Collection/<Saga>/` restent orphelins). Il est CORRIGE dans le code
+  courant : le mkdir passe apres toutes les gardes, par `mkdir_counted`
+  (gate `if not dry_run`) et journalise une op MKDIR que `_undo_mkdir_ops`
+  rmdir a l'undo.
+  Pourquoi la conversion : un `pytest.xfail` conditionnel transforme la
+  REGRESSION en XFAIL, donc en exit code 0, et saute au passage toutes les
+  assertions suivantes du test. Mesure sur mutation « `<root>/_review` cree en
+  dry-run » : ce fichier rendait `3 passed, 2 xfailed` (exit 0), et
+  test_apply_dryrun_retest.py + test_r8_085_saga_mkdir_gates_v77.py ne
+  voyaient rien non plus (10 passed). Un dry-run qui touche le disque, ou un
+  undo qui laisse des residus, doit etre ROUGE.
 
 LIMITES explicites (voir SYNTHESE Lot D) :
   - tmdb_collection_name est injecte dans plan.jsonl apres scan (TMDb off en
@@ -247,11 +251,18 @@ def test_dry_run_makes_no_disk_change(env: ChainEnv) -> None:
     assert int(result.get("errors") or 0) == 0, result
 
     only_before, only_after, changed = _diff(snap0, _snapshot_tree(env.root))
-    assert not only_before and not changed, (only_before, changed)
-    if only_after:
-        # Garde dynamique : si une regression fait sortir le mkdir saga du
-        # gate `if not dry_run`, l'orphelin apparaitrait ici des la preview.
-        pytest.xfail(f"[R8-085-preview] modif disque en dry-run : {only_after}")
+    # N36 : assertion FRANCHE, plus de `pytest.xfail` dynamique. L'ancienne
+    # garde transformait toute apparition de fichier/dossier en dry-run en
+    # XFAIL — donc en exit code 0 — et sautait au passage les deux assertions
+    # suivantes (pas d'undo candidate, pas de batch). Mesuree : une regression
+    # ou `<root>/_review` est cree en dry-run donnait
+    # `3 passed, 2 xfailed`, exit 0, et AUCUN autre test du depot ne la voyait
+    # (test_apply_dryrun_retest.py + test_r8_085_saga_mkdir_gates_v77.py :
+    # 10 passed sous la meme mutation). Un dry-run qui touche le disque est un
+    # echec, pas un defaut connu tolere.
+    assert not only_before and not changed and not only_after, (
+        f"dry-run a modifie le disque : disparus={only_before} apparus={only_after} modifies={changed}"
+    )
 
     preview = api.run.undo_last_apply_preview(run_id)
     assert preview.get("ok"), preview
@@ -435,12 +446,13 @@ def test_r8_085_saga_conform_film_creates_orphan_collection_dir(env: ChainEnv) -
     api2 = _fresh_api_on_state(env)
     snap0 = _snapshot_tree(env.root)
 
-    # Preview d'abord : la garde [R8-085-preview] est dans _assert ci-dessous.
+    # Preview d'abord : le dry-run ne doit RIEN creer (N36 : assertion franche,
+    # l'ancien `pytest.xfail` dynamique masquait la regression et sautait tout
+    # le reste du test — y compris l'apply reel et la verification MKDIR).
     dry = api2.run.apply(run_id, decisions, True, False)
     assert dry.get("ok"), dry
     _only_b_dry = _diff(snap0, _snapshot_tree(env.root))[1]
-    if _only_b_dry:
-        pytest.xfail(f"[R8-085-preview] dossier saga cree des le dry-run : {_only_b_dry}")
+    assert not _only_b_dry, f"dry-run a cree des elements sur disque : {_only_b_dry}"
 
     applied = api2.run.apply(run_id, decisions, False, False)
     assert applied.get("ok"), applied
@@ -454,14 +466,18 @@ def test_r8_085_saga_conform_film_creates_orphan_collection_dir(env: ChainEnv) -
     ops = store.apply.list_apply_operations(batch_id=batch_id) if batch_id else []
     mkdir_ops = [o for o in ops if str(o.get("op_type")) == "MKDIR"]
 
-    if coll_dir.is_dir() and not any(coll_dir.iterdir()):
-        assert not mkdir_ops, "orphelin PRESENT mais op MKDIR journalisee (etat inattendu)"
-        pytest.xfail(
-            "[R8-085] F-V7-COLLMKDIR : dossier saga vide orphelin cree pour un "
-            f"film conforme skippe (apply_core.py::apply_single) : {coll_dir}"
-        )
+    # N36 : assertion FRANCHE. R8-085 est corrige dans le code courant (le mkdir
+    # saga passe apres les gardes MAX_PATH/NOOP/equivalence-FS et par
+    # `mkdir_counted`, gate `if not dry_run` + op MKDIR journalisee). Un
+    # orphelin qui reapparait est donc une REGRESSION a signaler ROUGE, pas un
+    # defaut connu a tolerer en XFAIL (exit code 0).
+    assert not (coll_dir.is_dir() and not any(coll_dir.iterdir())), (
+        "[R8-085] regression F-V7-COLLMKDIR : dossier saga vide orphelin cree pour un "
+        f"film conforme skippe (apply_core.py::apply_single) : {coll_dir} "
+        f"(ops MKDIR journalisees pour ce batch : {len(mkdir_ops)})"
+    )
 
-    # Bug corrige : plus aucun orphelin, arborescence inchangee.
+    # Aucun orphelin : arborescence strictement inchangee.
     snap_after = _snapshot_tree(env.root)
     assert snap_after == snap0, _diff(snap0, snap_after)
 
@@ -501,10 +517,11 @@ def test_r8_085_saga_move_undo_leaves_orphan_dirs(env: ChainEnv) -> None:
 
     only_before, only_after, changed = _diff(snap0, _snapshot_tree(env.root))
     assert not only_before and not changed, (only_before, changed)
-    orphan_dirs = {"D:_Collection", "D:_Collection/Test Saga"}
-    if only_after and set(only_after) <= orphan_dirs:
-        pytest.xfail(
-            "[R8-085] F-V7-COLLMKDIR : apres UNDO les dossiers saga restent en "
-            f"orphelins vides (mkdir non journalise, pas d'op MKDIR) : {only_after}"
-        )
-    assert not only_after, f"residus inattendus apres undo: {only_after}"
+    # N36 : assertion FRANCHE (l'ancien XFAIL tolerait `_Collection/<Saga>/`
+    # en residu et rendait exit code 0). L'undo doit reposer le disque a
+    # l'identique, dossiers saga compris (op MKDIR journalisee ->
+    # `_undo_mkdir_ops` rmdir les dossiers redevenus vides).
+    assert not only_after, (
+        "[R8-085] residus apres UNDO — la restauration n'est PAS a l'identique "
+        f"(dossiers saga orphelins si mkdir non journalise) : {only_after}"
+    )
