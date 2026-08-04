@@ -27,14 +27,62 @@ _MIN_FREE_BYTES = 100 * 1024 * 1024  # 100 MB
 # Marge proportionnelle au-dessus de la somme estimee.
 _SAFETY_MARGIN = 0.10  # 10%
 
+# Kinds dont la row PARTAGE son dossier avec d'autres rows du plan.
+# INVARIANT DESTRUCTIF (cf. domain/core.py:401) : SEUL "single" possede un
+# dossier dedie. Pour ces kinds-la, `apply_collection_item` / `apply_tv_episode`
+# ne deplacent QUE le fichier video (+ ses sidecars) vers un sous-dossier du
+# MEME dossier : sommer l'arborescence entiere la compterait autant de fois
+# qu'elle contient de films, et ressusciterait le faux "espace insuffisant"
+# que le filtre "approuves seulement" (Fix R6-04, apply_support.py) elimine.
+_SHARED_FOLDER_KINDS = frozenset({"collection", "tv_episode", "extra"})
+
+
+def _dir_tree_size(folder: Path) -> int:
+    """Somme RECURSIVE de la taille des fichiers sous `folder`.
+
+    Aligne l'estimation sur ce que fait reellement l'apply : `merge_dir_safe`
+    (apply_core.py) parcourt `src_dir.rglob("*")`, et un `folder.rename(dst)`
+    emporte de toute facon l'arborescence complete. Une somme non recursive
+    OMET tout ce qui vit dans un sous-dossier (extras, sous-titres, artwork)
+    et sous-estime donc l'espace necessaire — l'erreur permissive qu'on ne
+    peut pas se permettre sur un chemin destructif.
+
+    Un fichier illisible est ignore ; un dossier illisible n'annule PAS ce qui
+    a deja ete somme (on garde le total partiel, plus conservateur que 0).
+    `rglob` ne suit pas les liens symboliques de dossier : pas de boucle.
+    """
+    total = 0
+    try:
+        for entry in folder.rglob("*"):
+            try:
+                if not entry.is_file():
+                    continue
+                total += int(entry.stat().st_size)
+            except (OSError, PermissionError):
+                continue
+    except (OSError, PermissionError):
+        return total
+    return total
+
 
 def _row_estimated_size(row: Any) -> int:
     """Taille estimee des fichiers que ce row va deplacer.
 
-    MVP : on prend la taille du fichier video principal (`folder/video`).
-    Pour les collections, on somme les videos directement dans `folder`
-    (sans recursion). Si stat echoue : on ignore et on retourne 0
-    (mieux laisser l'apply tenter que de bloquer sur un edge case).
+    Deux granularites, calquees sur celle de l'apply (cf. apply_core.py) :
+
+    - kind partage (`collection`, `tv_episode`, `extra`) avec un `video`
+      connu : seul ce fichier bouge, et vers un sous-dossier du meme dossier.
+      On somme le seul `folder/video`.
+    - tout le reste (`single`, ou kind absent/inconnu) : l'apply deplace le
+      DOSSIER ENTIER, recursivement. On somme donc tout l'arbre. C'est aussi
+      le defaut choisi quand le kind est inconnu, par coherence avec
+      `_normalize_plan_kind` (plan_support_core.py) qui retombe sur "single",
+      la granularite la plus destructive.
+
+    Le resultat n'est jamais inferieur a la taille du video principal : si
+    l'arbre est illisible mais que le video, lui, se stat, on garde ce dernier.
+    Si tout echoue : 0 (mieux laisser l'apply tenter que bloquer sur un edge
+    case ou l'on ne sait rien).
     """
     folder_str = str(getattr(row, "folder", "") or "")
     video_str = str(getattr(row, "video", "") or "")
@@ -42,37 +90,45 @@ def _row_estimated_size(row: Any) -> int:
         return 0
 
     folder = Path(folder_str)
+    kind = str(getattr(row, "kind", "") or "").strip().lower()
 
+    video_size = 0
     if video_str:
-        candidate = folder / video_str
         try:
-            return int(candidate.stat().st_size)
+            video_size = int((folder / video_str).stat().st_size)
         except (OSError, PermissionError):
-            return 0
+            video_size = 0
 
-    # Pas de video specifie (collection) : somme des fichiers immediats.
-    total = 0
-    try:
-        for entry in folder.iterdir():
-            if entry.is_file():
-                try:
-                    total += int(entry.stat().st_size)
-                except (OSError, PermissionError):
-                    continue
-    except (OSError, PermissionError):
-        return 0
-    return total
+    if video_str and kind in _SHARED_FOLDER_KINDS:
+        return video_size
+
+    return max(_dir_tree_size(folder), video_size)
 
 
 def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     """Somme estimee des octets a deplacer par les rows approuves.
 
     `approved_keys` : ensemble des row_id qui seront effectivement appliques.
+
+    Les rows NON approuvees sont volontairement exclues (Fix R6-04, cf.
+    apply_support.py) : sans ce filtre, un run a 990 refusees et 10 approuvees
+    declenchait un faux "espace disque insuffisant". Elles ne consomment rien
+    non plus quand `quarantine_unapproved` est actif : la quarantaine les
+    deplace sous `<root>/_review/`, donc sur le volume que l'on mesure — les
+    compter reviendrait a facturer deux fois le meme volume.
+
+    On ne somme donc QUE les rows explicitement approuvees. Une row au `row_id`
+    vide ne peut par construction jamais figurer dans `approved_keys` (les
+    cles viennent des decisions), donc elle est exclue — l'ancien garde
+    `if rid and rid not in approved_keys` la laissait passer et gonflait
+    l'estimation, jusqu'a un faux "espace disque insuffisant" qui BLOQUE
+    l'apply (#698). Cf la regle de revue "sentinelle falsy" dans
+    cinesort/domain/conversions.py.
     """
     total = 0
     for row in rows or []:
         rid = str(getattr(row, "row_id", "") or "")
-        if rid and rid not in approved_keys:
+        if rid not in approved_keys:
             continue
         total += _row_estimated_size(row)
     return total
