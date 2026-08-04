@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
@@ -21,15 +22,15 @@ from tests._helpers import wait_run_done as _wait_terminal
 
 class ApiBridgeLot3Tests(unittest.TestCase):
     def setUp(self) -> None:
-        # CI Windows : sur le runner GitHub, %TEMP% vaut C:\Users\RUNNER~1\...
-        # (nom court 8.3) et traverse des jonctions. open_path() compare
-        # Path.resolve() a Path.absolute() pour detecter un symlink parent :
-        # un chemin temporaire non canonique declenche donc un faux positif
-        # « Les liens symboliques ne sont pas autorises ». On canonise la
-        # racine temporaire pour fournir a l'API un chemin deja resolu, ce qui
-        # est le cas nominal cote produit ; le controle de securite n'est pas
-        # touche (les tests de refus vivent dans test_vague_h_security.py).
-        self._tmp = str(Path(tempfile.mkdtemp(prefix="cinesort_lot3_")).resolve())
+        # Racine temporaire BRUTE, volontairement non canonisee : sur le runner
+        # GitHub Windows %TEMP% vaut C:\Users\RUNNER~1\... (nom court 8.3) et
+        # traverse des jonctions. Ce fut un contournement (.resolve() ici) tant
+        # que open_path() comparait deux CHAINES (resolve() vs absolute()) et
+        # refusait donc ces chemins pourtant legitimes ; la garde compare
+        # desormais des chemins REELS (cf test_vague_h_security.py, classe
+        # OpenPathJunctionTests), les tests tournent donc sur le chemin tel que
+        # le systeme le donne.
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_lot3_")
         self.root = Path(self._tmp) / "root"
         self.state_dir = Path(self._tmp) / "state"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -589,6 +590,79 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertEqual(count_done, api_mod.MAX_TERMINAL_RUNS_IN_MEMORY)
         self.assertIn("active_keep", api._runs)  # type: ignore[attr-defined]
 
+    def test_purge_under_cap_does_not_query_runner_status(self) -> None:
+        """PERF : sous le cap, la purge ne doit interroger AUCUN run.
+
+        `runner.get_status()` retombe en BDD des que le JobRunner a evince le
+        run (cleanup H6), et chaque retombee coute 3 connexions SQLite neuves.
+        Comme `_get_run()` declenche la purge a chaque lecture d'etat, la
+        boucle faisait payer O(runs en memoire) ouvertures de connexion par
+        sondage de progression -> les scans successifs ralentissaient en
+        O(n^2). Sous le cap la boucle ne pouvait de toute facon rien evincer
+        (`terminal` est un sous-ensemble de `_runs`) : elle doit etre court-
+        circuitee, donc zero appel a get_status.
+        """
+        calls: list = []
+
+        class _FakeRunner:
+            def get_status(self, run_id: str):
+                calls.append(run_id)
+                return None  # simule le run deja evince par le cleanup H6
+
+        class _FakeRun:
+            def __init__(self, started_ts: float):
+                self.running = False
+                self.started_ts = started_ts
+                self.runner = _FakeRunner()
+
+        api = backend.CineSortApi()
+        under_cap = api_mod.MAX_TERMINAL_RUNS_IN_MEMORY
+        with api._runs_lock:  # type: ignore[attr-defined]
+            for i in range(under_cap):
+                api._runs[f"done_{i:03d}"] = _FakeRun(float(i))  # type: ignore[attr-defined]
+            api._purge_terminal_runs_locked()  # type: ignore[attr-defined]
+            remaining = len(api._runs)  # type: ignore[attr-defined]
+
+        self.assertEqual(calls, [], f"purge sous le cap : {len(calls)} appels a runner.get_status (attendu 0)")
+        # Aucune eviction non plus : la purge sous le cap est un no-op complet.
+        self.assertEqual(remaining, under_cap)
+
+    def test_get_run_polling_does_not_scale_with_runs_in_memory(self) -> None:
+        """PERF : le cout d'une lecture d'etat ne doit pas croitre avec l'historique.
+
+        Reproduit le defaut de bout en bout : 40 lectures `_get_run()` avec
+        N runs termines en memoire. Avant le correctif, chaque lecture
+        balayait les N entrees et interrogeait le runner pour chacune.
+        """
+        calls: list = []
+
+        class _FakeRunner:
+            def get_status(self, run_id: str):
+                calls.append(run_id)
+                return None
+
+        class _FakeRun:
+            def __init__(self, started_ts: float):
+                self.running = False
+                self.started_ts = started_ts
+                self.runner = _FakeRunner()
+
+        api = backend.CineSortApi()
+        n_runs = api_mod.MAX_TERMINAL_RUNS_IN_MEMORY - 5
+        with api._runs_lock:  # type: ignore[attr-defined]
+            for i in range(n_runs):
+                api._runs[f"done_{i:03d}"] = _FakeRun(float(i))  # type: ignore[attr-defined]
+
+        for _ in range(40):
+            api._get_run("done_000")  # type: ignore[attr-defined]
+
+        self.assertEqual(
+            calls,
+            [],
+            f"40 lectures d'etat avec {n_runs} runs en memoire ont declenche "
+            f"{len(calls)} interrogations du runner (attendu 0)",
+        )
+
     def test_get_or_create_infra_reuses_same_store_and_runner_for_same_state_dir(self) -> None:
         api = backend.CineSortApi()
         state_dir = self.state_dir / "infra_cache_same_state"
@@ -701,7 +775,15 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             res = api.open_path(str(target_file))
 
         self.assertTrue(res.get("ok"), res)
-        mocked_startfile.assert_called_once_with(str(folder))
+        # open_path ouvre toujours le chemin RESOLU (garde anti path-traversal),
+        # jamais la chaine fournie : sous un %TEMP% derriere une jonction ou en
+        # 8.3 les deux ecritures different alors que c'est le meme dossier reel.
+        mocked_startfile.assert_called_once()
+        opened = str(mocked_startfile.call_args.args[0])
+        self.assertEqual(
+            os.path.normcase(os.path.realpath(opened)),
+            os.path.normcase(os.path.realpath(str(folder))),
+        )
 
     def test_save_settings_rejects_explicit_empty_root(self) -> None:
         api = backend.CineSortApi()

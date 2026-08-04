@@ -1,5 +1,30 @@
 """Detection multi-signal des doublons (VN-D.1).
 
+!!! MODULE NON CABLE EN PRODUCTION (audit NUANCE N03, 2026-08-03) !!!
+    Aucun module de `cinesort/` n'importe ce fichier : les 7 points d'entree
+    de prod chargent 202 modules `cinesort.*` et `duplicate_multi_signal` n'en
+    fait pas partie. Le seul importeur du depot est
+    `tests/test_duplicate_grouping_multisignal_v77.py`. Le cablage ou la
+    suppression sont un ARBITRAGE PRODUIT ouvert — ne pas en deduire qu'un
+    bug de doublons vient d'ici.
+
+    Ce qui EST cable, et couvre les deux cas qu'on attribue souvent a ce
+    module :
+      - cross-langue ("Spirited Away" / "Le Voyage de Chihiro") :
+        `cinesort.app.plan_support_dedup._rescore_with_alternative_titles`
+        (appele en :219, :310, :497) rejoue la similarite contre les
+        `alternative_titles` TMDb des l'IDENTIFICATION ;
+      - multi-rip du meme film : `duplicate_support.find_duplicate_targets`
+        groupe sur le titre DECIDE (`movie_key`), pas sur le nom de dossier.
+
+    Et surtout : cabler ce module NE resoudrait PAS le cas cross-langue.
+    Mesure sur le vrai code (2026-08-03) : `_index_token` bucketise sur le
+    premier token APRES tri alphabetique, donc 'spirited away' -> 'away' et
+    'le voyage de chihiro' -> 'chihiro' : buckets differents, les deux titres
+    ne sont jamais compares ; forces dans le meme bucket, leur
+    `token_sort_ratio` vaut 18.18 contre un `FUZZY_TITLE_MIN_SCORE` de 88.
+    `group_by_multi_signal([...], phases=[PHASE_FUZZY_TITLE])` rend `[]`.
+
 Phase A: strict-metadata (existant, equivalent a `movie_key`).
 Phase B: fuzzy titre via rapidfuzz token_sort_ratio >= 88 + year tolerance +-1.
 Phase C: comparaison Chromaprint via `compare_audio_fingerprints` (>= 0.85).
