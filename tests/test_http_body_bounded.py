@@ -360,6 +360,233 @@ class ClientsAreRoutedThroughTheBoundedReadTests(unittest.TestCase):
         self.assertIsNone(client.find_by_imdb_id("tt0113277"))
         self._assert_bounded(session)
 
+    # -- Plex (#753 / #433) -----------------------------------------------
+    #
+    # PlexClient etait le DERNIER client sans borne : il n'importait meme
+    # aucun helper borne et gardait 4 `resp.json()` nus. Les tests ci-dessous
+    # portent sur le SITE D'APPEL (`PlexClient._get`), pas sur le helper : un
+    # correctif qui bornerait le helper sans router `_get` dessus les laisse
+    # ROUGES.
+
+    def test_plex_validate_connection(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        res = client.validate_connection()
+
+        self.assertFalse(res.get("ok"), "un corps hors borne ne doit jamais devenir un succes")
+        self._assert_bounded(session)
+
+    def test_plex_get_movies_raises_instead_of_returning_an_empty_library(self) -> None:
+        """Sens RESTRICTIF : sur un chemin qui alimente le scan, l'echec doit
+        remonter — surtout pas une liste vide qui ferait croire a 0 film."""
+        from cinesort.infra.plex_client import PlexClient, PlexError
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        with self.assertRaises(PlexError):
+            client.get_movies("4")
+        self._assert_bounded(session)
+
+    def test_plex_refresh_library_still_raises_plexerror(self) -> None:
+        """`refresh_library` n'attrape QUE PlexError : la borne ne doit pas y
+        faire fuir un `ValueError` brut jusqu'a l'UI."""
+        from cinesort.infra.plex_client import PlexClient, PlexError
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        with self.assertRaises(PlexError):
+            client.refresh_library("4")
+        self._assert_bounded(session)
+
+    def test_plex_get_movies_count(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        # Contrat historique de la methode : 0 en cas d'erreur.
+        self.assertEqual(client.get_movies_count("4"), 0)
+        self._assert_bounded(session)
+
+    def test_plex_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        client._session.get = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False,
+            payload={"MediaContainer": {"Directory": [{"key": "4", "title": "Films", "type": "movie"}]}},
+        )
+
+        libs = client.get_libraries("movie")
+
+        self.assertEqual(libs, [{"id": "4", "name": "Films", "type": "movie"}])
+
+    # -- Ollama (#824) ----------------------------------------------------
+
+    def test_ollama_invoke(self) -> None:
+        from cinesort.infra.integrations.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        session = _RecordingSession(hostile=True)
+        client._session.post = session  # type: ignore[method-assign]
+
+        res = client.generate_synopsis("Heat", 1995)
+
+        # La preuve principale : les octets reellement lus. Elle vient AVANT
+        # les assertions sur le payload, sinon un `reason` different masquerait
+        # le fait que le corps hostile a quand meme ete telecharge en entier.
+        self._assert_bounded(session)
+        self.assertLessEqual(session.bytes_read, MAX_RESPONSE_BYTES + _OVERREAD_TOLERANCE)
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("reason"), "response_too_large")
+        self.assertIs(res.get("ai_generated"), False)
+
+    def test_ollama_is_available_reads_a_bounded_body(self) -> None:
+        """`is_available` ne regarde que le status — mais en `stream=False`,
+        `requests` materialise quand meme TOUT le corps avant de rendre la main.
+
+        PORTEE EXACTE DE CE TEST : le double de session ne reproduit PAS cette
+        materialisation interne de `requests` (il rend une `Response` sans
+        toucher au flux). Ce que le test prouve reellement, c'est (1) que
+        l'appel est bien emis en `stream=True` et que le corps est lu par le
+        lecteur borne — `_assert_bounded` echoue sur `bytes_read == 0` si la
+        methode ne lit rien —, et (2) qu'un corps hors borne rend False au lieu
+        de True : un serveur qui inonde n'est pas « disponible ». Le contrat
+        « ne leve jamais » doit tenir en prime.
+        """
+        from cinesort.infra.integrations.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        self.assertFalse(client.is_available())
+        self._assert_bounded(session)
+        self.assertLessEqual(session.bytes_read, MAX_RESPONSE_BYTES + _OVERREAD_TOLERANCE)
+
+    def test_ollama_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.integrations.ollama_client import OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        client._session.post = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False,
+            payload={"response": json.dumps({"synopsis": "Un braqueur et un flic s'observent a Los Angeles."})},
+        )
+
+        res = client.generate_synopsis("Heat", 1995)
+
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("generated"), "Un braqueur et un flic s'observent a Los Angeles.")
+        self.assertIs(res.get("ai_generated"), True)
+
+    # -- Fiche film : GET TMDb direct (hors client) -----------------------
+    #
+    # Site trouve en re-verifiant l'inventaire : il n'appartient a AUCUN des
+    # cinq clients, donc un audit « par client » le manquait. C'etait un
+    # `requests.get(...)` nu suivi d'un `r.json()`, sans session partagee.
+
+    @staticmethod
+    def _film_support_doubles(state_dir: str) -> tuple:
+        class _Api:
+            def _internal_settings(self) -> dict:
+                return {"tmdb_api_key": "REALKEY", "state_dir": state_dir, "tmdb_timeout_s": 1.0}
+
+        class _StubTmdb:
+            """Neutralise le chemin cache/runtime : seul le GET direct compte."""
+
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            def get_movie_runtime(self, _movie_id: int) -> None:
+                return None
+
+            def _cache_get(self, _key: str) -> None:
+                return None
+
+            def _cache_set(self, _key: str, _value: object) -> None:
+                return None
+
+            def flush(self) -> None:
+                return None
+
+        return _Api(), _StubTmdb
+
+    def test_film_detail_direct_tmdb_get_is_bounded(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
+        session = _RecordingSession(hostile=True)
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(api, 603)
+
+        # Degradation gracieuse documentee de ce helper (best-effort).
+        self.assertIsNone(out.get("director"))
+        self.assertIsNone(out.get("overview"))
+        self._assert_bounded(session)
+
+    def test_film_detail_nominal_response_survives_the_session_close(self) -> None:
+        """Le corps est lu DANS le `with requests.Session()`, mais `r.json()`
+        s'execute APRES sa fermeture.
+
+        Ca ne marche que parce que `enforce_body_limit` reinjecte les octets
+        lus dans la reponse (`_content` + `_content_consumed`). Sans ce test,
+        rien n'exercait ce couplage avec une VRAIE `requests.Response` : les
+        doubles de `test_film_detail_tmdb_extras.py` sont des objets maison
+        dont `.json()` ne touche jamais au flux.
+        """
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_ok_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
+        session = _RecordingSession(
+            hostile=False,
+            payload={
+                "overview": "Un synopsis.",
+                "runtime": 148,
+                "credits": {"crew": [{"job": "Producer", "name": "Z"}, {"job": "Director", "name": "X"}]},
+            },
+        )
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(api, 603)
+
+        self.assertEqual(out.get("director"), "X")
+        self.assertEqual(out.get("overview"), "Un synopsis.")
+        self.assertEqual(out.get("runtime"), 148)
+
     def test_omdb_test_connection_reports_invalid_response(self) -> None:
         import tempfile
         from pathlib import Path
