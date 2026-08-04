@@ -2660,13 +2660,31 @@ def apply_tv_episode(
     intra-row (rollback des fichiers déjà déplacés si une étape échoue).
     (`new_title`/`new_year` : édition UI titre/année — câblés F2-a gate 7.)
     """
+    # Garde-fou destructif : `row.video` vide -> `folder / ""` == folder (verifie),
+    # donc `.exists()` est True et le chemin "video manquante" ci-dessous ne se
+    # declenche PAS. Le DOSSIER se retrouve alors passe a
+    # move_file_with_collision_policy() qui ne teste jamais `src.is_file()` :
+    # atomic_move() deplace le dossier COMPLET vers `Saison NN/SxxExx - Titre.ext`.
+    # PlanRow.video est documente "can be empty" (domain/core.py) -> refuser plutot
+    # que tenter le move.
+    if not row.video:
+        log("WARN", f"TV episode video field empty: {folder}")
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+        return
+
     video = folder / row.video
     if not video.exists():
         try:
             matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, row.video)]
             video = matches[0] if matches else video
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as exc:
+            # Revue PR#561 (sourcery-ai) : sans ce log, un NAS qui refuse
+            # l'enumeration (permission denied, share tombe) est rapporte a
+            # l'identique d'un dossier ou la video est reellement absente. Le
+            # skip est le meme dans les deux cas, mais le diagnostic ne l'est
+            # pas : on nomme la cause pour ne pas envoyer l'utilisateur
+            # chercher un fichier qui est en fait la.
+            log("WARN", f"TV episode listing failed: {folder} ({type(exc).__name__}: {exc})")
     if not video.exists():
         log("WARN", f"TV episode video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
@@ -2860,9 +2878,25 @@ def quarantine_row(
 
     video = folder / row.video
     if not video.exists():
-        matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
+        # Symetrique de apply_tv_episode (meme module) : protege contre folder disparu
+        # (move concurrent, TOCTOU depuis le `folder.exists()` du debut) ou permission
+        # denied -> sinon le plantage tue l'apply en plein batch de quarantaine et perd
+        # toutes les rows non traitees.
+        # NB : la comparaison reste `_name_eq_fs` (casefold + NFC, cf. main) et non
+        # `.lower()` : sur un scan SMB macOS les noms remontent en NFD.
+        try:
+            matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
+        except (OSError, PermissionError) as exc:
+            # Revue PR#561 (sourcery-ai) : ne pas rendre l'echec FS
+            # indiscernable d'un « aucune video trouvee ». La suite skippe la
+            # row SANS aucun log (contrairement a apply_tv_episode) : sans
+            # cette trace, un share tombe en plein batch de quarantaine se lit
+            # comme une bibliotheque vide.
+            log("WARN", f"QUARANTINE listing failed: {folder} ({type(exc).__name__}: {exc})")
+            matches = []
         video = matches[0] if matches else video
     if not video.exists():
+        log("WARN", f"QUARANTINE video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
 
