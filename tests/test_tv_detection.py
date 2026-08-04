@@ -63,6 +63,14 @@ class TvParsingTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.year, 2008)
 
+    def test_year_extracted_from_filename_flat_layout(self) -> None:
+        # Arborescence plate : l'annee n'est que dans le nom de fichier.
+        folder = Path("/lib/Downloads")
+        video = Path("/lib/Downloads/Breaking.Bad.2008.S01E01.mkv")
+        result = parse_tv_info(folder, video)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.year, 2008)
+
 
 class TvPlanFlowTests(unittest.TestCase):
     """Integration test: TV detection in plan_library with enable_tv_detection."""

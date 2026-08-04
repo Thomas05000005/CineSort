@@ -213,6 +213,22 @@ def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]
     return 0
 
 
+#: Marqueur pose sur une row UNIQUEMENT quand `film_tmdb_overrides` a ete lue
+#: AVEC SUCCES pour cette row (qu'un override existe ou non).
+#:
+#: Revue adversaire PR #849 : le seul signal qui prouve « l'overlay a tourne »
+#: doit etre pose par l'overlay lui-meme, sur son chemin de succes. Inferer ce
+#: succes depuis un autre champ (`display_title`, pose de toute facon par
+#: `history_support._enrich_plan_payload` APRES un `contextlib.suppress`) fait
+#: passer un echec silencieux pour un succes -> le choix TMDb manuel de
+#: l'utilisateur disparait de la Bibliotheque (bug R7-3 re-ouvert).
+#:
+#: Contrat : marqueur ABSENT => la lecture n'a pas abouti (store None, run_id/
+#: row_id vide, erreur SQLite/OS...) => tout consommateur en aval DOIT refaire
+#: l'overlay lui-meme. Fail-closed : en cas de doute on relit.
+TMDB_OVERLAY_DONE_KEY = "_tmdb_overlay_done"
+
+
 def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]) -> bool:
     """AUDIT 2026-06-14 (R7-3) : applique l'override TMDb manuel sur une row dict.
 
@@ -223,6 +239,12 @@ def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]
     overlay tmdb_id/chosen_tmdb_id/proposed_title/proposed_year/confidence depuis
     l'override. Sans override -> no-op (comportement inchange). Reversible : la
     table reste la source, on n'ecrit pas le plan (clear_tmdb_override suffit).
+
+    Effet de bord voulu : pose `TMDB_OVERLAY_DONE_KEY` sur la row des que la
+    lecture de la table a abouti (voir la constante). La valeur de retour, elle,
+    ne dit que « un override a ete APPLIQUE » : elle vaut False aussi bien quand
+    la lecture a echoue que quand il n'y a simplement rien a appliquer, donc
+    elle ne peut PAS servir de signal « l'overlay a tourne ».
     """
     if not isinstance(row, dict) or store is None:
         return False
@@ -232,8 +254,18 @@ def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]
         return False
     try:
         ov = store.film_modal.get_tmdb_override(run_id=rid, row_id=row_id)
-    except (AttributeError, OSError, TypeError, ValueError):
+    # Regle 4 du CLAUDE.md : sqlite3.Error n'herite PAS d'OSError. Sans lui, une
+    # base verrouillee remontait ici en exception nue -> chemin divergent selon
+    # l'appelant (avalee par le `contextlib.suppress(Exception)` de
+    # _enrich_plan_payload, mais fatale a toute la vue Bibliotheque).
+    except (AttributeError, OSError, TypeError, ValueError, sqlite3.Error) as exc:
+        # PAS de marqueur : la row n'a pas d'etat d'override fiable, l'appelant
+        # suivant doit refaire le travail.
+        logger.debug("overlay_tmdb_override read failed run_id=%s row_id=%s: %s", rid, row_id, exc)
         return False
+    # Lecture aboutie : cette row porte desormais l'etat authoritatif de
+    # film_tmdb_overrides. Le marqueur est pose ICI et NULLE PART ailleurs.
+    row[TMDB_OVERLAY_DONE_KEY] = True
     if not ov:
         return False
     tid = int(ov.get("tmdb_id") or 0)

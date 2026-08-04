@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from cinesort.app._path_utils import normalize_path as _normalize_path
 
@@ -29,6 +29,16 @@ _REINDEX_RETRY_DELAY_S = 5.0
 _MAX_RETRIES = 5
 # Cap pour eviter d'attendre 5 minutes par retry sur de tres longs delais
 _MAX_RETRY_DELAY_S = 60.0
+
+# Types du journal apply qui deplacent UN FICHIER : le chemin change en entier,
+# il se retrouve tel quel dans src_path/dst_path.
+_FILE_MOVE_OP_TYPES = frozenset({"MOVE", "RENAME", "MOVE_FILE"})
+# Types qui deplacent UN DOSSIER. C'est la voie NOMINALE du tri de films
+# (apply_core.apply_single renomme le dossier, jamais le fichier video — cf.
+# regle inviolable du projet). src_path/dst_path sont alors des DOSSIERS, alors
+# que Jellyfin indexe les films par chemin de FICHIER : le chemin d'un film vu
+# n'apparait jamais tel quel dans le journal, il doit etre RE-PREFIXE.
+_DIR_MOVE_OP_TYPES = frozenset({"MOVE_DIR"})
 
 
 def _compute_retry_delay(attempt: int, base_delay_s: float) -> float:
@@ -57,6 +67,19 @@ class WatchedInfo:
     last_played_date: str
 
 
+@dataclass(frozen=True)
+class _MoveOp:
+    """Un deplacement du journal apply, normalise.
+
+    `is_dir` distingue le deplacement d'un DOSSIER (les chemins qu'il contient
+    doivent etre re-prefixes) de celui d'un FICHIER (egalite stricte).
+    """
+
+    is_dir: bool
+    src: str
+    dst: str
+
+
 @dataclass
 class RestoreResult:
     """Resume de la restauration des statuts watched."""
@@ -81,28 +104,64 @@ class RestoreResult:
 # -- Helpers -----------------------------------------------------------
 
 
-def _build_path_mapping(operations: List[Dict[str, Any]]) -> Dict[str, str]:
-    """Construit le mapping ancien_chemin -> nouveau_chemin depuis les operations apply.
+def _build_move_sequence(operations: List[Dict[str, Any]]) -> List[_MoveOp]:
+    """Extrait les deplacements REUSSIS d'un batch apply, dans l'ordre d'execution.
 
-    Format des operations (depuis apply_operations SQLite) :
-    - op_type : MOVE, RENAME, MOVE_FILE, etc.
+    Format des operations (depuis `apply.list_apply_operations`, deja triees par
+    op_index croissant = ordre d'execution) :
+    - op_type : MOVE_FILE, MOVE_DIR, QUARANTINE_*, MKDIR...
     - src_path / dst_path : chemins source et destination
-    - undo_status : PENDING (= reussi), DONE, FAILED
+    - undo_status : PENDING (= reussi, pas encore annule), DONE, FAILED
+
+    L'ordre est CONSERVE : un meme film peut subir plusieurs deplacements dans
+    un batch (renommage du dossier par apply_single, puis deplacement de ce
+    dossier sous la racine Collection). Seul un rejeu SEQUENTIEL donne le
+    chemin final ; un dict ancien->nouveau perdrait la composition.
     """
-    mapping: Dict[str, str] = {}
+    sequence: List[_MoveOp] = []
     for op in operations:
         op_type = (op.get("op_type") or "").upper()
-        if op_type not in ("MOVE", "RENAME", "MOVE_FILE"):
+        is_dir = op_type in _DIR_MOVE_OP_TYPES
+        if not is_dir and op_type not in _FILE_MOVE_OP_TYPES:
             continue
         # undo_status PENDING = l'operation a ete faite avec succes (pas encore undo)
         undo_status = (op.get("undo_status") or "PENDING").upper()
         if undo_status not in ("PENDING",):
             continue
-        src = op.get("src_path", "")
-        dst = op.get("dst_path", "")
+        src = _normalize_path(op.get("src_path", ""))
+        dst = _normalize_path(op.get("dst_path", ""))
         if src and dst:
-            mapping[_normalize_path(src)] = _normalize_path(dst)
-    return mapping
+            sequence.append(_MoveOp(is_dir=is_dir, src=src, dst=dst))
+    return sequence
+
+
+def _remap_path(path: str, sequence: List[_MoveOp]) -> Optional[str]:
+    """Rejoue `sequence` sur un chemin de media Jellyfin.
+
+    Rend le chemin FINAL si au moins une operation a touche ce media, sinon
+    None (le film n'a pas bouge, ou il vit hors des racines de l'apply).
+
+    Le critere est « touche », PAS « chemin different » : un renommage de
+    casse seule (`apply_core._case_only_rename_with_rollback`) produit un
+    MOVE_DIR dont src et dst se normalisent a l'identique. Le film a pourtant
+    bien ete renomme sur disque, et sur un partage sensible a la casse Jellyfin
+    peut le ré-indexer comme un NOUVEL item. On re-affirme donc son statut vu —
+    `mark_played` est idempotent, le re-affirmer ne coute rien.
+    """
+    current = path
+    touched = False
+    for move in sequence:
+        if current == move.src:
+            # Deplacement direct du media (fichier, ou dossier quand Jellyfin
+            # indexe un rip BDMV/VIDEO_TS par son dossier).
+            current = move.dst
+            touched = True
+        elif move.is_dir and current.startswith(move.src + "/"):
+            # Le media est SOUS un dossier deplace : re-prefixation. Le '/' de
+            # garde evite qu'un dossier "…/inception" capture "…/inception 2".
+            current = move.dst + current[len(move.src) :]
+            touched = True
+    return current if touched else None
 
 
 # -- API publique ------------------------------------------------------
@@ -151,7 +210,7 @@ def restore_watched(
 ) -> RestoreResult:
     """Restaure les statuts watched apres apply + refresh Jellyfin.
 
-    1. Construit le mapping ancien_path -> nouveau_path
+    1. Rejoue les deplacements du batch sur chaque chemin du snapshot
     2. Attend la re-indexation Jellyfin (delai initial)
     3. Recupere la liste des films avec leurs nouveaux chemins
     4. Match et restaure les statuts
@@ -164,15 +223,18 @@ def restore_watched(
         _log.warning("jellyfin_sync.restore_watched: client invalide ou methodes manquantes, no-op")
         return RestoreResult(skipped=len(snapshot))
 
-    path_mapping = _build_path_mapping(operations)
-    if not path_mapping:
+    move_sequence = _build_move_sequence(operations)
+    if not move_sequence:
         _log.info("Jellyfin sync : aucune operation de deplacement, skip restore")
         return RestoreResult(skipped=len(snapshot))
 
-    # Determiner quels films watched ont ete deplaces
+    # Determiner quels films watched ont ete deplaces. On part du SNAPSHOT (des
+    # chemins de fichier video) et non des operations : un MOVE_DIR ne cite que
+    # des dossiers, donc son src_path n'est jamais une cle du snapshot.
     watched_moves: Dict[str, str] = {}  # new_path -> old_path
-    for old_norm, new_norm in path_mapping.items():
-        if old_norm in snapshot:
+    for old_norm in snapshot:
+        new_norm = _remap_path(old_norm, move_sequence)
+        if new_norm is not None:
             watched_moves[new_norm] = old_norm
 
     if not watched_moves:
