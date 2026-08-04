@@ -62,10 +62,19 @@ EXCLUDED_DIRS = frozenset({"tests", "__pycache__"})
 # REFACTOR_PLAN_84.md. `__root__` = modules a la racine du paquet.
 MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     "__root__": 3,
-    # 24 -> 23 : la couche avait 1 de marge non reprise. Le cliquet ne vaut que
-    # s'il colle a la mesure ; une marge dormante laisse passer une recidive
-    # gratuite. Baissee ici parce qu'on y touchait de toute facon.
-    "app": 23,
+    # 23 -> 25 (PR#852, +2). Les DEUX imports differes ont ete verifies un par
+    # un, et ils ne sont pas du meme genre :
+    #   - `cleanup` -> `apply_core._append_error_message` : VRAI CYCLE.
+    #     `apply_core.py:15` importe deja `cinesort.app.cleanup`. Un import de
+    #     tete casserait l'import du paquet.
+    #   - `apply_batches_reconciliation` -> `apply_audit.read_apply_audit` : PAS
+    #     de cycle (`apply_audit` n'importe que la stdlib). Le commentaire du
+    #     code dit « eviter de charger au boot », mais la vraie raison est le
+    #     `except ImportError` juste en dessous : sur un build EXE AMPUTE, un
+    #     import de tete tuerait tout le module de reconciliation, la ou l'import
+    #     local ne degrade que la lecture du marqueur. Conserve pour cette
+    #     raison-la, pas pour la raison affichee.
+    "app": 25,
     "data": 0,
     "domain": 16,
     "infra": 17,
