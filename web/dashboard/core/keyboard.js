@@ -6,8 +6,9 @@
  * - Ctrl+I : toggle inspecteur droit
  * - Ctrl+, : aller a Parametres
  * - Ctrl+K : command palette
- * - Ctrl+S : sauvegarder (emet event "cinesort:save-request")
- * - F5 : rafraichir (emet event "cinesort:refresh", ecoute par app.js)
+ * - Ctrl+S : sauvegarder les reglages (emet event "cinesort:save-request",
+ *            seule /parametres l'ecoute : il flushe le debounce de sauvegarde)
+ * - F5 : rafraichir la vue courante (emet "cinesort:refresh", ecoute ici meme)
  * - F1 / ? : aide
  * - Escape : fermer modale / palette
  */
@@ -40,7 +41,7 @@ function _showHelp() {
       <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Replier ou deployer la sidebar</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>I</kbd></td><td>Afficher ou masquer l'inspecteur droit</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Aller a Parametres</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Enregistrer</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Enregistrer les reglages (Parametres)</td></tr>
       <tr><td><kbd>F5</kbd></td><td>Rafraichir la vue</td></tr>
       <tr><td><kbd>?</kbd> ou <kbd>F1</kbd></td><td>Afficher cette aide</td></tr>
       <tr><td><kbd>Escape</kbd></td><td>Fermer la modale</td></tr>
@@ -61,7 +62,33 @@ function _showHelp() {
   }, 0);
 }
 
+/* Revue post-merge 2026-08-03 — « promesse non tenue » : `cinesort:refresh`
+ * etait dispatche par F5 (ci-dessous) ET par l'entree « Rafraichir la vue » de
+ * la palette Ctrl+K (components/command-palette.js), mais AUCUN module du front
+ * ne l'ecoutait : la touche etait morte, la commande de palette se contentait de
+ * fermer la palette, et la modale F1 (`_showHelp` ci-dessus) promettait quand
+ * meme « F5 : Rafraichir la vue ». Le commentaire « gere aussi dans app.js via
+ * bouton » etait perime (aucun handler correspondant dans app.js).
+ *
+ * On branche donc l'auditeur ici, au plus pres du dispatch. Re-naviguer vers le
+ * hash COURANT fait dispatcher un HashChangeEvent synthetique (core/router.js
+ * navigateTo, branche « meme hash ») -> resolve() -> cleanup + init() complet de
+ * la vue = refetch reel. C'est exactement le chemin deja emprunte par le clic
+ * sur l'item de sidebar de la vue courante, donc aucun mecanisme nouveau.
+ *
+ * Reference de module NOMMEE (pas une fonction flechee inline) : c'est ce qui
+ * rend `addEventListener` idempotent (le DOM ignore un couple type+callback deja
+ * enregistre), donc un double `initKeyboard()` ne produit pas deux refetch par
+ * frappe.
+ */
+function _refreshCurrentView() {
+  const hash = String((typeof window !== "undefined" && window.location && window.location.hash) || "");
+  navigateTo(hash.replace(/^#/, "") || "/accueil");
+}
+
 export function initKeyboard() {
+  window.addEventListener("cinesort:refresh", _refreshCurrentView);
+
   document.addEventListener("keydown", (e) => {
     // 1. Escape : fermer la modale ouverte (priorite maximale)
     if (e.key === "Escape") {
@@ -120,32 +147,41 @@ export function initKeyboard() {
       return;
     }
 
-    // 4b. Ctrl+Z : SUPPRIME (ultra-audit 2026-08-03, N01/N08).
-    //
-    // Le raccourci (#92 quick win #3) dispatchait `cinesort:undo-shortcut`, un
-    // evenement que PLUS AUCUN module n'ecoutait : son unique auditeur vivait
-    // dans library/lib-apply.js, disparu a la migration ESM. Ctrl+Z consommait
-    // donc la frappe (preventDefault) pour ne rien faire, pendant que la modale
-    // d'aide et /aide promettaient « Annuler la derniere application ».
-    //
-    // On ne le recable pas non plus, pour une raison de CIBLE, pas de
-    // confirmation. Correction d'une justification fausse ecrite ici lors du
-    // lot NUANCES (PR #873) et relevee en relecture : invoquer la regle des
-    // actions destructives etait un homme de paille. Personne ne proposait de
-    // cabler une frappe nue sur `run/undo_last_apply` ; le brancher sur
-    // `_onUndoExecute` (traitement.js) ou `_doUndoApply` (historique.js) aurait
-    // conserve `dangerConfirmModal` et n'aurait donc rien viole. Une regle
-    // projet mal invoquee dans le depot est pire que pas de justification :
-    // elle finit citee ailleurs.
-    //
-    // Le vrai motif : l'undo n'a pas de cible non ambigue depuis un raccourci
-    // GLOBAL. Il porte sur un batch precis — `_runInfo.pendingUndo` cote
-    // Traitement, le run selectionne cote Historique — etat qui n'existe que
-    // dans la vue montee. Depuis /parametres ou /bibliotheque, Ctrl+Z n'aurait
-    // aucun batch a designer, et depuis Historique il devrait deviner lequel
-    // des runs listes viser. L'undo reste donc accessible par ses deux boutons
-    // dedies (Traitement etape 5, Historique -> « Annuler l'apply »), la ou la
-    // cible est explicite — tous deux derriere `dangerConfirmModal`.
+    /* 4b. Ctrl+Z : RETIRE (revue post-merge 2026-08-03 + ultra-audit N01/N08 —
+     * les deux campagnes ont retire le meme raccourci, ce commentaire est leur
+     * conclusion commune).
+     *
+     * Le raccourci (#92 quick win #3) dispatchait `cinesort:undo-shortcut`, que
+     * PLUS AUCUN module n'ecoutait : le seul auditeur vivait dans
+     * `library/lib-apply.js`, supprime a la migration ESM. Le dispatch est
+     * reste, l'auditeur est parti — la frappe ne produisait donc rien tout en
+     * consommant l'evenement clavier, pendant que la modale F1 et /aide
+     * promettaient « Annuler la derniere application (depuis Bibliotheque) »,
+     * libelle faux en prime : la Bibliotheque n'a aucun flux d'undo.
+     *
+     * Pourquoi on ne le RECABLE pas — motif de CIBLE, pas de confirmation.
+     * Une premiere redaction justifiait le retrait par la regle des actions
+     * destructives ; c'etait un homme de paille et cette justification est
+     * retiree ici. Personne ne proposait de cabler une frappe nue sur
+     * `run/undo_last_apply` : le brancher sur `_onUndoExecute` (traitement.js)
+     * ou `_doUndoApply` (historique.js) aurait conserve `dangerConfirmModal` et
+     * n'aurait donc rien viole. Une regle projet mal invoquee dans le depot est
+     * pire que pas de justification : elle finit citee ailleurs.
+     *
+     * Le vrai motif : l'undo n'a pas de cible non ambigue depuis un raccourci
+     * GLOBAL. Il porte sur un batch precis — `_runInfo.pendingUndo` cote
+     * Traitement, le run selectionne cote Historique — etat qui n'existe que
+     * dans la vue montee. Depuis /parametres ou /bibliotheque, Ctrl+Z n'aurait
+     * aucun batch a designer, et depuis Historique il devrait deviner lequel
+     * des runs listes viser. L'undo reste donc accessible par ses deux boutons
+     * dedies (Traitement etape 5 « Previsualiser l'annulation » puis « Annuler
+     * l'apply », Historique -> « Annuler l'apply » par run), la ou la cible est
+     * explicite — tous deux derriere `dangerConfirmModal`.
+     *
+     * Effet de bord voulu : Ctrl+Z n'est plus intercepte du tout et redescend
+     * au navigateur (aucun preventDefault), ce qui rend l'undo natif des champs
+     * texte strictement intact, y compris si le focus n'est pas detecte.
+     */
 
     // 5. F1 : aide
     if (e.key === "F1") {
@@ -154,7 +190,7 @@ export function initKeyboard() {
       return;
     }
 
-    // 6. F5 : refresh (geré aussi dans app.js via bouton)
+    // 6. F5 : refresh de la vue courante (auditeur cable dans initKeyboard).
     if (e.key === "F5") {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("cinesort:refresh"));

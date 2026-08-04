@@ -57,13 +57,26 @@ lui-meme, corrigees et verrouillees ici :
                              (`test_invariant_aucune_operation_disque_prevue_ne_manque_a_la_modale`)
                              qui verrouille la chaine cle du payload run/apply
                              -> registre `_APPLY_DISK_OPS` -> texte rendu.
+
+Fusion de `origin/main` dans cette branche (2026-08-04) — deux ajustements que
+la fusion TEXTUELLE ne pouvait pas voir :
+
+  N09      les deux branches avaient cable un auditeur de `cinesort:refresh`,
+           ce lot dans `app.js`, main dans `core/keyboard.js`. Les additionner
+           aurait fait DEUX remontages de vue par F5. Un seul est conserve
+           (celui de main) et l'unicite est desormais un test
+           (`RefreshAuditeurUniqueTests`).
+  stubs    `historique.js` importe depuis main `cachedGetSettings` et
+           `deriveRunStatus` : les stubs de ce fichier ont ete completes, sans
+           quoi l'appel levait un ReferenceError avale par un `try/catch` — un
+           vert obtenu sur un module amoindri.
 """
 
 from __future__ import annotations
 
 import unittest
 
-from tests._jsexec import ROOT, node_check, require_node, run_module_test
+from tests._jsexec import ROOT, inline_module, node_check, require_node, run_module_test
 
 KEYBOARD_JS = ROOT / "web" / "dashboard" / "core" / "keyboard.js"
 API_JS = ROOT / "web" / "dashboard" / "core" / "api.js"
@@ -100,9 +113,14 @@ globalThis.document = {
   getElementById: () => null,
   get activeElement() { return { tagName: globalThis.__activeTag }; },
 };
+// `__winOn` note les inscriptions faites sur window (sans les cabler : ces
+// tests-la observent ce qui est EMIS). L'inventaire sert au test d'unicite de
+// l'auditeur `cinesort:refresh`, cf. RefreshAuditeurUniqueTests.
+globalThis.__winOn = [];
 globalThis.window = {
   dispatchEvent(ev) { globalThis.__dispatched.push(ev.type); return true; },
-  addEventListener() {}, removeEventListener() {},
+  addEventListener(type) { globalThis.__winOn.push(type); },
+  removeEventListener() {},
 };
 globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
 globalThis.setTimeout = setTimeout;
@@ -311,8 +329,19 @@ export const __h = {
 """
 
 
-class AppRefreshListenerTests(unittest.TestCase):
-    """N09 : `cinesort:refresh` avait 2 emetteurs et 0 auditeur."""
+class RefreshAuditeurUniqueTests(unittest.TestCase):
+    """N09 : `cinesort:refresh` avait 2 emetteurs et 0 auditeur.
+
+    Fusion main <- PR #873 — les DEUX branches ont corrige ce defaut, chacune de
+    son cote : ce lot posait l'auditeur dans `app.js` (`currentRoute()` +
+    navigateTo), la revue post-merge le posait dans `core/keyboard.js`
+    (`_refreshCurrentView`). Textuellement les deux apports fusionnaient sans
+    conflit ; semantiquement ils s'additionnaient : DEUX `navigateTo` par F5,
+    donc deux `hashchange` synchrones, donc un double cleanup + double `init()`
+    de la vue (double refetch reseau, le 2e remontage annulant les requetes du
+    1er via `abortCurrentNav`). Un seul auditeur a ete conserve, celui de
+    `core/keyboard.js`, et c'est cette UNICITE que ces tests verrouillent.
+    """
 
     def setUp(self) -> None:
         require_node(self)
@@ -322,32 +351,74 @@ class AppRefreshListenerTests(unittest.TestCase):
             APP_JS, stubs=_APP_WINDOW + _APP_STUBS, extra=_APP_EXTRA, driver=driver + "\nprocess.exit(0);\n"
         )
 
-    def test_cinesort_refresh_remonte_la_route_courante(self):
-        """ROUGE avant fix : 0 auditeur -> la palette « Rafraichir la vue » se
-        fermait sans rien refetcher (« Equivalent F5 » etait un mensonge)."""
-        res = self._run(
+    def test_un_seul_auditeur_de_cinesort_refresh(self):
+        """ROUGE si l'un des deux auditeurs revient : on compte les inscriptions
+        REELLES sur `window` faites par les deux modules concernes, et la somme
+        doit valoir exactement 1.
+
+        Le comptage se fait module par module (le harnais charge une source a la
+        fois) mais porte sur le meme contrat : `window.addEventListener(
+        "cinesort:refresh", ...)`. Somme = 2 -> double remontage de la vue par
+        F5 ; somme = 0 -> la touche redevient morte.
+        """
+        app = self._run(
             r"""
-const listeners = M.__h.fire("cinesort:refresh");
-__emit({ listeners, navs: globalThis.__navs });
+__emit({ n: (globalThis.__winListeners["cinesort:refresh"] || []).length });
 """
         )
-        self.assertGreaterEqual(res["listeners"], 1, "cinesort:refresh doit avoir un auditeur")
+        kb = run_module_test(
+            KEYBOARD_JS,
+            stubs=_KEYBOARD_STUBS,
+            extra=_KEYBOARD_EXTRA,
+            driver=r"""
+M.initKeyboard();
+__emit({ n: globalThis.__winOn.filter((t) => t === "cinesort:refresh").length });
+""",
+        )
+        self.assertEqual(
+            app["n"] + kb["n"],
+            1,
+            f"auditeurs de cinesort:refresh — app.js: {app['n']}, keyboard.js: {kb['n']} (attendu : 1 au total)",
+        )
+        self.assertEqual(kb["n"], 1, "l'auditeur unique vit dans core/keyboard.js (au plus pres du dispatch)")
+        self.assertEqual(app["n"], 0, "app.js ne doit plus en poser un second")
+
+    def test_lauditeur_unique_remonte_la_route_courante_une_seule_fois(self):
+        """L'unicite ne vaut que si l'auditeur restant fait REELLEMENT le travail
+        (sinon on aurait juste supprime la fonctionnalite). On le verifie sur un
+        `window` qui est un vrai EventTarget : un dispatch = une navigation, et
+        la query du hash courant est preservee (`?filter=hd` : rafraichir une
+        bibliotheque filtree ne doit pas perdre le filtre)."""
+        res = run_module_test(
+            KEYBOARD_JS,
+            stubs=r"""
+globalThis.__navs = [];
+const navigateTo = (h) => { globalThis.__navs.push(h); };
+const showModal = () => {};
+const toggleSidebar = () => {};
+const isRightPanelExpanded = () => false;
+const setRightPanelExpanded = () => {};
+const _win = new EventTarget();
+_win.location = { hash: "#/bibliotheque?filter=hd" };
+globalThis.window = _win;
+globalThis.document = {
+  addEventListener() {}, removeEventListener() {},
+  querySelector: () => null, getElementById: () => null,
+  activeElement: { tagName: "BODY" },
+};
+""",
+            extra="",
+            driver=r"""
+M.initKeyboard();
+globalThis.window.dispatchEvent(new CustomEvent("cinesort:refresh"));
+__emit({ navs: globalThis.__navs });
+""",
+        )
         self.assertEqual(
             res["navs"],
-            ["/bibliotheque"],
-            "l'auditeur doit re-monter la route courante (navigateTo sur le meme hash)",
+            ["/bibliotheque?filter=hd"],
+            f"un dispatch de cinesort:refresh = exactement une remontee de la route courante : {res['navs']!r}",
         )
-
-    def test_refresh_sans_route_resolue_ne_navigue_pas(self):
-        """Garde : au tout premier boot, currentRoute() vaut null."""
-        res = self._run(
-            r"""
-globalThis.__currentRoute = null;
-M.__h.fire("cinesort:refresh");
-__emit({ navs: globalThis.__navs });
-"""
-        )
-        self.assertEqual(res["navs"], [])
 
     def test_cinesort_undo_a_toujours_son_auditeur(self):
         """N01 : le consommateur du refresh des badges reste en place — ce sont
@@ -864,9 +935,10 @@ __emit({ modales, applyCalls: globalThis.__applyCalls.length });
 class ApplyAbortPendantLeVolTests(unittest.TestCase):
     """Relecture adversaire de la PR #873, point 1 — REGRESSION creee par le lot.
 
-    Le nouvel auditeur `cinesort:refresh` (app.js) re-monte la route courante :
-    `navigateTo(currentRoute())` -> `hashchange` -> cleanup de la vue ->
-    `unmountTraitement()` -> `_abortController.abort()` (traitement.js:2996).
+    L'auditeur de `cinesort:refresh` (`_refreshCurrentView`, core/keyboard.js
+    apres la fusion de main) re-monte la route courante :
+    `navigateTo(<hash courant>)` -> `hashchange` -> cleanup de la vue ->
+    `unmountTraitement()` -> `_abortController.abort()` (traitement.js:3106).
     Le POST `run/apply` etant emis AVEC `_signal()`, il est annule cote CLIENT
     alors que le backend, lui, CONTINUE de deplacer les fichiers. Le `catch`
     affichait alors « Erreur lors de l'apply. » en rouge — le pire message
@@ -1388,15 +1460,28 @@ class HistoriqueUndoEventTests(unittest.TestCase):
     def setUp(self) -> None:
         require_node(self)
 
-    _STUBS = r"""
+    # Fusion main <- PR #873 : main a ajoute deux imports a historique.js —
+    # `cachedGetSettings` (retention lue dans les reglages, plus dans le payload
+    # de get_dashboard) et `deriveRunStatus` (regle de statut sortie en module
+    # partage). Sans eux dans le jeu de stubs, l'appel leve un ReferenceError
+    # avale par le `try/catch` de `_fetchRetentionDays` : le test resterait vert
+    # sur un module amoindri. `cachedGetSettings` est un appel reseau, donc
+    # stubbe ; `deriveRunStatus` est de la LOGIQUE, donc la vraie source est
+    # injectee (un stub maison ferait passer la copie du testeur pour le code
+    # livre).
+    _STUBS = (
+        inline_module("core/run-status.js")
+        + r"""
 globalThis.__dispatched = [];
 globalThis.__toasts = [];
 globalThis.__undoResult = { ok: true };
+globalThis.__settings = { ok: true, history_retention_days: 90 };
 const apiPost = async (endpoint) => {
   if (endpoint === "run/undo_last_apply") return { status: 200, data: globalThis.__undoResult };
   return { status: 200, data: { ok: true, runs_history: [] } };
 };
 const apiGet = async () => ({ status: 200, data: { ok: true } });
+const cachedGetSettings = async () => ({ status: 200, data: globalThis.__settings });
 const escapeHtml = (s) => String(s == null ? "" : s);
 const navigateTo = () => {};
 const dangerConfirmModal = () => {};
@@ -1432,6 +1517,7 @@ globalThis.document = {
 };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 """
+    )
 
     _EXTRA = r"""
 export const __h = {

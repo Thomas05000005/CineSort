@@ -180,7 +180,7 @@ const NATIVE_FLAG_KEY = "cinesort.native";
   }
 })();
 
-import { registerRoute, requireAuth, startRouter, navigateTo, currentRoute } from "./core/router.js";
+import { registerRoute, requireAuth, startRouter, navigateTo } from "./core/router.js";
 import { apiPost, cachedGetSettings } from "./core/api.js";
 import { initI18n, setLocale } from "./core/i18n.js";
 
@@ -528,17 +528,18 @@ window.addEventListener("cinesort:undo", () => {
 // endroits (F5 dans core/keyboard.js, entree « Rafraichir la vue » de la
 // palette Ctrl+K) et ecoute a ZERO. La palette se fermait sans rien
 // rafraichir, alors que son hint annonce « Equivalent F5 ».
-// On re-monte la route courante : navigateTo() sur un hash identique
-// re-dispatche un hashchange, ce qui fait passer le router par le cleanup de
-// la vue puis son init() — donc un vrai refetch, sans rechargement complet.
-window.addEventListener("cinesort:refresh", () => {
-  try {
-    const route = currentRoute();
-    if (route) navigateTo(route);
-  } catch (e) {
-    console.warn("[app] cinesort:refresh", e);
-  }
-});
+//
+// Fusion main <- PR #873 : les deux branches avaient corrige ce meme defaut,
+// chacune de son cote — ce lot posait l'auditeur ICI (`currentRoute()` +
+// navigateTo), la revue post-merge le posait dans `core/keyboard.js`
+// (`_refreshCurrentView`, au plus pres du dispatch). Les garder tous les deux
+// aurait fait DEUX `navigateTo` par F5, donc deux hashchange synchrones, donc
+// un double cleanup + double init() de la vue : double refetch reseau, et le
+// second remontage annulant les requetes du premier (abortCurrentNav). On ne
+// garde donc que celui de core/keyboard.js, deja sur main, dont l'auditeur est
+// une reference de module NOMMEE (addEventListener idempotent sur un double
+// initKeyboard) et qui preserve la query du hash courant.
+// L'unicite est verrouillee par `test_un_seul_auditeur_de_cinesort_refresh`.
 
 /* === Sync sidebar/breadcrumb au changement de route ====== */
 

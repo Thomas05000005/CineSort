@@ -252,6 +252,26 @@ class PurgeReviewBucketAllTests(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertTrue(res.get("no_bucket"))
 
+    def test_orphan_manifest_tmp_not_counted_as_film(self) -> None:
+        """Audit 2026-07-09 : un `.tmp.<pid>.<tid>` orphelin laisse par un crash
+        de _save_ttl_manifest ne doit pas etre compte comme un film de quarantaine
+        dans l'inventaire du viewer (ni inscrit au manifest d'arrivee)."""
+        _write_file(self.root / "_review" / "MyFilm" / "movie.mkv", days_ago=1)
+        review = self.root / "_review"
+        review.mkdir(parents=True, exist_ok=True)
+        orphan = review / f"{_TTL_MANIFEST_NAME}.tmp.12345.67890"
+        orphan.write_text("{}", encoding="utf-8")
+
+        listing = list_review_bucket_files(self.cfg)
+        rels = {f["rel"] for f in listing["files"]}
+        self.assertNotIn(orphan.name, rels)
+        self.assertIn("MyFilm/movie.mkv", rels)
+        self.assertEqual(listing["files_count"], 1, "seul le vrai film doit compter")
+
+        # L'orphelin ne doit pas non plus etre inscrit au manifest d'arrivee.
+        manifest = json.loads((review / _TTL_MANIFEST_NAME).read_text(encoding="utf-8"))
+        self.assertNotIn(orphan.name, manifest)
+
 
 class StartQuarantineTtlCronTests(unittest.TestCase):
     def test_cron_disabled_when_ttl_zero(self) -> None:

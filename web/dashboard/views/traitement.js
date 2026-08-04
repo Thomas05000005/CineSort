@@ -195,9 +195,11 @@ function _signal() {
  *  l'utilisateur croit son apply mort pendant que les fichiers bougent, et il
  *  relance.
  *
- *  Le declencheur reel est le nouvel auditeur `cinesort:refresh` (app.js) :
- *  F5 — ou l'entree « Rafraichir la vue » de Ctrl+K — re-monte la route
- *  courante, ce qui passe par le cleanup de la vue, donc par cet abort.
+ *  Le declencheur reel est l'auditeur `cinesort:refresh` (`_refreshCurrentView`,
+ *  core/keyboard.js) : F5 — ou l'entree « Rafraichir la vue » de Ctrl+K —
+ *  re-monte la route courante, ce qui passe par le cleanup de la vue, donc par
+ *  cet abort. (Fusion main <- PR #873 : ce lot avait pose cet auditeur dans
+ *  app.js, main dans core/keyboard.js ; un seul a ete conserve, cf. app.js.)
  *
  *  Choix assume : on GARDE `_signal()` sur ces requetes (plutot que de les
  *  detacher comme `_handleSaveValidation({detached:true})`) et on filtre
