@@ -73,11 +73,25 @@ class _FakeProbeService:
         }
 
 
+class _FakeSettingsFacade:
+    """Facade `api.settings` minimale.
+
+    `probe_settings_for_report` (PR #887) lit les settings courants pour savoir
+    si la sonde est desactivee. Un dict vide normalise `probe_backend` a
+    `auto`, donc le raccourci ne se declenche pas et le chemin complet
+    (`_effective_probe_settings_for_runtime`) reste exerce, comme avant #887.
+    """
+
+    def get_settings(self) -> Dict[str, Any]:
+        return {}
+
+
 class _FakeApi:
     def __init__(self, store: SQLiteStore, state_dir: Path, profile: Dict[str, Any]) -> None:
         self._store = store
         self._state_dir = state_dir
         self._profile = profile
+        self.settings = _FakeSettingsFacade()
 
     def _is_valid_run_id(self, run_id: Any) -> bool:
         return bool(str(run_id or "").strip())

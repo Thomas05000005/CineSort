@@ -2009,23 +2009,20 @@ def _execute_apply(
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
                 _r.proposed_year = int(_ov["proposed_year"])
-    # Ultra-audit 2026-08 (N31) — NE PAS ajouter sqlite3.Error ici, c'est
-    # DELIBERE (meme forme de decision que F11 ligne ~1903).
+    # Ultra-audit 2026-08 (N31) — l'absence de `sqlite3.Error` dans l'except
+    # ci-dessous est DELIBEREE, contrairement au bloc duplicate_decisions
+    # juste au-dessus. Ne pas « aligner » les deux tuples.
     #
-    # Le finding proposait d'aligner ce tuple sur son voisin ligne 1973. Refuse
-    # apres analyse : cet overlay materialise « la DERNIERE volonte explicite de
-    # l'utilisateur » (cf. le bloc jumeau ligne 1487), et la boucle porte sur
-    # TOUTES les rows. Degrader une sqlite3.Error en WARN ferait continuer
-    # l'apply avec un overlay PARTIEL (rows 0..k-1 overridees, k..n non) et
-    # renommerait des dossiers sur disque avec le titre auto-matche, en ecrasant
-    # silencieusement le choix manuel.
+    # Cet overlay materialise la DERNIERE volonte explicite de l'utilisateur, et
+    # la boucle porte sur TOUTES les rows. Degrader une sqlite3.Error en WARN
+    # ferait continuer l'apply avec un overlay PARTIEL (rows 0..k-1 overridees,
+    # k..n non) et renommerait des dossiers avec le titre auto-matche, en
+    # ecrasant silencieusement le choix manuel.
     #
     # Laisser remonter est fail-closed et sans perte : ce bloc s'execute AVANT
-    # tout deplacement (_apply_rows_fn ligne ~2091) et DANS le try de
-    # `apply_changes` (ligne ~2741) ; la boundary ligne ~2863 clot le batch en
-    # FAILED et renvoie une erreur. Aucun fichier n'a bouge, rien n'est a
-    # annuler. Le mecanisme du finding ("database is locked") est de toute
-    # facon inatteignable : les 4 profils PRAGMA forcent journal_mode=WAL.
+    # tout appel a `_apply_rows_fn`, et les deux appelants de `_execute_apply`
+    # l'encadrent d'un try ; la boundary d'`apply_changes` clot alors le batch
+    # en FAILED. Aucun fichier n'a bouge, rien n'est a annuler.
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
