@@ -408,10 +408,11 @@ class TestValidation(unittest.TestCase):
 
 
 class TestFields(unittest.TestCase):
-    def test_all_17_fields_declared(self):
+    def test_all_20_fields_declared(self):
         expected = {
             "video_codec",
             "audio_codec",
+            "audio_codec_canonical",
             "resolution",
             "resolution_rank",
             "year",

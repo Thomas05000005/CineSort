@@ -442,6 +442,25 @@ def get_run(api: Any, run_id: str) -> Optional[Any]:
 
 
 def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
+    safe_max_keep = max(1, int(max_keep or 1))
+
+    # PERF (scans successifs qui ralentissent) : garde AVANT la boucle.
+    # `terminal` est toujours un sous-ensemble de `api._runs` (les runs
+    # actifs sont sautes), donc `len(api._runs) <= safe_max_keep` implique
+    # `len(terminal) <= safe_max_keep` : le `return` d'en dessous serait pris
+    # de toute facon. La boucle etait donc un pur no-op fonctionnel — mais un
+    # no-op TRES cher : elle appelle `rs.runner.get_status(rid)` par entree,
+    # et ce get_status retombe en BDD des que le JobRunner a evince le run
+    # (cleanup H6 : il ne conserve que les 5 derniers runs termines). Chaque
+    # retombee BDD = `RunRepository.get_run` = 3 connexions SQLite neuves
+    # (verif du groupe de schema + user_version + la requete), chacune avec
+    # son cycle PRAGMA + INSERT pragma_history + COMMIT.
+    # Comme `get_run()` declenche cette purge a CHAQUE lecture d'etat, le
+    # polling de progression d'un scan payait O(runs en memoire) ouvertures
+    # de connexion par sondage -> cout total O(n^2) sur une serie de scans.
+    if len(api._runs) <= safe_max_keep:
+        return
+
     terminal: List[Tuple[float, str]] = []
     for rid, rs in api._runs.items():
         if rs.running:
@@ -452,7 +471,6 @@ def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
         ts = float((snap.ended_ts if snap else None) or rs.started_ts or 0.0)
         terminal.append((ts, rid))
 
-    safe_max_keep = max(1, int(max_keep or 1))
     if len(terminal) <= safe_max_keep:
         return
 
