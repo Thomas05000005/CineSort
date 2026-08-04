@@ -169,7 +169,13 @@ class ShortcutsTests(unittest.TestCase):
     def test_arrow_keys_shortcut_present(self) -> None:
         # Ligne ↑/↓ ajoutee dans _SHORTCUTS pour spec 12 §1.
         self.assertIn('["↑", "↓"]', self.js)
-        self.assertIn("Navigation dans listes", self.js)
+        # Revue post-merge 2026-08-03 : le libelle disait « Navigation dans
+        # listes (films, doublons, runs) » alors que SEULE la vue Doublons
+        # implemente ArrowUp/ArrowDown. Le contenu du libelle est desormais
+        # verifie au RUNTIME (rendu reel de _renderShortcutsSection) par
+        # tests/test_revue_20260803_raccourcis_promesses.py ; ici on se contente
+        # de garantir que la ligne existe toujours.
+        self.assertIn("Navigation dans la liste", self.js)
 
 
 # ---------------------------------------------------------------------------

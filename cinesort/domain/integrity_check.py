@@ -33,10 +33,18 @@ _MAGIC_AVI_OFFSET = 8
 # WMV / ASF : 16 octets d'en-tete
 _MAGIC_WMV = bytes([0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11])
 
-# MPEG-TS : sync byte 0x47 repete a intervalles de 188 octets
+# MPEG-TS : sync byte 0x47 repete a intervalles reguliers.
+# - TS classique (.ts) : paquets de 188 octets, sync a l'offset 0.
+# - M2TS/MTS (.m2ts/.mts, Blu-ray et AVCHD) : paquets de 192 octets, ou un
+#   prefixe TP_extra_header de 4 octets precede chaque paquet -> le sync 0x47
+#   se trouve a l'offset 4 puis tous les 192 octets. Sans ce layout, tout
+#   M2TS/MTS valide etait faussement classe "header_mismatch".
 _TS_SYNC_BYTE = 0x47
 _TS_PACKET_SIZE = 188
+_TS_PACKET_SIZE_M2TS = 192  # 188 + les 4 octets du TP_extra_header
 _TS_SYNC_COUNT = 3  # verifier 3 sync bytes
+# (offset du 1er sync, taille de paquet) testes dans l'ordre
+_TS_LAYOUTS = ((0, _TS_PACKET_SIZE), (4, _TS_PACKET_SIZE_M2TS))
 
 # Extensions supportees par la verification
 _EXT_TO_FORMAT: Dict[str, str] = {
@@ -129,14 +137,25 @@ def _check_avi(data: bytes) -> Tuple[bool, str]:
 
 
 def _check_ts(data: bytes) -> Tuple[bool, str]:
-    """Verifie 3 sync bytes 0x47 a intervalles de 188 octets."""
-    needed = (_TS_SYNC_COUNT - 1) * _TS_PACKET_SIZE + 1
-    if len(data) < needed:
+    """Verifie 3 sync bytes 0x47 espaces regulierement.
+
+    Supporte le TS classique (paquets 188 o, sync a l'offset 0) et le
+    M2TS/MTS (paquets 192 o avec prefixe TP_extra_header de 4 o -> sync a
+    l'offset 4). Le premier layout dont les 3 sync bytes correspondent valide.
+    """
+    for base, size in _TS_LAYOUTS:
+        needed = base + (_TS_SYNC_COUNT - 1) * size + 1
+        if len(data) < needed:
+            continue
+        if all(data[base + i * size] == _TS_SYNC_BYTE for i in range(_TS_SYNC_COUNT)):
+            return True, "ok"
+    # Aucun layout ne correspond. Distinguer "trop petit pour verifier" de
+    # "octets presents mais invalides" : n'affirmer header_mismatch que si le
+    # buffer etait assez grand pour tester tous les layouts.
+    max_needed = max(base + (_TS_SYNC_COUNT - 1) * size + 1 for base, size in _TS_LAYOUTS)
+    if len(data) < max_needed:
         return False, "file_too_small"
-    for i in range(_TS_SYNC_COUNT):
-        if data[i * _TS_PACKET_SIZE] != _TS_SYNC_BYTE:
-            return False, "header_mismatch"
-    return True, "ok"
+    return False, "header_mismatch"
 
 
 def _check_wmv(data: bytes) -> Tuple[bool, str]:
