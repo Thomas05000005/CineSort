@@ -1427,10 +1427,32 @@ def _mirror_decisions_to_sql(
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:
-    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report."""
+    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report.
+
+    Fix revue adversaire PR#854. Cette fonction est le SEUL producteur de probes
+    du comparateur de doublons, et elle ne propageait que la HAUTEUR. Or la
+    hauteur ffprobe est celle du flux encode, bandes noires deja retirees : un
+    2160p scope 2.39:1 (`3840x1600`, la geometrie de la majorite des UHD
+    Blu-ray) tombait dans la classe 1080p et se retrouvait a EGALITE avec un
+    vrai 1080p flat -- le critere Resolution perdait ses 30 points, ce qui
+    suffisait a retourner le verdict global vers « Garder B, archiver A » sur le
+    fichier 5x plus gros. Le verdict etant applicable en masse (« Auto-decider
+    tous », perdants deplaces en _review/_duplicates_user_decided/ a l'apply),
+    la classe se decide desormais sur la LARGEUR comme partout ailleurs.
+
+    L'etiquette canonique n'est propagee que si elle vient d'une MESURE
+    (`resolution_source == "probe"`) : `_resolution_label` retombe sinon sur le
+    nom de release, et un fichier mesure 700x400 nomme `.1080p.` imposerait sa
+    classe au comparateur. Meme regle que `quality_score._effective_resolution_height`.
+    """
+    measured_label = ""
+    if str(detected.get("resolution_source") or "") == "probe":
+        measured_label = str(detected.get("resolution") or "")
     return {
         "video": {
             "height": detected.get("height") or detected.get("resolution_height") or 0,
+            "width": detected.get("width") or 0,
+            "resolution": measured_label,
             "codec": detected.get("video_codec") or "",
             "bitrate": detected.get("bitrate_bps") or (int(detected.get("bitrate_kbps") or 0) * 1000),
             "hdr10": detected.get("hdr10", False),

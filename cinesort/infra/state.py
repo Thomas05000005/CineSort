@@ -132,7 +132,14 @@ def atomic_write_json(p: Path, obj) -> None:
     tmp_name = f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.{uuid.uuid4().hex[:8]}"
     tmp = p.with_name(tmp_name)
     try:
-        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Durabilite (audit 2026-07-30 #820) : flush + fsync AVANT os.replace. os.replace
+        # est atomique cote entree de repertoire, mais sans fsync les donnees du tmp peuvent
+        # ne pas etre sur le disque au moment du crash -> fichier destination tronque/0-octet.
+        # Meme garantie que poster_proxy._atomic_write.
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
         # R8-026 (F2-d) : retry court sur os.replace. Sur Windows, os.replace leve
         # PermissionError (WinError 5/32) quand un lecteur concurrent (poller UI, 2e onglet)
         # tient le fichier destination ouvert -> le write etait PERDU (l'ancienne valeur restait).

@@ -301,19 +301,44 @@ def _build_plan_row(film: Dict[str, Any], run_id: str) -> Dict[str, Any]:
 
 
 def _build_quality_metrics(film: Dict[str, Any]) -> Dict[str, Any]:
+    # Fix audit 2026-07-24 (couche all) : _build_library_rows (seul rendu de la
+    # vue Bibliotheque) lit EXCLUSIVEMENT metrics["detected"] avec les cles
+    # width/height/video_codec/duration_s/languages (cf library_support.py:331
+    # et le commentaire lib-1 v1.5.6 lignes 317-330). L'ancien schema
+    # metrics["video"]/["audio"] + duration_s/bitrate top-level n'etait relu
+    # nulle part -> tous les films demo affichaient codec="unknown", resolution
+    # degradee, duree 0 et audio_languages vides, cassant la raison d'etre meme
+    # du mode demo. On aligne sur le schema reel produit par
+    # cinesort/domain/quality_score.py:1622.
     width, height = _RESOLUTION_WH.get(str(film.get("resolution") or ""), (0, 0))
+    duration_s = 6300.0
+    bitrate_kbps = int(film["bitrate"])
+    # Estimation taille = debit (kbps) / 8 * duree (s) * 1000 octets, comme
+    # _estimate_file_size cote quality_score (bitrate en kbps -> octets).
+    file_size_bytes = int(bitrate_kbps / 8 * duration_s * 1000)
     return {
-        "video": {
-            "codec": str(film["video_codec"]),
+        "engine_version": "demo",
+        "profile_id": DEMO_PROFILE_ID,
+        "profile_version": DEMO_PROFILE_VERSION,
+        "probe_quality": "OK",
+        "detected": {
+            "resolution": str(film.get("resolution") or ""),
+            "resolution_source": "demo",
             "width": int(width),
             "height": int(height),
+            "bitrate_kbps": bitrate_kbps,
+            "video_codec": str(film["video_codec"]),
+            "bit_depth": 10,
+            "hdr_dolby_vision": False,
+            "hdr10_plus": False,
+            "hdr10": False,
+            "audio_tracks_count": 1,
+            "audio_best_codec": str(film["audio_codec"]),
+            "audio_best_channels": int(film["channels"]),
+            "languages": ["eng", "fra"],
+            "duration_s": duration_s,
+            "file_size_bytes": file_size_bytes,
         },
-        "audio": {
-            "codec": str(film["audio_codec"]),
-            "channels": int(film["channels"]),
-        },
-        "duration_s": 6300,
-        "bitrate_kbps": int(film["bitrate"]),
     }
 
 

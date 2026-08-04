@@ -87,9 +87,12 @@ class JobRunner:
             row = self._store.run.get_run(run_id)
             if not row:
                 return
-            state_dir = Path(str(row.get("state_dir") or ""))
-            if not state_dir:
+            # Path("") -> Path(".") est truthy : tester la chaine brute, sinon
+            # un state_dir vide ferait ecrire crash.txt dans le CWD du process.
+            state_dir_raw = str(row.get("state_dir") or "").strip()
+            if not state_dir_raw:
                 return
+            state_dir = Path(state_dir_raw)
             run_dir = state_dir / "runs" / f"tri_films_{run_id}"
             run_dir.mkdir(parents=True, exist_ok=True)
             content = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {header}\n\n{tb_text.rstrip()}\n"
