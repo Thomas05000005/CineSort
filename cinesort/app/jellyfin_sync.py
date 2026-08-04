@@ -276,18 +276,42 @@ def restore_watched(
             _log.warning("Jellyfin sync : echec recuperation films (tentative %d) — %s", attempt, exc)
             continue
 
-        # Indexer par chemin normalise
-        jellyfin_by_path: Dict[str, str] = {}  # norm_path -> item_id
+        # Indexer par chemin normalise. Issue #566 : plusieurs items Jellyfin
+        # peuvent pointer le MEME chemin (doublon reste apres un refresh
+        # interrompu, recovery de base, « Force Refresh All Metadata »). Le dict
+        # simple ecrasait le premier id en silence — last-write-wins — et
+        # `mark_played` repartait alors sur un seul item, possiblement celui qui
+        # n'etait pas vu : l'utilisateur perdait le statut qu'il croyait
+        # restaurer. On MERGE par cle metier (le chemin) au lieu d'ecraser, et
+        # on re-affirme le statut sur TOUS les items du chemin — `mark_played`
+        # est idempotent cote Jellyfin, le faire deux fois ne coute rien.
+        jellyfin_by_path: Dict[str, List[str]] = {}  # norm_path -> [item_id]
+        duplicate_item_count = 0
         for movie in current_movies:
             p = _normalize_path(movie.get("path", ""))
-            if p:
-                jellyfin_by_path[p] = movie.get("id", "")
+            # Un id vide n'identifie aucun item : l'indexer ferait disparaitre
+            # l'item valide qui partage ce chemin (cf. issue #452, meme famille).
+            item_id = str(movie.get("id") or "")
+            if not p or not item_id:
+                continue
+            known = jellyfin_by_path.setdefault(p, [])
+            if item_id in known:
+                continue
+            if known:
+                duplicate_item_count += 1
+            known.append(item_id)
+        if duplicate_item_count:
+            _log.warning(
+                "Jellyfin sync : %d item(s) en doublon de chemin dans la bibliotheque "
+                "— le statut vu sera re-affirme sur chacun",
+                duplicate_item_count,
+            )
 
         # Tenter le match pour les pending
         still_pending: Dict[str, str] = {}
         for new_norm, old_norm in pending.items():
-            item_id = jellyfin_by_path.get(new_norm, "")
-            if not item_id:
+            item_ids = jellyfin_by_path.get(new_norm) or []
+            if not item_ids:
                 # FIX #15 : le film a DISPARU de l'index a cette tentative. Si une
                 # tentative anterieure avait laisse un mark_played en echec dans
                 # mark_failed, cet item_id est desormais perime : on le purge pour
@@ -299,16 +323,23 @@ def restore_watched(
                 still_pending[new_norm] = old_norm
                 continue
 
-            # Film trouve, restaurer le statut watched
-            ok = bool(client.mark_played(user_id, item_id))
-            if ok:
+            # Film trouve, restaurer le statut watched sur TOUS les items qui
+            # portent ce chemin (issue #566). Le chemin n'est considere restaure
+            # que si AUCUN des marquages n'a echoue : un echec partiel reste en
+            # attente et sera re-tente, il ne devient jamais un succes.
+            first_failed_id = ""
+            for item_id in item_ids:
+                if not bool(client.mark_played(user_id, item_id)):
+                    first_failed_id = first_failed_id or item_id
+            if not first_failed_id:
                 result.restored += 1
                 result.details.append(
                     {
                         "action": "restored",
                         "old_path": old_norm,
                         "new_path": new_norm,
-                        "item_id": item_id,
+                        "item_id": item_ids[0],
+                        "item_ids": list(item_ids),
                     }
                 )
             else:
@@ -318,7 +349,7 @@ def restore_watched(
                 # idempotent cote Jellyfin). Erreur definitive seulement apres
                 # epuisement des tentatives (comptage en fin de fonction).
                 still_pending[new_norm] = old_norm
-                mark_failed[new_norm] = item_id
+                mark_failed[new_norm] = first_failed_id
 
         pending = still_pending
         if not pending:
