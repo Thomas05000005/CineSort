@@ -1371,7 +1371,15 @@ class CineSortApi:
             client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
                 info = client.validate_connection()
-                jf_user_id = info.get("user_id", "")
+                if not info.get("ok") or not info.get("user_id"):
+                    err = str(info.get("error") or "user_id introuvable")
+                    return _err_response(
+                        f"Connexion Jellyfin echouee : {err}",
+                        category="resource",
+                        level="error",
+                        log_module=__name__,
+                    )
+                jf_user_id = str(info.get("user_id") or "")
             # BUG 2 : utiliser le scan multi-library pour eviter les tronques
             jellyfin_movies = client.get_all_movies_from_all_libraries(jf_user_id)
         except _jellyfin_mod.JellyfinError as exc:
