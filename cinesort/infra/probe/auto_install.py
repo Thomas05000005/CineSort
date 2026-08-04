@@ -27,15 +27,14 @@ import hashlib
 import logging
 import os
 import re
-import socket
 import sys
 import tempfile
 import zipfile
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
-from urllib.request import urlretrieve
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +124,18 @@ _MAX_EXTRACTED_BYTES_PER_INSTALL = 384 * 1024 * 1024
 # octet au-dela du plafond n'est ecrit sur disque).
 _EXTRACT_CHUNK_BYTES = 1024 * 1024
 
-# Timeout socket pour urlretrieve : sans cela, un serveur muet (hote en panne,
+# Timeout du telechargement : sans cela, un serveur muet (hote en panne,
 # firewall corporate qui drop) fait hang l'install indefiniment.
 # C'est un timeout PAR OPERATION socket, pas une duree totale de transfert : un
 # telechargement de 105 Mio sur une ligne lente reste possible tant que le
 # serveur ne reste pas 120 s sans envoyer un octet.
+# Il est passe a `urlopen(..., timeout=)`, donc porte sur la SEULE connexion
+# ouverte ici (cf. `_download_to_file` et issue #514).
 _DOWNLOAD_TIMEOUT_S = 120.0
+
+# Taille de bloc de lecture reseau. Sert aussi d'unite au `reporthook` (contrat
+# `urlretrieve` : blocknum, blocksize, totalsize).
+_DOWNLOAD_BLOCK_BYTES = 64 * 1024
 
 
 class IntegrityError(Exception):
@@ -216,8 +221,8 @@ def _assert_https(url: str) -> None:
 
     `file://` etait tolere « pour les tests unitaires » : c'etait un
     contournement du controle de transport laisse dans le code de production.
-    Les tests simulent desormais le transport (`urlretrieve` mocke) et n'ont
-    plus besoin de cette breche.
+    Les tests simulent desormais le transport (`urlopen` mocke) et n'ont plus
+    besoin de cette breche.
     """
     scheme = urlparse(url).scheme.lower()
     if scheme != "https":
@@ -280,7 +285,7 @@ class _ExtractBudget:
 
 
 def _bounded_reporthook(label: str) -> Callable[[int, int, int], None]:
-    """Hook `urlretrieve` qui interrompt un telechargement trop volumineux.
+    """Hook de progression qui interrompt un telechargement trop volumineux.
 
     Interrompt DURANT le transfert (le `Content-Length` annonce est refuse
     immediatement, et le volume reellement recu est recontrole a chaque bloc) :
@@ -303,6 +308,64 @@ def _bounded_reporthook(label: str) -> Callable[[int, int, int], None]:
     return _hook
 
 
+def _announced_size(response: Any) -> int:
+    """`Content-Length` annonce par le serveur, ou -1 s'il est absent/illisible.
+
+    -1 est la valeur que `urlretrieve` transmet au reporthook dans ce cas
+    (transfert chunked, serveur avare) : le hook sait deja la traiter, la borne
+    tombe alors sur le volume reellement recu.
+    """
+    headers = getattr(response, "headers", None)
+    raw = headers.get("Content-Length") if headers is not None else None
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return -1
+
+
+def _download_to_file(
+    url: str,
+    dest: str,
+    reporthook: Callable[[int, int, int], None],
+    *,
+    timeout_s: float,
+) -> None:
+    """Telecharge `url` vers `dest` en streaming, avec un timeout PAR CONNEXION.
+
+    Remplace `urlretrieve` (issue #514). `urlretrieve` n'expose aucun parametre
+    de timeout : le seul moyen de le borner etait `socket.setdefaulttimeout()`,
+    c'est-a-dire de changer le DEFAUT GLOBAL du processus. Pendant les 120 s du
+    telechargement, TOUT socket cree par un autre thread — serveur REST,
+    clients TMDb/OMDb/Jellyfin/Plex, watcher — heritait de ce timeout sans
+    l'avoir demande, et `auto_install_probe_tools` est declenchable a distance
+    via la facade REST runtime. `urlopen(..., timeout=)` ne borne que la
+    connexion ouverte ici : plus aucun effet de bord cross-thread.
+
+    Le contrat du `reporthook` est celui d'`urlretrieve`
+    (`blocknum, blocksize, totalsize`), appele une premiere fois a blocknum 0
+    avec la taille annoncee : le refus d'une archive hors plafond tombe donc
+    AVANT la lecture du moindre octet de corps.
+    """
+    request = Request(url, headers={"User-Agent": "CineSort/auto-install"})
+    # nosec B310 - le schema est verifie HTTPS par _assert_https en amont (aucun
+    # file:// ni schema exotique n'est accepte), l'URL est une constante du
+    # module et non une entree utilisateur, le volume est borne par le
+    # reporthook, et l'archive obtenue n'est utilisee qu'apres verification de
+    # son empreinte SHA256.
+    with urlopen(request, timeout=timeout_s) as response:  # nosec B310
+        totalsize = _announced_size(response)
+        blocknum = 0
+        reporthook(blocknum, _DOWNLOAD_BLOCK_BYTES, totalsize)
+        with open(dest, "wb") as out:
+            while True:
+                chunk = response.read(_DOWNLOAD_BLOCK_BYTES)
+                if not chunk:
+                    break
+                out.write(chunk)
+                blocknum += 1
+                reporthook(blocknum, _DOWNLOAD_BLOCK_BYTES, totalsize)
+
+
 def _download_bounded(url: str, dest: str, *, label: str) -> None:
     """Telecharge `url` vers `dest` avec un plafond de taille, HTTPS impose.
 
@@ -312,13 +375,14 @@ def _download_bounded(url: str, dest: str, *, label: str) -> None:
     changement d'implementation).
     """
     _assert_https(url)
-    with _socket_timeout(_DOWNLOAD_TIMEOUT_S):
-        # nosec B310 - le schema est verifie HTTPS juste au-dessus (aucun
-        # file:// ni schema exotique n'est accepte), l'URL est une constante du
-        # module et non une entree utilisateur, le volume est borne par le
-        # reporthook, et l'archive obtenue n'est utilisee qu'apres verification
-        # de son empreinte SHA256.
-        urlretrieve(url, dest, _bounded_reporthook(label))  # nosec B310
+    try:
+        _download_to_file(url, dest, _bounded_reporthook(label), timeout_s=_DOWNLOAD_TIMEOUT_S)
+    except BaseException:
+        # Transfert abandonne (plafond franchi, timeout, reseau coupe) : le
+        # fragment d'archive ne doit pas survivre pour etre repris par erreur.
+        with suppress(OSError):
+            os.remove(dest)
+        raise
     size = os.path.getsize(dest)
     if size > _MAX_ARCHIVE_BYTES:
         with suppress(OSError):
@@ -414,20 +478,6 @@ def _extract_member(
         # abandon il est efface ici. Dans tous les cas rien de tronque ne survit.
         with suppress(OSError):
             os.remove(tmp_name)
-
-
-@contextmanager
-def _socket_timeout(seconds: float) -> Iterator[None]:
-    """Force un timeout socket global pendant le download (urllib.request n'expose
-    pas de parametre timeout sur urlretrieve). Restaure la valeur precedente
-    en sortie, meme sur exception.
-    """
-    previous = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(seconds)
-    try:
-        yield
-    finally:
-        socket.setdefaulttimeout(previous)
 
 
 def get_tools_dir() -> Path:
