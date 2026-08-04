@@ -22,10 +22,10 @@ Findings couverts (assertions sur la SOURCE JS + node --check) :
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
 import unittest
 from pathlib import Path
+
+from tests._jsexec import node_check
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TRAITEMENT_JS = _ROOT / "web" / "dashboard" / "views" / "traitement.js"
@@ -152,18 +152,18 @@ class M21PingCachePurgeTests(unittest.TestCase):
 
 
 class NodeCheckTests(unittest.TestCase):
-    """node --check des 3 fichiers modifies (syntaxe ESM valide)."""
+    """Syntaxe ESM valide pour les 3 fichiers modifies.
+
+    Ce bloc faisait `node --check <chemin>` et asseyait `returncode == 0`.
+    Mesure du 2026-08-03 : cette commande sort en 0 sur 47 des 48 `.js` de
+    `web/dashboard/` MEME avec une erreur de syntaxe averee (modules ESM sans
+    `package.json` declarant `"type": "module"`). Les 3 assertions ci-dessous
+    etaient donc incapables d'echouer. Elles passent par le verificateur reel
+    `scripts/check_js_syntax.mjs` (goal impose, auto-teste par canaris).
+    """
 
     def _node_check(self, path: Path) -> None:
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("node introuvable sur le PATH")
-        res = subprocess.run(
-            [node, "--check", str(path)],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(res.returncode, 0, msg=f"node --check {path.name} a echoue:\n{res.stderr}")
+        node_check(self, path)
 
     def test_traitement_js_syntax(self) -> None:
         self._node_check(_TRAITEMENT_JS)

@@ -720,6 +720,18 @@ def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
     }
 
 
+def _real_path(value: Path) -> Path:
+    """Chemin REEL canonise, pour comparer des chemins et non des chaines.
+
+    ``os.path.realpath`` resout jonctions NTFS, points de montage, noms courts
+    8.3 et liens ; ``os.path.normcase`` neutralise la casse (NTFS est
+    insensible a la casse). Les DEUX cotes d'une comparaison de zone doivent
+    passer par ici : sinon deux ecritures du meme chemin reel paraissent
+    differentes et un dossier legitime est refuse.
+    """
+    return Path(os.path.normcase(os.path.realpath(str(value))))
+
+
 def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: Any) -> Dict[str, Any]:
     try:
         raw_path = str(path or "").strip()
@@ -749,21 +761,24 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
-        # contient un symlink dans son chemin (ex: parent symlink).
-        if str(resolved_path) != str(candidate.absolute()):
-            logger.warning(
-                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
-                candidate,
-                resolved_path,
-            )
-            return _err_response(
-                "Les liens symboliques ne sont pas autorises.",
-                category="permission",
-                level="warning",
-                log_module=__name__,
-            )
-
+        # Fix 2026-08-03 : ici vivait une 2e garde qui comparait des CHAINES
+        # (``str(resolved_path) != str(candidate.absolute())``) pour deviner un
+        # symlink parent. Or ``resolve()`` reecrit la chaine sans qu'aucun lien
+        # n'existe des que le chemin traverse une jonction NTFS, un point de
+        # montage, un nom court 8.3 ou une casse differente (NTFS est
+        # insensible a la casse) : une bibliotheque placee derriere une
+        # jonction se voyait refuser un dossier parfaitement normal.
+        # La protection anti path-traversal de la Vague H (2026-05-25) reste
+        # entiere, portee par trois faits INDEPENDANTS de l'ecriture du chemin :
+        #  1. les liens symboliques sont refuses explicitement ci-dessus
+        #     (``candidate.is_symlink()``) ;
+        #  2. un lien situe dans le chemin PARENT est neutralise par le controle
+        #     de zone ci-dessous, qui compare des chemins REELS des deux cotes
+        #     (``_real_path``) : la cible du lien sort de la zone autorisee, donc
+        #     le chemin est refuse ;
+        #  3. ``os.startfile()`` n'ouvre que le chemin RESOLU, jamais
+        #     ``candidate`` : meme autorise, un lien ne peut pas faire ouvrir
+        #     autre chose que sa cible deja validee.
         open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
@@ -779,9 +794,14 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if root_raw:
             allowed_bases.append(normalize_user_path(root_raw, Path(default_root)))
 
+        # Comparaison de chemins REELS (et non de chaines) des deux cotes :
+        # c'est ce controle qui porte desormais seul le refus d'une traversee
+        # par un lien parent. ``relative_to`` compare composant par composant :
+        # C:\lib2 n'est donc pas vu comme inclus dans C:\lib.
+        real_target = _real_path(resolved_to_check)
         for base in allowed_bases:
             try:
-                resolved_to_check.relative_to(base.resolve())
+                real_target.relative_to(_real_path(base))
                 allowed = True
                 break
             except (OSError, ValueError):
