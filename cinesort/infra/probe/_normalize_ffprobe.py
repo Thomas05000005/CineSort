@@ -37,7 +37,11 @@ def _detect_atmos_dtsx(codec_name: str, profile: str, title: str, tags: Dict[str
     tags_blob = " ".join(str(v) for v in (tags or {}).values()).lower()
 
     is_atmos = False
-    if codec in {"truehd", "eac3", "ac3"}:
+    # AC-3 (Dolby Digital) ne peut PAS transporter d'Atmos (pas de JOC, bande
+    # passante insuffisante) : seuls TrueHD (Blu-ray) et E-AC-3/JOC (streaming)
+    # le peuvent. Inclure "ac3" produisait un faux is_atmos sur les pistes AC-3
+    # taguees marketing "Atmos" par un release group.
+    if codec in {"truehd", "eac3"}:
         if "atmos" in title_l or "atmos" in tags_blob or "atmos" in prof:
             is_atmos = True
         elif "joc" in prof or "joc" in tags_blob:
