@@ -41,6 +41,21 @@ def _resolve_smtp_timeout(settings: Dict[str, Any]) -> int:
     return value
 
 
+def _resolve_smtp_port(settings: Dict[str, Any]) -> int:
+    """Retourne le port SMTP avec fallback 587. Une valeur non-numerique
+    (ex: ``"abc"`` saisi par l'utilisateur) retombe sur 587 au lieu de
+    crasher silencieusement le thread daemon d'envoi.
+    """
+    raw = settings.get("email_smtp_port")
+    if raw is None or raw == "":
+        return 587
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning("[email] port SMTP invalide %r, fallback 587", raw)
+        return 587
+
+
 def _build_subject(event: str, data: Dict[str, Any]) -> str:
     """Construit le sujet de l'email selon l'evenement."""
     if event == "post_scan":
@@ -88,7 +103,7 @@ def send_email_report(
 ) -> bool:
     """Envoie un rapport email. Retourne True si succes, False sinon."""
     host = str(settings.get("email_smtp_host") or "").strip()
-    port = int(settings.get("email_smtp_port") or 587)
+    port = _resolve_smtp_port(settings)
     user = str(settings.get("email_smtp_user") or "").strip()
     password = str(settings.get("email_smtp_password") or "")
     use_tls = bool(settings.get("email_smtp_tls", True))
