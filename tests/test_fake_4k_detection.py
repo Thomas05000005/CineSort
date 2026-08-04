@@ -31,6 +31,19 @@ def _checkerboard_high_freq(w: int, h: int) -> list:
     return (arr * 255).astype(np.int32).flatten().tolist()
 
 
+def _smooth_gradient_frame(w: int, h: int, amplitude: float = 34.6, base: float = 110.0, scale: float = 1.0) -> list:
+    """Degrade vertical lisse : peu de HF, variance faible mais non nulle.
+
+    Represente un aplat reel (ciel, fondu, carton) : `is_valid_frame` l'accepte
+    (variance ~100 en 8 bits, au-dessus de FRAME_MIN_VARIANCE_8BIT=50) alors que
+    l'analyse FFT devrait l'ecarter (< FAKE_4K_FFT_MIN_VARIANCE=200).
+    `scale=4.0` transpose la meme image sur l'echelle 10 bits.
+    """
+    ramp = np.linspace(base, base + amplitude, h, dtype=np.float64)
+    arr = np.repeat(ramp[:, None], w, axis=1) * scale
+    return arr.astype(np.int32).flatten().tolist()
+
+
 def _bicubic_upscale_simulation(w: int, h: int, seed: int = 0) -> list:
     """Simule un upscale bicubique : faible HF.
 
@@ -113,10 +126,35 @@ class TestIsFrameUsable(unittest.TestCase):
         frame = [128] * 100  # beaucoup moins que 64*64
         self.assertFalse(is_frame_usable_for_fft(frame, 64, 64, y_avg=128.0, variance=5000.0))
 
-    def test_variance_none_accepted(self):
-        # Si variance non fournie, on ne filtre pas dessus
-        frame = _white_noise_frame(64, 64)
-        self.assertTrue(is_frame_usable_for_fft(frame, 64, 64, y_avg=128.0, variance=None))
+    def test_variance_none_is_measured_not_ignored(self):
+        """#823 : sans variance fournie, elle est MESUREE (la garde etait morte).
+
+        Aucun producteur de frame ne pose la cle `variance` (frame_extraction
+        rend {timestamp, pixels, width, height, y_avg}), donc l'ancien
+        `if variance is not None` ne s'appliquait jamais en production.
+        """
+        noisy = _white_noise_frame(64, 64)
+        flat = _smooth_gradient_frame(64, 64)
+        self.assertTrue(is_frame_usable_for_fft(noisy, 64, 64, y_avg=128.0, variance=None))
+        self.assertFalse(is_frame_usable_for_fft(flat, 64, 64, y_avg=128.0, variance=None))
+
+    def test_thresholds_follow_bit_depth(self):
+        """Les seuils sont exprimes en 8 bits ; le 10 bits doit etre remis a l'echelle.
+
+        Un Y 10 bits vaut 4x le Y 8 bits, donc la variance vaut 16x : sans
+        remise a l'echelle, la garde « frame uniforme » ne mordait plus sur du
+        10 bits, c'est-a-dire sur la quasi-totalite des UHD.
+        """
+        flat_10bit = _smooth_gradient_frame(64, 64, scale=4.0)
+        # variance ~1600 : au-dessus du seuil 8 bits (200), en dessous du seuil
+        # 10 bits (3200). Le meme tableau change donc de verdict selon bit_depth.
+        self.assertTrue(is_frame_usable_for_fft(flat_10bit, 64, 64, y_avg=512.0, bit_depth=8))
+        self.assertFalse(is_frame_usable_for_fft(flat_10bit, 64, 64, y_avg=512.0, bit_depth=10))
+        # Meme logique pour la garde « trop sombre » : y_avg=50 en 10 bits vaut
+        # 12.5 en 8 bits, donc bien en dessous du plancher.
+        noisy = _white_noise_frame(64, 64)
+        self.assertTrue(is_frame_usable_for_fft(noisy, 64, 64, y_avg=50.0, bit_depth=8))
+        self.assertFalse(is_frame_usable_for_fft(noisy, 64, 64, y_avg=50.0, bit_depth=10))
 
     def test_zero_dimensions_rejected(self):
         self.assertFalse(is_frame_usable_for_fft([], 0, 0, y_avg=128.0))
@@ -160,6 +198,26 @@ class TestComputeFftHfRatioMedian(unittest.TestCase):
         ]
         m = compute_fft_hf_ratio_median(frames, 64, 64)
         self.assertIsNone(m)
+
+    def test_flat_frames_excluded_without_variance_key(self):
+        """#823, sur la forme REELLE des frames : aucune cle `variance`.
+
+        3 aplats + 2 frames texturees. Sans le filtrage, la mediane des 5 ratios
+        tombe sur un aplat (HF ~ 0) et le film est declare `fake_4k_bicubic` a
+        tort ; avec le filtrage, seules les 2 frames texturees comptent.
+        On verifie le VERDICT, pas seulement le nombre de frames retenues.
+        """
+        frames = [
+            {"pixels": _smooth_gradient_frame(64, 64), "width": 64, "height": 64, "y_avg": 127.0},
+            {"pixels": _smooth_gradient_frame(64, 64, base=100.0), "width": 64, "height": 64, "y_avg": 117.0},
+            {"pixels": _smooth_gradient_frame(64, 64, base=120.0), "width": 64, "height": 64, "y_avg": 137.0},
+            {"pixels": _white_noise_frame(64, 64, seed=1), "width": 64, "height": 64, "y_avg": 128.0},
+            {"pixels": _white_noise_frame(64, 64, seed=2), "width": 64, "height": 64, "y_avg": 128.0},
+        ]
+        m = compute_fft_hf_ratio_median(frames, 64, 64)
+        self.assertIsNotNone(m, "2 frames texturees restent utilisables")
+        verdict, _ = classify_fake_4k_fft(m, video_height=2160, is_animation=False)
+        self.assertEqual(verdict, "4k_native")
 
     def test_empty_list_none(self):
         self.assertIsNone(compute_fft_hf_ratio_median([], 64, 64))
