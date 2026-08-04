@@ -18,6 +18,16 @@ from cinesort.domain.codec_ranks import (
     format_audio_channels as _format_audio_channels,
 )
 
+# Source unique de la derivation « codec de base + variante -> etiquette
+# canonique » (le probe ffprobe range 'DTS-HD MA' dans `profile`, pas dans
+# `codec`). Le home naturel serait `codec_ranks`, hors perimetre de ce
+# correctif : on importe le scorer plutot que de dupliquer la regle, la
+# divergence entre ces deux modules ayant deja produit un bug (R8-039).
+from cinesort.domain.quality_score import (
+    _AUDIO_CANONICAL_RANK_ALIAS,
+    _canonical_audio_codec,
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Ponderations des criteres -------------------------------------------
@@ -34,6 +44,11 @@ _TIE_THRESHOLD = 5
 
 # --- Rangs pour chaque critere -------------------------------------------
 _RESOLUTION_RANK = {2160: 4, 1080: 3, 720: 2, 480: 1}
+
+# Etiquette canonique (`metrics.detected.resolution`, cf. quality_score
+# ._resolution_label) -> hauteur de reference de la classe. Utilise quand
+# l'appelant fournit deja le verdict canonique plutot que des dimensions.
+_CANONICAL_LABEL_RANK = {"2160p": 2160, "1080p": 1080, "720p": 720}
 
 _HDR_RANK = {"dv": 3, "dolby vision": 3, "hdr10+": 2, "hdr10plus": 2, "hdr10": 1, "sdr": 0, "": 0}
 
@@ -102,7 +117,9 @@ def compare_duplicates(
     # Critere optionnel : score perceptuel (poids 10)
     if perceptual_score_a is not None and perceptual_score_b is not None:
         pa, pb = int(perceptual_score_a), int(perceptual_score_b)
-        delta = max(-10, min(10, (pa - pb) // 5))  # normalise sur ±10
+        # int() truncate vers 0 (symetrique), contrairement a `//` qui floor
+        # vers -inf et biaisait en faveur de B sur petites differences.
+        delta = max(-10, min(10, int((pa - pb) / 5)))  # normalise sur ±10
         w = "a" if delta > 0 else "b" if delta < 0 else "tie"
         criteria.append(
             CriterionResult(
@@ -350,9 +367,55 @@ def _compare_criterion(
     return CriterionResult(name=name, label=label, value_a=str_a, value_b=str_b, winner="tie", points_delta=0)
 
 
+def _to_positive_int(value: Any) -> int:
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
 def _resolution_height(video: Dict[str, Any]) -> Optional[int]:
-    h = video.get("height")
-    return int(h) if h and int(h) > 0 else None
+    """Valeur comparee pour le critere « Resolution » : la CLASSE, pas la hauteur brute.
+
+    Fix ultra-audit 2026-08-03. Deux defauts distincts sont corriges ici.
+
+    1. On comparait la hauteur BRUTE du flux. Deux crops du meme film --
+       1920x800 et 1920x816, tous deux affiches « 720p vs 720p » dans la table
+       des criteres -- produisaient un delta de 30 points (le poids PLEIN du
+       critere) en faveur du second, et le comparateur recommandait d'archiver
+       le fichier 6,7x mieux debite. Idem 1920x1080 vs 1920x1088 (padding
+       mod-16), affiches « 1080p vs 1080p ». Le verdict n'est pas seulement
+       affiche : l'ecran Doublons expose « Auto-decider tous » qui transforme
+       `comparison.winner` en decision pour tous les groupes d'un clic, et les
+       perdants partent en _review/_duplicates_user_decided/ a l'apply. Le delta
+       suit desormais exactement l'etiquette affichee : meme classe => egalite.
+
+    2. La classe se decidait sur la seule hauteur, alors que le fix bug 178
+       (`quality_score._resolution_label`, 15/15 echantillons ffprobe reels
+       1920x[784-818] = de vrais 1080p) a etabli que la LARGEUR est le critere
+       principal : un 1080p scope 2.35:1 mesure 1920x800 et n'est pas un 720p.
+       On accepte donc `width`, ainsi qu'une etiquette canonique deja calculee
+       (`resolution` / `resolution_label`), des que l'appelant les fournit.
+
+    En dessous de 720p on garde la hauteur brute : elle reste discriminante
+    entre SD (576 / 480 / 360) et l'affichage historique est preserve.
+    """
+    label = str(video.get("resolution") or video.get("resolution_label") or "").strip().lower()
+    if label in _CANONICAL_LABEL_RANK:
+        return _CANONICAL_LABEL_RANK[label]
+    w = _to_positive_int(video.get("width"))
+    h = _to_positive_int(video.get("height"))
+    if w <= 0 and h <= 0:
+        return 480 if label in {"sd", "480p"} else None
+    # Seuils identiques a quality_score._resolution_label (source de verite unique).
+    if w >= 3800 or h >= 2100:
+        return 2160
+    if w >= 1900 or h >= 1000:
+        return 1080
+    if w >= 1280 or h >= 680:
+        return 720
+    return h or None
 
 
 def _resolution_label(h: Optional[int]) -> str:
@@ -398,10 +461,25 @@ def _video_codec_label(rank: Optional[int]) -> str:
 
 
 def _audio_codec_rank_value(audio: Dict[str, Any]) -> Optional[int]:
-    codec = str(audio.get("codec") or "").strip().lower()
-    if not codec:
+    """Rang du codec audio, sur l'etiquette CANONIQUE.
+
+    Fix ultra-audit 2026-08-03. Le pseudo-probe du comparateur est reconstruit
+    depuis `metrics.detected.audio_best_codec`, qui porte desormais l'etiquette
+    canonique ('dts-hd ma', 'truehd atmos', 'dts:x'). Un lookup exact sur
+    `AUDIO_CODEC_RANK` renverrait 0 (sous AAC) pour les etiquettes composees :
+    on reutilise donc la meme derivation que le scorer (source unique, cf.
+    R8-039 qui avait deja du realigner ces deux fonctions apres une divergence
+    constatee sur 113 films).
+    """
+    if not isinstance(audio, dict) or not audio.get("codec"):
         return None
-    return _AUDIO_CODEC_RANK.get(codec, 0)
+    canonical = _canonical_audio_codec(audio)
+    if not canonical:
+        return None
+    rank = _AUDIO_CODEC_RANK.get(canonical)
+    if rank is None:
+        rank = _AUDIO_CODEC_RANK.get(_AUDIO_CANONICAL_RANK_ALIAS.get(canonical, ""), 0)
+    return rank
 
 
 def _audio_codec_label(rank: Optional[int]) -> str:
