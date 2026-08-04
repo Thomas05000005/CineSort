@@ -386,6 +386,12 @@ class ProbeFilesBatchTests(unittest.TestCase):
             settings=self._settings(probe_parallelism_enabled=False),
         )
         self.assertEqual(len(out_seq), 100)
+        # `len(out_seq)` compte AUSSI les resultats servis par le cache : sans
+        # l'assertion suivante, `max_concurrent == 1` passerait trivialement si
+        # le `touch()` n'avait invalide qu'un seul fichier. Autrement dit, le
+        # test aurait pu etre vert parce que le travail n'a pas eu lieu.
+        # (releve par CodeRabbit sur la PR #892 ; remarque fondee)
+        self.assertEqual(runner_seq.calls, len(many))
         self.assertEqual(runner_seq.max_concurrent, 1)
         self.assertEqual(len(runner_seq.thread_ids), 1)
 
