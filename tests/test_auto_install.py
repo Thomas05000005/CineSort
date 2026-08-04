@@ -74,25 +74,26 @@ def _zip_with_lying_uncompressed_size(name: str, payload: bytes, declared: int) 
     return bytes(raw)
 
 
-def _transport(payload: bytes) -> Callable[..., None]:
-    """Faux urlretrieve respectant le contrat urllib (reporthook inclus)."""
+class _FakeHttpResponse(io.BytesIO):
+    """Reponse minimale facon `http.client.HTTPResponse` : lecture + `.headers`."""
 
-    def _download(url: str, dest: str, reporthook: Optional[Callable[[int, int, int], None]] = None) -> None:
-        block = 8192
-        if reporthook is not None:
-            reporthook(0, block, len(payload))
-        with open(dest, "wb") as out:
-            written = 0
-            blocknum = 0
-            while written < len(payload):
-                chunk = payload[written : written + block]
-                out.write(chunk)
-                written += len(chunk)
-                blocknum += 1
-                if reporthook is not None:
-                    reporthook(blocknum, block, len(payload))
+    def __init__(self, payload: bytes) -> None:
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
 
-    return _download
+
+def _transport(payload: bytes) -> Callable[..., _FakeHttpResponse]:
+    """Faux `urlopen` : sert `payload` quelle que soit l'URL demandee.
+
+    Seul le transport est simule : le streaming vers le disque, le calcul de la
+    taille annoncee et l'appel du reporthook restent du code de production
+    (`_download_to_file`).
+    """
+
+    def _open(request: object, timeout: Optional[float] = None, **kwargs: object) -> _FakeHttpResponse:
+        return _FakeHttpResponse(payload)
+
+    return _open
 
 
 class TestGetToolsDir(unittest.TestCase):
@@ -132,7 +133,7 @@ class TestFindInZip(unittest.TestCase):
 
 
 class TestInstallFfprobe(unittest.TestCase):
-    """Tests pour install_ffprobe (mock urlretrieve)."""
+    """Tests pour install_ffprobe (mock urlopen)."""
 
     def test_returns_existing_path(self):
         """Si ffprobe.exe existe deja, pas de telechargement."""
@@ -145,8 +146,8 @@ class TestInstallFfprobe(unittest.TestCase):
                 result = install_ffprobe()
                 self.assertEqual(result, str(fp))
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_downloads_and_extracts(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_downloads_and_extracts(self, mock_urlopen):
         """Simule le telechargement et l'extraction d'une archive conforme a l'empreinte attendue."""
         archive = _zip_bytes(
             {
@@ -154,7 +155,7 @@ class TestInstallFfprobe(unittest.TestCase):
                 "ffmpeg-7.1/bin/ffmpeg.exe": b"ffmpeg-binary",
             }
         )
-        mock_urlretrieve.side_effect = _transport(archive)
+        mock_urlopen.side_effect = _transport(archive)
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
             tools.mkdir()
@@ -168,11 +169,11 @@ class TestInstallFfprobe(unittest.TestCase):
                 self.assertEqual((tools / "ffmpeg.exe").read_bytes(), b"ffmpeg-binary")
                 cb.assert_called()
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_raises_if_exe_not_in_zip(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_raises_if_exe_not_in_zip(self, mock_urlopen):
         """Leve FileNotFoundError si ffprobe.exe absent du ZIP (archive pourtant conforme)."""
         archive = _zip_bytes({"readme.txt": b"nothing"})
-        mock_urlretrieve.side_effect = _transport(archive)
+        mock_urlopen.side_effect = _transport(archive)
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
             tools.mkdir()
@@ -182,12 +183,12 @@ class TestInstallFfprobe(unittest.TestCase):
 
 
 class TestInstallMediainfo(unittest.TestCase):
-    """Tests pour install_mediainfo (mock urlretrieve)."""
+    """Tests pour install_mediainfo (mock urlopen)."""
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_downloads_and_extracts(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_downloads_and_extracts(self, mock_urlopen):
         archive = _zip_bytes({"MediaInfo.exe": b"mi-binary"})
-        mock_urlretrieve.side_effect = _transport(archive)
+        mock_urlopen.side_effect = _transport(archive)
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
             tools.mkdir()
@@ -363,10 +364,10 @@ class TestSha256Verification(unittest.TestCase):
             if os.path.exists(path):
                 os.unlink(path)
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_install_ffprobe_rejects_bad_hash(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_install_ffprobe_rejects_bad_hash(self, mock_urlopen):
         """install_ffprobe(expected_sha256=...) avec mismatch -> IntegrityError."""
-        mock_urlretrieve.side_effect = _transport(_zip_bytes({"ffmpeg-7.1/bin/ffprobe.exe": b"tampered"}))
+        mock_urlopen.side_effect = _transport(_zip_bytes({"ffmpeg-7.1/bin/ffprobe.exe": b"tampered"}))
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
             tools.mkdir()
@@ -376,8 +377,8 @@ class TestSha256Verification(unittest.TestCase):
                 # Aucun binaire ne doit avoir ete extrait apres mismatch.
                 self.assertFalse((tools / "ffprobe.exe").exists())
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_install_without_any_pin_refuses_before_download(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_install_without_any_pin_refuses_before_download(self, mock_urlopen):
         """#466 — sans empreinte disponible, on refuse AVANT de tirer l'archive."""
         with tempfile.TemporaryDirectory() as tmp:
             tools = Path(tmp) / "tools"
@@ -394,7 +395,7 @@ class TestSha256Verification(unittest.TestCase):
                     install_ffprobe()
                 with self.assertRaises(IntegrityError):
                     install_mediainfo()
-            self.assertEqual(mock_urlretrieve.call_count, 0)
+            self.assertEqual(mock_urlopen.call_count, 0)
             self.assertEqual(sorted(p.name for p in tools.iterdir()), [])
 
 
@@ -455,15 +456,15 @@ class TestDownloadBounds(unittest.TestCase):
             hook(blocks, 8192, -1)
         self.assertIn("interrompu", str(ctx.exception))
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_download_bounded_rejects_oversize_file_even_without_reporthook(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install._download_to_file")
+    def test_download_bounded_rejects_oversize_file_even_without_reporthook(self, mock_download):
         """Second verrou : un transport qui n'appelle pas le hook est rattrape apres coup."""
 
-        def _silent_transport(url, dest, reporthook=None):
+        def _silent_transport(url, dest, reporthook, *, timeout_s):
             with open(dest, "wb") as out:
                 out.write(b"\0" * (auto_install._MAX_ARCHIVE_BYTES + 1))
 
-        mock_urlretrieve.side_effect = _silent_transport
+        mock_download.side_effect = _silent_transport
         with tempfile.TemporaryDirectory() as tmp:
             dest = os.path.join(tmp, "big.zip")
             with patch.object(auto_install, "_MAX_ARCHIVE_BYTES", 4096):
@@ -472,12 +473,32 @@ class TestDownloadBounds(unittest.TestCase):
             self.assertIn("trop volumineuse", str(ctx.exception))
             self.assertFalse(os.path.exists(dest), "l'archive hors plafond doit etre effacee")
 
-    @patch("cinesort.infra.probe.auto_install.urlretrieve")
-    def test_download_bounded_refuses_non_https(self, mock_urlretrieve):
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_download_to_file_streams_and_reports_progress(self, mock_urlopen):
+        """Le streaming remplace `urlretrieve` : contenu exact + contrat du reporthook tenu."""
+        payload = b"\0" * (auto_install._DOWNLOAD_BLOCK_BYTES * 2 + 17)
+        mock_urlopen.side_effect = _transport(payload)
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = os.path.join(tmp, "x.zip")
+            auto_install._download_to_file(
+                "https://example.com/x.zip",
+                dest,
+                lambda blocknum, blocksize, totalsize: calls.append((blocknum, blocksize, totalsize)),
+                timeout_s=1.0,
+            )
+            self.assertEqual(Path(dest).read_bytes(), payload)
+        # Premier appel a blocnum 0 avec la taille ANNONCEE : le refus d'une
+        # archive hors plafond tombe avant la lecture du moindre octet de corps.
+        self.assertEqual(calls[0], (0, auto_install._DOWNLOAD_BLOCK_BYTES, len(payload)))
+        self.assertEqual([c[0] for c in calls], [0, 1, 2, 3])
+
+    @patch("cinesort.infra.probe.auto_install.urlopen")
+    def test_download_bounded_refuses_non_https(self, mock_urlopen):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(IntegrityError):
                 _download_bounded("http://example.com/x.zip", os.path.join(tmp, "x.zip"), label="x.zip")
-        self.assertEqual(mock_urlretrieve.call_count, 0)
+        self.assertEqual(mock_urlopen.call_count, 0)
 
 
 class TestArchiveShapeBounds(unittest.TestCase):
