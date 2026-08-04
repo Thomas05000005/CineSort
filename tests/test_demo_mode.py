@@ -55,6 +55,29 @@ class DemoModeStaticTests(unittest.TestCase):
         self.assertTrue(callable(demo_support.start_demo_mode))
         self.assertTrue(callable(demo_support.stop_demo_mode))
 
+    def test_quality_metrics_uses_detected_schema(self) -> None:
+        # Regression audit 2026-07-24 : _build_library_rows lit metrics["detected"]
+        # (width/height/video_codec/duration_s/languages), PAS metrics["video"].
+        # Sans ce schema la vue Bibliotheque du mode demo etait vide.
+        film = demo_support.DEMO_FILMS[0]  # Inception 2160p hevc truehd
+        metrics = demo_support._build_quality_metrics(film)
+        self.assertIn("detected", metrics)
+        detected = metrics["detected"]
+        self.assertEqual(detected["video_codec"], film["video_codec"])
+        self.assertEqual(detected["width"], 3840)
+        self.assertEqual(detected["height"], 2160)
+        self.assertGreater(detected["duration_s"], 0)
+        self.assertTrue(detected["languages"])  # non vide -> audio_languages peuplees
+        self.assertEqual(detected["audio_best_codec"], film["audio_codec"])
+        self.assertEqual(metrics["probe_quality"], "OK")
+
+    def test_quality_metrics_covers_all_demo_films(self) -> None:
+        for film in demo_support.DEMO_FILMS:
+            detected = demo_support._build_quality_metrics(film)["detected"]
+            self.assertTrue(str(detected["video_codec"]), film.get("title"))
+            self.assertGreaterEqual(detected["width"], 0)
+            self.assertGreater(detected["duration_s"], 0, film.get("title"))
+
 
 class DemoModeBackendCycleTests(unittest.TestCase):
     """Cycle complet start → stop sur une vraie DB SQLite temporaire."""

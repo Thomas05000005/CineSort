@@ -41,9 +41,11 @@ def file_name_looks_bonus(name: str) -> bool:
     """Filtrage textuel uniquement (pas de stat) : detecte les fichiers video
     qui sont vraisemblablement des bonus/making-of/extras d'apres leur nom seul.
 
-    Reproduit la closure interne `_file_looks_bonus` de discover_candidate_folders
-    pour exposer la verification a d'autres modules (ex: plan_support_core qui
-    veut filtrer les videos BONUS d'un dossier "collection" type 'Star Wars/').
+    SOURCE UNIQUE de cette heuristique dans le module. Deux clones existaient :
+    `_looks_like_nested_extra_video` (variante `Path`, zero appelant), supprime
+    par #705, et la closure `_file_looks_bonus` de `discover_candidate_folders`,
+    supprimee ici au profit de cette fonction. Elles etaient a l'octet pres la
+    meme regle et pouvaient deriver independamment.
 
     Args:
         name: Nom du fichier (avec ou sans chemin parent).
@@ -151,14 +153,6 @@ def detect_single_with_extras(cfg: Any, videos: List[Path]) -> bool:
     return (biggest / second) >= float(getattr(cfg, "extras_size_ratio", 4.0))
 
 
-def _looks_like_nested_extra_video(video: Path) -> bool:
-    if IGNORE_VIDEO_NAME_RE.search(video.name):
-        return True
-    stem = video.stem.lower().replace(".", " ").replace("_", " ").replace("-", " ")
-    stem = re.sub(r"\s+", " ", stem).strip()
-    return stem in GENERIC_EXTRA_VIDEO_NAMES
-
-
 def collect_non_video_extensions(cfg: Any, folder: Path) -> Dict[str, int]:
     out: Dict[str, int] = {}
     try:
@@ -219,16 +213,10 @@ def discover_candidate_folders(
     collection_name_lower = str(getattr(cfg, "collection_root_name", "") or "").lower()
     video_exts = set(getattr(cfg, "video_exts", set()) or set())
     candidates: List[Path] = []
-
-    def _file_looks_bonus(name: str) -> bool:
-        """Filtrage textuel uniquement (pas de stat), reproduit
-        _looks_like_nested_extra_video sans toucher au filesystem.
-        """
-        if IGNORE_VIDEO_NAME_RE.search(name):
-            return True
-        stem = name.rsplit(".", 1)[0].lower().replace(".", " ").replace("_", " ").replace("-", " ")
-        stem = re.sub(r"\s+", " ", stem).strip()
-        return stem in GENERIC_EXTRA_VIDEO_NAMES
+    # Issue #888 : identites reelles des dossiers deja visites, pour ne pas
+    # explorer deux fois le meme dossier physique atteint par deux chemins.
+    # Voir `_identite_reelle` et la garde en tete de `_walk`.
+    vus: set[tuple[int, int]] = set()
 
     def _yyyy_folder_shape(path: Path) -> tuple[bool, bool]:
         """Inspecte un dossier `(YYYY)` en UN scandir.
@@ -257,14 +245,94 @@ def discover_candidate_folders(
                     continue
                 en = e.name
                 d = en.rfind(".")
-                if d >= 0 and en[d:].lower() in video_exts and not _file_looks_bonus(en):
+                if d >= 0 and en[d:].lower() in video_exts and not file_name_looks_bonus(en):
                     has_direct_video = True
         finally:
             with contextlib.suppress(OSError, AttributeError):
                 sub.close()
         return (has_direct_video, has_subdirs)
 
+    def _identite_reelle(path: Path) -> tuple[int, int] | None:
+        """Identite PHYSIQUE du dossier : `(st_dev, st_ino)`, ou None si illisible.
+
+        Deux chemins qui rendent le meme couple designent le meme dossier sur le
+        disque, meme si l'un passe par une jonction NTFS. Mesure sur Windows 11
+        (CPython 3.13), avec une vraie jonction `mklink /J` :
+
+            cible : st_dev=16600885243136770875 st_ino=562949956034177
+            lien  : st_dev=16600885243136770875 st_ino=562949956034177
+
+        `os.stat` suit deliberement la jonction, ce qui est exactement ce qu'on
+        veut ici : on cherche la cible, pas le lien.
+
+        Pourquoi pas `os.path.realpath` : il donne le meme verdict mais coute
+        **4,6x plus cher** (17,9 ms contre 3,9 ms pour 300 dossiers, meme
+        machine). Ce module est explicitement optimise pour le NAS SMB, ou
+        chaque aller-retour evite compte.
+
+        En cas d'echec (permission, jonction cassee, volume deconnecte) on rend
+        None et l'appelant DESCEND quand meme. C'est le sens permissif, choisi
+        deliberement : ce chemin-ci ne detruit rien, il analyse, et le
+        proprietaire a tranche que l'application ne doit jamais renoncer a
+        analyser. Un dossier reellement illisible sera de toute facon arrete
+        juste apres par l'echec du `scandir`.
+        """
+        try:
+            st = os.stat(str(path))
+        except (OSError, ValueError) as exc:
+            logger.warning("scan: stat identite failed on %s: %s", path, exc)
+            return None
+        # st_ino vaut 0 sur les systemes de fichiers qui ne le renseignent pas :
+        # dans ce cas le couple ne distingue plus rien et deviendrait un faux
+        # "deja vu" qui masquerait des dossiers legitimes.
+        if not st.st_ino:
+            return None
+        return (st.st_dev, st.st_ino)
+
+    def _retenir(path: Path) -> bool:
+        """Enregistre `path` comme visite. Rend False s'il l'etait deja.
+
+        Rend True quand l'identite est illisible : on prefere analyser deux fois
+        que ne pas analyser du tout (cf. `_identite_reelle`).
+        """
+        identite = _identite_reelle(path)
+        if identite is None:
+            return True
+        if identite in vus:
+            logger.info(
+                "scan: %s designe un dossier deja visite (jonction ou lien), ignore",
+                path,
+            )
+            _bump_stats_reject(stats, "ignore_dossier_deja_visite", path=str(path))
+            return False
+        vus.add(identite)
+        return True
+
     def _walk(current: Path, depth: int, in_year_descent: bool = False) -> None:
+        # Issue #888 : ne pas explorer deux fois le meme dossier physique.
+        #
+        # Une jonction NTFS n'est detectee par AUCUNE garde naturelle
+        # (`is_symlink()` rend False depuis Python 3.8, `is_dir()` rend True),
+        # donc `Bibliotheque/Raccourci -> Bibliotheque/Films` fait apparaitre
+        # chaque film DEUX fois dans le plan. Mesure (vraie jonction) :
+        #
+        #     candidat : Films\Dune (2021)
+        #     candidat : Raccourci\Dune (2021)
+        #     -> 1 seul realpath unique pour 2 candidats
+        #
+        # Ce ne sont pas deux films qui se ressemblent : c'est le meme dossier
+        # compte deux fois. L'ecran Doublons propose alors de « supprimer le
+        # doublon » d'un fichier unique, et un apply qui deplace par un chemin
+        # casse l'autre. Une jonction vers un ANCETRE produit le meme film
+        # jusqu'a 4 fois (la descente est bornee par max_depth, il n'y a donc
+        # pas de boucle infinie — verifie).
+        #
+        # Cette garde N'EXCLUT RIEN. Un dossier atteignable uniquement a travers
+        # une jonction (cas courant : un disque mutualise monte dans la
+        # bibliotheque) n'a jamais ete vu, donc il est visite normalement. Seule
+        # la SECONDE visite du meme dossier physique est supprimee.
+        if not _retenir(current):
+            return
         if depth > max_depth:
             # SCAN-1 (L122) : tracer les dossiers abandonnes par depasement
             # de profondeur pour permettre un diagnostic UI.
@@ -288,6 +356,15 @@ def discover_candidate_folders(
         yyyy_descend: List[Path] = []
         any_file = False
         video_files: List[str] = []
+        # Issue #888 : les sous-dossiers sont collectes AVANT d'etre classes, pour
+        # pouvoir traiter les dossiers reels avant les liens. `os.scandir` ne
+        # garantit aucun ordre — mesure faite : il a rendu `lien` AVANT `reel`
+        # sur un cas a deux entrees. Sans ce tri, c'est le chemin passant par la
+        # jonction qui pourrait etre retenu, et le plan afficherait a
+        # l'utilisateur un chemin qu'il ne reconnait pas, sur un ecran dont
+        # l'action deplace des dossiers. Le tri est stable : a egalite de nature,
+        # l'ordre du systeme de fichiers est preserve.
+        entrees_dossiers: List[tuple[bool, str, Path]] = []
         try:
             for entry in scandir_ctx:
                 try:
@@ -296,61 +373,80 @@ def discover_candidate_folders(
                     continue
                 nm = entry.name
                 if is_dir:
-                    # SCAN-1 (L174-L179) : limite le skip '_' a la racine
-                    # (depth == 0). En profondeur, certains utilisateurs
-                    # legitimes ont des sous-dossiers prefixes '_' (snapshots,
-                    # versionnage manuel, etc.). On garde toujours le skip du
-                    # dossier collection (interne CineSort).
-                    if depth == 0 and nm.startswith("_"):
-                        _bump_stats_reject(
-                            stats,
-                            "ignore_prefix_underscore",
-                            path=entry.path,
-                        )
-                        continue
-                    if depth == 0 and nm.lower() == collection_name_lower:
-                        # Skip le dossier _Collection au niveau 1 du root
-                        continue
-                    entry_path = Path(entry.path)
-                    # BUG 5 : fast-path — si le nom contient `(YYYY)`, on suppose
-                    # un dossier de film. SCAN-FIX (Opus 2026-06-11) : un dossier
-                    # `Avatar (2009)/` peut contenir le film DIRECTEMENT (cas plat,
-                    # majoritaire) OU dans un sous-dossier release imbrique
-                    # (`Avatar (2009)/Avatar.2009.1080p-GRP/film.mkv`). iter_videos
-                    # en phase 2 est NON-recursif : marquer candidat sans descendre
-                    # rendait le film imbrique invisible (absent du plan).
-                    # Decision en 1 scandir :
-                    #   - video directe non-bonus presente  -> candidat seul (rapide,
-                    #     PAS de descente : evite de planifier featurettes/extras des
-                    #     sous-dossiers comme films + evite tout doublon).
-                    #   - pas de video directe MAIS sous-dossiers -> DESCENTE (_walk)
-                    #     qui appliquera sa propre logique candidat/bonus a chaque
-                    #     niveau (le film imbrique redevient detectable).
-                    #   - ni l'un ni l'autre (feuille sans video / non-video) ->
-                    #     candidat (comportement historique, iter_videos tranchera).
-                    if depth >= 0 and _FILM_FOLDER_NAME_RE.search(nm):
-                        has_direct_video, has_subdirs = _yyyy_folder_shape(entry_path)
-                        if not has_direct_video and has_subdirs:
-                            yyyy_descend.append(entry_path)
-                        else:
-                            candidates.append(entry_path)
-                    else:
-                        subdirs.append(entry_path)
-                else:
-                    any_file = True
-                    # Extension via slicing (pas de Path)
-                    dot = nm.rfind(".")
-                    if dot >= 0 and nm[dot:].lower() in video_exts:
-                        video_files.append(nm)
+                    try:
+                        # is_junction() existe depuis Python 3.12 (plancher du
+                        # projet) et lit le cache de scandir : aucun aller-retour
+                        # supplementaire. is_symlink() couvre les liens Windows,
+                        # que is_junction() ignore.
+                        est_lien = entry.is_junction() or entry.is_symlink()
+                    except (OSError, AttributeError):
+                        est_lien = False
+                    entrees_dossiers.append((est_lien, nm, Path(entry.path)))
+                    continue
+                any_file = True
+                # Extension via slicing (pas de Path)
+                dot = nm.rfind(".")
+                if dot >= 0 and nm[dot:].lower() in video_exts:
+                    video_files.append(nm)
         finally:
             with contextlib.suppress(OSError, AttributeError):
                 scandir_ctx.close()
+
+        # Issue #888 : dossiers reels d'abord, liens ensuite (tri stable).
+        entrees_dossiers.sort(key=lambda e: e[0])
+
+        for est_lien, nm, entry_path in entrees_dossiers:
+            # SCAN-1 (L174-L179) : limite le skip '_' a la racine
+            # (depth == 0). En profondeur, certains utilisateurs
+            # legitimes ont des sous-dossiers prefixes '_' (snapshots,
+            # versionnage manuel, etc.). On garde toujours le skip du
+            # dossier collection (interne CineSort).
+            if depth == 0 and nm.startswith("_"):
+                _bump_stats_reject(
+                    stats,
+                    "ignore_prefix_underscore",
+                    path=str(entry_path),
+                )
+                continue
+            if depth == 0 and nm.lower() == collection_name_lower:
+                # Skip le dossier _Collection au niveau 1 du root
+                continue
+            # BUG 5 : fast-path — si le nom contient `(YYYY)`, on suppose
+            # un dossier de film. SCAN-FIX (Opus 2026-06-11) : un dossier
+            # `Avatar (2009)/` peut contenir le film DIRECTEMENT (cas plat,
+            # majoritaire) OU dans un sous-dossier release imbrique
+            # (`Avatar (2009)/Avatar.2009.1080p-GRP/film.mkv`). iter_videos
+            # en phase 2 est NON-recursif : marquer candidat sans descendre
+            # rendait le film imbrique invisible (absent du plan).
+            # Decision en 1 scandir :
+            #   - video directe non-bonus presente  -> candidat seul (rapide,
+            #     PAS de descente : evite de planifier featurettes/extras des
+            #     sous-dossiers comme films + evite tout doublon).
+            #   - pas de video directe MAIS sous-dossiers -> DESCENTE (_walk)
+            #     qui appliquera sa propre logique candidat/bonus a chaque
+            #     niveau (le film imbrique redevient detectable).
+            #   - ni l'un ni l'autre (feuille sans video / non-video) ->
+            #     candidat (comportement historique, iter_videos tranchera).
+            if depth >= 0 and _FILM_FOLDER_NAME_RE.search(nm):
+                has_direct_video, has_subdirs = _yyyy_folder_shape(entry_path)
+                if not has_direct_video and has_subdirs:
+                    # Descente : c'est `_walk` qui enregistrera l'identite.
+                    yyyy_descend.append(entry_path)
+                elif _retenir(entry_path):
+                    # Ce raccourci retient un candidat SANS passer par `_walk` :
+                    # sans cet enregistrement, un lien pointant droit sur un
+                    # dossier `(YYYY)` (`Bibliotheque/Lien -> .../Dune (2021)`)
+                    # produirait le meme film deux fois — la garde en tete de
+                    # `_walk` ne le verrait jamais.
+                    candidates.append(entry_path)
+            else:
+                subdirs.append(entry_path)
 
         if depth == 0:
             # Films poses directement a la racine : la racine devient candidat.
             # iter_videos() en phase 2 est non-recursif, donc les fichiers des
             # sous-dossiers ne seront pas double-comptes.
-            non_bonus_root_videos = [v for v in video_files if not _file_looks_bonus(v)]
+            non_bonus_root_videos = [v for v in video_files if not file_name_looks_bonus(v)]
             if non_bonus_root_videos:
                 candidates.append(current)
 
@@ -365,7 +461,7 @@ def discover_candidate_folders(
         if subdirs:
             # Dossier avec sous-dossiers : candidat uniquement si au moins un fichier
             # video non-bonus est present au niveau courant.
-            non_bonus_videos = [v for v in video_files if not _file_looks_bonus(v)]
+            non_bonus_videos = [v for v in video_files if not file_name_looks_bonus(v)]
             if depth >= 1 and non_bonus_videos:
                 candidates.append(current)
             for sd in subdirs:
@@ -380,7 +476,7 @@ def discover_candidate_folders(
             # bonus.mkv...) ne doit pas etre planifiee comme film. Hors descente
             # `(YYYY)`, le comportement historique est strictement preserve.
             if depth >= 1 and any_file:
-                if in_year_descent and video_files and all(_file_looks_bonus(v) for v in video_files):
+                if in_year_descent and video_files and all(file_name_looks_bonus(v) for v in video_files):
                     _bump_stats_reject(stats, "ignore_bonus_only_folder", path=str(current))
                 else:
                     candidates.append(current)
