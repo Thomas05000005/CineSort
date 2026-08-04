@@ -29,11 +29,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from unittest import mock
 
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.infra.probe import service as probe_service_module
 from cinesort.infra.probe.service import ProbeService, reset_tools_status_cache
-from cinesort.ui.api import probe_support
+from cinesort.ui.api import probe_support, quality_report_support
 from cinesort.ui.api.quality_report_support import probe_settings_for_report
 
 
@@ -264,6 +265,54 @@ class ProbeSettingsForReportTests(unittest.TestCase):
 
         self.assertEqual(api.effective_calls, 0)
         self.assertEqual(cfg["probe_backend"], "none")
+
+
+class _SentinelProbeStop(Exception):
+    """Coupe `_probe_and_score` juste apres la resolution des settings de sonde."""
+
+
+class ProbeAndScoreCallSiteTests(unittest.TestCase):
+    """Garde C, cotee APPELANT -- ajoutee en resolvant le conflit de la PR#854.
+
+    Les tests ci-dessus n'exercent que le helper. Une resolution de conflit qui
+    remettrait `api._effective_probe_settings_for_runtime(run_row)` sur la ligne
+    d'appel de `_probe_and_score` les laisserait TOUS verts alors que le
+    raccourci serait debranche en production (verifie par mutation : le helper
+    seul reste vert). On entre donc par `_probe_and_score` et on coupe net des
+    que la sonde recoit ses settings.
+    """
+
+    def test_probe_and_score_goes_through_the_cheap_resolver(self) -> None:
+        api = _ApiDouble({"probe_backend": "none"}, effective={"probe_backend": "none", "ffprobe_path": "X"})
+        captured: Dict[str, Any] = {}
+
+        class _ProbeStub:
+            def __init__(self, store: Any) -> None:
+                self.store = store
+
+            def probe_file(self, *, media_path: Any, settings: Dict[str, Any]) -> Dict[str, Any]:
+                captured.update(settings)
+                raise _SentinelProbeStop
+
+        with mock.patch.object(quality_report_support, "ProbeService", _ProbeStub):
+            with self.assertRaises(_SentinelProbeStop):
+                quality_report_support._probe_and_score(
+                    api,
+                    object(),
+                    {"config_json": "{}"},
+                    "run-1",
+                    "row-1",
+                    object(),
+                    Path("film.mkv"),
+                    profile_json={},
+                    active_profile_id="default",
+                    active_profile_version=1,
+                )
+
+        self.assertEqual(api.effective_calls, 0)
+        self.assertEqual(captured.get("probe_backend"), "none")
+        # Le resolveur cher aurait rempli `ffprobe_path` avec la valeur sentinelle.
+        self.assertNotEqual(captured.get("ffprobe_path"), "X")
 
 
 class EffectiveProbeSettingsInvariantTests(unittest.TestCase):
