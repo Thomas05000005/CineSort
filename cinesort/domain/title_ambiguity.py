@@ -24,6 +24,7 @@ impossible (flag `title_ambiguity_detected`).
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from dataclasses import replace
@@ -33,6 +34,28 @@ from typing import Any, Dict, List, Optional, Tuple
 # Note : les apostrophes sont converties en espaces lors de la normalisation,
 # donc "l'" devient "l " avant le strip d'article. Même remarque pour "d ".
 _LEADING_ARTICLES = ("the ", "le ", "la ", "les ", "l ", "un ", "une ", "des ", "a ", "an ", "d ")
+
+
+@functools.lru_cache(maxsize=512)
+def _normalize_title_for_ambiguity_cached(title: str) -> str:
+    """Corps memoise de :func:`normalize_title_for_ambiguity` (cle = titre deja
+    coerce en `str`, donc toujours hachable).
+
+    Issue #480 : la fonction est pure et rejouee au moins DEUX fois sur la meme
+    liste de candidats (`detect_title_ambiguity` puis `disambiguate_by_context`),
+    ce qui garantit un taux de succes >= 50 % avant meme les repetitions de
+    franchise entre films.
+    """
+    s = unicodedata.normalize("NFKD", title)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    for art in _LEADING_ARTICLES:
+        if s.startswith(art):
+            s = s[len(art) :]
+            break
+    return s
 
 
 def normalize_title_for_ambiguity(title: str) -> str:
@@ -49,19 +72,16 @@ def normalize_title_for_ambiguity(title: str) -> str:
       "The Thing"    -> "thing"
       "Dune: Part 1" -> "dune part 1"
       "L'Été"        -> "ete"
+
+    Issue #480 : le calcul est memoise, mais la coercition `str(title)` reste
+    ICI, hors cache. Decorer directement la fonction publique aurait transforme
+    tout appel avec un argument non hachable (liste, dict) en `TypeError` la ou
+    l'ancien code renvoyait une normalisation de `str(title)` — une regression
+    de robustesse gratuite sur une fonction typee `str` mais appelee en `Any`.
     """
     if not title:
         return ""
-    s = unicodedata.normalize("NFKD", str(title))
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = s.lower()
-    s = re.sub(r"[^a-z0-9\s]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    for art in _LEADING_ARTICLES:
-        if s.startswith(art):
-            s = s[len(art) :]
-            break
-    return s
+    return _normalize_title_for_ambiguity_cached(str(title))
 
 
 def detect_title_ambiguity(candidates: List[Any]) -> Tuple[bool, Optional[str]]:
