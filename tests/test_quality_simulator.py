@@ -159,7 +159,10 @@ class RecomputeInMemoryTests(unittest.TestCase):
                 "metrics": {"subscores": {"video": 60, "audio": 60, "extras": 60}, "detected": {}},
             },
         ]
-        baseline = {"weights": {"video": 60, "audio": 30, "extras": 10}, "tiers": {"premium": 85, "bon": 68, "moyen": 54}}
+        baseline = {
+            "weights": {"video": 60, "audio": 30, "extras": 10},
+            "tiers": {"premium": 85, "bon": 68, "moyen": 54},
+        }
         target = dict(baseline)
         out = _recompute_in_memory(reports, baseline, target)
         tiers_before = {r["tier_before"] for r in out}
