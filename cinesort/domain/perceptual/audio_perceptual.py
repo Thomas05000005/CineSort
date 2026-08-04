@@ -342,7 +342,15 @@ def analyze_clipping_segments(
             total = raw_total
             clipping = raw_clipping
 
-    pct = (clipping / total * 100) if total > 0 else 0.0
+    if total == 0:
+        # Aucun segment "Peak level" detecte malgre un stderr non-vide :
+        # parsing impossible (format ffmpeg inattendu, piste trop courte,
+        # stream sans peak metering). Distinguer de "0 clipping" pour eviter
+        # qu'un fichier non-analysable soit score "acceptable" par defaut.
+        logger.debug("analyze_clipping_segments: no Peak level lines in stderr (len=%d)", len(stderr))
+        return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
+
+    pct = clipping / total * 100
 
     if pct < CLIPPING_ACCEPTABLE_PCT:
         verdict = "acceptable"
@@ -437,10 +445,6 @@ def analyze_audio_perceptual(
         result.clipping_total_segments = clip_data["total_segments"]
         result.clipping_segments = clip_data["clipping_segments"]
         result.clipping_pct = clip_data["clipping_pct"]
-
-    # --- Score ---
-    result.audio_score = _compute_audio_score(loud, astats_data, clip_data)
-    result.audio_tier = _determine_tier(result.audio_score)
 
     # --- DRC classification (§14 v7.5.0) — aucun calcul supplementaire ---
     drc_cat, drc_conf = classify_drc(

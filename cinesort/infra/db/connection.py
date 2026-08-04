@@ -50,6 +50,7 @@ def connect_sqlite(
         detect_storage_type,
         is_unc_path,
         resolve_profile,
+        should_record_pragma_history,
     )
 
     # Resoudre le profil AVANT d'ouvrir la connexion : si le caller passe
@@ -95,12 +96,26 @@ def connect_sqlite(
                 db_path,
                 resolved_profile,
             )
+        # AUDIT ULTRA 2026-08 (pragma_profile.py:229-268) : l'audit
+        # `pragma_history` est OCCASIONNEL, plus systematique. Il coutait
+        # INSERT + SELECT MAX(id) + DELETE de purge + commit a CHAQUE
+        # ouverture, alors que `SQLiteStore._managed_conn` ouvre une connexion
+        # neuve par appel de repository (mesure locale : 3,9 ms/connexion
+        # contre 0,07 ms pour un `sqlite3.connect` nu). On n'ecrit plus qu'au
+        # premier boot pour ce chemin DB, ou quand le profil/la source change
+        # -- ce qui est exactement ce que l'historique sert a diagnostiquer.
+        record_history = should_record_pragma_history(
+            str(db_path),
+            resolved_profile,
+            history_source,
+        )
         apply_pragmas(
             conn,
             resolved_profile,
             db_path=str(db_path),
             storage_type_detected=storage_type_detected,
             source=history_source,
+            record_history=record_history,
         )
 
         # 3. Backward compat busy_timeout : si le caller a fourni une valeur
