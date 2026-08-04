@@ -423,6 +423,22 @@ class ReserveUniqueRunTests(unittest.TestCase):
         self.assertTrue(RUN_ID_PATTERN.match(fallback), f"repli {fallback} detruit par la normalisation")
         self.assertEqual(normalize_or_generate_run_id(fallback), fallback)
 
+    def test_db_failure_is_converted_to_the_documented_runtime_error(self) -> None:
+        """`sqlite3.Error` N'HERITE PAS d'`OSError` : telle quelle, elle traversait
+        le filtre `except (OSError, RuntimeError)` de `_validate_and_init_plan_context`
+        et remontait au boundary generique, sans message metier ni `err()`."""
+
+        def boom(_run_id: str) -> Any:
+            raise sqlite3.OperationalError("database is locked")
+
+        store = _FakeRunStore({})
+        store.get_run = boom  # type: ignore[assignment]
+
+        self.assertFalse(issubclass(sqlite3.Error, OSError), "premisse du test : sqlite3.Error n'est pas une OSError")
+        with self.assertRaises(RuntimeError) as ctx:
+            runtime_support.reserve_unique_run(self.api, store, self.state_dir)
+        self.assertIn("database is locked", str(ctx.exception))
+
 
 class StartJobHintCollisionTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -466,6 +482,31 @@ class StartJobHintCollisionTests(unittest.TestCase):
         row = self.store.run.get_run(taken)
         assert row is not None
         self.assertEqual(str(row.get("status")), "DONE", "le run existant a ete ecrase")
+
+    def test_malformed_hint_is_refused_instead_of_being_normalized(self) -> None:
+        """L'autre porte de la meme divergence : un hint hors format etait
+        remplace en SILENCE par `normalize_or_generate_run_id`, donc `start_job`
+        rendait un id different de celui sous lequel l'appelant avait deja cree
+        le dossier et le `RunState` — le run fantome, par un autre chemin."""
+        entered = threading.Event()
+
+        def job_fn(_should_cancel: Any) -> None:
+            entered.set()
+
+        for bad in ("demo_1750000000_ab12cd", "20260612_234833_444-deadbeef", "pas-un-run-id"):
+            with self.subTest(hint=bad):
+                self.assertFalse(RUN_ID_PATTERN.match(bad), "premisse : ce hint est bien hors format")
+                with self.assertRaises(RuntimeError) as ctx:
+                    self.runner.start_job(
+                        job_fn=job_fn,
+                        root=r"D:\Films",
+                        state_dir=str(self.state_dir),
+                        config={},
+                        run_id_hint=bad,
+                    )
+                self.assertIn(bad, str(ctx.exception))
+                self.assertFalse(entered.wait(timeout=0.2), "un worker fantome a demarre malgre le refus")
+                self.assertEqual(self.store.run.get_run(bad), None, "une ligne runs a ete creee sous le hint refuse")
 
     def test_free_hint_is_returned_unchanged(self) -> None:
         """Invariant de conception : l'id rendu ne doit jamais diverger du hint,
@@ -556,12 +597,18 @@ class RunsSchemaDocumentationTests(unittest.TestCase):
     n'ont aucune cascade.
 
     Un chiffre faux sur l'argument central n'est pas un defaut de redaction :
-    il sera cite plus tard comme s'il avait ete verifie. Ce test le MESURE et
-    exige que la docstring dise ce que le schema fait — si une 4e cascade est
-    ajoutee un jour, il rougit et force la mise a jour.
-    """
+    il sera cite plus tard comme s'il avait ete verifie. Ces tests MESURENT le
+    jeu exact de cascades — si une 4e est ajoutee un jour, ils rougissent et
+    forcent la relecture de l'arbitrage (et donc de sa docstring).
 
-    _NUMBER_WORDS = {1: "une", 2: "deux", 3: "trois", 4: "quatre", 5: "cinq", 6: "six", 7: "sept", 8: "huit"}
+    Ce qui est verrouille est le SCHEMA, jamais le texte : CLAUDE.md proscrit
+    les tests qui comparent une chaine de code source (« ils tombent quand le
+    code s'ameliore et ne detectent rien quand il casse »). Une assertion sur
+    `RunIdConflictError.__doc__` a ete retiree pour cette raison — elle rougissait
+    a la moindre reformulation francaise sans qu'aucun comportement ne change,
+    alors que `test_cascade_targets_are_exactly_the_three_documented_tables`
+    couvre deja integralement l'ajout d'une cascade.
+    """
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_schema_")
@@ -590,22 +637,6 @@ class RunsSchemaDocumentationTests(unittest.TestCase):
             {"errors": "run_id", "quality_reports": "run_id", "anomalies": "run_id"},
             "l'arbitrage 'pas de OR REPLACE' repose sur ce jeu exact de cascades",
         )
-
-    def test_conflict_docstring_states_the_measured_cascade_count(self) -> None:
-        cascading = self._cascading_tables()
-        doc = RunIdConflictError.__doc__ or ""
-        word = self._NUMBER_WORDS.get(len(cascading), str(len(cascading)))
-        self.assertIn(
-            f"les {word} FK",
-            doc,
-            f"{len(cascading)} FK cascade mesurees, la docstring en annonce un autre nombre",
-        )
-        for table in sorted(cascading):
-            self.assertIn(
-                f"`{table}`",
-                doc,
-                f"la table {table} cascade reellement mais n'est pas nommee dans la docstring",
-            )
 
     def test_run_id_is_a_primary_key_component_of_three_other_tables(self) -> None:
         """L'autre chiffre du meme lot : `infra/run_id.py` annoncait « six

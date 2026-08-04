@@ -12,6 +12,7 @@ import logging
 import os
 import platform
 import re
+import sqlite3
 import sys
 import threading
 import time
@@ -508,13 +509,25 @@ _RUN_ID_RESERVATION_ATTEMPTS = 100
 
 
 def _iter_free_run_ids(api: Any, store: SQLiteStore) -> Iterator[str]:
-    """Enumere des run_id absents du registre memoire ET de la table `runs`."""
+    """Enumere des run_id absents du registre memoire ET de la table `runs`.
+
+    `sqlite3.Error` est convertie en `RuntimeError` : elle N'HERITE PAS
+    d'`OSError`, donc sans cette conversion une base verrouillee ou corrompue
+    traversait le filtre `except (OSError, RuntimeError)` de
+    `run_flow_support._validate_and_init_plan_context` et remontait au boundary
+    generique — sans message metier et sans passer par `err()`. Le contrat
+    annonce par `reserve_unique_run` (RuntimeError) redevient exact.
+    """
     for _ in range(_RUN_ID_RESERVATION_ATTEMPTS):
         run_id = generate_run_id()
         with api._runs_lock:
             if run_id in api._runs:
                 continue
-        if store.run.get_run(run_id) is not None:
+        try:
+            already_used = store.run.get_run(run_id) is not None
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"Verification d'unicite du run_id impossible : {exc}") from exc
+        if already_used:
             continue
         yield run_id
 

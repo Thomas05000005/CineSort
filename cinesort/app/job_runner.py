@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Optional
 from cinesort.domain.run_models import RunSnapshot, RunStatus
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.log_context import clear_run_id, set_run_id
-from cinesort.infra.run_id import generate_run_id, normalize_or_generate_run_id
+from cinesort.infra.run_id import RUN_ID_PATTERN, generate_run_id, normalize_or_generate_run_id
 
 _logger = logging.getLogger(__name__)
 
@@ -298,10 +298,24 @@ class JobRunner:
         thread ait démarré : un scan fantôme, non pilotable, écrivant son plan
         dans le dossier de l'ancien id pendant que la ligne `runs` vivait sous
         le nouveau. Lever avant tout démarrage de thread supprime ce cas.
+
+        Un hint EXPLICITE hors format canonique est refusé pour la même raison :
+        `normalize_or_generate_run_id` lui aurait substitué un identifiant neuf,
+        c'est-à-dire exactement la divergence que le refus de collision
+        ci-dessous supprime, mais par un autre chemin. Le seul appelant du dépôt
+        (`run_flow_support:_start_plan_impl`) passe un id issu de
+        `reserve_unique_run`, donc déjà canonique : ce refus ne change rien au
+        flux réel, il rend le contrat vrai sur TOUTE la surface publique.
         """
         created_ts = time.time()
-        candidate = run_id_hint or generate_run_id()
-        run_id = normalize_or_generate_run_id(candidate)
+        if run_id_hint:
+            if not RUN_ID_PATTERN.match(run_id_hint):
+                raise RuntimeError(f"Le run_id demande n'est pas au format attendu : {run_id_hint!r}")
+            candidate = run_id_hint
+            run_id = run_id_hint
+        else:
+            candidate = generate_run_id()
+            run_id = normalize_or_generate_run_id(candidate)
         run_debug = debug_log or self._debug_logger
         self._debug(
             f"start_job called candidate={candidate} normalized_run_id={run_id} root={root} state_dir={state_dir}",
