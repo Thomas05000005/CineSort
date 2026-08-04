@@ -281,6 +281,38 @@ class DedupIdsTests(unittest.TestCase):
 
         self.assertEqual(api.integrations.calls, [[42, 7]])
 
+    def _count_dedup_calls(self, *, with_posters: bool) -> int:
+        """Compte les appels reels a la dedup pendant un `_build_library_rows`."""
+        rows = [_plan_row(f"r{i}", tmdb_id=42 + (i % 3), enriched=True) for i in range(6)]
+        api = _FakeApi(rows)
+        real = library_support._dedup_ids_preserving_order
+        calls: List[int] = []
+
+        def _spy(ids: List[int]) -> List[int]:
+            calls.append(len(ids))
+            return real(ids)
+
+        library_support._dedup_ids_preserving_order = _spy  # type: ignore[assignment]
+        try:
+            library_support._build_library_rows(api, "run1", with_posters=with_posters)
+        finally:
+            library_support._dedup_ids_preserving_order = real  # type: ignore[assignment]
+        return len(calls)
+
+    def test_dedup_is_skipped_when_no_poster_is_ever_exposed(self) -> None:
+        """Revue Sourcery : la dedup ne sert QU'a l'argument du batch.
+
+        `with_posters=False` est le chemin des deux appelants les plus chauds
+        (rollup et compteurs de chips, ce dernier rejoue a chaque clic de chip /
+        tri / filtre) : ils ne doivent pas payer une passe sur toute la
+        bibliotheque pour un resultat jete.
+        """
+        self.assertEqual(self._count_dedup_calls(with_posters=False), 0)
+
+    def test_dedup_still_runs_when_the_batch_is_fetched(self) -> None:
+        """NON-REGRESSION : le batch, lui, recoit toujours des ids dedupliques."""
+        self.assertEqual(self._count_dedup_calls(with_posters=True), 1)
+
 
 # ---------------------------------------------------------------------------
 # 4. REVUE ADVERSAIRE PR #849 — le marqueur d'overlay ABOUTI

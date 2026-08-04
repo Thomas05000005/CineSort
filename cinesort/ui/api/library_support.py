@@ -341,11 +341,17 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
         if tid and tid > 0:
             resolved_tmdb_by_row[rid] = tid
             tmdb_ids.append(tid)
-    # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
-    # `if tid not in tmdb_ids` etait quadratique.
-    tmdb_ids = _dedup_ids_preserving_order(tmdb_ids)
     posters_by_tmdb: Dict[str, str] = {}
     if with_posters and tmdb_ids:
+        # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
+        # `if tid not in tmdb_ids` etait quadratique.
+        # Revue Sourcery PR#849 : la dedup ne sert QU'a l'argument du batch, donc
+        # elle est faite DANS la garde. Les deux appelants `with_posters=False`
+        # (`get_library_rollup`:1206 et le compteur de chips :1384) sont les plus
+        # chauds — le second est rejoue a chaque clic de chip / tri / filtre — et
+        # ne payent plus une passe sur toute la bibliotheque pour rien. La garde
+        # elle-meme est insensible a la dedup : une liste non vide le reste.
+        tmdb_ids = _dedup_ids_preserving_order(tmdb_ids)
         try:
             poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
             if poster_res and poster_res.get("ok"):
