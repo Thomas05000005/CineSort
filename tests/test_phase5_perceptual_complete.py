@@ -16,6 +16,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from tests._jsexec import node_check
+
 _ROOT = Path(__file__).resolve().parents[1]
 _PERCEPTUAL_MODAL = _ROOT / "web" / "dashboard" / "components" / "perceptual-modal.js"
 _RIGHT_PANEL = _ROOT / "web" / "dashboard" / "components" / "right-panel.js"
@@ -306,48 +308,26 @@ class CssTests(unittest.TestCase):
 
 
 class NodeSyntaxCheckTests(unittest.TestCase):
-    """Sanity-check : node --check valide la syntaxe (parser officiel).
+    """Syntaxe validee par le parser officiel de Node — dans le BON goal.
 
     Plus robuste qu'un compteur d'accolades ad-hoc qui mishandle les
-    template literals avec ${...}, regex litterales, etc. Si node est
-    introuvable (env CI minimal), le test est skip.
+    template literals avec ${...}, regex litterales, etc.
+
+    Ces deux tests appelaient `node --check <chemin>`. Mesure du 2026-08-03
+    (Node v24.14.1) : cette commande sort en 0 sur 47 des 48 `.js` de
+    `web/dashboard/` MEME avec une erreur de syntaxe averee — ce sont des
+    modules ESM et, sans `package.json` declarant `"type": "module"`, la
+    detection de syntaxe de module de Node s'interpose et le processus sort en 0
+    sans reverifier la source en goal module. Les assertions ci-dessous ne
+    pouvaient donc pas echouer. Elles passent desormais par le verificateur reel
+    `scripts/check_js_syntax.mjs`, qui impose le goal explicitement.
     """
 
     def test_modal_node_check(self) -> None:
-        import shutil
-        import subprocess
-
-        if not shutil.which("node"):
-            self.skipTest("node introuvable dans le PATH")
-        result = subprocess.run(
-            ["node", "--check", str(_PERCEPTUAL_MODAL)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            f"node --check echoue:\nstdout={result.stdout}\nstderr={result.stderr}",
-        )
+        node_check(self, _PERCEPTUAL_MODAL)
 
     def test_right_panel_node_check(self) -> None:
-        import shutil
-        import subprocess
-
-        if not shutil.which("node"):
-            self.skipTest("node introuvable dans le PATH")
-        result = subprocess.run(
-            ["node", "--check", str(_RIGHT_PANEL)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            f"node --check echoue:\nstdout={result.stdout}\nstderr={result.stderr}",
-        )
+        node_check(self, _RIGHT_PANEL)
 
 
 class BalanceTests(unittest.TestCase):

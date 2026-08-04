@@ -1,7 +1,19 @@
-# CLAUDE.md — Instructions pour Claude Code
+# CLAUDE.md — état détaillé du projet (référence)
 
-Ce fichier est le contexte projet pour les sessions Claude (CLI, GitHub Action, IDE).
-L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
+> ⚠️ **Ce fichier n'est PAS chargé automatiquement.** Claude Code ne lit que
+> `./CLAUDE.md` (racine) et `./.claude/CLAUDE.md`. Pendant des mois, ces 570
+> lignes n'ont donc été lues par aucune session, sauf si quelqu'un pointait
+> explicitement le chemin.
+>
+> **Les instructions vivent désormais dans [`/CLAUDE.md`](../../CLAUDE.md)** à la
+> racine — court (< 200 lignes), limité à ce qui change ce qu'un agent ferait.
+> Anthropic documente qu'au-delà, l'adhérence baisse et les instructions
+> finissent ignorées.
+>
+> Ce fichier-ci reste la **référence détaillée** : état des campagnes, patterns
+> architecturaux, journal des sessions. À consulter à la demande, pas à charger
+> à chaque session. L'historique ancien est dans
+> [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
 
 ---
 

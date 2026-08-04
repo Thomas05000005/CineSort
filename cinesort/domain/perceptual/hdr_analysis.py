@@ -188,18 +188,17 @@ def _extract_mastering_display(side_data_list: List[Dict[str, Any]]) -> Tuple[fl
 
 
 def _extract_content_light(side_data_list: List[Dict[str, Any]]) -> Tuple[float, float]:
-    """Retourne (max_cll, max_fall) en nits depuis les side_data."""
+    """Retourne (max_cll, max_fall) en nits depuis les side_data.
+
+    Note : ffprobe peut serialiser max_content / max_average en ratio "X/Y"
+    selon le container/codec, comme pour mastering_display. parse_ratio gere
+    les deux formes (ratio ou float direct), float() seul cassait sur ratio.
+    """
     item = _side_data_find(side_data_list, _SIDE_DATA_CONTENT_LIGHT)
     if not item:
         return (0.0, 0.0)
-    try:
-        max_cll = float(item.get("max_content") or item.get("MaxCLL") or 0)
-    except (ValueError, TypeError):
-        max_cll = 0.0
-    try:
-        max_fall = float(item.get("max_average") or item.get("MaxFALL") or 0)
-    except (ValueError, TypeError):
-        max_fall = 0.0
+    max_cll = parse_ratio(item.get("max_content") or item.get("MaxCLL"))
+    max_fall = parse_ratio(item.get("max_average") or item.get("MaxFALL"))
     return (max_cll, max_fall)
 
 
