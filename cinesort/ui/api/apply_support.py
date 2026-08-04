@@ -25,7 +25,7 @@ import cinesort.infra.plex_client as _plex_mod
 import cinesort.infra.state as state
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
-from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
@@ -608,7 +608,45 @@ def _execute_undo_ops(
                     continue
 
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
-                conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
+                # REGLE INVIOLABLE n1 : le nom du fichier reste INTACT. L'ancien
+                # `api._unique_path` resolvait une collision dans le bac en
+                # renommant le FICHIER (`Rocky.1976.1080p.mkv` ->
+                # `Rocky.1976.1080p_2.mkv`) — 4e site de renommage du depot,
+                # celui-ci sur le chemin de l'UNDO, donc sur le filet de secours.
+                # `unique_bucket_path` porte l'index sur un DOSSIER a la place.
+                conflict_dst = unique_bucket_path(
+                    undo_conflicts_root / current_path.name,
+                    bucket_root=undo_conflicts_root,
+                    use_dup_suffix=False,
+                )
+                if conflict_dst is None:
+                    # Aucune desambiguisation de dossier possible. On REFUSE le
+                    # deplacement plutot que d'ecraser la cible ou de renommer le
+                    # fichier : sur un chemin destructif l'erreur va dans le sens
+                    # restrictif, et le fichier source reste ou il est.
+                    _log.error(
+                        "undo: quarantaine impossible sans renommer le fichier, abandon: %s",
+                        current_path,
+                    )
+                    failed += 1
+                    _mark_undo_status(
+                        store,
+                        log_fn,
+                        op_id=op_id,
+                        undo_status="FAILED",
+                        error_message=(
+                            "Quarantaine d'undo impossible sans renommer le fichier video "
+                            f"({current_path.name}) : deplacement refuse, le fichier est laisse en place."
+                        ),
+                    )
+                    continue
+                # `unique_bucket_path` INSERE un dossier d'index quand la cible est
+                # prise ; ce dossier n'existe pas encore. Sans ce mkdir, `shutil.move`
+                # leve FileNotFoundError, que la branche ci-dessous interprete comme
+                # « fichier disparu » et compte en SKIPPED — le fichier serait reste
+                # en place sans que rien ne signale d'echec. Constate par le test du
+                # site d'appel, avec deux conflits homonymes.
+                conflict_dst.parent.mkdir(parents=True, exist_ok=True)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
