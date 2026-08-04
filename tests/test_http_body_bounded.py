@@ -502,16 +502,8 @@ class ClientsAreRoutedThroughTheBoundedReadTests(unittest.TestCase):
     # cinq clients, donc un audit « par client » le manquait. C'etait un
     # `requests.get(...)` nu suivi d'un `r.json()`, sans session partagee.
 
-    def test_film_detail_direct_tmdb_get_is_bounded(self) -> None:
-        import tempfile
-        from unittest.mock import patch
-
-        from cinesort.ui.api import film_support
-
-        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_")
-        self.addCleanup(tmp.cleanup)
-        state_dir = tmp.name
-
+    @staticmethod
+    def _film_support_doubles(state_dir: str) -> tuple:
         class _Api:
             def _internal_settings(self) -> dict:
                 return {"tmdb_api_key": "REALKEY", "state_dir": state_dir, "tmdb_timeout_s": 1.0}
@@ -534,17 +526,66 @@ class ClientsAreRoutedThroughTheBoundedReadTests(unittest.TestCase):
             def flush(self) -> None:
                 return None
 
+        return _Api(), _StubTmdb
+
+    def test_film_detail_direct_tmdb_get_is_bounded(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
         session = _RecordingSession(hostile=True)
         with (
-            patch("cinesort.infra.tmdb_client.TmdbClient", _StubTmdb),
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
             patch("requests.Session.get", new=session),
         ):
-            out = film_support._fetch_tmdb_extras(_Api(), 603)
+            out = film_support._fetch_tmdb_extras(api, 603)
 
         # Degradation gracieuse documentee de ce helper (best-effort).
         self.assertIsNone(out.get("director"))
         self.assertIsNone(out.get("overview"))
         self._assert_bounded(session)
+
+    def test_film_detail_nominal_response_survives_the_session_close(self) -> None:
+        """Le corps est lu DANS le `with requests.Session()`, mais `r.json()`
+        s'execute APRES sa fermeture.
+
+        Ca ne marche que parce que `enforce_body_limit` reinjecte les octets
+        lus dans la reponse (`_content` + `_content_consumed`). Sans ce test,
+        rien n'exercait ce couplage avec une VRAIE `requests.Response` : les
+        doubles de `test_film_detail_tmdb_extras.py` sont des objets maison
+        dont `.json()` ne touche jamais au flux.
+        """
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_ok_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
+        session = _RecordingSession(
+            hostile=False,
+            payload={
+                "overview": "Un synopsis.",
+                "runtime": 148,
+                "credits": {"crew": [{"job": "Producer", "name": "Z"}, {"job": "Director", "name": "X"}]},
+            },
+        )
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(api, 603)
+
+        self.assertEqual(out.get("director"), "X")
+        self.assertEqual(out.get("overview"), "Un synopsis.")
+        self.assertEqual(out.get("runtime"), 148)
 
     def test_omdb_test_connection_reports_invalid_response(self) -> None:
         import tempfile
