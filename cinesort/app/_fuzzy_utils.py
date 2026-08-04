@@ -9,7 +9,7 @@ symbole reste re-exporte ici pour preserver la backward compat absolue
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 # Backward compat: re-export depuis le bon etage architectural (domain).
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
@@ -50,23 +50,31 @@ def find_best_fuzzy_match(
     *,
     threshold: int = DEFAULT_FUZZY_THRESHOLD,
     use_token_sort: bool = False,
-) -> Optional[Tuple[str, int]]:
+    choices_are_normalized: bool = False,
+) -> Optional[Tuple[str, int, int]]:
     """Cherche le meilleur match fuzzy d'un titre parmi une liste de candidats.
 
     Utilise `rapidfuzz.process.extractOne` qui est vectorise en C : reduction
     typique x100 a x1000 par rapport a une boucle Python sur les candidats.
 
     Args:
-        query: Le titre a chercher (deja normalise ou non — on normalise ici).
-        choices: Iterable de titres candidats (deja normalises ou non).
+        query: Le titre a chercher (deja normalise ou non — on normalise ici,
+            `normalize_for_fuzzy` etant idempotente).
+        choices: Sequence de titres candidats, dans l'ordre du caller.
         threshold: Score minimum (0-100) pour considerer un match.
         use_token_sort: Si True, utilise fuzz.token_sort_ratio (insensible
             a l'ordre des mots) au lieu de fuzz.ratio. Utile pour les titres
             avec sous-titres reorganises.
+        choices_are_normalized: True si les candidats sortent deja d'un index
+            pre-normalise (radarr_by_year_normalized & co) : on evite alors de
+            re-normaliser a chaque requete, ce qui annulerait le gain de
+            l'index de l'issue #29.
 
     Returns:
-        (match_normalise, score) si un match >= threshold est trouve, sinon None.
-        Le caller doit ensuite retrouver l'objet original via index/dict.
+        `(match_normalise, score, index)` si un match >= threshold est trouve,
+        sinon None. `index` est la position dans la sequence `choices` D'ORIGINE
+        (pas dans la liste filtree en interne) : c'est elle qui permet au caller
+        de remonter a l'objet metier associe au titre.
 
     Cf issue #29 : remplace les boucles O(n^2) dans radarr_sync,
     jellyfin_validation et watchlist par cet appel O(n) vectorise.
@@ -77,10 +85,19 @@ def find_best_fuzzy_match(
     if not q_norm:
         return None
 
-    # Pre-normalise les choix pour eviter la re-normalisation a chaque ratio
-    norm_choices = [normalize_for_fuzzy(c) for c in choices]
-    # Filtre les choix vides apres normalisation pour eviter les artefacts
-    norm_choices = [c for c in norm_choices if c]
+    # Pre-normalise les choix pour eviter la re-normalisation a chaque ratio,
+    # en filtrant ceux qui deviennent vides. On MEMORISE l'index d'origine de
+    # chaque choix retenu : sans cette table, le filtre decale les index et le
+    # caller ne peut plus retrouver l'objet correspondant au titre matche.
+    # C'est ce contrat casse qui rendait ce helper inutilisable — et qui a
+    # pousse les 3 call sites de l'issue #29 a re-inliner extractOne.
+    norm_choices: List[str] = []
+    origin_index: List[int] = []
+    for i, c in enumerate(choices):
+        n = c if choices_are_normalized else normalize_for_fuzzy(c)
+        if n:
+            norm_choices.append(n)
+            origin_index.append(i)
     if not norm_choices:
         return None
 
@@ -88,7 +105,7 @@ def find_best_fuzzy_match(
     best = process.extractOne(q_norm, norm_choices, scorer=scorer, score_cutoff=threshold)
     if best is None:
         return None
-    # process.extractOne renvoie (choice, score, index)
-    match_str, score, _ = best
+    # process.extractOne renvoie (choice, score, index_dans_norm_choices)
+    match_str, score, filtered_idx = best
     logger.debug("fuzzy_vectorized: match '%s' ~ '%s' = %d (>= %d)", q_norm[:40], match_str[:40], int(score), threshold)
-    return (match_str, int(score))
+    return (match_str, int(score), origin_index[filtered_idx])
