@@ -1,0 +1,14 @@
+{
+  "name": "cinesort-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sources front de CineSort (web/). Ce manifeste n'apporte AUCUNE dependance npm : il existe uniquement pour que Node interprete les .js du depot comme des modules ESM, ce qu'ils sont.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check:js": "node scripts/check_js_syntax.mjs"
+  }
+}

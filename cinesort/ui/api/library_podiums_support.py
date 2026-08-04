@@ -45,7 +45,9 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("library_podiums cannot resolve latest run: %s", exc)
         return None
-    return str(runs[0]["run_id"]) if runs else None
+    if not runs:
+        return None
+    return str(runs[0].get("run_id") or "") or None
 
 
 def _aggregate_top(values: List[Optional[str]], limit: int) -> List[Dict[str, Any]]:

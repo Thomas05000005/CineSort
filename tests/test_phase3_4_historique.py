@@ -101,8 +101,21 @@ class StatusDerivationTests(unittest.TestCase):
         self.assertIn("function _deriveStatus(run)", self.js)
 
     def test_status_classes(self) -> None:
-        for cls in ("is-error", "is-partial", "is-done", "is-applied", "is-cancelled", "is-pending"):
+        # Revue post-merge 2026-08-03 : ce test cherchait aussi `is-pending`,
+        # classe qui n'a JAMAIS ete declaree dans web/shared/components.css — le
+        # statut AWAITING_VALIDATION s'affichait donc sans couleur, et
+        # l'assertion restait verte parce qu'elle ne regardait que le texte
+        # source. On verifie desormais que chaque classe citee par le JS existe
+        # bien cote CSS. Le mapping statut -> classe est teste au runtime dans
+        # tests/test_revue_20260803_historique_statuts.py.
+        css = _COMPONENTS_CSS.read_text(encoding="utf-8")
+        for cls in ("is-error", "is-partial", "is-done", "is-applied", "is-cancelled"):
             self.assertIn(cls, self.js, f"classe statut {cls} manquante")
+            self.assertIn(
+                f".historique-run-status.{cls}",
+                css,
+                f"classe statut {cls} utilisee par le JS mais absente du CSS",
+            )
 
 
 class InspectorTests(unittest.TestCase):

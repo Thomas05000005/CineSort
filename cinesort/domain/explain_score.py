@@ -43,6 +43,24 @@ _CATEGORY_LABELS_FR: Dict[str, str] = {
 
 # Chaque entrée : (match label substring, suggestion FR).
 # Si un factor négatif correspond, la suggestion est proposée.
+#
+# ÉTAT MESURÉ (audit NUANCE N05, 2026-08-03) — 4 motifs ne matchent AUCUN
+# libellé émis par `quality_score.py` (comptage sur les littéraux du module) :
+#   - "bitrate bas"      : le scorer écrit "Debit trop faible pour {res} (…)"  (L919)
+#   - "hdr 8bit"         : le scorer écrit "HDR detecte avec profondeur 8 bits" (L928)
+#   - "langue manquante" : aucun libellé équivalent (le plus proche, "Pas de VO
+#                          detectee" L1027, ne veut PAS dire la même chose)
+#   - "récent" (accentué): le libellé est "Film recent ({year}) en definition
+#                          standard" — mais il est capté juste après par
+#                          "standard", donc AUCUNE suggestion n'est perdue.
+# "commentary" est mort lui aussi, sans effet : "commentaire" est testé avant
+# dans la même boucle qui `break` et émet exactement le même texte.
+# Non corrigé DÉLIBÉRÉMENT : aucune UI ne lit `suggestions` (le front n'appelle
+# même pas get_quality_report ; seules sortent la clé `score_explanation_full`
+# de l'export JSON et un appel API scripté), et réaligner les motifs sur les
+# libellés FR recréerait à l'identique le couplage fragile qui a pourri ici.
+# Le vrai correctif est de clé sur une métadonnée de factor, pas sur une
+# sous-chaîne de libellé — refonte à arbitrer, pas une rustine.
 _SUGGESTION_RULES: List[tuple[str, str]] = [
     ("upscale", "Remplacer par une source native à la résolution annoncée (éviter les upscales)."),
     ("re-encode", "Chercher une version REMUX ou avec un bitrate plus élevé (≥ 15 Mbps en 1080p)."),

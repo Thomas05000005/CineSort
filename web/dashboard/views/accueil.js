@@ -16,6 +16,7 @@ import { escapeHtml } from "../core/dom.js";
 import { apiPost, getSettingsEpoch } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { deriveRunStatus } from "../core/run-status.js";
 import * as rightPanel from "../components/right-panel.js";
 
 /* --- Format dates relatives -------------------------------------------- */
@@ -314,8 +315,15 @@ async function _pingIntegration(key, settings, signal) {
     } else if (key === "plex") {
       const url = String(s.plex_url || "");
       const token = String(s.plex_token || "");
+      // Revue post-merge 2026-08-03 : le parametre s'appelle `token`, PAS
+      // `api_key` (IntegrationsFacade.test_plex_connection(url, token, timeout_s)
+      // — Plex est la seule integration a ne pas utiliser `api_key`). Le serveur
+      // REST fait `method(**params)` sans aliasing : `api_key` levait un
+      // TypeError -> HTTP 400 -> pastille Plex bloquee sur « hors ligne » des
+      // qu'un token etait configure, alors que Parametres > Tester repondait OK
+      // sur le meme serveur (parametres.js envoie bien `token`).
       const payload = (url || token)
-        ? { url, api_key: token, timeout_s: 5 }
+        ? { url, token, timeout_s: 5 }
         : {};
       res = await apiPost("integrations/test_plex_connection", payload, _opts);
     } else if (key === "radarr") {
@@ -686,28 +694,26 @@ function _renderSuggestions(stats) {
 const _TIMELINE_DAYS = 7;
 const _WEEKDAY_SHORT_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
-/** Retourne le statut derive (APPLIED/PARTIAL/ERROR/DONE) pour un run. */
-function _deriveRunStatus(r) {
-  const errors = Number(r.errors_count || 0);
-  const applied = Number(r.applied_rows || 0);
-  const total = Number(r.total_rows || 0);
-  const explicit = String(r.status || "").toUpperCase();
-  if (explicit) {
-    if (explicit === "APPLIED" || explicit === "DONE" || explicit === "PARTIAL" || explicit === "ERROR") {
-      return explicit;
-    }
-  }
-  if (errors > 0) return "ERROR";
-  if (applied > 0 && total > 0 && applied >= total) return "APPLIED";
-  if (applied > 0 && total > 0 && applied < total) return "PARTIAL";
-  return "DONE";
-}
-
+/* Revue adversaire PR #855 (2026-08-03) : la derivation locale vivait ici, avec
+ * une liste blanche `APPLIED/DONE/PARTIAL/ERROR` qui ne contenait ni FAILED, ni
+ * CANCELLED, ni aucun statut transitoire. Tout le reste retombait sur
+ * `return "DONE"` : un run PLANTE sans ligne d'erreur, un run ANNULE et meme un
+ * run ENCORE EN COURS s'affichaient en pastille grise « saine », avec une
+ * infobulle « ... — DONE ». C'est exactement le defaut « run FAILED invisible »
+ * corrige dans /historique — ici sur l'ecran d'atterrissage.
+ * La regle est desormais UNIQUE (core/run-status.js) et partagee avec
+ * views/historique.js : les deux ecrans ne peuvent plus se contredire. */
 function _statusBulletClass(status) {
   const s = String(status || "").toUpperCase();
   if (s === "APPLIED") return "accueil-timeline-bullet--applied";
-  if (s === "PARTIAL") return "accueil-timeline-bullet--partial";
   if (s === "ERROR") return "accueil-timeline-bullet--error";
+  // « En validation » attend une action de l'utilisateur : meme teinte warning
+  // que dans /historique (.historique-run-status.is-partial). Aucune classe
+  // ajoutee — .accueil-timeline-bullet--partial existe deja (components.css).
+  if (s === "PARTIAL" || s === "AWAITING_VALIDATION") return "accueil-timeline-bullet--partial";
+  // PENDING / RUNNING / PAUSED / CANCELLED : gris neutre, comme le `is-done` /
+  // `is-cancelled` d'historique.js (tous deux gris). Le mot affiche dans
+  // l'infobulle, lui, dit desormais la verite.
   return "accueil-timeline-bullet--done";
 }
 
@@ -753,7 +759,7 @@ function _renderRecentActivity(runs) {
   const cols = _bucketRunsByDay(list, new Date());
   const colsHtml = cols.map((c) => {
     const bullets = c.runs.map((r) => {
-      const status = _deriveRunStatus(r);
+      const status = deriveRunStatus(r);
       const cls = _statusBulletClass(status);
       const hh = String(r._ts.getHours()).padStart(2, "0");
       const mm = String(r._ts.getMinutes()).padStart(2, "0");
