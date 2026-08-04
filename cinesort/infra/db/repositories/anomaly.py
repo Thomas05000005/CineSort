@@ -8,6 +8,20 @@ Migration #85 phase B2 (2026-05-16) : meme pattern que phase B1 ProbeRepository 
 Methodes exposees :
     get_anomaly_counts_for_runs, get_anomaly_stats, get_top_anomaly_codes,
     list_anomalies_for_run
+
+ETAT AU 2026-08-03 (nuance N10 de l'ultra-audit) — A LIRE AVANT DE CODER CONTRE
+CE REPOSITORY : la table `anomalies` n'a AUCUN producteur. Les 4 methodes
+ci-dessus sont en lecture seule, et le depot ne contient pas un seul INSERT vers
+cette table hors des tests et de la recopie interne de `021_fk_cascade.sql`.
+Constate sur une base de production reelle : `sqlite_sequence` porte la ligne
+('anomalies', 0), donc le compteur AUTOINCREMENT n'a jamais avance — la table
+n'a pas ete videe, elle n'a jamais recu une insertion. Ces methodes renvoient
+donc toujours [] / {} / 0, et le consommateur `dashboard_support` prend
+systematiquement sa branche de repli en memoire.
+Ce n'est PAS un bug a corriger ici : c'est un arbitrage produit (brancher un
+producteur, ou supprimer la table avec ses 3 index, sa migration 021 dediee, ce
+repository et ses lecteurs) qui depasse la couche infra. Ne pas "reparer" une
+lecture qui n'a rien a lire.
 """
 
 from __future__ import annotations
