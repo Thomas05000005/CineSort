@@ -35,7 +35,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from tests._jsexec import ROOT, esm_syntax_error, require_node, run_module_test
+from tests._jsexec import ROOT, node_check, require_node, run_module_test
 from tests.test_revue_20260803_historique_statuts import EXTRA as HIST_EXTRA
 from tests.test_revue_20260803_historique_statuts import STUBS as HIST_STUBS
 from tests.test_revue_20260803_modales_et_payloads import ACCUEIL_STUBS
@@ -242,9 +242,9 @@ __emit(out);
         self.assertEqual(acc["done_partiel"], "PARTIAL")
 
     def test_nonreg_la_source_partagee_est_bien_un_module_esm(self):
-        self.assertEqual(esm_syntax_error(RUN_STATUS_JS), "")
-        self.assertEqual(esm_syntax_error(ACCUEIL_JS), "")
-        self.assertEqual(esm_syntax_error(HISTORIQUE_JS), "")
+        node_check(self, RUN_STATUS_JS)
+        node_check(self, ACCUEIL_JS)
+        node_check(self, HISTORIQUE_JS)
 
 
 if __name__ == "__main__":

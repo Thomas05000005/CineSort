@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests._jsexec import ROOT, esm_syntax_error, inline_module, require_node, run_module_test
+from tests._jsexec import ROOT, inline_module, node_check, require_node, run_module_test
 
 PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
 ACCUEIL_JS = ROOT / "web" / "dashboard" / "views" / "accueil.js"
@@ -334,7 +334,7 @@ __emit({ submitted, modals: globalThis.__modals.length });
         self.assertEqual(res["modals"], 1)
 
     def test_nonreg_esm(self):
-        self.assertEqual(esm_syntax_error(PARAMETRES_JS), "")
+        node_check(self, PARAMETRES_JS)
 
 
 class PingPlexAccueilTests(unittest.TestCase):
@@ -393,7 +393,7 @@ __emit({ params: post ? post.params : null });
         self.assertEqual(res["params"], {})
 
     def test_nonreg_esm(self):
-        self.assertEqual(esm_syntax_error(ACCUEIL_JS), "")
+        node_check(self, ACCUEIL_JS)
 
 
 class PiedModalePerceptuelleTests(unittest.TestCase):
@@ -452,7 +452,7 @@ __emit({ label: M.__h.analyzedAtLabel({ analyzed_at: "2026-01-02 03:04", ts: 174
         self.assertEqual(res["label"], "2026-01-02 03:04")
 
     def test_nonreg_esm(self):
-        self.assertEqual(esm_syntax_error(PERCEPTUAL_JS), "")
+        node_check(self, PERCEPTUAL_JS)
 
 
 if __name__ == "__main__":
