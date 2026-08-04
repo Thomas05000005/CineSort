@@ -2677,8 +2677,14 @@ def apply_tv_episode(
         try:
             matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, row.video)]
             video = matches[0] if matches else video
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as exc:
+            # Revue PR#561 (sourcery-ai) : sans ce log, un NAS qui refuse
+            # l'enumeration (permission denied, share tombe) est rapporte a
+            # l'identique d'un dossier ou la video est reellement absente. Le
+            # skip est le meme dans les deux cas, mais le diagnostic ne l'est
+            # pas : on nomme la cause pour ne pas envoyer l'utilisateur
+            # chercher un fichier qui est en fait la.
+            log("WARN", f"TV episode listing failed: {folder} ({type(exc).__name__}: {exc})")
     if not video.exists():
         log("WARN", f"TV episode video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
@@ -2880,10 +2886,17 @@ def quarantine_row(
         # `.lower()` : sur un scan SMB macOS les noms remontent en NFD.
         try:
             matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
-        except (OSError, PermissionError):
+        except (OSError, PermissionError) as exc:
+            # Revue PR#561 (sourcery-ai) : ne pas rendre l'echec FS
+            # indiscernable d'un « aucune video trouvee ». La suite skippe la
+            # row SANS aucun log (contrairement a apply_tv_episode) : sans
+            # cette trace, un share tombe en plein batch de quarantaine se lit
+            # comme une bibliotheque vide.
+            log("WARN", f"QUARANTINE listing failed: {folder} ({type(exc).__name__}: {exc})")
             matches = []
         video = matches[0] if matches else video
     if not video.exists():
+        log("WARN", f"QUARANTINE video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
 

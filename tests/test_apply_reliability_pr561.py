@@ -230,6 +230,49 @@ class TvEpisodeEmptyVideoGuardTests(_ApplyReliabilityBase):
         self.assertEqual(res.skipped, 1)
         self.assertEqual(res.skip_reasons.get(core.SKIP_REASON_AUTRE), 1)
 
+    def test_iterdir_qui_leve_est_loggue_avec_sa_cause(self) -> None:
+        """Revue PR#561 (sourcery-ai) : un echec FS ne doit pas se lire comme une video absente.
+
+        Le skip est identique dans les deux cas ; seul le log distingue « le
+        share ne repond pas » de « le fichier n'est pas la ». Sans cette trace,
+        l'utilisateur cherche un fichier qui est en fait sur le disque.
+        """
+        folder = self.root / "Ma Serie S01"
+        self._write(folder / "Ma.Serie.S01E01.mkv", b"video")
+
+        cfg = core.Config(root=self.root).normalized()
+        res = core.ApplyResult()
+        real_iterdir = Path.iterdir
+
+        def _boom(self_path: Path):  # type: ignore[no-untyped-def]
+            if self_path == folder:
+                raise PermissionError(13, "Access is denied")
+            return real_iterdir(self_path)
+
+        with unittest.mock.patch.object(Path, "iterdir", _boom):
+            apply_core.apply_tv_episode(
+                cfg,
+                folder,
+                self._tv_row(folder, "introuvable.mkv"),
+                False,
+                self._log,
+                res,
+                conflicts_root=self.run_review_root / "_conflicts",
+                conflicts_sidecars_root=self.run_review_root / "_conflicts_sidecars",
+                duplicates_identical_root=self.run_review_root / "_duplicates_identical",
+            )
+
+        self.assertEqual(res.skipped, 1)
+        causes = [msg for level, msg in self.logs if level == "WARN" and "PermissionError" in msg]
+        self.assertTrue(
+            causes,
+            f"l'echec d'enumeration doit etre trace avec sa cause ; logs={self.logs}",
+        )
+        self.assertTrue(
+            any(str(folder) in msg for msg in causes),
+            f"le log doit nommer le dossier fautif ; logs={self.logs}",
+        )
+
     def test_video_presente_est_toujours_traitee(self) -> None:
         """Anti sur-correction : la garde ne doit pas bloquer un episode valide."""
         folder = self.root / "Ma Serie S01"
@@ -305,6 +348,15 @@ class QuarantineRowIterdirGuardTests(_ApplyReliabilityBase):
         self.assertEqual(res.skipped, 1)
         self.assertEqual(res.skip_reasons.get(core.SKIP_REASON_AUTRE), 1)
         self.assertEqual(res.quarantined, 0)
+        # Revue PR#561 (sourcery-ai) : ce chemin skippait SANS aucun log. Un
+        # share tombe en plein batch de quarantaine se lisait alors comme une
+        # bibliotheque vide.
+        causes = [msg for level, msg in self.logs if level == "WARN" and "PermissionError" in msg]
+        self.assertTrue(causes, f"l'echec d'enumeration doit etre trace avec sa cause ; logs={self.logs}")
+        self.assertTrue(
+            any(str(folder) in msg for msg in causes),
+            f"le log doit nommer le dossier fautif ; logs={self.logs}",
+        )
 
     def test_iterdir_folder_disparu_ne_tue_pas_le_batch(self) -> None:
         """TOCTOU : le dossier existe au check d'entree puis disparait (move concurrent)."""
