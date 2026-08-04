@@ -27,19 +27,53 @@ class _SlowRunnerSpy:
     """Runner qui simule un subprocess ffprobe lent (sleep) et trace les threads.
 
     `calls` ne compte que les vrais probes de fichier (pas les --Version checks).
+
+    `rendezvous` (optionnel) transforme l'espion en **preuve** de simultaneite
+    plutot qu'en indice : les `rendezvous` premiers probes se bloquent sur une
+    barriere et ne peuvent repartir que lorsque tous sont arrives. Si le service
+    probe en sequentiel, le premier arrive attend seul jusqu'au timeout et
+    `rendezvous_timed_out` passe a True. Aucune horloge murale n'intervient dans
+    le verdict : c'est la seule facon d'observer « N probes tournent VRAIMENT en
+    meme temps » sans dependre de la vitesse de la machine.
+
+    L'exception de barriere est capturee ici et convertie en drapeau parce que
+    `probe_files` tolere les erreurs de probe (un probe qui plante ne tue pas le
+    batch) : laisser remonter `BrokenBarrierError` la ferait avaler en silence,
+    et le test verrait un batch un peu plus court au lieu d'un echec explicite.
     """
 
-    def __init__(self, sleep_s: float = 0.05) -> None:
+    def __init__(
+        self, sleep_s: float = 0.05, rendezvous: int | None = None, rendezvous_timeout_s: float = 60.0
+    ) -> None:
         self.sleep_s = sleep_s
         self.calls = 0
         self.version_calls = 0
         self.thread_ids: set = set()
+        self.max_concurrent = 0
+        self.rendezvous_timed_out = False
+        self._in_flight = 0
+        self._rendezvous_left = rendezvous or 0
+        self._rendezvous_timeout_s = rendezvous_timeout_s
+        self._barrier = threading.Barrier(rendezvous) if rendezvous else None
         self._lock = threading.Lock()
         self._payload = (
             '{"format": {"format_name": "matroska,webm", "duration": "60.0"}, '
             '"streams": [{"codec_type": "video", "codec_name": "h264", '
             '"width": 1920, "height": 1080}]}'
         )
+
+    def _await_rendezvous(self) -> None:
+        """Bloque sur la barriere si ce probe fait partie des N premiers."""
+        with self._lock:
+            if self._barrier is None or self._rendezvous_left <= 0:
+                return
+            self._rendezvous_left -= 1
+        try:
+            self._barrier.wait(timeout=self._rendezvous_timeout_s)
+        except threading.BrokenBarrierError:
+            # Timeout OU barriere deja cassee par un autre thread : dans les deux
+            # cas la simultaneite demandee n'a pas ete atteinte.
+            self.rendezvous_timed_out = True
 
     def __call__(self, cmd, timeout_s):
         # Les checks de version sont [tool, --Version|-version] — pas de fichier media.
@@ -50,11 +84,18 @@ class _SlowRunnerSpy:
             else:
                 self.calls += 1
                 self.thread_ids.add(threading.get_ident())
+                self._in_flight += 1
+                self.max_concurrent = max(self.max_concurrent, self._in_flight)
         if is_version_check:
             # Version checks ne dorment pas (rapides en realite).
             return 0, "ffprobe version 6.0", ""
-        time.sleep(self.sleep_s)
-        return 0, self._payload, ""
+        try:
+            self._await_rendezvous()
+            time.sleep(self.sleep_s)
+            return 0, self._payload, ""
+        finally:
+            with self._lock:
+                self._in_flight -= 1
 
 
 class ProbeWorkersResolutionTests(unittest.TestCase):
@@ -266,12 +307,39 @@ class ProbeFilesBatchTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(runner.calls, 1)
 
-    def test_100_files_completes_under_reasonable_time(self) -> None:
-        """100 films simules avec 8 workers : doit etre nettement < mono-thread.
+    def test_100_files_probe_simultaneously(self) -> None:
+        """100 films / 8 workers : prouve que 8 probes tournent VRAIMENT ensemble.
 
-        Compare parallel vs sequential pour eviter la flakiness CI : on
-        verifie le ratio (parallel doit etre au moins 2x plus rapide), pas
-        une borne absolue qui depend de la charge machine.
+        Ce test comparait auparavant deux durees wall-clock
+        (`par_dur < seq_dur * 0.7`) et s'appelait
+        `test_100_files_completes_under_reasonable_time`. Il etait connu flaky
+        depuis le 2026-06-08 (`docs/internal/BILAN_PREP_BOUCLE_2026-06-08.md` le
+        classe « flaky / seuil temporel », et `BILAN_ITER8_2026-06-08.md`
+        documente un run ou il a du etre deselectionne) et il a fini par bloquer
+        la totalite du backlog : sur `main` le 2026-08-04 il est tombe a
+        `par=18.950s seq=26.541s`, soit un ratio de 0.714 contre 0.700 exiges —
+        rate de 2 % — ce qui a mis le check requis `Lint, Tests, Build` au rouge
+        sur main, donc sur les ~50 PR armees, qui fusionnent avec main.
+
+        Pourquoi ce ratio n'etait pas mesurable de facon fiable : le sleep simule
+        ne pese que 2 s des ~12 s d'un run sequentiel (mesure locale) ; tout le
+        reste est du travail Python **tenu par le GIL** (parsing JSON, ecritures
+        SQLite, hachage). Le gain observable depend donc du nombre de cœurs du
+        runner. En local (machine large) le ratio tombe a 0.49 ; le job
+        `Lint, Tests, Build` tourne sur `windows-latest`, qui a 4 cœurs, et il y
+        stagne autour de 0.71. Le seuil etait pose exactement sur le plancher de
+        bruit du runner de CI.
+
+        Le remplacement suit le precedent deja etabli DANS CE FICHIER par
+        l'issue #88, qui avait converti `test_parallel_faster_than_sequential` en
+        verification structurelle pour exactement la meme raison — la conversion
+        avait simplement oublie ce test-ci.
+
+        La nouvelle assertion est **strictement plus forte** que l'ancienne : un
+        ratio pouvait passer par chance avec 2 workers actifs sur 8, alors qu'une
+        barriere a 8 participants ne se debloque que si 8 probes sont reellement
+        en vol au meme instant. Et elle est deterministe : aucune horloge n'entre
+        dans le verdict, seulement l'arrivee effective des threads.
         """
         # Cree 100 fichiers vides.
         many = []
@@ -279,41 +347,53 @@ class ProbeFilesBatchTests(unittest.TestCase):
             mp = Path(self._tmp.name) / f"big_{i:04d}.mkv"
             mp.write_bytes(b"\x00" * 64)
             many.append(mp)
-        # Run parallel
-        runner_par = _SlowRunnerSpy(sleep_s=0.02)
+
+        workers = 8
+        # rendezvous=workers : les 8 premiers probes se bloquent mutuellement
+        # jusqu'a ce que les 8 soient arrives. En sequentiel, le premier attend
+        # seul et le drapeau de timeout se leve.
+        runner_par = _SlowRunnerSpy(sleep_s=0.02, rendezvous=workers, rendezvous_timeout_s=60.0)
         service_par = ProbeService(self.store, runner=runner_par, which_fn=lambda n: str(n))
-        t0 = time.monotonic()
         out_par = service_par.probe_files(
             media_paths=many,
-            settings=self._settings(probe_parallelism_enabled=True, probe_workers=8),
+            settings=self._settings(probe_parallelism_enabled=True, probe_workers=workers),
         )
-        par_dur = time.monotonic() - t0
+
+        self.assertFalse(
+            runner_par.rendezvous_timed_out,
+            f"Les {workers} probes ne se sont jamais retrouves simultanement : la "
+            f"parallelisation est cassee (concurrence max observee "
+            f"{runner_par.max_concurrent}, threads distincts "
+            f"{len(runner_par.thread_ids)}).",
+        )
         self.assertEqual(len(out_par), 100)
+        self.assertEqual(runner_par.calls, 100)
+        # La barriere garantit deja >= workers simultanes ; on l'affirme pour que
+        # l'echec reste lisible si le mecanisme de rendez-vous evoluait.
+        self.assertGreaterEqual(runner_par.max_concurrent, workers)
 
         # Reset cache via touch (mtime changes -> cache miss)
         for mp in many:
             mp.touch()
 
-        # Run sequential
-        runner_seq = _SlowRunnerSpy(sleep_s=0.02)
+        # Le chemin sequentiel doit rester strictement mono-thread. Pas de
+        # rendez-vous ici : il bloquerait par construction, ce qui est justement
+        # ce que la branche parallele prouve.
+        runner_seq = _SlowRunnerSpy(sleep_s=0.0)
         service_seq = ProbeService(self.store, runner=runner_seq, which_fn=lambda n: str(n))
-        t0 = time.monotonic()
         out_seq = service_seq.probe_files(
             media_paths=many,
             settings=self._settings(probe_parallelism_enabled=False),
         )
-        seq_dur = time.monotonic() - t0
         self.assertEqual(len(out_seq), 100)
-
-        # Parallel doit etre plus rapide que sequentiel (gain reel attendu : 4-8x
-        # selon CPU/Windows scheduling). Seuil 0.7 pour absorber le jitter CI :
-        # un gain de 30%+ (par < 70% seq) prouve le parallelism, le gain reel
-        # observe est typiquement 50-80% mais varie selon la machine.
-        self.assertLess(
-            par_dur,
-            seq_dur * 0.7,
-            f"100 films par={par_dur:.3f}s seq={seq_dur:.3f}s (gain insuffisant)",
-        )
+        # `len(out_seq)` compte AUSSI les resultats servis par le cache : sans
+        # l'assertion suivante, `max_concurrent == 1` passerait trivialement si
+        # le `touch()` n'avait invalide qu'un seul fichier. Autrement dit, le
+        # test aurait pu etre vert parce que le travail n'a pas eu lieu.
+        # (releve par CodeRabbit sur la PR #892 ; remarque fondee)
+        self.assertEqual(runner_seq.calls, len(many))
+        self.assertEqual(runner_seq.max_concurrent, 1)
+        self.assertEqual(len(runner_seq.thread_ids), 1)
 
     def test_one_failing_probe_does_not_kill_batch(self) -> None:
         """Un subprocess qui plante en parallele ne doit pas tuer les autres."""
