@@ -265,6 +265,47 @@ class ComparisonResultStructureTests(unittest.TestCase):
         self.assertGreater(r.size_savings, 0)
 
 
+class PerceptualScoreSymmetryTests(unittest.TestCase):
+    """Issue #598 : delta perceptual doit etre symetrique entre A et B.
+
+    Avant fix : (pa - pb) // 5 utilisait floor division (rounds vers -inf),
+    donc -1 // 5 == -1 (winner=b) mais 1 // 5 == 0 (winner=tie).
+    Apres fix : int((pa - pb) / 5) truncate vers 0, symetrique.
+    """
+
+    def _probe_pair(self):
+        return _probe(height=1080, codec="hevc"), _probe(height=1080, codec="hevc")
+
+    def test_small_diff_in_favor_of_a_is_tie(self) -> None:
+        pa_probe, pb_probe = self._probe_pair()
+        r = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=100, perceptual_score_b=99)
+        perc = next(c for c in r.criteria if c.name == "perceptual")
+        self.assertEqual(perc.winner, "tie")
+        self.assertEqual(perc.points_delta, 0)
+
+    def test_small_diff_in_favor_of_b_is_tie(self) -> None:
+        """Symetrique avec le precedent (regression pour le fix de #598)."""
+        pa_probe, pb_probe = self._probe_pair()
+        r = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=99, perceptual_score_b=100)
+        perc = next(c for c in r.criteria if c.name == "perceptual")
+        self.assertEqual(perc.winner, "tie")
+        self.assertEqual(perc.points_delta, 0)
+
+    def test_4_points_diff_is_still_tie_on_both_sides(self) -> None:
+        pa_probe, pb_probe = self._probe_pair()
+        r_pos = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=100, perceptual_score_b=96)
+        r_neg = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=96, perceptual_score_b=100)
+        self.assertEqual(next(c for c in r_pos.criteria if c.name == "perceptual").points_delta, 0)
+        self.assertEqual(next(c for c in r_neg.criteria if c.name == "perceptual").points_delta, 0)
+
+    def test_5_points_diff_gives_symmetric_signed_delta(self) -> None:
+        pa_probe, pb_probe = self._probe_pair()
+        r_pos = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=100, perceptual_score_b=95)
+        r_neg = compare_duplicates(pa_probe, pb_probe, perceptual_score_a=95, perceptual_score_b=100)
+        self.assertEqual(next(c for c in r_pos.criteria if c.name == "perceptual").points_delta, 1)
+        self.assertEqual(next(c for c in r_neg.criteria if c.name == "perceptual").points_delta, -1)
+
+
 class EdgeCaseTests(unittest.TestCase):
     """Edge cases."""
 
