@@ -40,7 +40,6 @@ from typing import Any, List
 from unittest import mock
 
 import cinesort.domain.core as core
-import cinesort.ui.api.run_flow_support as run_flow_support
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.settings_support import build_cfg_from_settings as _real_build_cfg
 from tests._helpers import create_file as _create_file
@@ -124,9 +123,9 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
             _wait_done(api, run_id, timeout_s=20.0)
 
         self.assertGreater(
-            len(captured), 0,
-            "build_cfg_from_settings n'a JAMAIS ete appele dans le pipeline "
-            "start_plan : le test ne mesure rien.",
+            len(captured),
+            0,
+            "build_cfg_from_settings n'a JAMAIS ete appele dans le pipeline start_plan : le test ne mesure rien.",
         )
         return captured[-1]
 
@@ -141,7 +140,8 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
             naming_movie_template="{title} ({year})",
         )
         self.assertIn(
-            "tmdb_tag", cfg.naming_movie_template,
+            "tmdb_tag",
+            cfg.naming_movie_template,
             f"REGRESSION cluster iter6 : naming_preset='plex' DOIT etre resync "
             f"au call site (template Plex='{{title}} ({{year}}) {{tmdb_tag}}'). "
             f"Vu : {cfg.naming_movie_template!r}. "
@@ -157,9 +157,9 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
             naming_movie_template="{title} ({year})",
         )
         self.assertIn(
-            "resolution", cfg.naming_movie_template,
-            f"naming_preset='jellyfin' DOIT etre resync au call site. "
-            f"Vu : {cfg.naming_movie_template!r}",
+            "resolution",
+            cfg.naming_movie_template,
+            f"naming_preset='jellyfin' DOIT etre resync au call site. Vu : {cfg.naming_movie_template!r}",
         )
 
     def test_preset_custom_preserve_template_utilisateur(self) -> None:
@@ -174,9 +174,9 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
             naming_movie_template="{title} [{resolution}]",
         )
         self.assertEqual(
-            cfg.naming_movie_template, "{title} [{resolution}]",
-            f"naming_preset='custom' DOIT preserver le template utilisateur. "
-            f"Vu : {cfg.naming_movie_template!r}",
+            cfg.naming_movie_template,
+            "{title} [{resolution}]",
+            f"naming_preset='custom' DOIT preserver le template utilisateur. Vu : {cfg.naming_movie_template!r}",
         )
 
     def test_preset_default_inchange(self) -> None:
@@ -186,9 +186,9 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
             naming_movie_template="{title} ({year})",
         )
         self.assertEqual(
-            cfg.naming_movie_template, "{title} ({year})",
-            f"naming_preset='default' DOIT donner le template par defaut. "
-            f"Vu : {cfg.naming_movie_template!r}",
+            cfg.naming_movie_template,
+            "{title} ({year})",
+            f"naming_preset='default' DOIT donner le template par defaut. Vu : {cfg.naming_movie_template!r}",
         )
 
 

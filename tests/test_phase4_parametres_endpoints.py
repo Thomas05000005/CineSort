@@ -330,9 +330,15 @@ class ResetSettingsTests(unittest.TestCase):
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["scope"], "apparence")
         self.assertIn("theme", out["reset_keys"])
-        # Verifie que la valeur a bien ete reset au default "studio"
+        # Le theme doit revenir au defaut CANONIQUE, lu depuis la table des
+        # defaults de settings_support (source unique) — le hardcoder ici a deja
+        # perime une fois (defaut passe de "studio" a "luxe" sans MAJ du test).
+        from cinesort.ui.api.settings_support import _LITERAL_DEFAULTS
+
+        expected_theme = dict(_LITERAL_DEFAULTS).get("theme")
+        self.assertTrue(expected_theme, "default 'theme' absent de _LITERAL_DEFAULTS")
         current = self.api.settings.get_settings()
-        self.assertEqual(current.get("theme"), "studio")
+        self.assertEqual(current.get("theme"), expected_theme)
 
     def test_scope_profils_qualite_clears_active_id(self) -> None:
         self.api.settings._payload = {

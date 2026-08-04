@@ -26,7 +26,6 @@ Couvre :
 from __future__ import annotations
 
 import ast
-import io
 import sqlite3
 import tempfile
 import unittest
@@ -59,9 +58,7 @@ class TestApplyPermissionErrorMessage(unittest.TestCase):
         """Le bloc try/except dans apply_rows catch PermissionError AVANT le catch
         generique OSError, et le handler PermissionError construit un message clair.
         """
-        apply_core_path = (
-            Path(__file__).resolve().parent.parent / "cinesort" / "app" / "apply_core.py"
-        )
+        apply_core_path = Path(__file__).resolve().parent.parent / "cinesort" / "app" / "apply_core.py"
         source = apply_core_path.read_text(encoding="utf-8")
 
         # Le marqueur du fix Vague H doit etre present.

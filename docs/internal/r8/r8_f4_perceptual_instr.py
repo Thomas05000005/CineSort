@@ -13,13 +13,15 @@ Relations métamorphiques (pas d'oracle absolu) :
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_perceptual_instr.py <ffmpeg> <fix1.mp4> <fix2.mp4> ...
 """
+
 from __future__ import annotations
+
 import json
 import shutil
 import sys
 
-from cinesort.domain.perceptual.audio_perceptual import analyze_loudnorm, analyze_astats
 from cinesort.domain.perceptual import video_analysis as VA
+from cinesort.domain.perceptual.audio_perceptual import analyze_astats, analyze_loudnorm
 
 
 def analyze_one(ffmpeg: str, media: str, duration_s: float = 4.0):

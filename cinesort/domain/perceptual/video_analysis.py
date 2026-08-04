@@ -96,10 +96,7 @@ def run_filter_graph(
     # blurdetect POSENT des métadonnées de frame (lavfi.*) mais n'écrivent RIEN sur
     # stderr sans ce filtre final. AVANT : 0 ligne -> blockiness_mean=blur_mean=0
     # -> _score_blockiness(0)=95 et _score_blur(0)=95 (perceptuel fabriqué).
-    vf = (
-        f"select='not(mod(n\\,{step}))',"
-        "signalstats=stat=tout+vrep,blockdetect,blurdetect,metadata=mode=print"
-    )
+    vf = f"select='not(mod(n\\,{step}))',signalstats=stat=tout+vrep,blockdetect,blurdetect,metadata=mode=print"
 
     cmd = [
         ffmpeg_path,
@@ -117,8 +114,11 @@ def run_filter_graph(
     ]
 
     rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
-    if rc != 0 and not stderr:
-        logger.debug("run_filter_graph ffmpeg rc=%d", rc)
+    if rc != 0:
+        # ffmpeg peut emettre stderr non-vide meme en cas d'erreur fatale
+        # (message d'erreur lui-meme). Logger l'erreur au lieu de tenter un
+        # parsing trompeur sur de la sortie d'erreur.
+        logger.warning("run_filter_graph ffmpeg rc=%d stderr=%s", rc, stderr[:300] if stderr else "(empty)")
         return []
 
     return _parse_filter_output(stderr)

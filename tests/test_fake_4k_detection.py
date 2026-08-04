@@ -257,6 +257,17 @@ class TestCombineVerdicts(unittest.TestCase):
         v, _ = combine_fake_4k_verdicts(fft_ratio=None, ssim_self_ref=0.80)
         self.assertEqual(v, "4k_native")
 
+    def test_single_signal_native_has_lower_confidence(self):
+        # audit-bot:2026-07-25-A1 : un seul signal disponible et negatif ne peut
+        # pas etre aussi sur qu'un consensus a deux signaux.
+        _, c_single_fft = combine_fake_4k_verdicts(fft_ratio=0.30, ssim_self_ref=None)
+        _, c_single_ssim = combine_fake_4k_verdicts(fft_ratio=None, ssim_self_ref=0.80)
+        _, c_both = combine_fake_4k_verdicts(fft_ratio=0.22, ssim_self_ref=0.85)
+        self.assertAlmostEqual(c_single_fft, 0.60)
+        self.assertAlmostEqual(c_single_ssim, 0.60)
+        self.assertAlmostEqual(c_both, 0.90)
+        self.assertLess(c_single_fft, c_both)
+
 
 # ---------------------------------------------------------------------------
 # VideoPerceptual sérialisation

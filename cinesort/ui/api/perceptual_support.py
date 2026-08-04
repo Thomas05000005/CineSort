@@ -1212,6 +1212,7 @@ def _run_perceptual_batch_job(
     _run_perceptual_job pour la meme logique sur les paires).
     """
     try:
+
         def _cb(done: int, _total: int) -> None:
             _record_job_snapshot(job_id, done=done)
 
@@ -1419,8 +1420,8 @@ def get_perceptual_compare_audio(
 
         probe_a = _load_probe(api, store, run_row, media_a)
         probe_b = _load_probe(api, store, run_row, media_b)
-        na = probe_a.get("normalized") if isinstance(probe_a, dict) else {} or {}
-        nb = probe_b.get("normalized") if isinstance(probe_b, dict) else {} or {}
+        na = (probe_a.get("normalized") if isinstance(probe_a, dict) else {}) or {}
+        nb = (probe_b.get("normalized") if isinstance(probe_b, dict) else {}) or {}
         dur_a = float(na.get("duration_s") or 0)
         dur_b = float(nb.get("duration_s") or 0)
 
@@ -1682,9 +1683,10 @@ def _build_tmdb_client(api: Any):
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             return None
+        import cinesort.infra.state as _state  # noqa: PLC0415
         from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
         from cinesort.ui.api.settings_support import normalize_user_path  # noqa: PLC0415
-        import cinesort.infra.state as _state  # noqa: PLC0415
+
         state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)

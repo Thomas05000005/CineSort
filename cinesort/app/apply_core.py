@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import sqlite3
 import time
 import unicodedata
+from contextvars import ContextVar
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
 
 import cinesort.domain.core as core_mod
+from cinesort.app._dir_utils import is_reparse_point
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
@@ -37,8 +41,7 @@ def _name_eq_fs(a: str, b: str) -> bool:
     "video missing" (et compromet l'apply_rollback faute de src_sha1).
     """
     return (
-        unicodedata.normalize("NFC", str(a or "")).casefold()
-        == unicodedata.normalize("NFC", str(b or "")).casefold()
+        unicodedata.normalize("NFC", str(a or "")).casefold() == unicodedata.normalize("NFC", str(b or "")).casefold()
     )
 
 
@@ -157,9 +160,13 @@ def record_apply_op(
             payload["src_size"] = int(src_size)
         record_op(payload)
         return True
-    except (TypeError, ValueError, OSError) as e:
+    except (TypeError, ValueError, OSError, sqlite3.Error) as e:
         # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
         # (l'op physique a deja reussi cote FS, on n'arrive juste pas a journaliser pour rollback)
+        # F11 (2026-08-02) : sqlite3.Error n'herite PAS de OSError. Sans cette entree,
+        # un "database is locked" avortait tout le batch APRES un move deja fait sur
+        # disque (record_apply_op est appelee apres atomic_move) -> etat mixte sur le FS,
+        # rows restantes jamais traitees, et move non journalise donc non annulable.
         _logger.warning("record_apply_op: echec journalisation %s src=%s: %s", op_type, src_path, e, exc_info=True)
         return False
 
@@ -281,7 +288,7 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     """
     import time as _time_mod  # local pour eviter shadow du module ``time`` haut
 
-    digest = hashlib.sha1()
+    digest = hashlib.sha1(usedforsecurity=False)
     start = _time_mod.monotonic()
     chunk_8m = 8 * 1024 * 1024
     try:
@@ -397,6 +404,39 @@ def unique_path_dup(base: Path) -> Path:
     return base.with_name(f"{stem}__DUP{time.time_ns()}{suffix}")
 
 
+# F30 : ensemble des dossiers deja "crees" pendant un apply EN DRY-RUN.
+#
+# En apply reel, `path.exists()` dedoublonne naturellement : le 2e appel pour le
+# meme dossier ne compte rien. En dry-run rien n'est cree, donc chaque appel
+# recomptait le meme dossier -> `mkdirs` gonfle dans le bandeau "APPLY done" et
+# lignes "MKDIR: <meme chemin>" dupliquees dans le log de preview (4 au lieu de 1
+# pour une collection d'un film + 2 sous-titres, et duplication INTER-ROWS pour
+# le dossier de saga partage par plusieurs films).
+#
+# Porte par un ContextVar plutot que par un parametre : cela evite de modifier la
+# signature des 6 fonctions du chemin d'apply DESTRUCTIF pour un defaut de simple
+# comptabilite. Valeur None hors apply_rows -> comportement strictement inchange.
+#
+# L'etat est APPARIE a l'ApplyResult de l'apply courant (revue adversaire R1).
+# Sans cet appariement, un ContextVar laisse peuple par un apply precedent — le
+# reset ne peut pas etre garanti sans envelopper les 640 lignes de apply_rows
+# dans un try/finally — ferait qu'un futur appelant direct de mkdir_counted en
+# dry-run consulterait un ensemble perime et ne compterait plus rien. Comme
+# chaque apply_rows travaille sur un ApplyResult neuf, un etat perime ne peut
+# jamais correspondre a l'objet courant : il est ignore par construction.
+_MKDIR_SEEN_DRY_RUN: ContextVar[Optional[Tuple[Any, Set[str]]]] = ContextVar(
+    "cinesort_mkdir_seen_dry_run", default=None
+)
+
+
+def _mkdir_seen_for(res: "ApplyResult") -> Optional[Set[str]]:
+    """Ensemble des mkdir deja comptes pour CET apply, ou None si hors apply_rows."""
+    state = _MKDIR_SEEN_DRY_RUN.get()
+    if state is None or state[0] is not res:
+        return None
+    return state[1]
+
+
 def mkdir_counted(
     path: Path,
     *,
@@ -414,6 +454,14 @@ def mkdir_counted(
     ce n'est pas le dossier dont on suit la creation pour le rollback).
     """
     if path.exists():
+        return
+    # F30 : en dry-run, `path.exists()` reste faux a chaque appel puisque rien
+    # n'est cree — sans cette garde le meme dossier etait recompte et re-logue a
+    # chaque fichier deplace. Strictement inactif en apply reel (ou un dossier
+    # supprime en cours de batch doit pouvoir etre recree et recompte).
+    seen_dry_run = _mkdir_seen_for(res) if dry_run else None
+    mkdir_key = os.path.normcase(str(path)) if seen_dry_run is not None else ""
+    if seen_dry_run is not None and mkdir_key in seen_dry_run:
         return
     log("INFO", f"MKDIR: {path}")
     if not dry_run:
@@ -439,6 +487,74 @@ def mkdir_counted(
             reversible=False,
         )
     res.mkdirs += 1
+    if seen_dry_run is not None:
+        seen_dry_run.add(mkdir_key)
+
+
+class _SafeWalk(NamedTuple):
+    """Résultat d'une descente qui ne franchit AUCUN point d'analyse.
+
+    `blocked` porte les chemins écartés (points d'analyse, dossiers illisibles) :
+    l'appelant DOIT s'en servir pour ne pas transformer un refus en succès
+    silencieux (compteur « dossier source supprimé », log de fin d'opération).
+    """
+
+    files: list[Path]
+    dirs: list[Path]
+    blocked: list[Path]
+
+
+def _walk_without_crossing_reparse_points(root: Path) -> _SafeWalk:
+    """Descente explicite sous `root` qui s'arrête sur tout point d'analyse.
+
+    Issue #891 — `Path.rglob("*")` DESCEND dans une jonction NTFS (`mklink /J`) :
+    `is_symlink()` y répond False, `is_dir()` True, et l'énumération traverse
+    vers la cible. Sur les chemins destructifs de l'apply (balayage autour d'un
+    film puis déplacement/suppression), cela faisait sortir de `cfg.root` sans
+    qu'aucun chemin ne quitte `cfg.root` en apparence : `ensure_inside_root`
+    était contourné, des octets d'un autre volume entraient dans la
+    bibliothèque et un dossier hors racine était supprimé, le tout `errors=0`.
+
+    Le scan, lui, DOIT continuer à traverser les jonctions (analyser est le but
+    de l'app) : ce helper est réservé aux chemins destructifs, où l'erreur va
+    dans le sens restrictif — un point d'analyse est écarté, jamais traversé.
+
+    PRÉCONDITION : `root` lui-même n'est PAS testé ici (il serait énuméré via
+    `iterdir`, donc traversé). L'appelant doit avoir vérifié
+    `is_reparse_point(root)` en amont — c'est ce que font `merge_dir_safe` et
+    `prune_empty_dirs`.
+    """
+    files: list[Path] = []
+    dirs: list[Path] = []
+    blocked: list[Path] = []
+    pending: list[Path] = [root]
+    while pending:
+        current = pending.pop(0)
+        try:
+            entries = sorted(current.iterdir())
+        except (OSError, ValueError) as exc:
+            # Illisible = on ne sait pas ce qu'il y a dedans : on le signale au
+            # lieu de le laisser passer pour vide (sens restrictif).
+            _logger.debug("walk_no_reparse: enumeration impossible %s: %s", current, exc)
+            blocked.append(current)
+            continue
+        children: list[Path] = []
+        for entry in entries:
+            if is_reparse_point(entry):
+                blocked.append(entry)
+                continue
+            try:
+                if entry.is_dir():
+                    dirs.append(entry)
+                    children.append(entry)
+                elif entry.is_file():
+                    files.append(entry)
+            except (OSError, ValueError) as exc:
+                _logger.debug("walk_no_reparse: type illisible %s: %s", entry, exc)
+                blocked.append(entry)
+        # Pré-ordre : les enfants du dossier courant avant ses frères restants.
+        pending[:0] = children
+    return _SafeWalk(files=files, dirs=dirs, blocked=blocked)
 
 
 def prune_empty_dirs(root: Path) -> bool:
@@ -446,12 +562,20 @@ def prune_empty_dirs(root: Path) -> bool:
 
     Renvoie True si au moins un dossier a été supprimé. Les erreurs OS sont
     ignorées (skip silencieux).
+
+    Issue #891 — aucun point d'analyse n'est traversé ni supprimé : ni `root`
+    lui-même (sinon `iterdir` énumère la cible et des dossiers vides HORS
+    bibliothèque sont supprimés), ni un sous-dossier (sinon `rmdir` détruit le
+    point de montage lui-même dès que sa cible est vide).
     """
     if not root.exists() or not root.is_dir():
         return False
+    if is_reparse_point(root):
+        _logger.debug("prune_empty_dirs: racine = point d'analyse, refus: %s", root)
+        return False
     removed_any = False
     for directory in sorted(
-        [path for path in root.rglob("*") if path.is_dir()], key=lambda path: len(path.parts), reverse=True
+        _walk_without_crossing_reparse_points(root).dirs, key=lambda path: len(path.parts), reverse=True
     ):
         try:
             if not any(directory.iterdir()):
@@ -771,7 +895,10 @@ def move_file_with_collision_policy(
         # path conflicts_root/conflict_context() suppose un fichier en dst.
         if dst_file.exists():
             if not dst_file.is_file():
-                log("WARN", f"CONFLICT (race) detected pre-move (dst is not a file): {src_file} -> {dst_file}, quarantining")
+                log(
+                    "WARN",
+                    f"CONFLICT (race) detected pre-move (dst is not a file): {src_file} -> {dst_file}, quarantining",
+                )
             else:
                 log("WARN", f"CONFLICT (race) detected pre-move: {src_file} -> {dst_file}, quarantining")
             qdst = move_to_review_bucket(
@@ -840,6 +967,18 @@ def merge_dir_safe(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
         log("WARN", f"MERGE source missing, skip: {src_dir}")
         return
+    # Issue #891 : fusionner DEPUIS une jonction viderait un autre volume dans la
+    # bibliotheque. Refus compte comme erreur : la fusion demandee n'a pas eu
+    # lieu, elle ne doit pas etre maquillee en succes (`merges_count`).
+    if is_reparse_point(src_dir):
+        res.errors += 1
+        message = (
+            f"FUSION REFUSEE : '{src_dir}' est un point d'analyse (jonction NTFS / lien) "
+            f"pointant hors de la bibliotheque. Rien n'a ete deplace."
+        )
+        _append_error_message(res, message)
+        log("ERROR", f"MERGE source is a reparse point, refuse: {src_dir}")
+        return
     if not dst_dir.exists():
         mkdir_counted(dst_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
     if not dst_dir.is_dir():
@@ -850,7 +989,11 @@ def merge_dir_safe(
     log("INFO", f"MERGE_DIR: {src_dir} -> {dst_dir}")
     res.merges_count += 1
 
-    all_files = [path for path in src_dir.rglob("*") if path.is_file()]
+    # Issue #891 : descente explicite, `rglob` traverserait les jonctions.
+    walk = _walk_without_crossing_reparse_points(src_dir)
+    for blocked_path in walk.blocked:
+        log("WARN", f"MERGE: point d'analyse NON traverse, laisse en place: {blocked_path}")
+    all_files = walk.files
     handled_for_leftovers: Set[Path] = set()
 
     for src_file in all_files:
@@ -898,10 +1041,18 @@ def merge_dir_safe(
         # apres apply reel : on doit incrementer source_dirs_deleted_count, peu
         # importe qu'il y ait eu des leftovers ou non. L'ancien check
         # `len(leftover_files) == 0` sous-estimait le compteur en preview UI.
-        res.source_dirs_deleted_count += 1
+        #
+        # Issue #891 : sauf si la descente a bute sur un point d'analyse. Il
+        # restera dans `src_dir`, que l'apply reel ne pourra donc pas supprimer
+        # (prune_empty_dirs refuse aussi de le traverser) : annoncer sa
+        # suppression serait une promesse que l'apply ne tiendra pas.
+        if walk.blocked:
+            log("WARN", f"MERGE: source conservee (point d'analyse a l'interieur): {src_dir}")
+        else:
+            res.source_dirs_deleted_count += 1
         return
 
-    remaining_files = [path for path in src_dir.rglob("*") if path.is_file()]
+    remaining_files = _walk_without_crossing_reparse_points(src_dir).files
     for src_file in remaining_files:
         move_to_review_bucket(
             src_file,
@@ -949,6 +1100,101 @@ def _revert_moves(
             log("ERROR", f"ROLLBACK {label} ECHEC {dst_done} -> {src_orig}: {rb_exc}")
 
 
+def _row_target_key(row: "PlanRow") -> Tuple[str, str, str]:
+    """Cible REELLE d'une PlanRow pour une operation destructive.
+
+    Deux rows qui partagent cette cle designent exactement les memes octets sur le
+    disque : les deplacer via l'une ou l'autre donne le meme resultat.
+    """
+    folder = str(getattr(row, "folder", "") or "").casefold()
+    video = str(getattr(row, "video", "") or "").casefold()
+    kind = str(getattr(row, "kind", "") or "")
+    return (folder, video, kind)
+
+
+def _index_rows_by_id(
+    rows: list["PlanRow"],
+    *,
+    log: Callable[[str, str], None],
+    prefix: str,
+) -> Tuple[Dict[str, "PlanRow"], Set[str]]:
+    """Indexe les PlanRow par row_id pour les operations DESTRUCTIVES, en FAIL-CLOSED
+    sur les collisions AMBIGUES.
+
+    AUDIT 2026-07-13 [CRIT-2] : les deux index `by_row` etaient construits en
+    `by_row[rid] = r` last-wins SILENCIEUX. Si deux PlanRow partagent un row_id
+    (collision possible tant que des row_id legacy 32 bits circulent), le row_id
+    choisi par l'utilisateur resolvait vers le MAUVAIS PlanRow -> un film JAMAIS
+    marque sortait de la bibliotheque, et le film reellement vise y restait.
+
+    RELECTURE R2 [D1] : un row_id duplique n'est pas forcement ambigu. Des rows
+    STRICTEMENT IDENTIQUES (meme folder + meme video + meme kind) sont produites de
+    facon ROUTINIERE par des roots imbriques (`validate_roots` n'emet qu'un WARNING,
+    `plan_multi_roots` concatene sans dedup et `_compute_row_id` ne hashe pas le root)
+    : chaque film du root enfant apparait alors deux fois avec le MEME row_id. Les
+    declarer ambigues abandonnait l'operation destructive de l'utilisateur alors que
+    la cible etait parfaitement determinee (et spammait un ERROR par doublon du plan
+    ENTIER). On ne fail-close donc QUE si les rows en collision visent des cibles
+    DIFFERENTES ; sinon on garde la premiere, sans bruit.
+
+    Retourne `(by_row, ambiguous_row_ids)`.
+    """
+    by_row: Dict[str, "PlanRow"] = {}
+    ambiguous_row_ids: Set[str] = set()
+    for r in rows:
+        _rid = getattr(r, "row_id", None)
+        _rid_str = str(_rid) if _rid not in (None, "") else ""
+        if not _rid_str:
+            # BUG-009 (hotfix) : avant on filtrait silencieusement les row_id falsy
+            # (None, "", 0). Un loser dont le row_id etait vide etait absorbe en
+            # "row_id introuvable" sans signal clair -> on logge un WARN explicite.
+            log("WARN", f"{prefix} PlanRow sans row_id (folder={getattr(r, 'folder', '?')}), ignore")
+            continue
+        if _rid_str in by_row:
+            kept = by_row[_rid_str]
+            if _row_target_key(r) == _row_target_key(kept):
+                # Doublon EXACT (roots imbriques / plan concatene) : meme cible, aucune
+                # ambiguite -> on garde la premiere, silencieusement.
+                continue
+            if _rid_str not in ambiguous_row_ids:
+                ambiguous_row_ids.add(_rid_str)
+                log(
+                    "ERROR",
+                    f"{prefix} row_id DUPLIQUE dans le plan: {_rid_str} "
+                    f"(folder={getattr(r, 'folder', '?')} vs {getattr(kept, 'folder', '?')})",
+                )
+            continue
+        by_row[_rid_str] = r
+    return by_row, ambiguous_row_ids
+
+
+def _locked_msg(name: str) -> str:
+    """Message utilisateur pour un verrou fichier Windows (cas tres frequent).
+
+    Extrait du handler per-row (F10) pour que la pre-passe collection et le
+    nettoyage post-boucle, qui vivent HORS du try per-row, puissent produire
+    exactement le meme message au lieu d'un '[WinError 32]' brut.
+    """
+    return (
+        f"FICHIER VERROUILLE : '{name}' est ouvert dans un autre logiciel "
+        f"(VLC ? lecteur video ? indexeur Windows ?). Ferme-le et relance l'apply "
+        f"pour ce film."
+    )
+
+
+def _append_error_message(res: "ApplyResult", message: str) -> None:
+    """Ajoute un message d'erreur utilisateur a `res` (remontee UI / summary.txt).
+
+    RELECTURE R2 [D5] : une seule convention pour TOUS les appelants. Certains tests
+    anciens passent un `res` duck-type sans `error_messages` ; un append nu ferait
+    crasher tout l'apply (les branches fail-closed etaient hors du try/except OSError).
+    """
+    try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+        res.error_messages.append(message)
+    except AttributeError:  # noqa: BLE001 - retro-compat tests anciens (res duck-type)
+        pass
+
+
 def move_duplicate_losers_to_user_decided(
     cfg: "Config",
     rows: list["PlanRow"],
@@ -959,7 +1205,7 @@ def move_duplicate_losers_to_user_decided(
     log: Callable[[str, str], None],
     res: "ApplyResult",
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> None:
+) -> Set[str]:
     """Phase 6 doublons (spec 01-doublons.md §3.7) : déplace les fichiers/dossiers
     "losers" d'une décision utilisateur vers `<root>/_review/_duplicates_user_decided/`.
 
@@ -970,33 +1216,44 @@ def move_duplicate_losers_to_user_decided(
 
     `loser_row_ids` : set des row_id dont la décision a marqué un autre row comme
     winner. Tolère un set vide (no-op).
+
+    Retourne l'ensemble des row_id ABANDONNES (fail-closed sur row_id ambigu) :
+    RIEN n'a bougé pour eux, l'appelant ne doit donc PAS les retirer de la boucle
+    d'apply normale (RELECTURE R2 [D3]).
     """
+    abandoned_row_ids: Set[str] = set()
     if not loser_row_ids:
-        return
+        return abandoned_row_ids
     if not dry_run:
         duplicates_user_decided_root.mkdir(parents=True, exist_ok=True)
 
-    # BUG-009 (hotfix) : avant on filtrait silencieusement les row_id falsy
-    # (None, "", 0) via `if getattr(r, "row_id", None)`. Resultat : un loser dont
-    # le row_id etait vide etait absorbe en "row_id introuvable" sans signal clair.
-    # On enforce desormais un row_id non-vide ET on logge un WARN explicite des
-    # qu'un row PlanRow arrive sans row_id, pour faciliter le diagnostic upstream.
-    by_row: Dict[str, "PlanRow"] = {}
-    for r in rows:
-        _rid = getattr(r, "row_id", None)
-        _rid_str = str(_rid) if _rid not in (None, "") else ""
-        if not _rid_str:
-            log(
-                "WARN",
-                f"DUPLICATE_LOSER PlanRow sans row_id (folder={getattr(r, 'folder', '?')}), ignore",
-            )
-            continue
-        by_row[_rid_str] = r
+    # BUG-009 + AUDIT 2026-07-13 [CRIT-2] (fail-closed sur row_id dupliques) :
+    # cf. _index_rows_by_id.
+    by_row, ambiguous_row_ids = _index_rows_by_id(rows, log=log, prefix="DUPLICATE_LOSER")
     losers_seen: Set[str] = set()
     for rid in loser_row_ids:
         if rid in losers_seen:
             continue
         losers_seen.add(rid)
+        # [CRIT-2] FAIL-CLOSED : row_id ambigu -> on ne peut pas savoir quel PlanRow
+        # l'utilisateur visait. On ABANDONNE l'operation destructive pour ce row_id
+        # (aucun deplacement) au lieu de resoudre vers le mauvais film.
+        if str(rid) in ambiguous_row_ids:
+            log(
+                "ERROR",
+                f"DUPLICATE_LOSER row_id {rid} AMBIGU (collision de row_id) -> "
+                f"ABANDON, aucun fichier deplace pour ce row_id",
+            )
+            # RELECTURE R2 [D2] : un abandon est une ERREUR visible (res.errors),
+            # sinon l'utilisateur lit "Erreurs : 0" alors que son action destructive
+            # n'a PAS eu lieu. [D5] : append protege (une seule convention).
+            res.errors += 1
+            _append_error_message(
+                res,
+                f"DUPLICATE_LOSER {rid}: row_id duplique dans le plan, deplacement abandonne (fail-closed)",
+            )
+            abandoned_row_ids.add(str(rid))
+            continue
         row = by_row.get(str(rid))
         if row is None:
             log("WARN", f"DUPLICATE_LOSER row_id introuvable, skip: {rid}")
@@ -1039,12 +1296,16 @@ def move_duplicate_losers_to_user_decided(
         # Comptage ATOMIQUE par loser : on n'ajoute à res qu'après succès complet du rid
         # (sinon un partiel/échec laissait un compteur faux).
         _moved_pairs: list[Tuple[Path, Path]] = []
-        _rid_count = 0
         try:
-            # Cas "collection" : on a un video_name dans un dossier partagé →
-            # déplacer SEULEMENT la vidéo loser + ses sidecars (et pas le dossier
-            # entier, car d'autres films peuvent y vivre).
-            if row.kind == "collection" and video_name:
+            # AUDIT 2026-07-13 [CRIT-1] : granularité destructive. SEUL kind="single"
+            # possède un dossier dédié ; "collection", "extra" (bonus_video,
+            # plan_support_core.py:751) et "tv_episode" vivent dans un dossier PARTAGÉ
+            # → déplacer SEULEMENT la vidéo + ses sidecars, jamais le dossier entier
+            # (l'ancienne garde `== "collection"` laissait extra/tv_episode tomber sur
+            # MOVE_DIR = film principal / série entière emportés). Sémantique alignée
+            # sur quarantine_row (`if row.kind == "single"` → dossier entier, sinon
+            # vidéo + sidecars).
+            if row.kind != "single" and video_name:
                 video = folder / video_name
                 if not video.exists():
                     # tolère case-insensitive : iter le dossier
@@ -1076,7 +1337,6 @@ def move_duplicate_losers_to_user_decided(
                     )
                     if moved_to is not None and not dry_run:
                         _moved_pairs.append((Path(moved_to), sidecar))
-                    _rid_count += 1
                 moved_to = move_to_review_bucket(
                     video,
                     src_anchor=folder,
@@ -1092,10 +1352,25 @@ def move_duplicate_losers_to_user_decided(
                 )
                 if moved_to is not None and not dry_run:
                     _moved_pairs.append((Path(moved_to), video))
-                _rid_count += 1
                 # R8-018 : compteur DEDIE (≠ duplicates_identical) -> invariant
                 # moved==deleted preserve + chemin de recuperation reel (_duplicates_user_decided).
-                res.duplicates_user_decided_moved_count += _rid_count
+                # RELECTURE R2 [D4] : on compte des FILMS (+1 par row), pas des FICHIERS.
+                # L'ancien `+= _rid_count` ajoutait video + sidecars -> un episode avec 2
+                # sous-titres s'affichait comme 3 "films deplaces" sous un libelle UI
+                # "Films ... deplaces", et divergeait de la branche single (`+= 1`).
+                res.duplicates_user_decided_moved_count += 1
+                continue
+
+            # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
+            # non-"single" SANS video_name est une row corrompue, pas une autorisation
+            # d'emporter un dossier partagé. On skip avec un WARN plutôt que de tomber
+            # silencieusement sur MOVE_DIR.
+            if row.kind != "single":
+                log(
+                    "WARN",
+                    f"DUPLICATE_LOSER row {rid} kind={row.kind!r} sans video, "
+                    f"skip (dossier partage jamais deplace en entier): {folder}",
+                )
                 continue
 
             # Cas "single" : déplace le dossier entier vers le bucket.
@@ -1124,11 +1399,10 @@ def move_duplicate_losers_to_user_decided(
             log("ERROR", f"DUPLICATE_LOSER echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
             _revert_moves(row_record_op, _moved_pairs, log, "DUPLICATE_LOSER")
             res.errors += 1
-            try:
-                res.error_messages.append(f"DUPLICATE_LOSER {getattr(folder, 'name', folder)}: {exc}")
-            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
-                pass
+            _append_error_message(res, f"DUPLICATE_LOSER {getattr(folder, 'name', folder)}: {exc}")
             continue
+
+    return abandoned_row_ids
 
 
 def move_marked_for_deletion_to_bucket(
@@ -1141,7 +1415,7 @@ def move_marked_for_deletion_to_bucket(
     log: Callable[[str, str], None],
     res: "ApplyResult",
     record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> None:
+) -> Set[str]:
     """AUDIT 2026-06-14 (R7-4) : deplace les films marques pour suppression par
     l'utilisateur vers `<root>/_review/_user_marked_for_deletion/`.
 
@@ -1150,24 +1424,41 @@ def move_marked_for_deletion_to_bucket(
     sont ensuite exclues. Deplacements via atomic_move + record_apply_op ->
     reversibles par l'undo. No-op si set vide. Securite torrents : on DEPLACE
     (jamais de suppression definitive), l'utilisateur videra le bucket lui-meme.
+
+    Retourne l'ensemble des row_id ABANDONNES (fail-closed sur row_id ambigu) :
+    RIEN n'a bougé pour eux -> l'appelant ne doit PAS les exclure de l'apply normal
+    (RELECTURE R2 [D3]).
     """
+    abandoned_row_ids: Set[str] = set()
     if not marked_row_ids:
-        return
+        return abandoned_row_ids
     if not dry_run:
         marked_for_deletion_root.mkdir(parents=True, exist_ok=True)
 
-    by_row: Dict[str, "PlanRow"] = {}
-    for r in rows:
-        _rid = getattr(r, "row_id", None)
-        _rid_str = str(_rid) if _rid not in (None, "") else ""
-        if _rid_str:
-            by_row[_rid_str] = r
+    # AUDIT 2026-07-13 [CRIT-2] : index fail-closed sur les row_id dupliques
+    # (cf. _index_rows_by_id). Bucket vide par l'utilisateur -> une resolution
+    # last-wins vers le mauvais PlanRow = perte definitive d'un film jamais marque.
+    by_row, ambiguous_row_ids = _index_rows_by_id(rows, log=log, prefix="MARKED_FOR_DELETION")
 
     seen: Set[str] = set()
     for rid in marked_row_ids:
         if rid in seen:
             continue
         seen.add(rid)
+        if str(rid) in ambiguous_row_ids:
+            log(
+                "ERROR",
+                f"MARKED_FOR_DELETION row_id {rid} AMBIGU (collision de row_id) -> "
+                f"ABANDON, aucun fichier deplace pour ce row_id",
+            )
+            # RELECTURE R2 [D2]/[D5] : abandon = erreur VISIBLE (res.errors) + append protege.
+            res.errors += 1
+            _append_error_message(
+                res,
+                f"MARKED_FOR_DELETION {rid}: row_id duplique dans le plan, deplacement abandonne (fail-closed)",
+            )
+            abandoned_row_ids.add(str(rid))
+            continue
         row = by_row.get(str(rid))
         if row is None:
             log("WARN", f"MARKED_FOR_DELETION row_id introuvable, skip: {rid}")
@@ -1201,10 +1492,13 @@ def move_marked_for_deletion_to_bucket(
         # boucle per-row L1650). Un fichier marqué verrouillé n'avorte PAS le batch ;
         # un item collection à moitié déplacé est rollback. Comptage atomique par rid.
         _moved_pairs: list[Tuple[Path, Path]] = []
-        _rid_count = 0
         try:
-            # Cas collection : deplacer SEULEMENT la video marquee + ses sidecars.
-            if row.kind == "collection" and video_name:
+            # AUDIT 2026-07-13 [CRIT-1] : granularité destructive (bucket vidé par
+            # l'utilisateur -> perte definitive). SEUL kind="single" possède un dossier
+            # dédié ; "collection", "extra" (bonus_video) et "tv_episode" partagent leur
+            # dossier avec d'autres vidéos NON marquées → déplacer SEULEMENT la vidéo
+            # marquée + ses sidecars. Sémantique alignée sur quarantine_row.
+            if row.kind != "single" and video_name:
                 video = folder / video_name
                 if not video.exists():
                     try:
@@ -1234,7 +1528,6 @@ def move_marked_for_deletion_to_bucket(
                     )
                     if moved_to is not None and not dry_run:
                         _moved_pairs.append((Path(moved_to), sidecar))
-                    _rid_count += 1
                 moved_to = move_to_review_bucket(
                     video,
                     src_anchor=folder,
@@ -1250,8 +1543,20 @@ def move_marked_for_deletion_to_bucket(
                 )
                 if moved_to is not None and not dry_run:
                     _moved_pairs.append((Path(moved_to), video))
-                _rid_count += 1
-                res.marked_for_deletion_moved_count += _rid_count
+                # RELECTURE R2 [D4] : +1 par FILM (row), pas par FICHIER deplace.
+                # Le libelle UI est "Films marques pour suppression deplaces" : compter
+                # les sidecars gonflait le chiffre (1 episode + 2 srt = 3 "films").
+                res.marked_for_deletion_moved_count += 1
+                continue
+
+            # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
+            # non-"single" SANS video_name est corrompue -> jamais MOVE_DIR, on skip.
+            if row.kind != "single":
+                log(
+                    "WARN",
+                    f"MARKED_FOR_DELETION row {rid} kind={row.kind!r} sans video, "
+                    f"skip (dossier partage jamais deplace en entier): {folder}",
+                )
                 continue
 
             # Cas single : deplacer le dossier entier.
@@ -1276,11 +1581,10 @@ def move_marked_for_deletion_to_bucket(
             log("ERROR", f"MARKED_FOR_DELETION echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
             _revert_moves(row_record_op, _moved_pairs, log, "MARKED_FOR_DELETION")
             res.errors += 1
-            try:
-                res.error_messages.append(f"MARKED_FOR_DELETION {getattr(folder, 'name', folder)}: {exc}")
-            except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
-                pass
+            _append_error_message(res, f"MARKED_FOR_DELETION {getattr(folder, 'name', folder)}: {exc}")
             continue
+
+    return abandoned_row_ids
 
 
 def move_collection_folder(
@@ -1371,51 +1675,98 @@ def apply_rows(
     )
     cfg = ctx.cfg
     res = ctx.res
+    # F30 : ensemble neuf, appari a CET ApplyResult. En apply reel on pose None
+    # pour que la dedup ne puisse pas fuir d'un dry-run vers un apply destructif
+    # (ou `path.exists()` reste le seul et unique dedoublonneur).
+    _MKDIR_SEEN_DRY_RUN.set((res, set()) if dry_run else None)
 
     # Phase 6 doublons : déplacer les losers AVANT la boucle apply principale.
     losers_set: Set[str] = {str(r) for r in (duplicate_loser_row_ids or set()) if r}
     if losers_set and ctx.duplicates_user_decided_root is not None:
-        move_duplicate_losers_to_user_decided(
-            cfg,
-            rows,
-            losers_set,
-            duplicates_user_decided_root=ctx.duplicates_user_decided_root,
-            dry_run=dry_run,
-            log=log,
-            res=res,
-            record_op=record_op,
+        abandoned = (
+            move_duplicate_losers_to_user_decided(
+                cfg,
+                rows,
+                losers_set,
+                duplicates_user_decided_root=ctx.duplicates_user_decided_root,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=record_op,
+            )
+            or set()
         )
         # Retirer les losers des rows à apply normalement.
-        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in losers_set]
+        # RELECTURE R2 [D3] : SAUF les row_id ABANDONNES par le fail-closed (rien n'a
+        # bouge pour eux). Les exclure quand meme laissait le film ni deplace ni
+        # renomme/range : disparition silencieuse du travail attendu.
+        excluded = losers_set - abandoned
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in excluded]
 
     # AUDIT 2026-06-14 (R7-4) : films marques pour suppression -> bucket dedie
     # AVANT la boucle apply, puis exclus (meme schema que les losers).
     marked_set: Set[str] = {str(r) for r in (marked_for_deletion_row_ids or set()) if r}
     if marked_set and ctx.marked_for_deletion_root is not None:
-        move_marked_for_deletion_to_bucket(
+        abandoned_marked = (
+            move_marked_for_deletion_to_bucket(
+                cfg,
+                rows,
+                marked_set,
+                marked_for_deletion_root=ctx.marked_for_deletion_root,
+                dry_run=dry_run,
+                log=log,
+                res=res,
+                record_op=record_op,
+            )
+            or set()
+        )
+        # [D3] : idem losers, les abandons fail-closed restent dans l'apply normal.
+        excluded_marked = marked_set - abandoned_marked
+        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in excluded_marked]
+
+    # F10 : la migration du dossier collection legacy vit HORS du try per-row.
+    # Un PermissionError ici (dossier ouvert dans l'explorateur, fichier lu par
+    # VLC) faisait remonter l'exception jusqu'au boundary de l'apply : batch clos
+    # FAILED, message brut '[WinError 5]', resultat et resume perdus, et en mode
+    # atomique le rollback annulait les rows deja reussies. On degrade desormais
+    # comme le handler per-row : erreur comptee, message clair, apply poursuivi
+    # (resolve_collection_folder_after_migration gere deja le cas "pas migre").
+    try:
+        migrate_legacy_collection_root(
             cfg,
-            rows,
-            marked_set,
-            marked_for_deletion_root=ctx.marked_for_deletion_root,
             dry_run=dry_run,
             log=log,
             res=res,
+            conflicts_root=ctx.conflicts_root,
+            conflicts_sidecars_root=ctx.conflicts_sidecars_root,
+            duplicates_identical_root=ctx.duplicates_identical_root,
+            leftovers_root=ctx.leftovers_root,
+            hash_cache=ctx.hash_cache,
             record_op=record_op,
         )
-        rows = [r for r in rows if str(getattr(r, "row_id", "")) not in marked_set]
+    except PermissionError as exc:
+        res.errors += 1
+        _append_error_message(res, _locked_msg(legacy_collection_root(cfg).name))
+        log("ERROR", f"apply: migration Collection legacy impossible (verrou): {exc}")
+    except OSError as exc:
+        res.errors += 1
+        _append_error_message(res, f"MIGRATION Collection: {exc}")
+        log("ERROR", f"apply: migration Collection legacy echouee: {exc}")
 
-    migrate_legacy_collection_root(
-        cfg,
-        dry_run=dry_run,
-        log=log,
-        res=res,
-        conflicts_root=ctx.conflicts_root,
-        conflicts_sidecars_root=ctx.conflicts_sidecars_root,
-        duplicates_identical_root=ctx.duplicates_identical_root,
-        leftovers_root=ctx.leftovers_root,
-        hash_cache=ctx.hash_cache,
-        record_op=record_op,
-    )
+    # F10 : rows dont la pre-passe collection a echoue -> on ne les retraite PAS
+    # dans la boucle principale (fail-closed). Un shutil.move de DOSSIER interrompu
+    # sur Windows laisse src ET dst peuples : empiler un 2e traitement dessus
+    # aggraverait l'etat au lieu de le reparer.
+    #
+    # La memorisation se fait par DOSSIER, pas par row (revue adversaire R1) : un
+    # dossier collection porte par definition PLUSIEURS rows, et le
+    # `if str(original_folder) in ctx.folder_map: continue` ci-dessous s'execute
+    # AVANT le try. Les rows suivantes du meme dossier sortaient donc par ce
+    # continue sans jamais etre marquees, et etaient traitees normalement — elles
+    # creaient un sous-dossier et y deplacaient leur video A L'INTERIEUR du
+    # dossier dont la migration venait d'echouer.
+    failed_prepass: Set[str] = set()
+    failed_prepass_folders: Set[str] = set()
 
     for row in rows:
         if row.kind != "collection":
@@ -1427,49 +1778,68 @@ def apply_rows(
         old_folder = resolve_collection_folder_after_migration(cfg, original_folder)
         if str(original_folder) in ctx.folder_map:
             continue
-        if cfg.enable_collection_folder and (not core_mod.is_under_collection_root(cfg, old_folder)):
-            target = cfg.root / cfg.collection_root_name / core_mod.windows_safe(old_folder.name)
-            core_mod.ensure_inside_root(cfg, target)
-            if target.exists():
-                if target.is_dir():
-                    merge_dir_safe(
+        # F10 : cette pre-passe deplace des DOSSIERS entiers hors du try per-row.
+        # Un verrou Windows y faisait avorter tout le batch avec un message brut.
+        try:
+            if cfg.enable_collection_folder and (not core_mod.is_under_collection_root(cfg, old_folder)):
+                target = cfg.root / cfg.collection_root_name / core_mod.windows_safe(old_folder.name)
+                core_mod.ensure_inside_root(cfg, target)
+                if target.exists():
+                    if target.is_dir():
+                        merge_dir_safe(
+                            cfg,
+                            old_folder,
+                            target,
+                            dry_run=dry_run,
+                            log=log,
+                            res=res,
+                            conflicts_root=ctx.conflicts_root,
+                            conflicts_sidecars_root=ctx.conflicts_sidecars_root,
+                            duplicates_identical_root=ctx.duplicates_identical_root,
+                            leftovers_root=ctx.leftovers_root,
+                            hash_cache=ctx.hash_cache,
+                            record_op=record_op,
+                        )
+                        ctx.folder_map[str(original_folder)] = str(old_folder) if dry_run else str(target)
+                        res.collection_moves += 1
+                    else:
+                        log("WARN", f"Collection destination invalid (file), skip merge: {target}")
+                        ctx.folder_map[str(original_folder)] = str(old_folder)
+                        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+                else:
+                    # Appel local (fonction definie dans ce meme module) au lieu
+                    # de passer par core_mod.move_collection_folder qui etait un
+                    # re-export backward-compat — cf #83 phase A4.
+                    new_folder = move_collection_folder(
                         cfg,
                         old_folder,
-                        target,
                         dry_run=dry_run,
                         log=log,
-                        res=res,
-                        conflicts_root=ctx.conflicts_root,
-                        conflicts_sidecars_root=ctx.conflicts_sidecars_root,
-                        duplicates_identical_root=ctx.duplicates_identical_root,
-                        leftovers_root=ctx.leftovers_root,
-                        hash_cache=ctx.hash_cache,
                         record_op=record_op,
                     )
-                    ctx.folder_map[str(original_folder)] = str(old_folder) if dry_run else str(target)
-                    res.collection_moves += 1
-                else:
-                    log("WARN", f"Collection destination invalid (file), skip merge: {target}")
-                    ctx.folder_map[str(original_folder)] = str(old_folder)
-                    core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+                    if str(new_folder) != str(old_folder):
+                        ctx.folder_map[str(original_folder)] = str(old_folder) if dry_run else str(new_folder)
+                        res.collection_moves += 1
+                    else:
+                        ctx.folder_map[str(original_folder)] = str(old_folder)
             else:
-                # Appel local (fonction definie dans ce meme module) au lieu
-                # de passer par core_mod.move_collection_folder qui etait un
-                # re-export backward-compat — cf #83 phase A4.
-                new_folder = move_collection_folder(
-                    cfg,
-                    old_folder,
-                    dry_run=dry_run,
-                    log=log,
-                    record_op=record_op,
-                )
-                if str(new_folder) != str(old_folder):
-                    ctx.folder_map[str(original_folder)] = str(old_folder) if dry_run else str(new_folder)
-                    res.collection_moves += 1
-                else:
-                    ctx.folder_map[str(original_folder)] = str(old_folder)
-        else:
-            ctx.folder_map[str(original_folder)] = str(old_folder)
+                ctx.folder_map[str(original_folder)] = str(old_folder)
+        except PermissionError as exc:
+            res.errors += 1
+            _append_error_message(res, _locked_msg(old_folder.name))
+            log("ERROR", f"apply: pre-passe collection bloquee par un verrou ({old_folder.name}): {exc}")
+            ctx.folder_map[str(original_folder)] = str(original_folder)
+            failed_prepass.add(str(getattr(row, "row_id", "")))
+            failed_prepass_folders.add(str(original_folder))
+            continue
+        except OSError as exc:
+            res.errors += 1
+            _append_error_message(res, f"COLLECTION {old_folder.name}: {exc}")
+            log("ERROR", f"apply: pre-passe collection echouee ({old_folder.name}): {exc}")
+            ctx.folder_map[str(original_folder)] = str(original_folder)
+            failed_prepass.add(str(getattr(row, "row_id", "")))
+            failed_prepass_folders.add(str(original_folder))
+            continue
 
     def current_folder_path(folder_str: str) -> Path:
         """Retourne le chemin courant d'un folder en tenant compte des moves déjà appliqués."""
@@ -1510,6 +1880,23 @@ def apply_rows(
             time.sleep(0.5)
 
     for idx, row in enumerate(rows, start=1):
+        # F10 (fail-closed) : la pre-passe collection a echoue pour cette row
+        # (dossier verrouille, move interrompu). On ne la retraite PAS : sur
+        # Windows un move de dossier interrompu laisse source ET destination
+        # peuplees, un 2e traitement aggraverait l'etat au lieu de le reparer.
+        if (failed_prepass and str(getattr(row, "row_id", "")) in failed_prepass) or (
+            failed_prepass_folders and str(getattr(row, "folder", "")) in failed_prepass_folders
+        ):
+            core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
+            # La progression doit AVANCER meme pour une row skippee : si les
+            # dernieres rows du batch sont celles en echec, l'UI resterait
+            # bloquee sous 100 % jusqu'a la fin du batch.
+            if progress_cb is not None:
+                try:
+                    progress_cb(idx, _apply_total, str(getattr(row, "folder", "") or row.row_id))
+                except Exception:  # noqa: BLE001 - callback exterieur, on swallow
+                    _logger.debug("apply: progress_cb error (row skippee)", exc_info=True)
+            continue
         # VN-E.3 : pause cooperative + cancel — sortir au plus tot.
         if _wait_while_paused_apply():
             break
@@ -1564,10 +1951,16 @@ def apply_rows(
                 # apparaissent comme `user_rejected` dans apply_audit.jsonl,
                 # ce qui fausse la tracabilite post-apply (cf apply_audit.py
                 # objectif "pourquoi ce fichier a ete deplace la").
-                _dec_reason = "user_approved" if ok else (
-                    "user_deferred" if dec.get("decision") == "deferred"
-                    else "validation_absente" if row.row_id not in ctx.decision_keys
-                    else "user_rejected"
+                _dec_reason = (
+                    "user_approved"
+                    if ok
+                    else (
+                        "user_deferred"
+                        if dec.get("decision") == "deferred"
+                        else "validation_absente"
+                        if row.row_id not in ctx.decision_keys
+                        else "user_rejected"
+                    )
                 )
                 audit_logger.row_decision(
                     row_id=str(row.row_id),
@@ -1733,14 +2126,13 @@ def apply_rows(
             # Avant : le catch fourre-tout ci-dessous loguait seulement "fs_error" sans
             # indiquer a l'utilisateur que le film etait probablement ouvert dans VLC
             # (cas Windows tres frequent : fichier .mkv lu/probe par un autre process).
-            err_msg = (
-                f"FICHIER VERROUILLE : '{folder.name}' est ouvert dans un autre logiciel "
-                f"(VLC ? lecteur video ? indexeur Windows ?). Ferme-le et relance l'apply "
-                f"pour ce film."
-            )
+            # Le texte vit dans `_locked_msg` : la pre-passe collection et le
+            # nettoyage post-boucle (F10) doivent produire le MEME message, sinon
+            # les deux formulations divergent au fil des retouches.
+            err_msg = _locked_msg(folder.name)
             res.errors += 1
             # Remonter le message a l'UI via ApplyResult.error_messages (cf core.py).
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 res.error_messages.append(err_msg)
             except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
                 pass
@@ -1821,9 +2213,7 @@ def apply_rows(
                     int(res.sidecar_conflicts_kept_both_count),
                     int(res.duplicates_identical_moved_count),
                 )
-                _conflict_delta = tuple(
-                    _audit_post_conflicts[i] - _audit_pre_conflicts[i] for i in range(3)
-                )
+                _conflict_delta = tuple(_audit_post_conflicts[i] - _audit_pre_conflicts[i] for i in range(3))
                 if _conflict_delta[0] > 0:
                     audit_logger.conflict(
                         row_id=str(row.row_id),
@@ -1865,14 +2255,27 @@ def apply_rows(
                 _logger.debug("apply: audit post-row delta emit failed", exc_info=True)
 
     cleanup_preview = preview_cleanup_residual_folders(cfg, ctx.touched_top_level_dirs)
-    _move_residual_top_level_dirs(
-        cfg,
-        dry_run=dry_run,
-        log=log,
-        res=res,
-        touched_top_level_dirs=ctx.touched_top_level_dirs,
-        record_op=record_op,
-    )
+    # F10 : le nettoyage post-boucle vit lui aussi hors du try per-row et deplace
+    # des dossiers. Un verrou y faisait perdre le resultat ENTIER de l'apply
+    # (rows deja traitees comprises). On le degrade en erreur comptee : le
+    # diagnostic residuel et le resume restent produits.
+    try:
+        _move_residual_top_level_dirs(
+            cfg,
+            dry_run=dry_run,
+            log=log,
+            res=res,
+            touched_top_level_dirs=ctx.touched_top_level_dirs,
+            record_op=record_op,
+        )
+    except PermissionError as exc:
+        res.errors += 1
+        _append_error_message(res, f"NETTOYAGE RESIDUEL bloque par un verrou : {exc}")
+        log("ERROR", f"apply: nettoyage residuel bloque par un verrou: {exc}")
+    except OSError as exc:
+        res.errors += 1
+        _append_error_message(res, f"NETTOYAGE RESIDUEL : {exc}")
+        log("ERROR", f"apply: nettoyage residuel echoue: {exc}")
     cleanup_preview["moved_count"] = int(res.cleanup_residual_folders_moved_count or 0)
     cleanup_preview["left_in_place_count"] = int(
         cleanup_preview.get("has_video_count", 0)
@@ -1900,14 +2303,24 @@ def apply_rows(
             "Nettoyage résiduel exécuté sans déplacement. " + str(cleanup_preview.get("message") or "")
         ).strip()
     res.cleanup_residual_diagnostic = cleanup_preview
-    _move_empty_top_level_dirs(
-        cfg,
-        dry_run=dry_run,
-        log=log,
-        res=res,
-        touched_top_level_dirs=ctx.touched_top_level_dirs,
-        record_op=record_op,
-    )
+    # F10 : idem pour le deplacement des dossiers vides.
+    try:
+        _move_empty_top_level_dirs(
+            cfg,
+            dry_run=dry_run,
+            log=log,
+            res=res,
+            touched_top_level_dirs=ctx.touched_top_level_dirs,
+            record_op=record_op,
+        )
+    except PermissionError as exc:
+        res.errors += 1
+        _append_error_message(res, f"NETTOYAGE DOSSIERS VIDES bloque par un verrou : {exc}")
+        log("ERROR", f"apply: nettoyage dossiers vides bloque par un verrou: {exc}")
+    except OSError as exc:
+        res.errors += 1
+        _append_error_message(res, f"NETTOYAGE DOSSIERS VIDES : {exc}")
+        log("ERROR", f"apply: nettoyage dossiers vides echoue: {exc}")
     _logger.info(
         "apply: termine — renames=%d moves=%d skipped=%d quarantined=%d errors=%d (dry_run=%s)",
         res.renames,
@@ -1961,12 +2374,13 @@ def apply_single(
     new_name = format_movie_folder(cfg.naming_movie_template, _naming_ctx)
 
     # Si collection TMDb + collection_folder_enabled → placer dans _Collection/Saga/
+    # R8-085 : PAS de mkdir ici — un mkdir avant les gardes MAX_PATH/NOOP creait
+    # un dossier saga vide orphelin meme quand la row etait ensuite skippee.
     _coll_name = (tmdb_collection_name or "").strip()
+    coll_dir: Optional[Path] = None
     if _coll_name and cfg.enable_collection_folder:
         coll_dir = cfg.root / cfg.collection_root_name / core_mod.windows_safe(_coll_name)
         dst = coll_dir / new_name
-        if not dry_run:
-            coll_dir.mkdir(parents=True, exist_ok=True)
     else:
         dst = folder.parent / new_name
     core_mod.ensure_inside_root(cfg, dst)
@@ -1991,7 +2405,7 @@ def apply_single(
     _path_err = check_path_length_killswitch(str(dst)) or check_path_length_killswitch(_candidate_inner_path)
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass
@@ -2055,6 +2469,17 @@ def apply_single(
         return
 
     log("INFO", f"RENAME: {folder} -> {dst}")
+
+    # R8-085 A+B : mkdir saga APRES toutes les gardes (MAX_PATH, NOOP conforme,
+    # equivalence FS, merge) et via mkdir_counted — chaque niveau cree est
+    # journalise en op MKDIR pour que l'undo supprime les dossiers redevenus
+    # vides (restauration a l'identique). Le parent (<root>/_Collection) est
+    # journalise separement car mkdir_counted ne trace que le dernier segment.
+    if coll_dir is not None and not coll_dir.exists():
+        if not coll_dir.parent.exists():
+            mkdir_counted(coll_dir.parent, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
+        mkdir_counted(coll_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
+
     moved_from = folder
     moved_to = dst
     src_sha1: Optional[str] = None
@@ -2096,9 +2521,7 @@ def apply_single(
             # comportement SMB est variable. On force une erreur explicite et
             # cohrente plutot que de perdre des donnees.
             if dst.exists():
-                raise FileExistsError(
-                    f"apply_single: destination apparue pendant l'apply (race condition) : {dst}"
-                )
+                raise FileExistsError(f"apply_single: destination apparue pendant l'apply (race condition) : {dst}")
             folder.rename(dst)
 
     # P1.3 : record l'op même en dry_run pour la preview UI
@@ -2180,7 +2603,7 @@ def apply_collection_item(
     _path_err = check_path_length_killswitch(str(_candidate_video_path))
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass
@@ -2241,7 +2664,11 @@ def apply_collection_item(
             dst = sub_dir / sidecar.name
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
-                op_key = (str(core_mod._norm_win_path(sidecar)), str(core_mod._norm_win_path(dst)), "collection_sidecar")
+                op_key = (
+                    str(core_mod._norm_win_path(sidecar)),
+                    str(core_mod._norm_win_path(dst)),
+                    "collection_sidecar",
+                )
                 if op_key in dedup_seen_ops:
                     log("INFO", f"SKIP_DEDUP collection_sidecar: {sidecar} -> {dst}")
                     core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
@@ -2332,13 +2759,31 @@ def apply_tv_episode(
     intra-row (rollback des fichiers déjà déplacés si une étape échoue).
     (`new_title`/`new_year` : édition UI titre/année — câblés F2-a gate 7.)
     """
+    # Garde-fou destructif : `row.video` vide -> `folder / ""` == folder (verifie),
+    # donc `.exists()` est True et le chemin "video manquante" ci-dessous ne se
+    # declenche PAS. Le DOSSIER se retrouve alors passe a
+    # move_file_with_collision_policy() qui ne teste jamais `src.is_file()` :
+    # atomic_move() deplace le dossier COMPLET vers `Saison NN/SxxExx - Titre.ext`.
+    # PlanRow.video est documente "can be empty" (domain/core.py) -> refuser plutot
+    # que tenter le move.
+    if not row.video:
+        log("WARN", f"TV episode video field empty: {folder}")
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+        return
+
     video = folder / row.video
     if not video.exists():
         try:
             matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, row.video)]
             video = matches[0] if matches else video
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as exc:
+            # Revue PR#561 (sourcery-ai) : sans ce log, un NAS qui refuse
+            # l'enumeration (permission denied, share tombe) est rapporte a
+            # l'identique d'un dossier ou la video est reellement absente. Le
+            # skip est le meme dans les deux cas, mais le diagnostic ne l'est
+            # pas : on nomme la cause pour ne pas envoyer l'utilisateur
+            # chercher un fichier qui est en fait la.
+            log("WARN", f"TV episode listing failed: {folder} ({type(exc).__name__}: {exc})")
     if not video.exists():
         log("WARN", f"TV episode video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
@@ -2391,7 +2836,7 @@ def apply_tv_episode(
             if not sc.exists():
                 continue
             if sc.name.startswith(video.stem):
-                suffix_chain = sc.name[len(video.stem):]
+                suffix_chain = sc.name[len(video.stem) :]
                 dst_sc = target_dir / f"{target_stem}{suffix_chain}"
             else:
                 dst_sc = target_dir / sc.name
@@ -2409,7 +2854,7 @@ def apply_tv_episode(
             break
     if _path_err is not None:
         log("WARN", _path_err)
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             res.error_messages.append(_path_err)
         except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
             pass
@@ -2532,9 +2977,25 @@ def quarantine_row(
 
     video = folder / row.video
     if not video.exists():
-        matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
+        # Symetrique de apply_tv_episode (meme module) : protege contre folder disparu
+        # (move concurrent, TOCTOU depuis le `folder.exists()` du debut) ou permission
+        # denied -> sinon le plantage tue l'apply en plein batch de quarantaine et perd
+        # toutes les rows non traitees.
+        # NB : la comparaison reste `_name_eq_fs` (casefold + NFC, cf. main) et non
+        # `.lower()` : sur un scan SMB macOS les noms remontent en NFD.
+        try:
+            matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
+        except (OSError, PermissionError) as exc:
+            # Revue PR#561 (sourcery-ai) : ne pas rendre l'echec FS
+            # indiscernable d'un « aucune video trouvee ». La suite skippe la
+            # row SANS aucun log (contrairement a apply_tv_episode) : sans
+            # cette trace, un share tombe en plein batch de quarantaine se lit
+            # comme une bibliotheque vide.
+            log("WARN", f"QUARANTINE listing failed: {folder} ({type(exc).__name__}: {exc})")
+            matches = []
         video = matches[0] if matches else video
     if not video.exists():
+        log("WARN", f"QUARANTINE video missing: {video}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
 

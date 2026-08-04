@@ -28,9 +28,13 @@ class DashboardStatusActiveRunTests(unittest.TestCase):
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.api = backend.CineSortApi()
-        self.api.settings.save_settings({
-            "root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False,
-        })
+        self.api.settings.save_settings(
+            {
+                "root": str(self.root),
+                "state_dir": str(self.state_dir),
+                "tmdb_enabled": False,
+            }
+        )
         self.store, _runner = self.api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
 
     def tearDown(self) -> None:
@@ -39,8 +43,11 @@ class DashboardStatusActiveRunTests(unittest.TestCase):
     def _insert_run(self, run_id: str, *, status_done: bool = True) -> None:
         started = time.time() - 50.0
         self.store.run.insert_run_pending(
-            run_id=run_id, root=str(self.root), state_dir=str(self.state_dir),
-            config={"tmdb_enabled": False}, created_ts=started - 2.0,
+            run_id=run_id,
+            root=str(self.root),
+            state_dir=str(self.state_dir),
+            config={"tmdb_enabled": False},
+            created_ts=started - 2.0,
         )
         self.store.run.mark_run_running(run_id, started_ts=started)
         if status_done:
@@ -48,10 +55,22 @@ class DashboardStatusActiveRunTests(unittest.TestCase):
         run_dir = self.state_dir / "runs" / f"tri_films_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "plan.jsonl").write_text(
-            json.dumps({"row_id": "r1", "kind": "single", "folder": str(self.root),
-                        "video": str(self.root / "x.mkv"), "proposed_title": "X",
-                        "proposed_year": 2020, "proposed_source": "tmdb", "confidence": 80,
-                        "candidates": [], "notes": "", "collection_name": None}) + "\n",
+            json.dumps(
+                {
+                    "row_id": "r1",
+                    "kind": "single",
+                    "folder": str(self.root),
+                    "video": str(self.root / "x.mkv"),
+                    "proposed_title": "X",
+                    "proposed_year": 2020,
+                    "proposed_source": "tmdb",
+                    "confidence": 80,
+                    "candidates": [],
+                    "notes": "",
+                    "collection_name": None,
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
 
@@ -78,6 +97,7 @@ class DashboardStatusActiveRunTests(unittest.TestCase):
         # Simuler un run en cours en memoire (RunState running, pas done)
         self.api._runs = {"live_run_42": SimpleNamespace(running=True, done=False)}  # type: ignore[attr-defined]
         import threading
+
         self.api._runs_lock = threading.RLock()  # type: ignore[attr-defined]
         data = self.api._get_dashboard_impl(run_id)
         self.assertEqual(data["active_run_id"], "live_run_42")

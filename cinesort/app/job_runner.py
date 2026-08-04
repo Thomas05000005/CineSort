@@ -87,9 +87,12 @@ class JobRunner:
             row = self._store.run.get_run(run_id)
             if not row:
                 return
-            state_dir = Path(str(row.get("state_dir") or ""))
-            if not state_dir:
+            # Path("") -> Path(".") est truthy : tester la chaine brute, sinon
+            # un state_dir vide ferait ecrire crash.txt dans le CWD du process.
+            state_dir_raw = str(row.get("state_dir") or "").strip()
+            if not state_dir_raw:
                 return
+            state_dir = Path(state_dir_raw)
             run_dir = state_dir / "runs" / f"tri_films_{run_id}"
             run_dir.mkdir(parents=True, exist_ok=True)
             content = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {header}\n\n{tb_text.rstrip()}\n"
@@ -151,9 +154,8 @@ class JobRunner:
             return job_fn(should_cancel)
 
         params = sig.parameters
-        accepts_should_pause = (
-            "should_pause" in params
-            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        accepts_should_pause = "should_pause" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
         )
         if accepts_should_pause:
             # AUDIT 2026-06-10 (REAL 2/2) : valider la LIAISON des arguments avant
@@ -259,9 +261,7 @@ class JobRunner:
                     return False, db_status_before
             # except Exception : defensif, on retombe sur le skip protecteur
             except Exception as exc:
-                self._debug(
-                    f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}"
-                )
+                self._debug(f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}")
         return True, db_status_before
 
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
@@ -474,9 +474,7 @@ class JobRunner:
             # exception, annuler un run paused laissait le run bloque en
             # PAUSED a vie (slot actif jamais libere par le finally). On passe
             # should_cancel au helper pour qu'il fasse le bypass.
-            skip_terminal, db_status_before = self._should_skip_terminal(
-                run_id, should_cancel_fn=should_cancel
-            )
+            skip_terminal, db_status_before = self._should_skip_terminal(run_id, should_cancel_fn=should_cancel)
             if skip_terminal:
                 self._debug(
                     f"worker terminal transition SKIPPED — db_status={db_status_before} run_id={run_id}",
@@ -539,6 +537,7 @@ class JobRunner:
             self._debug(f"worker exception run_id={run_id}: {error_message}\n{tb_text}", run_debug)
             ended_ts = time.time()
             self._write_crash_for_run(run_id, "job_runner worker failed", tb_text)
+
             # C4 fix (hotfix2) : meme guard que pour DONE/CANCELLED — un
             # crash worker ne doit pas ecraser un PAUSED persiste par l'API.
             # L'erreur reste tracee dans la table `errors` (insert_error).
@@ -557,9 +556,7 @@ class JobRunner:
                         return False
                     return rt_chk.cancel_event.is_set()
 
-            skip_terminal, db_status_before = self._should_skip_terminal(
-                run_id, should_cancel_fn=_cancel_check
-            )
+            skip_terminal, db_status_before = self._should_skip_terminal(run_id, should_cancel_fn=_cancel_check)
             if skip_terminal:
                 self._debug(
                     f"worker FAILED transition SKIPPED — db_status={db_status_before} run_id={run_id}",
@@ -622,10 +619,7 @@ class JobRunner:
                         RunStatus.SAVED,
                         RunStatus.AWAITING_VALIDATION,
                     )
-                    if (
-                        not held
-                        and rt.snapshot.status not in _TERMINAL
-                    ):
+                    if not held and rt.snapshot.status not in _TERMINAL:
                         db_status_final = self._current_db_status(run_id)
                         if self._is_user_held_state(db_status_final):
                             try:
@@ -749,9 +743,7 @@ class JobRunner:
             # Idempotent si snapshot est deja sur le bon target.
             if rt.snapshot.status != target_status:
                 self._set_snapshot(run_id, status=target_status, running=False)
-            self._debug(
-                f"request_pause set pause flag run_id={run_id} target={target_status.value}", run_debug
-            )
+            self._debug(f"request_pause set pause flag run_id={run_id} target={target_status.value}", run_debug)
         return True
 
     def request_resume(self, run_id: str) -> bool:
