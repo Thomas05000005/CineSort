@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
+from cinesort.infra._http_utils import get_bounded
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _SECRET_MASK, normalize_user_path
@@ -140,15 +141,23 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
             try:
                 import requests as _req
 
-                r = _req.get(
-                    f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
-                    params={
-                        "api_key": api_key,
-                        "language": "fr-FR",
-                        "append_to_response": "credits",
-                    },
-                    timeout=float(settings.get("tmdb_timeout_s") or 10.0),
-                )
+                # Meme famille que #753/#824 : ce GET direct etait la derniere
+                # lecture JSON non bornee du depot (il n'est dans aucun client,
+                # donc l'inventaire par client le manquait). `requests.get()`
+                # ouvre de toute facon une Session ephemere en interne : on la
+                # rend explicite pour pouvoir passer par le lecteur borne, sans
+                # changer la semantique reseau (pas de retry ajoute).
+                with _req.Session() as _session:
+                    r = get_bounded(
+                        _session,
+                        f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
+                        params={
+                            "api_key": api_key,
+                            "language": "fr-FR",
+                            "append_to_response": "credits",
+                        },
+                        timeout=float(settings.get("tmdb_timeout_s") or 10.0),
+                    )
                 if r.status_code == 200:
                     data = r.json() or {}
                     # Director : prend le premier crew member job=Director

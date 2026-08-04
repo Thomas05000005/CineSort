@@ -496,6 +496,56 @@ class ClientsAreRoutedThroughTheBoundedReadTests(unittest.TestCase):
         self.assertEqual(res.get("generated"), "Un braqueur et un flic s'observent a Los Angeles.")
         self.assertIs(res.get("ai_generated"), True)
 
+    # -- Fiche film : GET TMDb direct (hors client) -----------------------
+    #
+    # Site trouve en re-verifiant l'inventaire : il n'appartient a AUCUN des
+    # cinq clients, donc un audit « par client » le manquait. C'etait un
+    # `requests.get(...)` nu suivi d'un `r.json()`, sans session partagee.
+
+    def test_film_detail_direct_tmdb_get_is_bounded(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_")
+        self.addCleanup(tmp.cleanup)
+        state_dir = tmp.name
+
+        class _Api:
+            def _internal_settings(self) -> dict:
+                return {"tmdb_api_key": "REALKEY", "state_dir": state_dir, "tmdb_timeout_s": 1.0}
+
+        class _StubTmdb:
+            """Neutralise le chemin cache/runtime : seul le GET direct compte."""
+
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            def get_movie_runtime(self, _movie_id: int) -> None:
+                return None
+
+            def _cache_get(self, _key: str) -> None:
+                return None
+
+            def _cache_set(self, _key: str, _value: object) -> None:
+                return None
+
+            def flush(self) -> None:
+                return None
+
+        session = _RecordingSession(hostile=True)
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", _StubTmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(_Api(), 603)
+
+        # Degradation gracieuse documentee de ce helper (best-effort).
+        self.assertIsNone(out.get("director"))
+        self.assertIsNone(out.get("overview"))
+        self._assert_bounded(session)
+
     def test_omdb_test_connection_reports_invalid_response(self) -> None:
         import tempfile
         from pathlib import Path
