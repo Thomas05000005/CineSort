@@ -1075,9 +1075,7 @@ def _score_video(
     if threshold_kbps > 0 and primary_genre:
         adjusted = _adj_th(threshold_kbps, primary_genre)
         if adjusted != threshold_kbps:
-            reasons.append(
-                f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s"
-            )
+            reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
             threshold_kbps = adjusted
 
     if bitrate_kbps is None:
