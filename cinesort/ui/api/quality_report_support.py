@@ -14,10 +14,12 @@ from cinesort.domain.encode_analysis import analyze_encode_quality
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.mkv_title_check import check_container_title
 from cinesort.domain.probe_models import probe_quality_is_failed
+from cinesort.domain.quality_score import SCORING_RULES_VERSION
 from cinesort.infra.probe import ProbeService
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
-from cinesort.ui.api.perceptual_support import enrich_quality_report_with_perceptual
+from cinesort.ui.api.perceptual_support import _build_tmdb_client, enrich_quality_report_with_perceptual
+from cinesort.ui.api.probe_support import probe_settings_from_dict, probe_settings_from_run_row
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 # Seuils cross-check runtime NFO vs probe (P1.1.d).
@@ -59,6 +61,43 @@ def detect_nfo_runtime_mismatch(
     }
 
 
+def probe_settings_for_report(api: Any, run_row: Any) -> Dict[str, Any]:
+    """Settings probe du rapport qualite, sans detection d'outils inutile.
+
+    `api._effective_probe_settings_for_runtime` fait DEUX choses :
+
+    a. resoudre `probe_backend` depuis les settings courants (ou, a defaut, la
+       config persistee du run) ;
+    b. auto-remplir `ffprobe_path` / `mediainfo_path` via
+       `tools_manager.detect_probe_tools`.
+
+    (b) balaye le PATH et les dossiers winget a CHAQUE appel : son cache
+    (`probe_support.probe_tools_status_payload`) n'est consulte que lorsque
+    `check_versions=True`, or ce chemin passe `check_versions=False`. Mesure en
+    conditions reelles : 31,06 ms par rapport, dont l'essentiel en
+    `shutil.which` (13 appels -> ~5 900 `nt._path_exists`).
+
+    Quand `probe_backend == none`, (b) est du travail pur perte : `ProbeService`
+    ne lit alors AUCUN chemin d'outil (cf `probe_file`, branche `none`). On
+    resout donc d'abord le backend avec les MEMES primitives que
+    `effective_probe_settings_for_runtime` -- `probe_settings_from_dict` sur les
+    settings courants, avec repli sur la config du run -- et on n'appelle la
+    version complete que si la sonde est reellement active. Cout du raccourci :
+    0,246 ms.
+
+    Aucune heuristique nouvelle n'est introduite : la version complete ne
+    touche JAMAIS `probe_backend`, elle n'ecrit que les deux chemins d'outils.
+    Cet invariant est verrouille par
+    `tests/test_perf_probe_tools_cache_n1.py::EffectiveProbeSettingsInvariantTests`.
+    """
+    current = api.settings.get_settings()
+    base = probe_settings_from_run_row(run_row) if isinstance(run_row, dict) else {}
+    cheap = probe_settings_from_dict(current if current else base)
+    if str(cheap.get("probe_backend") or "") == "none":
+        return cheap
+    return api._effective_probe_settings_for_runtime(run_row)
+
+
 def _extract_confidence_and_explanation(metrics_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     confidence = metrics_obj.get("score_confidence")
     if not isinstance(confidence, dict):
@@ -84,7 +123,7 @@ def _probe_and_score(
     active_profile_id: str,
     active_profile_version: int,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    probe_settings = api._effective_probe_settings_for_runtime(run_row)
+    probe_settings = probe_settings_for_report(api, run_row)
     probe = ProbeService(store)
     probe_result = probe.probe_file(media_path=media_path, settings=probe_settings)
     normalized = probe_result.get("normalized") if isinstance(probe_result.get("normalized"), dict) else {}
@@ -99,7 +138,18 @@ def _probe_and_score(
                 tmdb_id_lookup = int(c.tmdb_id)
                 break
         if tmdb_id_lookup > 0:
-            tmdb = api._tmdb_client() if hasattr(api, "_tmdb_client") else None
+            # Fix ultra-audit 2026-08-03 : `api._tmdb_client()` n'existe PAS sur
+            # CineSortApi (aucun `def _tmdb_client` ni `self._tmdb_client =` dans
+            # le depot). Le `hasattr` avalait l'absence en silence -> `tmdb` etait
+            # TOUJOURS None -> `tmdb_genres` toujours vide -> tout le scoring
+            # genre-aware P4.2 etait du code mort en production (bonus codec
+            # moderne / HDR contextuel / Atmos, malus grain, malus resolution,
+            # `adjust_bitrate_threshold` par genre, `metrics.primary_genre`, et
+            # tout facteur "Genre '...'" de l'explain-score). Le meme defaut avait
+            # ete corrige le 2026-06-10 (AUDIT REAL 2/2) sur perceptual_support et
+            # library_audit_support ; ce 3e call site avait ete oublie. On
+            # reutilise le meme constructeur que perceptual_support.
+            tmdb = _build_tmdb_client(api)
             if tmdb:
                 meta = tmdb.get_movie_metadata_for_perceptual(tmdb_id_lookup)
                 if meta and isinstance(meta.get("genres"), list):
@@ -186,6 +236,59 @@ def _probe_and_score(
     return probe_result, out
 
 
+def _build_cache_hit_result(
+    api: Any,
+    store: Any,
+    run_id: str,
+    row_id: str,
+    existing: Dict[str, Any],
+    existing_metrics: Dict[str, Any],
+    *,
+    scoring_rules_stale: bool = False,
+) -> Dict[str, Any]:
+    """Rapport deja persiste, rendu tel quel (cache hit)."""
+    probe_quality = str(existing_metrics.get("probe_quality") or "UNKNOWN")
+    confidence, explanation = _extract_confidence_and_explanation(existing_metrics)
+    cached_result = {
+        "ok": True,
+        **existing,
+        "probe_quality": probe_quality,
+        "confidence": confidence,
+        "explanation": explanation,
+        "cache_hit_probe": True,
+        "cache_hit_quality": True,
+        "status": "ignored_existing",
+        "skipped_existing": True,
+        "media_path": "",
+    }
+    if scoring_rules_stale:
+        # Ce rapport DEVAIT etre re-score (regles de scoring plus recentes) mais
+        # le media n'est plus atteignable -- typiquement un run deja applique :
+        # `resolve_media_path_for_row` part de `row.folder`, le dossier SOURCE,
+        # qui n'existe plus apres le deplacement. Rendre une erreur ferait
+        # disparaitre un score que l'utilisateur voyait jusque-la ; on rend donc
+        # l'ancien, explicitement marque comme perime.
+        cached_result["scoring_rules_stale"] = True
+    # R6-QUAL-CACHE-HIT-NO-PERCEPTUAL : enrichir aussi le cache hit
+    # pour garantir que `result.perceptual` est present sur les 2 chemins
+    # (sinon le frontend voit un drift apres reload de page).
+    try:
+        settings_cached = api.settings.get_settings() if api else {}
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        settings_cached = {}
+    score_version_cached = _normalize_composite_score_version(
+        settings_cached.get("composite_score_version") if isinstance(settings_cached, dict) else None
+    )
+    enrich_quality_report_with_perceptual(
+        store,
+        run_id,
+        row_id,
+        cached_result,
+        composite_score_version=score_version_cached,
+    )
+    return cached_result
+
+
 @requires_valid_run_id
 def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) -> Dict[str, Any]:
     if not run_id or not row_id:
@@ -210,6 +313,7 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         active_profile_version = int(active.get("version") or profile_json.get("version") or 1)
         active_engine_version = str(profile_json.get("engine_version") or "CinemaLux_v1")
 
+        stale_existing: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
         if reuse_existing:
             existing = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
             if existing:
@@ -217,43 +321,31 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 existing_engine = str(existing_metrics.get("engine_version") or "")
                 existing_profile_id = str(existing.get("profile_id") or "")
                 existing_profile_version = int(existing.get("profile_version") or 0)
+                # Fix revue adversaire PR#854 : les 3 cles historiques viennent
+                # TOUTES du profil, qui est persiste — un changement de REGLE
+                # dans le code ne les faisait donc pas bouger, et une
+                # bibliotheque melangeait silencieusement des scores ancienne et
+                # nouvelle formule dans le meme classement de tiers (l'analyse en
+                # masse passe `reuse_existing=True` par defaut). On compare en
+                # plus l'estampille du code ; les rapports anterieurs ne portent
+                # pas le champ ("" != "2") et sont donc tous re-scores.
+                existing_rules_version = str(existing_metrics.get("scoring_rules_version") or "")
+                if (
+                    existing_engine == active_engine_version
+                    and existing_rules_version == str(SCORING_RULES_VERSION)
+                    and existing_profile_id == active_profile_id
+                    and existing_profile_version == active_profile_version
+                ):
+                    return _build_cache_hit_result(api, store, run_id, row_id, existing, existing_metrics)
                 if (
                     existing_engine == active_engine_version
                     and existing_profile_id == active_profile_id
                     and existing_profile_version == active_profile_version
                 ):
-                    probe_quality = str(existing_metrics.get("probe_quality") or "UNKNOWN")
-                    confidence, explanation = _extract_confidence_and_explanation(existing_metrics)
-                    cached_result = {
-                        "ok": True,
-                        **existing,
-                        "probe_quality": probe_quality,
-                        "confidence": confidence,
-                        "explanation": explanation,
-                        "cache_hit_probe": True,
-                        "cache_hit_quality": True,
-                        "status": "ignored_existing",
-                        "skipped_existing": True,
-                        "media_path": "",
-                    }
-                    # R6-QUAL-CACHE-HIT-NO-PERCEPTUAL : enrichir aussi le cache hit
-                    # pour garantir que `result.perceptual` est present sur les 2 chemins
-                    # (sinon le frontend voit un drift apres reload de page).
-                    try:
-                        settings_cached = api.settings.get_settings() if api else {}
-                    except (AttributeError, KeyError, OSError, TypeError, ValueError):
-                        settings_cached = {}
-                    score_version_cached = _normalize_composite_score_version(
-                        settings_cached.get("composite_score_version") if isinstance(settings_cached, dict) else None
-                    )
-                    enrich_quality_report_with_perceptual(
-                        store,
-                        run_id,
-                        row_id,
-                        cached_result,
-                        composite_score_version=score_version_cached,
-                    )
-                    return cached_result
+                    # Seule l'estampille de code differe : ce rapport doit etre
+                    # re-score, mais il reste le meilleur repli si le media n'est
+                    # plus atteignable (cf. `_build_cache_hit_result`).
+                    stale_existing = (existing, existing_metrics)
 
         rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
         row = next((item for item in rows if str(item.row_id) == str(row_id)), None)
@@ -265,6 +357,10 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
         media_path = api._resolve_media_path_for_row(cfg, row)
         if media_path is None or (not media_path.exists()):
+            if stale_existing is not None:
+                return _build_cache_hit_result(
+                    api, store, run_id, row_id, stale_existing[0], stale_existing[1], scoring_rules_stale=True
+                )
             return _err_response(
                 t("errors.media_not_found_for_row"), category="validation", level="info", log_module=__name__
             )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -276,13 +277,23 @@ def export_nfo_for_run(
             details.append({"path": str(nfo_path), "status": "would_write"})
             continue
 
+        tmp = nfo_path.with_name(f"{nfo_path.name}.tmp.{os.getpid()}")
         try:
-            nfo_path.write_text(xml_content, encoding="utf-8")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, nfo_path)
             written += 1
             details.append({"path": str(nfo_path), "status": "written"})
         except (OSError, PermissionError) as exc:
             errors += 1
             details.append({"path": str(nfo_path), "status": f"error: {exc}"})
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
     return {
         "ok": True,
