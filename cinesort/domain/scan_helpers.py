@@ -151,14 +151,6 @@ def detect_single_with_extras(cfg: Any, videos: List[Path]) -> bool:
     return (biggest / second) >= float(getattr(cfg, "extras_size_ratio", 4.0))
 
 
-def _looks_like_nested_extra_video(video: Path) -> bool:
-    if IGNORE_VIDEO_NAME_RE.search(video.name):
-        return True
-    stem = video.stem.lower().replace(".", " ").replace("_", " ").replace("-", " ")
-    stem = re.sub(r"\s+", " ", stem).strip()
-    return stem in GENERIC_EXTRA_VIDEO_NAMES
-
-
 def collect_non_video_extensions(cfg: Any, folder: Path) -> Dict[str, int]:
     out: Dict[str, int] = {}
     try:
@@ -221,8 +213,8 @@ def discover_candidate_folders(
     candidates: List[Path] = []
 
     def _file_looks_bonus(name: str) -> bool:
-        """Filtrage textuel uniquement (pas de stat), reproduit
-        _looks_like_nested_extra_video sans toucher au filesystem.
+        """Filtrage textuel uniquement (pas de stat) : detecte un nom de
+        bonus/extra sans toucher au filesystem.
         """
         if IGNORE_VIDEO_NAME_RE.search(name):
             return True
