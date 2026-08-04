@@ -114,8 +114,11 @@ def run_filter_graph(
     ]
 
     rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
-    if rc != 0 and not stderr:
-        logger.debug("run_filter_graph ffmpeg rc=%d", rc)
+    if rc != 0:
+        # ffmpeg peut emettre stderr non-vide meme en cas d'erreur fatale
+        # (message d'erreur lui-meme). Logger l'erreur au lieu de tenter un
+        # parsing trompeur sur de la sortie d'erreur.
+        logger.warning("run_filter_graph ffmpeg rc=%d stderr=%s", rc, stderr[:300] if stderr else "(empty)")
         return []
 
     return _parse_filter_output(stderr)
