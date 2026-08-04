@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import ResponseTooLargeError, make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
@@ -104,14 +104,28 @@ class PlexClient:
             pass
 
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
-        """GET avec gestion d'erreurs standardisee."""
+        """GET avec gestion d'erreurs standardisee.
+
+        La borne anti-OOM du corps est appliquee ICI, au transport (cf
+        `request_bounded`), donc A LA LECTURE du flux et non apres que
+        `requests` ait deja alloue tout le corps (issues #433 / #753).
+        PlexClient etait le dernier client sans cette borne : ses quatre
+        `resp.json()` (`validate_connection`, `get_libraries`, `get_movies`,
+        `get_movies_count`) sont couverts d'un coup, `refresh_library` avec.
+        """
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Plex: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
+        except ResponseTooLargeError as exc:
+            # Converti en PlexError : c'est le seul type d'erreur que les cinq
+            # appelants traitent (`refresh_library` n'attrape QUE PlexError).
+            # Laisser fuir un ValueError le ferait remonter brut jusqu'a l'UI.
+            _log.warning("Plex: GET %s -> corps hors borne (%s)", path, exc)
+            raise PlexError(f"Reponse Plex trop volumineuse sur {path} : {exc}") from exc
         except requests.ConnectionError as exc:
             _log.debug("Plex: GET %s -> connexion impossible (%.1fs)", path, time.monotonic() - _t0)
             raise PlexError(f"Connexion impossible a {self.base_url} : {exc}") from exc
