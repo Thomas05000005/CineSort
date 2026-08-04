@@ -186,6 +186,11 @@ def upsert_disk_cache(
         tmp = entry.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
+            # fsync avant os.replace : garantit la durabilite physique sur disque
+            # (parite avec tmdb/omdb _save_cache_atomic) pour eviter une entree
+            # tronquee promue si crash kernel / panne courant.
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, entry)
         return True
     except (OSError, TypeError, ValueError) as exc:
