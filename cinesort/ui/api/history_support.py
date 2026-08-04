@@ -94,7 +94,7 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
         from cinesort.domain.conversions import to_int
         from cinesort.domain.title_helpers import strip_trailing_year_if_equal
         from cinesort.ui.api.film_support import (
-            apply_tmdb_override,
+            apply_tmdb_overrides_bulk,
             list_tmdb_overrides_bulk,
             overlay_tmdb_override,
         )
@@ -120,10 +120,21 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
         # PERF (ultra-audit 2026-08, CRITICAL) : les overrides TMDb du run sont
         # lus en UNE requete au lieu de 2 connexions SQLite PAR ROW (2N pour un
         # plan de N films : 40 s / 2002 connexions mesurees a N=1000, meme table
-        # vide). `None` = lecture bulk indisponible -> on retombe sur le chemin
-        # par row, lent mais correct : jamais un plan silencieusement privé de
-        # ses overrides. `{}` = run réellement sans override -> rien à faire.
+        # vide). `None` = lecture bulk indisponible OU partielle -> on retombe
+        # sur le chemin par row (dans la boucle), lent mais correct : jamais un
+        # plan silencieusement privé de ses overrides. `{}` = run réellement
+        # sans override -> rien à appliquer, mais les rows sont bien marquées.
+        #
+        # `apply_tmdb_overrides_bulk` pose `TMDB_OVERLAY_DONE_KEY` lui-même sur
+        # les rows traitées (PR #849) : sans cela, `library_support` — qui est
+        # fail-closed sur ce marqueur — reprendrait la relecture par row et le
+        # N+1 supprimé ici reviendrait par la vue Bibliothèque. Il est appelé
+        # AVANT la boucle : l'overlay doit précéder le calcul de
+        # `display_title`, qui lit `proposed_title`/`proposed_year`.
         overrides = list_tmdb_overrides_bulk(store, run_id)
+        if overrides is not None:
+            with contextlib.suppress(Exception):
+                apply_tmdb_overrides_bulk(payload_rows, overrides)
 
         for row in payload_rows:
             if not isinstance(row, dict):
@@ -132,11 +143,11 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
             # calcul, pour que la Validation pré-cochée seede le bon titre/année/
             # confiance (traitement.js lit r.proposed_year) et que l'apply voie le
             # même titre que le modal fiche film / que l'overlay _validate_apply.
-            with contextlib.suppress(Exception):
-                if overrides is None:
+            # Chemin de repli uniquement : le lot a déjà été appliqué ci-dessus
+            # quand la lecture groupée a abouti.
+            if overrides is None:
+                with contextlib.suppress(Exception):
                     overlay_tmdb_override(store, run_id, row)
-                else:
-                    apply_tmdb_override(row, overrides.get(str(row.get("row_id") or "")))
             try:
                 # 1) titre d'affichage sans année dupliquée (helper testé, protège "Blade Runner 2049")
                 with contextlib.suppress(Exception):
@@ -779,6 +790,18 @@ def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
     }
 
 
+def _real_path(value: Path) -> Path:
+    """Chemin REEL canonise, pour comparer des chemins et non des chaines.
+
+    ``os.path.realpath`` resout jonctions NTFS, points de montage, noms courts
+    8.3 et liens ; ``os.path.normcase`` neutralise la casse (NTFS est
+    insensible a la casse). Les DEUX cotes d'une comparaison de zone doivent
+    passer par ici : sinon deux ecritures du meme chemin reel paraissent
+    differentes et un dossier legitime est refuse.
+    """
+    return Path(os.path.normcase(os.path.realpath(str(value))))
+
+
 def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: Any) -> Dict[str, Any]:
     try:
         raw_path = str(path or "").strip()
@@ -808,21 +831,24 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
-        # contient un symlink dans son chemin (ex: parent symlink).
-        if str(resolved_path) != str(candidate.absolute()):
-            logger.warning(
-                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
-                candidate,
-                resolved_path,
-            )
-            return _err_response(
-                "Les liens symboliques ne sont pas autorises.",
-                category="permission",
-                level="warning",
-                log_module=__name__,
-            )
-
+        # Fix 2026-08-03 : ici vivait une 2e garde qui comparait des CHAINES
+        # (``str(resolved_path) != str(candidate.absolute())``) pour deviner un
+        # symlink parent. Or ``resolve()`` reecrit la chaine sans qu'aucun lien
+        # n'existe des que le chemin traverse une jonction NTFS, un point de
+        # montage, un nom court 8.3 ou une casse differente (NTFS est
+        # insensible a la casse) : une bibliotheque placee derriere une
+        # jonction se voyait refuser un dossier parfaitement normal.
+        # La protection anti path-traversal de la Vague H (2026-05-25) reste
+        # entiere, portee par trois faits INDEPENDANTS de l'ecriture du chemin :
+        #  1. les liens symboliques sont refuses explicitement ci-dessus
+        #     (``candidate.is_symlink()``) ;
+        #  2. un lien situe dans le chemin PARENT est neutralise par le controle
+        #     de zone ci-dessous, qui compare des chemins REELS des deux cotes
+        #     (``_real_path``) : la cible du lien sort de la zone autorisee, donc
+        #     le chemin est refuse ;
+        #  3. ``os.startfile()`` n'ouvre que le chemin RESOLU, jamais
+        #     ``candidate`` : meme autorise, un lien ne peut pas faire ouvrir
+        #     autre chose que sa cible deja validee.
         open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
@@ -838,9 +864,14 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if root_raw:
             allowed_bases.append(normalize_user_path(root_raw, Path(default_root)))
 
+        # Comparaison de chemins REELS (et non de chaines) des deux cotes :
+        # c'est ce controle qui porte desormais seul le refus d'une traversee
+        # par un lien parent. ``relative_to`` compare composant par composant :
+        # C:\lib2 n'est donc pas vu comme inclus dans C:\lib.
+        real_target = _real_path(resolved_to_check)
         for base in allowed_bases:
             try:
-                resolved_to_check.relative_to(base.resolve())
+                real_target.relative_to(_real_path(base))
                 allowed = True
                 break
             except (OSError, ValueError):

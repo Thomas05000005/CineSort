@@ -1,3 +1,32 @@
+"""Helpers de conversion tolerants — source unique pour tout le depot.
+
+REGLE DE REVUE (grep-able) — sentinelle falsy
+=============================================
+Ne JAMAIS ecrire ``x or DEFAUT`` (ni ``if x and ...``) quand ``0``, ``0.0``,
+``False`` ou ``""`` est une valeur METIER legitime distincte de "absent" :
+Python evalue le falsy, pas l'absence, donc la valeur nulle voulue par
+l'utilisateur est silencieusement remplacee par le defaut.
+
+Utiliser a la place le helper de ce module, qui ne collapse que ``None`` et
+l'invalide :
+
+    to_int(value, default)     # 0 preserve, None/"" -> default
+    to_float(value, default)
+    to_bool(value, default)
+    to_optional_int/float/bool/bitrate(value)   # None si absent
+
+ou un test ``is None`` explicite.
+
+Detection des recidives (le motif dangereux est le defaut NON NUL, car il
+signifie qu'un 0 legitime serait ecrase) :
+
+    grep -rnE "\\bor [1-9][0-9]*(\\.[0-9]+)?\\b" cinesort/ --include=*.py | grep -vE "\\bor 0"
+
+Chaque hit doit etre justifie : soit ``0`` est impossible/insignifiant a cet
+endroit, soit il faut passer par ``to_int``/``to_float``/``is None``.
+Historique de la famille : #440, #611, #639, #698, #785, #791.
+"""
+
 from __future__ import annotations
 
 import re
@@ -135,8 +164,18 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
 
 
 def to_optional_bool(value: Any) -> Optional[bool]:
-    """Parse *value* en bool, retourne None si vide / non reconnu."""
-    s = str(value or "").strip().lower()
+    """Parse *value* en bool, retourne None si vide / non reconnu.
+
+    Gardes de type en tete (comme to_bool / to_optional_int / to_optional_bitrate) :
+    ``False`` et ``0`` sont des valeurs mesurees, pas des absences (#785).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
     if not s:
         return None
     if s in {"1", "true", "yes", "oui"}:

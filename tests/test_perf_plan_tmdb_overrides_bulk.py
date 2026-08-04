@@ -238,6 +238,103 @@ class ListTmdbOverridesBulkTests(_PlanPerfBase):
         self.assertLessEqual(counter.count, 3, f"{counter.count} connexions pour une lecture bulk")
 
 
+class BulkOverlayMarkerContractTests(_PlanPerfBase):
+    """FUSION #853 x #849 — la lecture GROUPEE doit honorer le contrat du
+    marqueur `TMDB_OVERLAY_DONE_KEY`.
+
+    #849 rend `library_support._build_library_rows` fail-closed : marqueur
+    absent => il relit `film_tmdb_overrides` par row. Deux facons de casser la
+    composition, chacune verrouillee ici :
+      - le chemin bulk ne pose PAS le marqueur -> la Bibliotheque repaye les 2N
+        connexions que cette PR vient de supprimer (perte du gain, pas du sens) ;
+      - le chemin bulk pose le marqueur sur un resultat PARTIEL -> le choix TMDb
+        manuel disparait EN SILENCE, la Bibliotheque ne relisant plus (bug R7-3
+        re-ouvert : perte du sens, celle qui compte).
+    """
+
+    def _corrupt_one_override_row(self) -> None:
+        """Insere une ligne indecodable (tmdb_id non numerique) dans le run.
+
+        Pas de STRICT sur la table (migration 023) : SQLite stocke bien le texte
+        dans une colonne INTEGER, donc `int()` leve a la relecture — exactement
+        ce que rencontre `get_tmdb_override` sur le chemin par row.
+        """
+        with self.store.film_modal._managed_conn() as conn:  # noqa: SLF001
+            conn.execute(
+                """
+                INSERT INTO film_tmdb_overrides(
+                    run_id, row_id, tmdb_id, new_confidence,
+                    proposed_title, proposed_year, chosen_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("R1", "r0001", "pas-un-entier", 5, "Corrompu", 2000, 0.0),
+            )
+
+    def test_bulk_path_stamps_the_marker_on_every_row_read(self) -> None:
+        """Lecture groupee aboutie => marqueur sur TOUTES les rows lues, y
+        compris celles sans override (le marqueur dit « lecture aboutie », pas
+        « override applique »)."""
+        payload = self.api._serialize_rows_for_payload(self.rows)
+        out = history_support._enrich_plan_payload(self.api, "R1", payload)
+
+        self.assertTrue(all(r.get(film_support.TMDB_OVERLAY_DONE_KEY) for r in out))
+
+    def test_partial_bulk_read_returns_none_not_a_truncated_dict(self) -> None:
+        """Une ligne indecodable rend la lecture groupee NON FIABLE : `None`,
+        pas un dict ampute qui se ferait passer pour complet."""
+        self._corrupt_one_override_row()
+
+        self.assertIsNone(film_support.list_tmdb_overrides_bulk(self.store, "R1"))
+
+    def test_partial_bulk_read_marks_no_row_and_falls_back(self) -> None:
+        """LE point de la fusion : un echec PARTIEL de la lecture groupee ne doit
+        marquer AUCUNE row. Sinon la Bibliotheque, qui fait confiance au
+        marqueur, servirait un plan silencieusement prive de ses overrides —
+        le choix TMDb manuel disparaitrait sans un mot (bug R7-3)."""
+        self._corrupt_one_override_row()
+
+        # L'enrichissement retombe sur le chemin par row : l'override VALIDE est
+        # toujours applique, et la row dont l'override est illisible n'est PAS
+        # marquee -> la Bibliotheque la relira au lieu de la croire a jour.
+        payload = self.api._serialize_rows_for_payload(self.rows)
+        out = history_support._enrich_plan_payload(self.api, "R1", payload)
+        by_id = {r["row_id"]: r for r in out}
+        self.assertEqual(by_id[self.target]["proposed_title"], "Chosen Title")
+        self.assertEqual(by_id[self.target]["confidence"], 92)
+        self.assertNotIn(film_support.TMDB_OVERLAY_DONE_KEY, by_id["r0001"])
+
+    def test_apply_bulk_marks_nothing_when_read_unavailable(self) -> None:
+        """`overrides=None` (lecture impossible) : aucune row touchee, aucune
+        marquee — c'est ce qui rend le repli par row obligatoire en aval."""
+        rows = [{"row_id": "r0", "proposed_title": "Auto"}, {"row_id": "r1"}]
+
+        self.assertEqual(film_support.apply_tmdb_overrides_bulk(rows, None), 0)
+
+        for r in rows:
+            self.assertNotIn(film_support.TMDB_OVERLAY_DONE_KEY, r)
+        self.assertEqual(rows[0]["proposed_title"], "Auto")
+
+    def test_apply_bulk_skips_rows_without_row_id(self) -> None:
+        """Meme regle que `overlay_tmdb_override` : sans row_id, aucun etat
+        d'override n'est connu pour cette row -> pas de marqueur."""
+        rows: List[Dict[str, Any]] = [{"proposed_title": "Sans row_id"}, {"row_id": "", "proposed_title": "Vide"}]
+
+        self.assertEqual(film_support.apply_tmdb_overrides_bulk(rows, {}), 0)
+
+        for r in rows:
+            self.assertNotIn(film_support.TMDB_OVERLAY_DONE_KEY, r)
+
+    def test_apply_bulk_marks_rows_read_without_override(self) -> None:
+        """`{}` = run lu, sans aucun override : les rows SONT marquees (rien a
+        appliquer n'est pas un echec) — sans quoi la Bibliotheque relirait tout."""
+        rows = [{"row_id": "r0", "proposed_title": "Auto"}]
+
+        self.assertEqual(film_support.apply_tmdb_overrides_bulk(rows, {}), 0)
+
+        self.assertTrue(rows[0][film_support.TMDB_OVERLAY_DONE_KEY])
+        self.assertEqual(rows[0]["proposed_title"], "Auto")
+
+
 class FindPlanRowSingleRowTests(_PlanPerfBase):
     """HIGH : la fiche film ne doit plus materialiser tout le plan."""
 
