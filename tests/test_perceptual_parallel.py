@@ -139,9 +139,7 @@ class TestRunParallelTasks(unittest.TestCase):
             return "never"
 
         t0 = time.time()
-        results = run_parallel_tasks(
-            {"a": hang, "b": hang}, max_workers=1, timeout_per_task_s=0.15
-        )
+        results = run_parallel_tasks({"a": hang, "b": hang}, max_workers=1, timeout_per_task_s=0.15)
         elapsed = time.time() - t0
         self.assertLess(elapsed, 1.5, f"timeout non applique en mono-worker, elapsed={elapsed:.3f}s")
         self.assertFalse(results["a"][0])
