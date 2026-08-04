@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from pathlib import Path
@@ -59,6 +61,30 @@ def detect_nfo_runtime_mismatch(
         "delta_minutes": round(delta_min, 1),
         "delta_pct": round(delta_pct * 100.0, 1),
     }
+
+
+def profile_fingerprint(profile_json: Any) -> str:
+    """Empreinte stable du CONTENU d'un profil qualite.
+
+    Ultra-audit 2026-08 (N30) : le detecteur de rapport perime comparait le
+    triplet (engine_version, profile_id, profile_version), qui est CONTENT-BLIND.
+    `save_quality_profile` fait un `ON CONFLICT(id) DO UPDATE` qui ecrase
+    `profile_json` en GARDANT la version (infra/db/repositories/quality.py:91) :
+    un utilisateur qui modifie ses seuils sans changer id/version obtenait un
+    triplet identique, donc un rapport perime servi comme frais.
+
+    L'empreinte porte sur le JSON canonique (cles triees) -> insensible a
+    l'ordre des cles, sensible a toute valeur. Retourne "" si le profil est
+    inserialisable : l'appelant traite alors le rapport comme perime
+    (fail-closed = on recalcule, on ne sert jamais un score douteux).
+    """
+    if not isinstance(profile_json, dict):
+        return ""
+    try:
+        canonical = json.dumps(profile_json, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha1(canonical.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324
 
 
 def probe_settings_for_report(api: Any, run_row: Any) -> Dict[str, Any]:
@@ -206,6 +232,12 @@ def _probe_and_score(
     embedded_subs_raw = normalized.get("subtitles") if isinstance(normalized, dict) else None
     if isinstance(embedded_subs_raw, list):
         metrics_out["subtitles_embedded"] = list(embedded_subs_raw)
+    # Ultra-audit 2026-08 (N30) : empreinte du CONTENU du profil, pour que le
+    # detecteur de rapport perime cesse d'etre content-blind (cf
+    # `profile_fingerprint`). Purement additif dans metrics.
+    fingerprint = profile_fingerprint(profile_json)
+    if fingerprint:
+        metrics_out["profile_fingerprint"] = fingerprint
     store.quality.upsert_quality_report(
         run_id=run_id,
         row_id=row_id,
@@ -313,6 +345,8 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
         active_profile_version = int(active.get("version") or profile_json.get("version") or 1)
         active_engine_version = str(profile_json.get("engine_version") or "CinemaLux_v1")
 
+        active_fingerprint = profile_fingerprint(profile_json)
+
         stale_existing: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
         if reuse_existing:
             existing = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
@@ -321,6 +355,13 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 existing_engine = str(existing_metrics.get("engine_version") or "")
                 existing_profile_id = str(existing.get("profile_id") or "")
                 existing_profile_version = int(existing.get("profile_version") or 0)
+                # Ultra-audit 2026-08 (N30) : le triplet
+                # (engine_version, profile_id, profile_version) ne voit PAS un
+                # profil edite sans changement de version. On exige en plus
+                # l'empreinte du contenu. Rapport sans empreinte (anterieur au
+                # correctif) ou profil inserialisable -> considere PERIME, donc
+                # recalcule : fail-closed, jamais un score douteux servi.
+                existing_fingerprint = str(existing_metrics.get("profile_fingerprint") or "")
                 # Fix revue adversaire PR#854 : les 3 cles historiques viennent
                 # TOUTES du profil, qui est persiste — un changement de REGLE
                 # dans le code ne les faisait donc pas bouger, et une
@@ -330,18 +371,25 @@ def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) 
                 # plus l'estampille du code ; les rapports anterieurs ne portent
                 # pas le champ ("" != "2") et sont donc tous re-scores.
                 existing_rules_version = str(existing_metrics.get("scoring_rules_version") or "")
-                if (
+                # Les deux gardes portent sur des sources de peremption
+                # DISTINCTES et se composent : `same_profile` = "le rapport a ete
+                # calcule avec CE profil-ci, contenu compris" (N30), l'estampille
+                # = "avec CETTE version des regles de code" (PR#854). Le cache
+                # exige les deux ; le repli `stale_existing` n'est accorde qu'a un
+                # rapport dont le PROFIL est prouve identique -- servir un score
+                # issu d'un autre profil, ou d'un profil qu'on ne sait pas
+                # identifier (empreinte absente), serait le faux positif
+                # silencieux que N30 vient precisement de fermer.
+                same_profile = (
                     existing_engine == active_engine_version
-                    and existing_rules_version == str(SCORING_RULES_VERSION)
                     and existing_profile_id == active_profile_id
                     and existing_profile_version == active_profile_version
-                ):
+                    and bool(active_fingerprint)
+                    and existing_fingerprint == active_fingerprint
+                )
+                if same_profile and existing_rules_version == str(SCORING_RULES_VERSION):
                     return _build_cache_hit_result(api, store, run_id, row_id, existing, existing_metrics)
-                if (
-                    existing_engine == active_engine_version
-                    and existing_profile_id == active_profile_id
-                    and existing_profile_version == active_profile_version
-                ):
+                if same_profile:
                     # Seule l'estampille de code differe : ce rapport doit etre
                     # re-score, mais il reste le meilleur repli si le media n'est
                     # plus atteignable (cf. `_build_cache_hit_result`).

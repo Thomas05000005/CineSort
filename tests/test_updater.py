@@ -20,6 +20,7 @@ from cinesort.app.updater import (
     _write_cache,
     check_for_updates,
 )
+from cinesort.infra import state
 
 
 def _fake_payload(
@@ -57,7 +58,15 @@ class _FakeResponse:
 
 
 class WriteCacheAtomicTests(unittest.TestCase):
-    """_write_cache doit ecrire atomiquement (tmp + os.replace)."""
+    """_write_cache doit ecrire atomiquement ET durablement.
+
+    Le couple `.tmp` unique + fsync + `os.replace` n'est plus ecrit sur place
+    dans `updater` : il vit dans `cinesort.infra.state.atomic_write_bytes`,
+    seul ecrivain atomique du depot. Les tests patchent donc `os.replace` LA
+    OU IL EST APPELE. Ce qui est verifie n'a pas bouge d'un pouce : echec du
+    basculement -> pas de cache final, pas de `.tmp` orphelin, pas
+    d'exception qui remonte au caller.
+    """
 
     def test_roundtrip_and_no_tmp_leftover(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -74,10 +83,32 @@ class WriteCacheAtomicTests(unittest.TestCase):
     def test_replace_failure_cleans_tmp(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             cache_path = Path(d) / updater.CACHE_FILENAME
-            with mock.patch.object(updater.os, "replace", side_effect=OSError("boom")):
+            # On patche le VRAI `os.replace` du helper, pas `atomic_write_json`
+            # lui-meme : mocker l'ecrivain fabriquerait la condition testee et
+            # ne prouverait plus rien du chemin d'ecriture reel.
+            with mock.patch.object(state.os, "replace", side_effect=OSError("boom")):
                 _write_cache(cache_path, _fake_payload())
             # Echec du replace -> pas de cache final, pas de .tmp orphelin.
             self.assertFalse(cache_path.exists())
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
+
+    def test_replace_failure_leaves_previous_cache_intact(self) -> None:
+        """Un echec d'ecriture ne doit JAMAIS degrader le cache deja en place.
+
+        C'est la propriete que `write_text` n'avait pas (#787) : il tronquait
+        la cible AVANT d'ecrire, donc une coupure laissait un fichier vide.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            _write_cache(cache_path, _fake_payload(tag="7.7.0"))
+            before = cache_path.read_bytes()
+
+            with mock.patch.object(state.os, "replace", side_effect=OSError("boom")):
+                _write_cache(cache_path, _fake_payload(tag="9.9.9"))
+
+            self.assertEqual(cache_path.read_bytes(), before)
+            self.assertEqual(_read_cache(cache_path, cache_ttl_s=3600)["tag_name"], "7.7.0")
             leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
             self.assertEqual(leftovers, [])
 

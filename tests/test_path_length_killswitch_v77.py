@@ -279,13 +279,19 @@ class ApplyTvEpisodeKillSwitchTests(unittest.TestCase):
         return row
 
     def test_tv_path_trop_long_skip(self):
-        """Episode TV avec titre tres long : kill-switch declenche."""
+        """Serie au nom tres long : kill-switch declenche.
+
+        Le levier etait le TITRE D'EPISODE tant que l'apply renommait le fichier
+        en `SxxExx - Titre.ext`. Le fichier gardant desormais son nom source
+        (regle inviolable n1), la longueur du chemin cible ne depend plus que du
+        DOSSIER `Serie (annee)/Saison NN/` — c'est donc lui qu'on fait exploser.
+        """
         folder = self.root / "Series"
         folder.mkdir()
         (folder / "episode.mkv").write_bytes(b"x" * 2048)
 
-        # Episode title tres long pour exploser MAX_PATH
-        long_ep_title = "C" * 250
+        # Nom de serie tres long pour exploser MAX_PATH sur le dossier cible.
+        long_series = "C" * 250
 
         cfg = _DummyConfig(self.root)
         res = core.ApplyResult()
@@ -294,7 +300,7 @@ class ApplyTvEpisodeKillSwitchTests(unittest.TestCase):
         def log(level, msg):
             logs.append((level, msg))
 
-        row = self._make_row(tv_episode_title=long_ep_title)
+        row = self._make_row(tv_series_name=long_series, proposed_title=long_series)
         apply_tv_episode(
             cfg,
             folder,
