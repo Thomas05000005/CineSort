@@ -1747,8 +1747,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "lowercase_extensions" in payload:
         out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
     if "separator" in payload:
-        sep = str(payload.get("separator") or ".")
-        out["separator"] = sep if sep in {".", " ", "_", "-"} else "."
+        sep = str(payload.get("separator") or " ")
+        out["separator"] = sep if sep in {".", " ", "_", "-"} else " "
     return out
 
 
@@ -1789,8 +1789,13 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if "history_retention_days" in payload:
         out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
-    if "retention_days" in payload:
-        out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    # "retention_days" RETIRE (2026-08-03) — reglage FANTOME : persiste, jamais lu.
+    # Le seul cron de retention (app.py:495 et 1004 -> retention_cleanup) lit
+    # `history_retention_days` ci-dessus ; aucun code ne lisait `retention_days`.
+    # Le champ UI promettait "conservation des analyses perceptuelles et scores
+    # qualite" : cette purge n'existe pas, et la cabler par simple anciennete
+    # detruirait le cache probe vivant d'une bibliotheque stable (re-probe complet
+    # SMB/NAS). Le reglage est donc supprime plutot qu'invente.
     # VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review (defaut 30j, 0 = OFF).
     # Bornage [0, 3650] aligne sur history_retention_days. Le cron tourne 24h via
     # `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`, demarre depuis app.py.
