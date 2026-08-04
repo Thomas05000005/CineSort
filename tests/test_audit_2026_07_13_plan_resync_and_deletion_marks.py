@@ -109,6 +109,14 @@ class _StubApi:
     def _load_rows_from_plan_jsonl(self, run_paths: state.RunPaths) -> List[core.PlanRow]:
         return load_rows_from_plan_jsonl(run_paths)
 
+    def _serialize_rows_for_payload(self, rows: List[core.PlanRow]) -> List[Dict[str, Any]]:
+        # PERF (ultra-audit 2026-08) : la fiche film ne demande plus le plan
+        # ENTIER via api.run.get_plan mais UNE row via history_support.
+        # get_plan_row, qui s'appuie sur ce helper (present sur la vraie API).
+        from cinesort.ui.api.run_data_support import serialize_rows_for_payload
+
+        return serialize_rows_for_payload(rows)
+
     # -- infra
     def _get_or_create_infra(self, state_dir: Path):
         return self._store, None

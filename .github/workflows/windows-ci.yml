@@ -1,8 +1,29 @@
 name: windows-ci
 
 on:
+  # `push:` et `pull_request:` etaient tous deux SANS filtre de branche, ce qui
+  # declenchait DEUX runs pour chaque poussee sur une PR : un pour l'evenement
+  # `push` (sur la branche), un pour l'evenement `pull_request`. Les deux
+  # survivaient, parce que le groupe `concurrency` ci-dessous les range dans des
+  # groupes DIFFERENTS (`pull_request.number` pour l'un, `github.ref` pour
+  # l'autre).
+  #
+  # Mesure du 2026-08-04 : 25 branches sur 27 avaient les deux runs. Ce workflow
+  # a DEUX jobs sur `windows-latest` (dont un build PyInstaller complet), donc
+  # chaque poussee coutait 4 jobs Windows au lieu de 2 — sur le pool le plus
+  # rare, celui-la meme que le check REQUIS `Lint, Tests, Build` doit partager.
+  # Constate deux fois dans la journee : `windows-ci`, qui n'est pas requis,
+  # occupait 11 a 12 creneaux sur 14 pendant que la cascade de fusion etait a
+  # l'arret.
+  #
+  # Le filtre ci-dessous est la convention DEJA suivie par tous les autres
+  # workflows du depot (ci, bandit, codeql, gitleaks, mypy, pip-audit) :
+  # windows-ci en etait le seul ecart. La couverture est inchangee — une PR est
+  # toujours verifiee via l'evenement `pull_request`, et `main` via `push`.
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # OpenSSF Scorecard : top-level permissions explicites = read-only.

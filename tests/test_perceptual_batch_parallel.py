@@ -235,7 +235,9 @@ class TestAnalyzePerceptualBatch(unittest.TestCase):
     def test_mixed_results_preserved_order(self, mock_get):
         """Films dans un ordre random de retour, results suivent l'ordre des row_ids."""
 
-        def fake_report(api, run_id, row_id, options):
+        # `**_kw` : absorbe `rows_index` (index de plan partage, cf N24) sans
+        # rien changer a ce que ces tests verifient (ordre, isolation, pool).
+        def fake_report(api, run_id, row_id, options, **_kw):
             # film r2 echoue, autres reussissent
             if row_id == "r2":
                 return {"ok": False, "message": "erreur film 2"}
@@ -256,7 +258,9 @@ class TestAnalyzePerceptualBatch(unittest.TestCase):
     def test_worker_crash_isolated_does_not_break_batch(self, mock_get):
         """Un worker qui leve une exception ne casse pas les autres."""
 
-        def fake_report(api, run_id, row_id, options):
+        # `**_kw` : absorbe `rows_index` (index de plan partage, cf N24) sans
+        # rien changer a ce que ces tests verifient (ordre, isolation, pool).
+        def fake_report(api, run_id, row_id, options, **_kw):
             if row_id == "r2":
                 raise RuntimeError("ffmpeg crash sur r2")
             return {"ok": True, "perceptual": {"global_score": 80}}
@@ -289,7 +293,9 @@ class TestAnalyzePerceptualBatch(unittest.TestCase):
         call_lock = threading.Lock()
         call_count = {"n": 0}
 
-        def fake_report(api, run_id, row_id, options):
+        # `**_kw` : absorbe `rows_index` (index de plan partage, cf N24) sans
+        # rien changer a ce que ces tests verifient (ordre, isolation, pool).
+        def fake_report(api, run_id, row_id, options, **_kw):
             with call_lock:
                 call_count["n"] += 1
             time.sleep(0.05)
