@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
 
-from cinesort.app._dir_utils import is_dir_empty
+from cinesort.app._dir_utils import is_dir_empty, is_reparse_point
 from cinesort.app.move_journal import atomic_move
 from cinesort.domain.core import (
     RESIDUAL_IMAGE_EXTS,
@@ -16,6 +16,12 @@ from cinesort.domain.core import (
 )
 
 _logger = logging.getLogger(__name__)
+
+# Issue #517 : un sidecar credible ne pese pas 500 Mo. Au-dela, un fichier dont
+# l'extension est dans une famille residuelle (.txt, .jpg, .nfo...) est presume
+# etre autre chose qu'un sidecar — une video renommee, une archive — et le
+# dossier devient `ambiguous` : classement par extension SEULE ecarte.
+MAX_RESIDUAL_SIDECAR_BYTES = 500 * 1024 * 1024
 
 if TYPE_CHECKING:
     from cinesort.domain.core import ApplyResult, Config
@@ -64,9 +70,18 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
 
     Renvoie une étiquette utilisée par le preview et le move pour distinguer les dossiers
     sûrs à déplacer (`eligible`/`empty`) des dossiers à protéger (vidéos, symlinks).
+
+    Issue #517 — `path` lui-même est testé AVANT toute énumération : une jonction
+    NTFS de premier niveau (`root\\DisqueMutualisé` -> `D:\\...`) passe `is_dir()`
+    et `rglob` descend dans sa cible, si bien que le classement se décidait sur des
+    fichiers situés HORS de la bibliothèque, puis déplaçait le point de montage
+    vers `_Nettoyage`. Sur ce chemin destructif, ne pas traverser est toujours
+    plus sûr que traverser.
     """
     if not path.exists() or not path.is_dir():
         return "invalid"
+    if is_reparse_point(path):
+        return "symlink"
     if is_dir_empty(path):
         return "empty"
 
@@ -77,7 +92,7 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
     saw_file = False
     try:
         for item in path.rglob("*"):
-            if item.is_symlink():
+            if is_reparse_point(item):
                 return "symlink"
             if item.is_dir():
                 continue
@@ -87,6 +102,8 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
             ext = item.suffix.lower()
             if ext in cfg.video_exts or ext in {".iso"}:
                 return "has_video"
+            if item.stat().st_size > MAX_RESIDUAL_SIDECAR_BYTES:
+                return "ambiguous"
             if ext not in allowed_exts:
                 return "ambiguous"
     except (PermissionError, OSError):
@@ -342,6 +359,10 @@ def _move_empty_top_level_dirs(
 
     No-op si l'option `move_empty_folders_enabled` est désactivée. Met à jour
     `res.empty_folders_moved_count`.
+
+    Issue #517 — même angle mort que le nettoyage résiduel : une jonction NTFS
+    dont la cible est vide (volume démonté, disque mutualisé vidé) est vue
+    `is_dir_empty() == True` et le point de montage partirait vers `_Vide`.
     """
     if not cfg.move_empty_folders_enabled:
         return
@@ -376,7 +397,7 @@ def _move_empty_top_level_dirs(
 
     res.empty_folders_moved_count += _move_dirs_to_bucket(
         candidates,
-        is_eligible=is_dir_empty,
+        is_eligible=lambda src: is_dir_empty(src) and not is_reparse_point(src),
         bucket_root=bucket_root,
         dry_run=dry_run,
         log=log,

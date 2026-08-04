@@ -117,11 +117,20 @@ def parse_tv_info(folder: Path, video: Path) -> Optional[TvInfo]:
     if not series_name:
         series_name = folder_name
 
-    # Extract year from folder name or series title.
+    # Extract year from folder name, then fall back to the video filename.
+    # En arborescence plate (ex. "Breaking.Bad.2008.S01E01.mkv" dans un dossier
+    # sans annee), l'annee est presente dans le nom de fichier : sans ce fallback
+    # elle etait perdue (asymetrie avec saison/episode, extraits du fichier).
     year = None
-    year_match = _YEAR_RE.search(folder.parent.name if season_from_folder is not None else folder_name)
-    if year_match:
-        year = int(year_match.group(1))
+    year_sources = [
+        folder.parent.name if season_from_folder is not None else folder_name,
+        video_name,
+    ]
+    for src in year_sources:
+        year_match = _YEAR_RE.search(src)
+        if year_match:
+            year = int(year_match.group(1))
+            break
 
     return TvInfo(
         series_name=series_name,

@@ -52,6 +52,45 @@ jobs:
           path: uv.lock
           retention-days: 14
 
+  # Garde-fou de syntaxe du front.
+  #
+  # Ce job existe parce que `node --check` MENTAIT. Mesure du 2026-08-03
+  # (Node v24.14.1, depot sans package.json) : en injectant `const BROKEN = ;`
+  # dans chacun des 48 `.js` de `web/dashboard/`, 47 sortaient quand meme en 0.
+  # Ce sont des modules ESM ; sans `package.json` declarant `"type": "module"`,
+  # la detection de syntaxe de module de Node s'interpose et le processus sort
+  # en 0 sans jamais reverifier la source dans le goal « module ». Seul
+  # `bootstrap-debug.js` (IIFE, sans import ni export, charge par un
+  # `<script src>` classique) etait reellement verifie. Une vingtaine de bilans
+  # internes citaient ce `node --check` comme preuve de validite du JS : ces
+  # preuves etaient nulles.
+  #
+  # `scripts/check_js_syntax.mjs` impose le goal explicitement (`--input-type`,
+  # source sur stdin), derive ce goal de la maniere dont chaque fichier est
+  # reellement charge par le navigateur, et s'auto-teste par canaris avant de
+  # conclure. Code 1 = erreur de syntaxe ; code 2 = l'outil ne se fait plus
+  # confiance (il refuse alors de verdir).
+  js-syntax:
+    name: Syntaxe JS (web/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout du depot
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # Auto-test d'abord : si les canaris ne detectent plus rien, autant le
+      # savoir avant de lire un « tout va bien » qui ne voudrait rien dire.
+      - name: Auto-test du verificateur (canaris)
+        run: node scripts/check_js_syntax.mjs --self-test
+
+      - name: Verification de syntaxe des sources de web/
+        run: node scripts/check_js_syntax.mjs
+
   ci:
     name: Lint, Tests, Build
     runs-on: windows-latest
