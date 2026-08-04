@@ -11,7 +11,7 @@ dashboard (`web/dashboard/views/parametres.js` -> POST
 directement : le trou de la derniere campagne etait precisement une batterie qui
 prouvait un comportement sur un chemin que la production n'empruntait pas.
 
-Seul le transport reseau est simule (`urlretrieve`), comme le ferait un
+Seul le transport reseau est simule (`urlopen`), comme le ferait un
 attaquant en MITM ou un miroir compromis : tout le reste — resolution de
 l'empreinte, verification, bornes, ecriture disque, remontee d'erreur a
 l'UI — est le code de production.
@@ -47,29 +47,31 @@ def _zip_bytes(entries: Dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
-def _fake_transport(payload: bytes) -> Callable[..., None]:
-    """Remplace urlretrieve : sert `payload` quelle que soit l'URL demandee.
+def _request_url(request: object) -> str:
+    """URL demandee, que le transport recoive une `Request` ou une chaine."""
+    return str(getattr(request, "full_url", request))
 
-    Respecte le contrat d'urllib (appel du reporthook), pour que le bornage du
-    telechargement soit exerce comme en production et pas court-circuite.
+
+class _FakeHttpResponse(io.BytesIO):
+    """Reponse minimale facon `http.client.HTTPResponse` : lecture + `.headers`."""
+
+    def __init__(self, payload: bytes) -> None:
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload))}
+
+
+def _fake_transport(payload: bytes) -> Callable[..., _FakeHttpResponse]:
+    """Remplace `urlopen` : sert `payload` quelle que soit l'URL demandee.
+
+    Seul le transport reseau est simule : le streaming vers le disque, la taille
+    annoncee et l'appel du reporthook restent du code de production, donc le
+    bornage du telechargement est exerce comme en vrai et pas court-circuite.
     """
 
-    def _download(url: str, dest: str, reporthook: Optional[Callable[[int, int, int], None]] = None) -> None:
-        block = 8192
-        if reporthook is not None:
-            reporthook(0, block, len(payload))
-        with open(dest, "wb") as out:
-            written = 0
-            blocknum = 0
-            while written < len(payload):
-                chunk = payload[written : written + block]
-                out.write(chunk)
-                written += len(chunk)
-                blocknum += 1
-                if reporthook is not None:
-                    reporthook(blocknum, block, len(payload))
+    def _open(request: object, timeout: Optional[float] = None, **kwargs: object) -> _FakeHttpResponse:
+        return _FakeHttpResponse(payload)
 
-    return _download
+    return _open
 
 
 def _write_bomb_zip(path: Path, entry: str, uncompressed_bytes: int) -> str:
@@ -94,26 +96,34 @@ def _write_bomb_zip(path: Path, entry: str, uncompressed_bytes: int) -> str:
     return digest.hexdigest()
 
 
-def _file_transport(source: Path) -> Callable[..., None]:
-    """Remplace urlretrieve : recopie `source` par blocs, sans charger le fichier en memoire."""
+class _FakeFileResponse:
+    """Reponse `urlopen` servie depuis un fichier, sans le charger en memoire."""
 
-    def _download(url: str, dest: str, reporthook: Optional[Callable[[int, int, int], None]] = None) -> None:
-        block = 65536
-        total = source.stat().st_size
-        if reporthook is not None:
-            reporthook(0, block, total)
-        with open(source, "rb") as src, open(dest, "wb") as out:
-            blocknum = 0
-            while True:
-                data = src.read(block)
-                if not data:
-                    break
-                out.write(data)
-                blocknum += 1
-                if reporthook is not None:
-                    reporthook(blocknum, block, total)
+    def __init__(self, source: Path) -> None:
+        self._fh = source.open("rb")
+        self.headers = {"Content-Length": str(source.stat().st_size)}
 
-    return _download
+    def read(self, size: int = -1) -> bytes:
+        return self._fh.read(size)
+
+    def close(self) -> None:
+        self._fh.close()
+
+    def __enter__(self) -> "_FakeFileResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.close()
+        return False
+
+
+def _file_transport(source: Path) -> Callable[..., _FakeFileResponse]:
+    """Remplace `urlopen` : sert `source` par blocs, sans charger le fichier en memoire."""
+
+    def _open(request: object, timeout: Optional[float] = None, **kwargs: object) -> _FakeFileResponse:
+        return _FakeFileResponse(source)
+
+    return _open
 
 
 class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
@@ -165,7 +175,7 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
                 "MediaInfo.exe": _PAYLOAD,
             }
         )
-        with mock.patch.object(auto_install, "urlretrieve", side_effect=_fake_transport(tampered)):
+        with mock.patch.object(auto_install, "urlopen", side_effect=_fake_transport(tampered)):
             payload = self.api.runtime.auto_install_probe_tools()
 
         self._assert_rien_installe(payload)
@@ -183,7 +193,7 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
         with (
             mock.patch.object(auto_install, "EXPECTED_SHA256_FFMPEG", None),
             mock.patch.object(auto_install, "EXPECTED_SHA256_MEDIAINFO", None),
-            mock.patch.object(auto_install, "urlretrieve", side_effect=_fake_transport(archive)) as transport,
+            mock.patch.object(auto_install, "urlopen", side_effect=_fake_transport(archive)) as transport,
         ):
             payload = self.api.runtime.auto_install_probe_tools()
 
@@ -210,7 +220,7 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
 
         with (
             mock.patch.dict(os.environ, {auto_install._ENV_SHA256_FFMPEG: digest}),
-            mock.patch.object(auto_install, "urlretrieve", side_effect=_file_transport(bomb_path)),
+            mock.patch.object(auto_install, "urlopen", side_effect=_file_transport(bomb_path)),
         ):
             payload = self.api.runtime.auto_install_probe_tools()
 
@@ -238,9 +248,9 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
         )
         mi_archive = _zip_bytes({"MediaInfo.exe": b"real-mediainfo"})
 
-        def _dispatch(url: str, dest: str, reporthook=None) -> None:
-            payload = ff_archive if "ffmpeg" in url.lower() else mi_archive
-            _fake_transport(payload)(url, dest, reporthook)
+        def _dispatch(request: object, timeout: Optional[float] = None, **kwargs: object) -> _FakeHttpResponse:
+            payload = ff_archive if "ffmpeg" in _request_url(request).lower() else mi_archive
+            return _fake_transport(payload)(request, timeout)
 
         with (
             mock.patch.dict(
@@ -250,7 +260,7 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
                     auto_install._ENV_SHA256_MEDIAINFO: hashlib.sha256(mi_archive).hexdigest(),
                 },
             ),
-            mock.patch.object(auto_install, "urlretrieve", side_effect=_dispatch),
+            mock.patch.object(auto_install, "urlopen", side_effect=_dispatch),
         ):
             payload = self.api.runtime.auto_install_probe_tools()
 

@@ -12,17 +12,25 @@ en tres grande majorite par les executions PRECEDENTES de cet audit. Il
 n'est plus lu par personne : produire davantage ne rend plus service, ca
 enterre les vrais problemes sous le bruit.
 
-Avant toute ouverture, COMPTE l'existant :
-  gh pr list --state open --limit 300 --json number,title
-  gh issue list --state open --limit 400 --json number,title
+Avant toute ouverture, COMPTE l'existant, et calcule la SOMME des deux :
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:pr+is:open&per_page=1' -q .total_count
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:issue+is:open&per_page=1' -q .total_count
 
 Puis applique ce budget, par execution :
-- au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs, petits,
-  testes et sans arbitrage produit ;
-- au plus 5 issues ouvertes, reservees aux findings de severite HIGH ou
-  superieure ;
-- 0 ouverture tant que le total ouvert depasse 150 : dans ce cas tu ne
-  fais que COMMENTER l'existant et proposer des fermetures.
+- 0 ouverture des que PR_ouvertes + issues_ouvertes depasse 150. C'est une
+  SOMME, pas un seuil par categorie : 110 PR et 195 issues font 305, donc
+  ZERO ouverture. Dans ce cas tu ne fais que COMMENTER l'existant et
+  proposer des fermetures. Cette ligne prime sur les deux suivantes ;
+- sinon, au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs,
+  petits, testes et sans arbitrage produit ;
+- sinon, au plus 5 issues ouvertes, reservees aux findings de severite HIGH
+  ou superieure.
+
+Repere mesure le 2026-08-03 : 110 PR + 195 issues ouvertes, et la file
+GitHub Actions a atteint 999 runs pour 16 creneaux d'execution, soit ~18 h
+de latence avant qu'une PR puisse fusionner. Ouvrir une PR de plus dans cet
+etat ne fait pas avancer le depot : ca retarde les correctifs deja prets.
+Le travail utile, quand le seuil est franchi, est de FERMER et de FUSIONNER.
 
 Regles de non-duplication, dans cet ordre :
 1. Le finding est-il deja CORRIGE sur main ? Verifie dans le code, pas
