@@ -41,9 +41,11 @@ def file_name_looks_bonus(name: str) -> bool:
     """Filtrage textuel uniquement (pas de stat) : detecte les fichiers video
     qui sont vraisemblablement des bonus/making-of/extras d'apres leur nom seul.
 
-    Reproduit la closure interne `_file_looks_bonus` de discover_candidate_folders
-    pour exposer la verification a d'autres modules (ex: plan_support_core qui
-    veut filtrer les videos BONUS d'un dossier "collection" type 'Star Wars/').
+    SOURCE UNIQUE de cette heuristique dans le module. Deux clones existaient :
+    `_looks_like_nested_extra_video` (variante `Path`, zero appelant), supprime
+    par #705, et la closure `_file_looks_bonus` de `discover_candidate_folders`,
+    supprimee ici au profit de cette fonction. Elles etaient a l'octet pres la
+    meme regle et pouvaient deriver independamment.
 
     Args:
         name: Nom du fichier (avec ou sans chemin parent).
@@ -212,16 +214,6 @@ def discover_candidate_folders(
     video_exts = set(getattr(cfg, "video_exts", set()) or set())
     candidates: List[Path] = []
 
-    def _file_looks_bonus(name: str) -> bool:
-        """Filtrage textuel uniquement (pas de stat) : detecte un nom de
-        bonus/extra sans toucher au filesystem.
-        """
-        if IGNORE_VIDEO_NAME_RE.search(name):
-            return True
-        stem = name.rsplit(".", 1)[0].lower().replace(".", " ").replace("_", " ").replace("-", " ")
-        stem = re.sub(r"\s+", " ", stem).strip()
-        return stem in GENERIC_EXTRA_VIDEO_NAMES
-
     def _yyyy_folder_shape(path: Path) -> tuple[bool, bool]:
         """Inspecte un dossier `(YYYY)` en UN scandir.
 
@@ -249,7 +241,7 @@ def discover_candidate_folders(
                     continue
                 en = e.name
                 d = en.rfind(".")
-                if d >= 0 and en[d:].lower() in video_exts and not _file_looks_bonus(en):
+                if d >= 0 and en[d:].lower() in video_exts and not file_name_looks_bonus(en):
                     has_direct_video = True
         finally:
             with contextlib.suppress(OSError, AttributeError):
@@ -342,7 +334,7 @@ def discover_candidate_folders(
             # Films poses directement a la racine : la racine devient candidat.
             # iter_videos() en phase 2 est non-recursif, donc les fichiers des
             # sous-dossiers ne seront pas double-comptes.
-            non_bonus_root_videos = [v for v in video_files if not _file_looks_bonus(v)]
+            non_bonus_root_videos = [v for v in video_files if not file_name_looks_bonus(v)]
             if non_bonus_root_videos:
                 candidates.append(current)
 
@@ -357,7 +349,7 @@ def discover_candidate_folders(
         if subdirs:
             # Dossier avec sous-dossiers : candidat uniquement si au moins un fichier
             # video non-bonus est present au niveau courant.
-            non_bonus_videos = [v for v in video_files if not _file_looks_bonus(v)]
+            non_bonus_videos = [v for v in video_files if not file_name_looks_bonus(v)]
             if depth >= 1 and non_bonus_videos:
                 candidates.append(current)
             for sd in subdirs:
@@ -372,7 +364,7 @@ def discover_candidate_folders(
             # bonus.mkv...) ne doit pas etre planifiee comme film. Hors descente
             # `(YYYY)`, le comportement historique est strictement preserve.
             if depth >= 1 and any_file:
-                if in_year_descent and video_files and all(_file_looks_bonus(v) for v in video_files):
+                if in_year_descent and video_files and all(file_name_looks_bonus(v) for v in video_files):
                     _bump_stats_reject(stats, "ignore_bonus_only_folder", path=str(current))
                 else:
                     candidates.append(current)
