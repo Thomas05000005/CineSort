@@ -1086,19 +1086,26 @@ def rescan_row(
 # ---------------------------------------------------------------------------
 
 
+# Colonnes de l'export, dans l'ordre — SOURCE UNIQUE.
+# Cette constante existait mais n'etait lue nulle part : la liste etait re-ecrite
+# a la main 3 fois (entete CSV, ordre des valeurs CSV, cles de
+# `_row_to_export_dict`), et la copie morte avait deja DERIVE (elle annoncait
+# `tier_v2` / `audio_languages` / `subtitle_languages` la ou l'export emet
+# `tier` / `audio_langs` / `subs_langs`). Les 3 sites en derivent desormais, et
+# `test_export_fields_single_source` verrouille l'alignement.
 _EXPORT_FIELDS = (
     "row_id",
     "title",
     "year",
     "score_v2",
-    "tier_v2",
+    "tier",
     "path",
     "size_bytes",
     "duration_min",
     "codec",
     "resolution",
-    "audio_languages",
-    "subtitle_languages",
+    "audio_langs",
+    "subs_langs",
     "warnings",
 )
 
@@ -1200,44 +1207,9 @@ def export_films(
             # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
             with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
                 writer = csv.writer(fp, delimiter=";")
-                writer.writerow(
-                    [
-                        "row_id",
-                        "title",
-                        "year",
-                        "score_v2",
-                        "tier",
-                        "path",
-                        "size_bytes",
-                        "duration_min",
-                        "codec",
-                        "resolution",
-                        "audio_langs",
-                        "subs_langs",
-                        "warnings",
-                    ]
-                )
+                writer.writerow(list(_EXPORT_FIELDS))
                 for row in export_rows:
-                    writer.writerow(
-                        [
-                            _serialize_for_csv(row.get(k))
-                            for k in [
-                                "row_id",
-                                "title",
-                                "year",
-                                "score_v2",
-                                "tier",
-                                "path",
-                                "size_bytes",
-                                "duration_min",
-                                "codec",
-                                "resolution",
-                                "audio_langs",
-                                "subs_langs",
-                                "warnings",
-                            ]
-                        ]
-                    )
+                    writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
             return {
                 "ok": True,
                 "file_path": str(file_path),

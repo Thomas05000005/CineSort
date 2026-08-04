@@ -1,7 +1,7 @@
 """Moteur de regles custom pour scoring qualite (G6).
 
 Whitelist stricte : pas d'eval, pas d'importation dynamique.
-17 fields, 11 operators, 7 actions. Max 50 regles x 10 conditions par profil.
+20 fields, 11 operators, 7 actions. Max 50 regles x 10 conditions par profil.
 """
 
 from __future__ import annotations
@@ -23,7 +23,14 @@ MAX_RULES_JSON_BYTES = 8000
 # Chaque entree mappe (section, key) dans le contexte {detected, __context__, __computed__}.
 FIELD_PATHS: Dict[str, Tuple[str, str]] = {
     "video_codec": ("detected", "video_codec"),
+    # `audio_codec` = codec de BASE rapporte par le probe ('dts', 'truehd', 'eac3').
+    # `audio_codec_canonical` = etiquette composee ('dts-hd ma', 'truehd atmos',
+    # 'dts:x', 'eac3 atmos'), cf. quality_score._canonical_audio_codec. Deux champs
+    # distincts (revue CodeRabbit PR#854) : basculer `audio_codec` sur l'etiquette
+    # canonique aurait desactive en silence toutes les regles `audio_codec = "dts"`
+    # deja enregistrees, l'operateur `=` etant une egalite stricte.
     "audio_codec": ("detected", "audio_best_codec"),
+    "audio_codec_canonical": ("detected", "audio_best_codec_canonical"),
     "resolution": ("detected", "resolution"),
     "resolution_rank": ("__computed__", "resolution_rank"),
     "year": ("__context__", "year"),

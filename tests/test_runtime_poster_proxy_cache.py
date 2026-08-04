@@ -290,5 +290,50 @@ class PosterProxyCacheTests(unittest.TestCase):
         self.assertEqual(fake_session.get.call_count, 0)
 
 
+class TestAtomicWriteConcurrency(unittest.TestCase):
+    """Regression CWE-362 : `_atomic_write` sous ecriture multi-thread.
+
+    Le serveur cache est multi-thread (ThreadingHTTPServer). Avant le fix, le
+    fichier `.tmp` portait un nom fixe (`<target>.tmp`) partage par toutes les
+    requetes concurrentes visant le meme poster : deux writes simultanes
+    s'entremelaient dans le meme `.tmp`, corrompant le contenu final.
+    Le nom de `.tmp` est desormais unique par pid/thread/instant.
+    Audit 2026-07-08.
+    """
+
+    def test_concurrent_writes_never_corrupt(self) -> None:
+        import threading
+
+        with TemporaryDirectory() as td:
+            target = Path(td) / "posters" / "w342" / "42.webp"
+            # Payloads distincts, chacun d'une taille suffisante pour rendre un
+            # entrelacement visible s'il survenait.
+            payloads = [bytes([i]) * 4096 for i in range(1, 33)]
+            barrier = threading.Barrier(len(payloads))
+            errors: List[BaseException] = []
+
+            def _worker(payload: bytes) -> None:
+                try:
+                    barrier.wait()
+                    poster_proxy._atomic_write(target, payload)
+                except BaseException as exc:  # noqa: BLE001
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=_worker, args=(p,)) for p in payloads]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [], f"Ecritures concurrentes en erreur: {errors}")
+            # Le contenu final doit etre EXACTEMENT l'un des payloads (jamais un
+            # melange). Un octet uniforme = pas d'entrelacement.
+            final = target.read_bytes()
+            self.assertIn(final, payloads, "Contenu final corrompu (entrelacement .tmp)")
+            # Aucun `.tmp` residuel ne doit subsister apres coup.
+            leftovers = list(target.parent.glob("*.tmp*"))
+            self.assertEqual(leftovers, [], f".tmp residuels: {leftovers}")
+
+
 if __name__ == "__main__":
     unittest.main()
