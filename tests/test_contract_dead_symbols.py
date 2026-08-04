@@ -123,7 +123,19 @@ KNOWN_DEAD: Dict[str, str] = {
     "cinesort/infra/notifications.py::NIF_MESSAGE": "constante module-level jamais lue",
     "cinesort/infra/notifications.py::NIIF_NOSOUND": "constante module-level jamais lue",
     "cinesort/infra/probe/_source_circuit_breaker.py::reset_default_breaker": "fonction/classe sans aucun lecteur dans le depot",
-    "cinesort/infra/probe/disk_cache.py::prune_disk_cache": "fonction/classe sans aucun lecteur dans le depot",
+    # `disk_cache.prune_disk_cache` est SORTI de cette liste le 2026-08-04 : la
+    # branche `rel/atomic-write-durability` reecrit son corps (la retention doit
+    # desormais balayer les `.tmp` orphelins, dont le nom unique interdit tout
+    # recyclage) et `tests/test_atomic_write_durability.py` l'exerce. La regle
+    # du cliquet est que la liste ne peut que RETRECIR : une entree qui a gagne
+    # un lecteur se retire, elle ne se re-justifie pas.
+    #
+    # NUANCE A NE PAS PERDRE : ce lecteur est un TEST. La fonction n'a toujours
+    # aucun appelant en PRODUCTION (verifie le 2026-08-04 :
+    # `grep -rn prune_disk_cache cinesort/ app.py` ne rend que sa definition).
+    # `USE_ROOTS` inclut `tests/` deliberement (« zero faux positif »), donc le
+    # contrat la considere vivante — mais le cablage reel du pruner de cache
+    # probe reste a faire, et ce n'est pas au cliquet de le rappeler.
     "cinesort/infra/state.py::ensure_dir": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/infra/state.py::write_text_safe": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/ui/api/quality_audit_support.py::_extract_warnings_from_payload": "fonction/classe sans aucun lecteur dans le depot",
