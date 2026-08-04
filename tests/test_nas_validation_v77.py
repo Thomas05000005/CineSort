@@ -207,8 +207,7 @@ class RunNasBenchmarkTests(unittest.TestCase):
             self.assertGreater(
                 result["wal_growth_kb"],
                 0.0,
-                "wal_growth_kb doit etre > 0 : la mesure est capturee avant le "
-                "wal_checkpoint(TRUNCATE) du finally.",
+                "wal_growth_kb doit etre > 0 : la mesure est capturee avant le wal_checkpoint(TRUNCATE) du finally.",
             )
 
     def test_benchmark_result_is_json_serializable(self):
