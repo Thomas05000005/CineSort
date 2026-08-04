@@ -133,6 +133,16 @@ def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
 
 
 def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
+    """Ecrit le cache de maniere atomique ET durable (helper commun).
+
+    Le check tourne dans un thread daemon (check_for_update_async) pendant que
+    l'UI peut lire via get_cached_info : une ecriture directe write_text() peut
+    etre lue tronquee, ou laisser un JSON partiel apres crash/coupure. Le
+    `os.replace` interne au helper est atomique -> un lecteur voit soit
+    l'ancien fichier, soit le nouveau, jamais un melange. Meme couple
+    (tmp unique + fsync + controle de taille) que tmdb_client, poster_proxy et
+    quarantine_ttl, qui passent tous par `cinesort.infra.state`.
+    """
     if not cache_path:
         return
     try:
@@ -140,6 +150,14 @@ def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
         # Une coupure a cet instant laissait un `update_cache.json` vide ou
         # partiel que `_read_cache` rejetait ensuite a chaque boot -> un appel
         # GitHub par demarrage, jusqu'au rate limit 60/h.
+        #
+        # Conflit avec #789 (main) : meme issue #787, meme intention. Main
+        # ecrivait `tmp.write_text(...)` puis `os.replace` — SANS fsync, donc
+        # sans la moitie de l'invariant qui protege du crash systeme, et avec
+        # un `.tmp` suffixe du seul pid (deux threads du meme processus
+        # partagent ce nom). Le helper unique fait les deux moities ensemble
+        # et nettoie son `.tmp` en `finally` : la version inline de main est
+        # retiree, pas conservee en double.
         atomic_write_json(cache_path, {"ts": time.time(), "payload": payload}, indent=None)
     except OSError as exc:
         logger.debug("Updater: ecriture cache impossible (%s)", exc)

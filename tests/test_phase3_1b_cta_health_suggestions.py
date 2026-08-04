@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from tests._jsexec import require_node, run_module_test
+from tests._jsexec import inline_module, require_node, run_module_test
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ACCUEIL_JS = _ROOT / "web" / "dashboard" / "views" / "accueil.js"
@@ -150,7 +150,12 @@ class IntegrationTests(unittest.TestCase):
 # marqueur unique par source de donnees. Si un payload cesse d'etre exploite
 # (ou est passe a la mauvaise position), son marqueur disparait du HTML.
 
-_ACCUEIL_STUBS = """
+# `deriveRunStatus` (core/run-status.js, partage avec /historique) n'est PAS
+# stubbe : on injecte la VRAIE source, un stub maison testerait la copie du
+# testeur au lieu du code livre (cf. tests/_jsexec.inline_module).
+_ACCUEIL_STUBS = (
+    inline_module("core/run-status.js")
+    + """
 const escapeHtml = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const apiPost = async () => ({});
@@ -159,6 +164,7 @@ const getNavSignal = () => null;
 const navigateTo = () => {};
 const rightPanel = { setSections: () => {}, setTitle: () => {} };
 """
+)
 
 _ACCUEIL_EXTRA = """
 export { _renderAccueil as __renderAccueil };

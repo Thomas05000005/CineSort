@@ -65,7 +65,7 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "state_dir_example": "FANTOME - exemple onboarding, aucun lecteur",
     "tmdb_key_protection": "FANTOME - meta GET jamais affichee par l'UI",
     "tmdb_key_warning": "FANTOME - meta GET jamais affichee par l'UI",
-    # --- WRITE_ONLY (13) : UI ecrit/affiche, aucune lecture backend hors persistance ---
+    # --- WRITE_ONLY (12) : UI ecrit/affiche, aucune lecture backend hors persistance ---
     # NB : auto_approve_enabled / auto_approve_threshold RETIRES 2026-07-10 — desormais
     # LUS par history_support.load_validation (seed READ-TIME de la Validation via
     # run_read_support.seed_auto_approve_decisions / is_auto_approvable). Feature cablee.
@@ -80,7 +80,9 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "light_intensity": "WRITE_ONLY - effet client-side (variables CSS)",
     "notifications_enabled": "WRITE_ONLY - R8-069 : le gate desktop lit desktop_notifications_enabled, ce toggle n'a plus aucun lecteur",
     "onboarding_completed": "WRITE_ONLY - toggle parametres.js:328 mais AUCUN lecteur (ni wizard ni backend)",
-    "retention_days": "WRITE_ONLY - persiste mais aucun lecteur backend",
+    # NB : "retention_days" RETIRE 2026-08-03 — le reglage fantome a ete SUPPRIME
+    # (settings_support._save_section_advanced + champ parametres.js), pas cable :
+    # la purge "scores et analyses" qu'il promettait n'existe pas cote backend.
     "theme": "WRITE_ONLY - effet client-side (app.js:899 document.body.dataset.theme)",
     # --- HORS matrice JSON (2) : _LITERAL_DEFAULTS est un AnnAssign que
     # m3_settings.py ne parsait pas (branche literal_default morte). Ce test

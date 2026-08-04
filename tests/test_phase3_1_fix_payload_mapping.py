@@ -14,6 +14,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from tests._jsexec import require_node, run_module_test
+from tests.test_revue_20260803_modales_et_payloads import ACCUEIL_STUBS
+
 _ROOT = Path(__file__).resolve().parents[1]
 _ACCUEIL_JS = _ROOT / "web" / "dashboard" / "views" / "accueil.js"
 
@@ -67,15 +70,33 @@ class StatusDerivationTests(unittest.TestCase):
         cls.js = _ACCUEIL_JS.read_text(encoding="utf-8")
 
     def test_derives_status_from_errors_and_applied(self) -> None:
-        # runs_history[] n'expose pas un champ "status". On le derive :
-        # ERROR si errors_count > 0, PARTIAL si applied < total, DONE sinon.
-        # Accepte la fonction `_deriveRunStatus` (nouveau nom) ou `derivedStatus` (ancien).
-        self.assertTrue(
-            "_deriveRunStatus" in self.js or "derivedStatus" in self.js,
-            "Le code doit avoir une fonction de derivation du status",
+        """ERROR si errors_count > 0, PARTIAL si applied < total, DONE sinon.
+
+        Revue adversaire PR #855 : ce test cherchait le NOM `_deriveRunStatus`
+        dans la source. Il est tombe quand la derivation a demenage dans
+        `core/run-status.js` (source unique partagee avec /historique), alors
+        que le comportement teste, lui, ne changeait pas. On execute desormais
+        le vrai rendu : le nom du helper n'a plus d'importance, son resultat si.
+        """
+        require_node(self)
+        res = run_module_test(
+            _ACCUEIL_JS,
+            stubs=ACCUEIL_STUBS,
+            extra="export const __t = { render: _renderRecentActivity };\n",
+            driver=r"""
+const ts = Math.floor(Date.now() / 1000) - 3600;
+const mk = (o) => Object.assign({ run_id: "r", status: "DONE", started_ts: ts,
+  total_rows: 10, applied_rows: 0, errors_count: 0 }, o);
+__emit({
+  erreurs: M.__t.render([mk({ errors_count: 3 })]),
+  partiel: M.__t.render([mk({ applied_rows: 4 })]),
+  termine: M.__t.render([mk({})]),
+});
+""",
         )
-        self.assertIn("errors_count", self.js)
-        self.assertIn("applied_rows", self.js)
+        self.assertIn("— ERROR", res["erreurs"])
+        self.assertIn("— PARTIAL", res["partiel"])
+        self.assertIn("— DONE", res["termine"])
 
 
 class TimestampHandlingTests(unittest.TestCase):

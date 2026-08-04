@@ -805,7 +805,14 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # `tmdb_support.enrich_tmdb_ids_by_title` : deux ecrivains reellement
     # concurrents sur le MEME chemin intermediaire (#732), sans fsync, sur le
     # fichier que l'apply relit pour renommer les dossiers. Cf write_plan_jsonl.
-    from cinesort.ui.api.run_data_support import write_plan_jsonl  # noqa: PLC0415
+    # Un SEUL import differe de `run_data_support` pour les deux symboles : le
+    # cliquet `test_lazy_imports_bounded` (main, #83) compte les *statements*,
+    # et en ajouter un second a quatre lignes du premier faisait passer la
+    # couche ui de 110 a 112 sans rien differer de plus.
+    from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
+        resync_run_state_rows,
+        write_plan_jsonl,
+    )
 
     write_plan_jsonl(plan_jsonl, all_rows)
 
@@ -814,8 +821,6 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # toujours de la fin du scan -> sans cette resynchronisation, l'UI reaffiche
     # l'ancien match et l'apply renomme le dossier avec l'ANCIEN titre/annee/
     # edition (le re-scan parait sans effet jusqu'au redemarrage de l'app).
-    from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
-
     resync_run_state_rows(api, run_id)
 
     if tmdb is not None:
@@ -1088,19 +1093,26 @@ def rescan_row(
 # ---------------------------------------------------------------------------
 
 
+# Colonnes de l'export, dans l'ordre — SOURCE UNIQUE.
+# Cette constante existait mais n'etait lue nulle part : la liste etait re-ecrite
+# a la main 3 fois (entete CSV, ordre des valeurs CSV, cles de
+# `_row_to_export_dict`), et la copie morte avait deja DERIVE (elle annoncait
+# `tier_v2` / `audio_languages` / `subtitle_languages` la ou l'export emet
+# `tier` / `audio_langs` / `subs_langs`). Les 3 sites en derivent desormais, et
+# `test_export_fields_single_source` verrouille l'alignement.
 _EXPORT_FIELDS = (
     "row_id",
     "title",
     "year",
     "score_v2",
-    "tier_v2",
+    "tier",
     "path",
     "size_bytes",
     "duration_min",
     "codec",
     "resolution",
-    "audio_languages",
-    "subtitle_languages",
+    "audio_langs",
+    "subs_langs",
     "warnings",
 )
 
@@ -1202,44 +1214,9 @@ def export_films(
             # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
             with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
                 writer = csv.writer(fp, delimiter=";")
-                writer.writerow(
-                    [
-                        "row_id",
-                        "title",
-                        "year",
-                        "score_v2",
-                        "tier",
-                        "path",
-                        "size_bytes",
-                        "duration_min",
-                        "codec",
-                        "resolution",
-                        "audio_langs",
-                        "subs_langs",
-                        "warnings",
-                    ]
-                )
+                writer.writerow(list(_EXPORT_FIELDS))
                 for row in export_rows:
-                    writer.writerow(
-                        [
-                            _serialize_for_csv(row.get(k))
-                            for k in [
-                                "row_id",
-                                "title",
-                                "year",
-                                "score_v2",
-                                "tier",
-                                "path",
-                                "size_bytes",
-                                "duration_min",
-                                "codec",
-                                "resolution",
-                                "audio_langs",
-                                "subs_langs",
-                                "warnings",
-                            ]
-                        ]
-                    )
+                    writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
             return {
                 "ok": True,
                 "file_path": str(file_path),

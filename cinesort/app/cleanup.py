@@ -311,7 +311,7 @@ def _move_dirs_to_bucket(
                 dst_path=dst,
                 reversible=True,
             )
-        moved += 1
+            moved += 1
     return moved
 
 

@@ -26,11 +26,11 @@ import ni export, donc le seul reellement verifie.
 CE QUE CE FICHIER VERROUILLE
 ============================
 
-1. `scripts/check_js_syntax.mjs` est vert sur l'arbre reel et couvre les 48
+1. `scripts/check_js_syntax.mjs` est vert sur l'arbre reel et couvre les 49
    `.js` du dashboard (+ le `.mjs` de `web/dashboard/tests/`).
 2. Le goal d'analyse de CHAQUE fichier est celui de son chargement reel.
-3. MUTATION : une erreur de syntaxe injectee dans n'importe lequel des 49
-   fichiers fait rougir le verificateur — les 49 sont testes.
+3. MUTATION : une erreur de syntaxe injectee dans n'importe lequel des 50
+   fichiers fait rougir le verificateur — les 50 sont testes.
 4. MUTATION : le contrat de chargement de `bootstrap-debug.js` (script
    classique, pas de module) est verifie lui aussi.
 5. MUTATION : les canaris d'auto-test du verificateur sont vivants — neutralises,
@@ -112,7 +112,7 @@ class OutillagePresentTests(unittest.TestCase):
         self.assertEqual(
             data.get("type"),
             "module",
-            'package.json doit declarer "type": "module" : les 48 .js de web/dashboard/ sont des '
+            'package.json doit declarer "type": "module" : les 49 .js de web/dashboard/ sont des '
             "modules ESM, et sans cette declaration `node --check` sort en 0 sur une erreur averee.",
         )
 
@@ -126,8 +126,16 @@ class VerificateurSurArbreReelTests(unittest.TestCase):
         self.assertEqual(payload["failures"], [])
         self.assertEqual(payload["problems"], [])
 
-    def test_les_48_js_du_dashboard_sont_couverts(self) -> None:
-        """L'inventaire doit couvrir TOUS les .js reellement presents."""
+    def test_les_49_js_du_dashboard_sont_couverts(self) -> None:
+        """L'inventaire doit couvrir TOUS les .js reellement presents.
+
+        Le compte exact est une ANCRE : il attrape un `rglob` devenu muet, un
+        deplacement de `web/dashboard/`, ou un module ajoute sans que personne
+        ne verifie qu'il entre bien dans le perimetre du gate. Il passe de 48 a
+        49 avec `web/dashboard/core/run-status.js` (derivation de statut de run
+        partagee par /accueil et /historique) : ajouter un module du dashboard
+        se declare ici, ce n'est pas un effet de bord silencieux.
+        """
         proc = _run_checker("--plan", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         plan = json.loads(proc.stdout)
@@ -136,7 +144,7 @@ class VerificateurSurArbreReelTests(unittest.TestCase):
         attendus = {
             p.relative_to(REPO).as_posix() for p in sorted(DASHBOARD.rglob("*.js")) if "node_modules" not in p.parts
         }
-        self.assertEqual(len(attendus), 48, f"le dashboard ne contient plus 48 .js mais {len(attendus)}")
+        self.assertEqual(len(attendus), 49, f"le dashboard ne contient plus 49 .js mais {len(attendus)}")
         self.assertEqual(
             attendus - couverts,
             set(),
@@ -212,18 +220,19 @@ class _ArbreTemporaireMixin(unittest.TestCase):
 class MutationTests(_ArbreTemporaireMixin):
     """La preuve : sans erreur le verificateur est vert, avec erreur il rougit."""
 
-    def test_une_erreur_dans_n_importe_lequel_des_49_fichiers_est_detectee(self) -> None:
+    def test_une_erreur_dans_n_importe_lequel_des_50_fichiers_est_detectee(self) -> None:
         """Chaque fichier est casse a son tour, puis restaure.
 
-        C'est la mesure qui manquait : `node --check` sortait en 0 sur 47 de ces
-        49 fichiers. Ici les 49 doivent rougir, un par un.
+        C'est la mesure qui manquait : `node --check` sortait en 0 sur 47 des 48
+        `.js` du dashboard mesures le 2026-08-03. Ici, tous les fichiers du plan
+        (50 aujourd'hui) doivent rougir, un par un.
 
         La restauration est verifiee par egalite d'octets (plus strict que « ca
         reparse »), et le vert global est reconstate une fois a la fin : si une
         restauration avait derape, la verification complete le dirait.
         """
         fichiers = self._fichiers_du_plan()
-        self.assertGreaterEqual(len(fichiers), 49, f"inventaire trop maigre : {len(fichiers)}")
+        self.assertGreaterEqual(len(fichiers), 50, f"inventaire trop maigre : {len(fichiers)}")
 
         depart = self._checker_tmp()
         self.assertEqual(depart.returncode, 0, f"l'arbre copie doit partir vert:\n{depart.stderr}")
@@ -253,7 +262,9 @@ class MutationTests(_ArbreTemporaireMixin):
                 self.assertEqual(cible.read_bytes(), original, f"{rel} n'a pas ete restaure a l'octet pres")
 
         retour = self._checker_tmp()
-        self.assertEqual(retour.returncode, 0, f"apres les 49 restaurations le gate doit reverdir:\n{retour.stderr}")
+        self.assertEqual(
+            retour.returncode, 0, f"apres les {len(fichiers)} restaurations le gate doit reverdir:\n{retour.stderr}"
+        )
 
     def test_une_seule_erreur_fait_rougir_la_verification_complete(self) -> None:
         """Bout en bout : le gate global, pas seulement le mode --only."""
