@@ -187,6 +187,13 @@ class TestBuildVideoSubscores(unittest.TestCase):
         _, flags = build_video_subscores(v, None, probe, None)
         self.assertIn("hdr_metadata_missing", flags)
 
+    def test_hdr10_with_zero_maxcll_flag(self):
+        # Cas reel : hdr_analysis emet 0.0 (float) quand MaxCLL/MaxFALL absents, jamais None.
+        v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
+        probe = {"video": {"hdr10": True, "max_cll": 0.0, "max_fall": 0.0}}
+        _, flags = build_video_subscores(v, None, probe, None)
+        self.assertIn("hdr_metadata_missing", flags)
+
     def test_labels_fr_present(self):
         v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
         subs, _ = build_video_subscores(v, None, None, None)
@@ -224,10 +231,22 @@ class TestBuildAudioSubscores(unittest.TestCase):
         self.assertEqual(spec.tier, "platinum")
 
     def test_low_bitrate_lossy_bronze(self):
-        a = AudioPerceptual(lossy_verdict="low_bitrate_lossy", lossy_confidence=0.85)
+        a = AudioPerceptual(lossy_verdict="lossy_low", lossy_confidence=0.85)
         subs = build_audio_subscores(a)
         spec = next(s for s in subs if s.name == "spectral_cutoff")
         self.assertEqual(spec.tier, "bronze")
+
+    def test_high_bitrate_lossy_gold(self):
+        a = AudioPerceptual(lossy_verdict="lossy_high", lossy_confidence=0.85)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "gold")
+
+    def test_mid_bitrate_lossy_silver(self):
+        a = AudioPerceptual(lossy_verdict="lossy_mid", lossy_confidence=0.85)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "silver")
 
     def test_drc_cinema_highest(self):
         a = AudioPerceptual(drc_category="cinema", drc_confidence=0.9)
@@ -541,7 +560,7 @@ class TestOrchestrator(unittest.TestCase):
             resolution_height=2160,
             fake_4k_verdict_combined="fake_4k_confirmed",
         )
-        a = AudioPerceptual(audio_score=55, lossy_verdict="low_bitrate_lossy", lossy_confidence=0.9)
+        a = AudioPerceptual(audio_score=55, lossy_verdict="lossy_low", lossy_confidence=0.9)
         g = GrainAnalysis(is_animation=False, grain_nature="encode_noise")
         r = compute_global_score_v2(v, a, g, None, duration_s=7200)
         # Video subscores penalises lourdement, audio aussi
