@@ -34,7 +34,7 @@ from cinesort.domain.calibration import analyze_feedback_bias, compute_tier_delt
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS, validate_rules
 from cinesort.domain.custom_rules_templates import list_templates
-from cinesort.domain.film_history import _load_plan_rows_from_jsonl
+from cinesort.domain.film_history import _load_plan_rows_from_jsonl, _resolve_run_dir
 from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_locale, t
 from cinesort.domain.naming import (
     PRESETS,
@@ -1365,7 +1365,12 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : le vrai dossier de run est `runs/tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Le chemin
+        # etait construit sans le prefixe -> plan.jsonl jamais trouve -> "Aucun
+        # film dans ce run" silencieux en prod. _resolve_run_dir applique la
+        # convention canonique tout en tolerant les runs anterieurs (dossier nu).
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1438,7 +1443,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1512,7 +1518,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1591,7 +1598,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
