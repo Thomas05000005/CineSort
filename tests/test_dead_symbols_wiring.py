@@ -302,10 +302,11 @@ class ScanHelpersSingleBonusRuleTests(unittest.TestCase):
     def test_une_seule_implementation_de_la_regle(self) -> None:
         """Exactement UNE fonction du module consulte GENERIC_EXTRA_VIDEO_NAMES.
 
-        Le module en portait trois (la fonction publique, une closure et une
-        variante `Path` morte). On compte les implementations plutot que de
-        nommer les clones supprimes : nommer un symbole absent, meme pour
-        l'interdire, le ferait passer pour "lu" par test_contract_dead_symbols.
+        Le module en portait trois : la fonction publique, une closure, et une
+        variante `Path` morte (celle-ci supprimee en amont par #705). On compte
+        les implementations plutot que de nommer les clones supprimes : nommer
+        un symbole absent, meme pour l'interdire, le ferait passer pour "lu"
+        par test_contract_dead_symbols.
         """
         import ast
         from pathlib import Path as _Path
@@ -330,7 +331,7 @@ class ScanHelpersSingleBonusRuleTests(unittest.TestCase):
 
 
 class RetentionDaysPhantomTests(unittest.TestCase):
-    """Le reglage fantome `retention_days` a bien ete supprime (#490)."""
+    """Le reglage fantome `retention_days` a bien ete supprime (#781)."""
 
     def test_le_reglage_n_est_plus_persiste(self) -> None:
         """Envoyer la cle ne doit plus rien ecrire : elle n'avait aucun lecteur."""

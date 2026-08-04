@@ -996,7 +996,7 @@ function _renderProbeToolsTable(status) {
     </table>
     <div class="parametres-tools-actions">
       <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck" title="Re-détecter les outils installés sur le système (ignore le cache)">↻ Vérifier (forcer la détection)</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~30-60s, ~50 Mo)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~110 Mo, empreinte SHA256 vérifiée avant installation)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
       <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update" title="Mettre à jour via winget (nécessite Windows Package Manager)">⇧ Mettre à jour (winget)</button>
     </div>
     <p class="parametres-tools-message" data-probe-tools-message></p>
@@ -3025,12 +3025,13 @@ function _bindProbeToolsActions(container) {
           await _loadProbeToolsStatus(container, { force: true });
           _setProbeToolsMessage(container, "✓ Statut rafraîchi.", "ok");
         } else if (action === "auto_install") {
-          // Confirmation : DL HTTP ~50 Mo + écriture dans %LOCALAPPDATA% — action sensible.
+          // Confirmation : DL HTTPS ~110 Mo + écriture dans %LOCALAPPDATA% — action sensible.
           const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
             ? window.confirm(
                 "Installer automatiquement ffprobe et MediaInfo ?\n\n"
-                + "• Téléchargement HTTP : environ 50 Mo\n"
-                + "• Durée estimée : 30 à 60 secondes\n"
+                + "• Téléchargement HTTPS : environ 110 Mo\n"
+                + "• Durée estimée : 1 à 3 minutes\n"
+                + "• Empreinte SHA256 vérifiée avant installation : en cas d'écart, rien n'est installé\n"
                 + "• Destination : dossier utilisateur (pas besoin d'admin)\n\n"
                 + "Confirmer l'installation ?",
               )

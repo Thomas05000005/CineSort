@@ -59,10 +59,15 @@ USE_ROOTS = ("cinesort", "tests", "app.py")
 # ---------------------------------------------------------------------------
 # Dette CONNUE, figee au 2026-08-03. LISTE EN RETRECISSEMENT UNIQUEMENT.
 # Cle : "<chemin/relatif.py>::<symbole>".
+#
+# 2026-08-04 (fusion de main) : le cliquet a fait son travail des la premiere
+# resynchronisation. `cleanup._is_cleanable_residual_dir` est sorti de la liste
+# (il a gagne un lecteur avec le test des jonctions NTFS, #517), et
+# `integrity_check._TS_PACKET_SIZE` — devenu orphelin quand #784 l'a remplace
+# par `_TS_LAYOUTS` — a ete recable au lieu d'etre inscrit ici.
 # ---------------------------------------------------------------------------
 KNOWN_DEAD: Dict[str, str] = {
     "cinesort/app/apply_rollback.py::ROLLBACK_NONE": "constante module-level jamais lue",
-    "cinesort/app/cleanup.py::_is_cleanable_residual_dir": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/duplicate_pipeline.py::compute_fusion_for_pair": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/enrichment_facade.py::enrichment_for_film": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/enrichment_facade.py::get_enrichment_status": "fonction/classe sans aucun lecteur dans le depot",

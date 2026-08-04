@@ -42,10 +42,10 @@ def file_name_looks_bonus(name: str) -> bool:
     qui sont vraisemblablement des bonus/making-of/extras d'apres leur nom seul.
 
     SOURCE UNIQUE de cette heuristique dans le module. Deux clones existaient :
-    la closure `_file_looks_bonus` de `discover_candidate_folders` et
-    `_looks_like_nested_extra_video` (variante `Path`, zero appelant), tous deux
-    supprimes au profit de cette fonction — trois copies d'une meme regle qui
-    pouvaient deriver independamment.
+    `_looks_like_nested_extra_video` (variante `Path`, zero appelant), supprime
+    par #705, et la closure `_file_looks_bonus` de `discover_candidate_folders`,
+    supprimee ici au profit de cette fonction. Elles etaient a l'octet pres la
+    meme regle et pouvaient deriver independamment.
 
     Args:
         name: Nom du fichier (avec ou sans chemin parent).
