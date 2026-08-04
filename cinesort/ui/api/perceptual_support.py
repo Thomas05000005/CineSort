@@ -447,6 +447,7 @@ def _execute_perceptual_analysis(
                 str(media_path),
                 duration_s=duration_s,
                 video_height=height,
+                video_width=width,  # #525 : re-upscale a la resolution NATIVE
                 is_animation=grain_local.is_animation,
             )
             video_local.ssim_self_ref = ssim_result.ssim_y
@@ -464,7 +465,9 @@ def _execute_perceptual_analysis(
                     str(media_path),
                 )
         # §7 v7.5.0 : Fake 4K detection FFT 2D + combinaison avec §13 SSIM
-        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height)
+        # #823 : bit_depth transmis, sinon les gardes « frame sombre / uniforme »
+        # restent calibrees 8 bits et ne filtrent quasi rien sur du 10 bits.
+        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height, bit_depth)
         video_local.fft_hf_ratio_median = fft_ratio
         verdict_fft, _conf_fft = classify_fake_4k_fft(
             fft_ratio, video_height=height, is_animation=grain_local.is_animation
