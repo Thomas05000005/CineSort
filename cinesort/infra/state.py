@@ -141,9 +141,26 @@ def clean_old_runs(state_dir: Path, keep_last: int = 10) -> None:
     # des fichiers, en le relocant sous runs/_preserved_review/ (exclu de la retention),
     # avant de supprimer le reste du run_dir.
     preserved_root = runs / _PRESERVED_REVIEW_DIRNAME
+
+    # Issue #609 (PERTE DE DONNEES) : le tri se faisait sur le NOM du run_dir. Les
+    # run_dirs s'appellent `tri_films_{run_id}` et run_id a DEUX formats acceptes par
+    # normalize_or_generate_run_id (infra/run_id.py) : `YYYYMMDD_HHMMSS_NNN` et le
+    # fallback `uuid4().hex` (atteint sur collision / retry sqlite3.IntegrityError dans
+    # job_runner). Des que les deux formats coexistent, l'ordre lexicographique cesse
+    # d'etre chronologique (`tri_films_f3a9...` passe devant `tri_films_20260803_...`)
+    # et la retention supprime des runs RECENTS en gardant de vieux uuid. On trie donc
+    # sur la date de modification reelle ; `0.0` si le dir devient inaccessible entre
+    # l'iterdir() et le stat() (concurrent rmtree), ce qui le classe en fin de liste
+    # donc candidat a la purge, sans faire exploser tout le nettoyage.
+    def _mtime_of(d: Path) -> float:
+        try:
+            return d.stat().st_mtime
+        except OSError:
+            return 0.0
+
     items = sorted(
         [d for d in runs.iterdir() if d.is_dir() and d.name != _PRESERVED_REVIEW_DIRNAME],
-        key=lambda x: x.name,
+        key=_mtime_of,
         reverse=True,
     )
     for d in items[keep_last:]:
