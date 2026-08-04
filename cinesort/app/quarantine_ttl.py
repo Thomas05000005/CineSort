@@ -155,6 +155,17 @@ def _ttl_manifest_path(root: Path) -> Path:
     return root / _TTL_MANIFEST_NAME
 
 
+def _is_ttl_manifest_file(name: str) -> bool:
+    """True si `name` est le manifest TTL interne OU un de ses temporaires.
+
+    `_save_ttl_manifest` ecrit dans un sibling `.cinesort_ttl_manifest.json.tmp.<pid>.<tid>`
+    avant `os.replace`. Un crash entre le write et le replace laisse ce `.tmp.*`
+    orphelin ; sans cette exclusion il serait compte comme contenu quarantaine
+    (fausse la telemetrie du viewer) et purge comme un film reel.
+    """
+    return name == _TTL_MANIFEST_NAME or name.startswith(_TTL_MANIFEST_NAME + ".tmp")
+
+
 def _load_ttl_manifest(root: Path) -> Dict[str, float]:
     """Charge le manifest {rel_posix: first_seen_ts}. Tolerant : {} si absent/corrompu."""
     path = _ttl_manifest_path(root)
@@ -275,7 +286,7 @@ def _iter_review_files(root: Path) -> List[Path]:
     try:
         for item in root.rglob("*"):
             try:
-                if item.is_file() and item.name != _TTL_MANIFEST_NAME:
+                if item.is_file() and not _is_ttl_manifest_file(item.name):
                     out.append(item)
             except (OSError, PermissionError):
                 continue
@@ -583,7 +594,7 @@ def purge_review_bucket(
                 if not dry_run:
                     with contextlib.suppress(OSError):
                         child.rmdir()
-            elif child.is_file() and child.name != _TTL_MANIFEST_NAME:
+            elif child.is_file() and not _is_ttl_manifest_file(child.name):
                 # Fichiers libres au top-level (rare mais possible)
                 try:
                     top_stats["considered"] += 1

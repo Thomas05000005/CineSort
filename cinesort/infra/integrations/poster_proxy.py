@@ -338,6 +338,15 @@ def _atomic_write(target: Path, payload: bytes) -> None:
     un JPEG a moitie ecrit dans le cache, servi ensuite pendant 30 jours
     (Cache-Control immuable). Le helper unique fait le nom unique + le fsync +
     le controle de taille.
+
+    Resolution du conflit avec `#718` (merge de main du 2026-08-04) : les deux
+    branches corrigent la MEME course, main sur place et celle-ci en routant
+    vers `state.atomic_write_bytes`. C'est cette derniere qui est retenue parce
+    qu'elle SUBSUME l'autre — `state._replace_with_retry` porte exactement la
+    politique de retentative mesuree par `#718` (12 tentatives, base 2 ms,
+    plafond 50 ms, jitter par thread ; 19/32 echecs sans elle, 0/32 avec) et y
+    ajoute le controle de taille ecrite. Garder les deux aurait duplique la
+    politique en deux exemplaires qui divergent au premier reglage.
     """
     atomic_write_bytes(target, payload)
 

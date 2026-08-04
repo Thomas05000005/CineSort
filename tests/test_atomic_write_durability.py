@@ -327,6 +327,29 @@ class TestTousLesSitesRoutes(_AtomicAssertions):
         self.assertIsNone(result["error"])
         self.assert_both_invariants(journal, "tmdb_client.purge_expired_tmdb_cache")
 
+    def test_purge_keeps_the_compact_form_of_the_other_writer(self) -> None:
+        """Les DEUX ecrivains du cache TMDb doivent produire la MEME forme.
+
+        `_save_cache_atomic` serialise en compact (PERF-6 : cache de 20 Mo
+        reecrit ~750 fois par scan). La purge du boot passait par le defaut
+        `indent=2` d'`atomic_write_json` et rendait donc un fichier ~2x plus
+        gros, relu tel quel par `_load_cache` au demarrage suivant — et
+        desormais fsynce en entier, donc paye deux fois.
+        """
+        cache_path = self.root / "tmdb_cache.json"
+        fresh = time.time()
+        expired = fresh - (400 * 24 * 3600)
+        entries = {f"movie|{i}": {"_cached_at": fresh, "value": {"poster_path": f"/p{i}.jpg"}} for i in range(40)}
+        entries["movie|old"] = {"_cached_at": expired, "value": {"poster_path": "/old.jpg"}}
+        cache_path.write_text(json.dumps(entries), encoding="utf-8")
+
+        result = tmdb_client.purge_expired_tmdb_cache(cache_path, ttl_days=1)
+        self.assertEqual(result["purged"], 1)
+
+        written = cache_path.read_text(encoding="utf-8")
+        self.assertNotIn("\n", written, "la purge a reecrit le cache en JSON indente")
+        self.assertEqual(len(json.loads(written)), 40)
+
     # 4. cinesort/infra/integrations/poster_proxy.py : _atomic_write (#712)
     def test_site_poster_proxy(self) -> None:
         target = self.root / "posters" / "w185" / "603.jpg"

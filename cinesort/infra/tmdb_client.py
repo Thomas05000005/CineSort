@@ -1129,8 +1129,15 @@ def purge_expired_tmdb_cache(
     # Cette fonction tourne dans un thread daemon au BOOT, en concurrence avec
     # `TmdbClient._save_cache_atomic` : les deux utilisaient le meme
     # `cache_path.with_suffix('.tmp')` et n'avaient donc aucune isolation.
+    #
+    # `indent=None` : MEME forme compacte que `TmdbClient._save_cache_atomic`
+    # (separators serres, cf PERF-6 quinze lignes plus haut). Le defaut
+    # `indent=2` d'`atomic_write_json` doublait le fichier a chaque purge —
+    # un cache de 18 Mo repassait a ~36 Mo, relu tel quel par `_load_cache` au
+    # demarrage suivant et desormais fsynce en entier. Le `indent=2` est
+    # anterieur a cette PR, mais elle reecrit cette ligne et fsync son resultat.
     try:
-        atomic_write_json(cache_path, new_cache)
+        atomic_write_json(cache_path, new_cache, indent=None)
     except (OSError, PermissionError) as exc:
         result["error"] = f"write_error: {exc}"
         return result
