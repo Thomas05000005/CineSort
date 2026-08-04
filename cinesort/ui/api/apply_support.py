@@ -38,7 +38,7 @@ from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._validators import clamp_timeout, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 logger = logging.getLogger(__name__)
@@ -2462,7 +2462,8 @@ def _make_jellyfin_client(data: Dict[str, Any]) -> Any:
     """Cree un JellyfinClient depuis les settings. Retourne None si impossible."""
     url = str(data.get("jellyfin_url") or "").strip()
     api_key = str(data.get("jellyfin_api_key") or "").strip()
-    timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+    # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+    timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
     return JellyfinClient(url, api_key, timeout_s=timeout_s)
 
 
@@ -2504,7 +2505,8 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if not plex_url or not plex_token or not plex_lib:
         return
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2565,7 +2567,8 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
             log_module=__name__,
         )
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
