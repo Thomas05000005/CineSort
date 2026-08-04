@@ -933,6 +933,37 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
     return 0, ""
 
 
+def _is_premium_multichannel_codec(canonical_codec: str) -> bool:
+    """True si l'etiquette canonique designe un codec « haut de gamme ».
+
+    Revue CodeRabbit PR#854 : depuis que `_score_audio` lit l'etiquette CANONIQUE
+    (`_canonical_audio_codec`), le test litteral `"dts-hd" in a_codec` ne couvrait
+    plus les memes codecs que le reste du lot :
+
+    - DTS:X est etiquete 'dts:x' (aucun 'dts-hd' dedans) alors que
+      `_audio_codec_bonus`:920 et `_hierarchy_audio_codec_token`:857 le classent
+      lossless premium -> un DTS:X 7.1 perdait le +4 multicanal ;
+    - DTS-HD HRA est etiquete 'dts-hd hra', qui CONTIENT 'dts-hd', alors que ce
+      profil est LOSSY : `_audio_codec_bonus`:908 et
+      `_hierarchy_audio_codec_token`:866 le ramenent deja au rang `dts`. Il
+      touchait donc un bonus « haut de gamme » que les deux autres consommateurs
+      lui refusent.
+
+    Un seul predicat pour les trois, pour que la classification ne rediverge plus.
+    """
+    c = str(canonical_codec or "").lower()
+    if not c:
+        return False
+    # DTS-HD HRA : lossy. Teste AVANT le substring 'dts-hd' generique.
+    if ("hra" in c) and ("dts" in c):
+        return False
+    if ("truehd" in c) or ("atmos" in c):
+        return True
+    if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c):
+        return True
+    return ("dts-hd" in c) or ("dtshd" in c)
+
+
 def _channels_bonus(channels: int, profile: Dict[str, Any]) -> Tuple[int, str]:
     cmap = profile["audio_bonuses"]["channels_bonus_map"]
     if channels >= 8:
@@ -1197,7 +1228,7 @@ def _score_audio(
         # ce qui declenchait le bonus +4 multicanal pour du TrueHD/Atmos 2.0
         # ou 5.1 (channels < 8). Le parenthesage explicite restaure la
         # semantique attendue : codec premium ET >= 8 canaux.
-        if (("truehd" in a_codec) or ("atmos" in a_codec) or ("dts-hd" in a_codec)) and channels >= 8:
+        if _is_premium_multichannel_codec(a_codec) and channels >= 8:
             audio_sub += 4
             add_reason(+4, "Audio haut de gamme multicanal")
 
@@ -1731,10 +1762,19 @@ def _apply_custom_rules_helper(
         rule_context = {
             "detected": {
                 "video_codec": _vr("video_codec", "") or "",
-                # Fix ultra-audit 2026-08-03 : etiquette canonique (cf.
-                # `_canonical_audio_codec`) — une regle utilisateur
-                # `audio_codec = "dts-hd ma"` ne pouvait jamais matcher.
-                "audio_best_codec": _canonical_audio_codec(best_audio),
+                # Revue CodeRabbit PR#854 : le champ `audio_codec` des regles
+                # utilisateur garde le codec de BASE tel que le probe le rapporte.
+                # Le passer a l'etiquette canonique cassait EN SILENCE les regles
+                # deja enregistrees : `audio_codec = "dts"` (operateur `=`, egalite
+                # STRICTE cf. custom_rules._op_eq) cessait de matcher un remux
+                # DTS-HD MA, qui vaut desormais 'dts-hd ma'. Idem 'truehd' ->
+                # 'truehd atmos', 'eac3' -> 'eac3 atmos'.
+                # L'etiquette canonique reste accessible, mais via un champ
+                # DISTINCT et explicite (`audio_codec_canonical`), pour que
+                # `audio_codec_canonical = "dts-hd ma"` soit enfin exprimable
+                # sans reecrire les regles existantes.
+                "audio_best_codec": str(best_audio.get("codec") or ""),
+                "audio_best_codec_canonical": _canonical_audio_codec(best_audio),
                 "resolution": _vr("resolution_label", "") or "",
                 "bitrate_kbps": _vr("bitrate_kbps"),
                 "audio_best_channels": _to_int(best_audio.get("channels"), 0),

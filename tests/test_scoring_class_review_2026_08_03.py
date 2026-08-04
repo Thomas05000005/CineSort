@@ -422,5 +422,110 @@ class ScoringRulesVersionInvalidatesPersistedScoresTests(unittest.TestCase):
         self.assertFalse(bool(res.get("ok")))
 
 
+def _score_with_audio(track: Dict[str, Any], *, rules: Optional[list] = None) -> Dict[str, Any]:
+    """Score un 1080p neutre dont SEULE la piste audio varie."""
+    profile = default_quality_profile()
+    if rules is not None:
+        profile = dict(profile)
+        profile["custom_rules"] = rules
+    return compute_quality_score(
+        normalized_probe={
+            "probe_quality": "FULL",
+            "video": {"width": 1920, "height": 1080, "codec": "h264", "bitrate": 10_000_000},
+            "audio_tracks": [track],
+            "subtitles": [],
+        },
+        profile=profile,
+        folder_name="Film (2015)",
+        expected_title="Film",
+        expected_year=2015,
+        release_name="Film.mkv",
+    )
+
+
+_PREMIUM_REASON = "+4 Audio haut de gamme multicanal"
+
+
+class PremiumMultichannelBonusFollowsTheCanonicalLabelTests(unittest.TestCase):
+    """Revue CodeRabbit PR#854 : `"dts-hd" in a_codec` ne dit plus la meme chose.
+
+    `_score_audio` lit l'etiquette CANONIQUE depuis ce lot. Le test litteral
+    laissait donc le DTS:X ('dts:x') dehors alors que le lot le classe lossless
+    premium, et laissait le DTS-HD HRA ('dts-hd hra', LOSSY) dedans alors que les
+    deux autres consommateurs le ramenent au rang `dts`.
+    """
+
+    def test_dts_x_71_gets_the_premium_multichannel_bonus(self) -> None:
+        res = _score_with_audio({"codec": "dts", "profile": "DTS-HD MA", "is_dts_x": True, "channels": 8})
+        self.assertIn(_PREMIUM_REASON, res["reasons"])
+
+    def test_dts_hd_ma_71_still_gets_it(self) -> None:
+        res = _score_with_audio({"codec": "dts", "profile": "DTS-HD MA", "channels": 8})
+        self.assertIn(_PREMIUM_REASON, res["reasons"])
+
+    def test_truehd_atmos_71_still_gets_it(self) -> None:
+        res = _score_with_audio({"codec": "truehd", "is_atmos": True, "channels": 8})
+        self.assertIn(_PREMIUM_REASON, res["reasons"])
+
+    def test_dts_hd_hra_71_does_not_get_it(self) -> None:
+        """LOSSY : `_audio_codec_bonus` et `_hierarchy_audio_codec_token` le disent deja."""
+        res = _score_with_audio({"codec": "dts", "profile": "DTS-HD HRA", "channels": 8})
+        self.assertNotIn(_PREMIUM_REASON, res["reasons"])
+
+    def test_the_channel_floor_is_untouched(self) -> None:
+        """Non-regression du hotfix 2026-06-04 : premium en 5.1 n'y a pas droit."""
+        res = _score_with_audio({"codec": "truehd", "is_atmos": True, "channels": 6})
+        self.assertNotIn(_PREMIUM_REASON, res["reasons"])
+
+
+class UserRulesKeepTheBaseAudioCodecTests(unittest.TestCase):
+    """Revue CodeRabbit PR#854 : `audio_codec = "dts"` ne doit pas cesser de matcher.
+
+    L'operateur `=` est une egalite STRICTE (`custom_rules._op_eq`). Basculer le
+    champ sur l'etiquette canonique aurait desactive sans un mot les regles deja
+    enregistrees par l'utilisateur.
+    """
+
+    @staticmethod
+    def _rule(field: str, value: str) -> list:
+        return [
+            {
+                "id": "sonde",
+                "name": "sonde",
+                "enabled": True,
+                "priority": 10,
+                "conditions": [{"field": field, "op": "=", "value": value}],
+                "match": "all",
+                "action": {"type": "flag_warning", "value": "TOUCHE", "reason": "sonde"},
+            }
+        ]
+
+    def _flags(self, track: Dict[str, Any], field: str, value: str) -> list:
+        res = _score_with_audio(track, rules=self._rule(field, value))
+        return list(res["metrics"].get("custom_warning_flags") or [])
+
+    def test_a_legacy_dts_rule_still_matches_a_dts_hd_ma_remux(self) -> None:
+        track = {"codec": "dts", "profile": "DTS-HD MA", "channels": 6}
+        self.assertIn("TOUCHE", self._flags(track, "audio_codec", "dts"))
+
+    def test_a_legacy_truehd_rule_still_matches_a_truehd_atmos_track(self) -> None:
+        track = {"codec": "truehd", "is_atmos": True, "channels": 8}
+        self.assertIn("TOUCHE", self._flags(track, "audio_codec", "truehd"))
+
+    def test_the_canonical_label_is_reachable_through_its_own_field(self) -> None:
+        """Le gain du lot est preserve, mais sur un champ EXPLICITE."""
+        track = {"codec": "dts", "profile": "DTS-HD MA", "channels": 6}
+        self.assertIn("TOUCHE", self._flags(track, "audio_codec_canonical", "dts-hd ma"))
+
+    def test_the_canonical_field_does_not_match_the_base_label(self) -> None:
+        track = {"codec": "dts", "profile": "DTS-HD MA", "channels": 6}
+        self.assertNotIn("TOUCHE", self._flags(track, "audio_codec_canonical", "dts"))
+
+    def test_the_metrics_payload_still_exposes_the_canonical_label(self) -> None:
+        """Le dashboard et le comparateur de doublons, eux, veulent la canonique."""
+        res = _score_with_audio({"codec": "dts", "profile": "DTS-HD MA", "channels": 6})
+        self.assertEqual(res["metrics"]["detected"].get("audio_best_codec"), "dts-hd ma")
+
+
 if __name__ == "__main__":
     unittest.main()
