@@ -18,6 +18,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import List
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     SCENE_DETECTION_DEDUP_TOLERANCE_S,
     SCENE_DETECTION_FPS_ANALYSIS,
@@ -28,8 +30,6 @@ from .constants import (
     SCENE_DETECTION_THRESHOLD,
     SCENE_DETECTION_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)

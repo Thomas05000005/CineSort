@@ -27,6 +27,8 @@ if _e2e_dir not in sys.path:
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+import contextlib
+
 from create_test_data import (
     _TOKEN,
     build_plan_rows,
@@ -34,7 +36,7 @@ from create_test_data import (
     populate_database,
     write_plan_file,
 )
-import contextlib
+
 from tests._helpers import find_free_port as _find_free_port
 
 VIEWPORTS = {

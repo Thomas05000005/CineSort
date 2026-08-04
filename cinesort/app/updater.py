@@ -14,8 +14,10 @@ V3-12 : helpers complementaires pour le hook au boot et les endpoints UI :
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -125,19 +127,40 @@ def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
         return None
     if not isinstance(data, dict):
         return None
-    if time.time() - float(data.get("ts", 0)) >= cache_ttl_s:
+    # `ts` peut etre absent, null ou non-numerique si le fichier a ete tronque
+    # (ecriture partielle) ou edite a la main : float() leverait ValueError/
+    # TypeError hors du except ci-dessus. On traite ce cas comme un cache
+    # illisible (return None) plutot que de laisser remonter l'exception, fidele
+    # a la philosophie du module ("cache illisible -> refetch, jamais crash").
+    try:
+        ts = float(data.get("ts") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if time.time() - ts >= cache_ttl_s:
         return None
     payload = data.get("payload")
     return payload if isinstance(payload, dict) else None
 
 
 def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
+    """Ecrit le cache de maniere atomique (tmp + os.replace).
+
+    Le check tourne dans un thread daemon (check_for_update_async) pendant que
+    l'UI peut lire via get_cached_info : une ecriture directe write_text() peut
+    etre lue tronquee, ou laisser un JSON partiel apres crash/coupure. os.replace
+    est atomique -> un lecteur voit soit l'ancien fichier, soit le nouveau.
+    Coherent avec le reste du codebase (tmdb_client, poster_proxy, quarantine_ttl).
+    """
     if not cache_path:
         return
+    tmp = cache_path.with_name(f"{cache_path.name}.tmp.{os.getpid()}")
     try:
-        cache_path.write_text(json.dumps({"ts": time.time(), "payload": payload}), encoding="utf-8")
+        tmp.write_text(json.dumps({"ts": time.time(), "payload": payload}), encoding="utf-8")
+        os.replace(tmp, cache_path)
     except OSError as exc:
         logger.debug("Updater: ecriture cache impossible (%s)", exc)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
 
 
 def _fetch_latest_release(github_repo: str, timeout_s: int) -> Optional[dict]:

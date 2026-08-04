@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import itertools
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
 import cinesort.domain.scan_helpers as core_scan_helpers
 from cinesort.infra.tmdb_client import TmdbResult
-from unittest import mock
 
 
 class _FakeTmdb:
@@ -176,15 +175,18 @@ class CoreHeuristicsTests(unittest.TestCase):
 
     def test_tmdb_confidence_boosts_to_high_when_year_matches(self) -> None:
         cfg = core.Config(root=Path(".")).normalized()
+        # VN-C.1 (batch 2) : seuil HIGH passe a 85. On force ici un score
+        # explicitement >= 85 via une similarite 0.92+0.88 declenchant tous
+        # les bonus tmdb au lieu d'un cas marginal a 84.
         chosen = core.Candidate(
             title="Les Bronzes 3",
             year=2006,
             source="tmdb",
-            score=0.86,
-            note="sim=0.80, dY=0",
+            score=0.92,
+            note="sim=0.95, dY=0",
         )
         score, label = core.compute_confidence(cfg, chosen, nfo_ok=False, year_delta_reject=False, tmdb_used=True)
-        self.assertGreaterEqual(score, 80)
+        self.assertGreaterEqual(score, 85)
         self.assertEqual(label, "high")
 
     def test_tmdb_poster_thumb_url(self) -> None:
@@ -430,7 +432,10 @@ class CoreHeuristicsTests(unittest.TestCase):
             self.assertGreaterEqual(int(stats.analyse_ignores_extensions.get(".txt", 0)), 1)
             self.assertGreaterEqual(int(stats.analyse_ignores_extensions.get(".jpg", 0)), 1)
 
-    def test_stream_scan_targets_is_lazy_and_plan_results_stay_stable_on_large_tree(self) -> None:
+    def test_discover_candidate_folders_and_plan_results_stay_stable_on_large_tree(self) -> None:
+        # VN-F.3 (2026-06-01) : migration de stream_scan_targets supprime vers
+        # discover_candidate_folders (plan_library passe deja par cette API
+        # depuis Phase 6+).
         with tempfile.TemporaryDirectory(prefix="stream_large_tree_") as tmp:
             root = Path(tmp)
             for idx in range(60):
@@ -440,13 +445,8 @@ class CoreHeuristicsTests(unittest.TestCase):
 
             cfg = core.Config(root=root, enable_tmdb=False).normalized()
             with mock.patch.object(core, "MIN_VIDEO_BYTES", 1):
-                stream = core_scan_helpers.stream_scan_targets(cfg, min_video_bytes=core.MIN_VIDEO_BYTES)
-                self.assertFalse(isinstance(stream, list))
-                first_batch = list(itertools.islice(stream, 5))
-                self.assertEqual(len(first_batch), 5)
-                remaining = list(stream)
-                all_targets = first_batch + remaining
-                self.assertEqual(len(all_targets), 60)
+                candidates = core_scan_helpers.discover_candidate_folders(cfg)
+                self.assertEqual(len(candidates), 60)
 
                 progress_calls = []
                 rows, stats = plan_support.plan_library(

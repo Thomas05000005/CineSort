@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -34,12 +35,15 @@ from typing import Any, Dict, Optional
 import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import ResponseTooLargeError, get_bounded, make_session_with_retry
 
 logger = logging.getLogger(__name__)
 
 
-OMDB_API_BASE = "http://www.omdbapi.com/"
+# AUDIT 2026-06-10 : HTTPS obligatoire — en HTTP clair la cle API (param apikey)
+# et les reponses transitaient en clair (fuite de cle vers tout observateur
+# reseau + reponses falsifiables par un on-path, ensuite mises en cache 7j).
+OMDB_API_BASE = "https://www.omdbapi.com/"
 
 # TTL court : OMDb met a jour les ratings IMDb regulierement. 7 jours est un
 # bon compromis (eviter de marteler l'API tout en captant les corrections
@@ -224,6 +228,47 @@ class OmdbClient:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_cache()
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling dashboard. On expose CM + close() + __del__
+    # best-effort. close() flush egalement le cache OMDb pour ne pas perdre
+    # les ecritures en RAM.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente et flush le cache (idempotent)."""
+        # Flush cache best-effort (OMDb n'a pas de throttle save : ecritures
+        # toujours immediates via _save_cache_atomic, mais on garantit la
+        # symetrie avec TmdbClient).
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            self._save_cache_atomic()
+        except Exception:  # noqa: BLE001
+            pass
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "OmdbClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # __del__ peut etre invoque pendant l'interpreter shutdown : on
+        # ferme juste la session (pas de flush pour eviter d'acceder a
+        # des primitives threading en cours de teardown).
+        try:
+            session = getattr(self, "_session", None)
+            if session is not None:
+                session.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     # --- Cache ---
 
     def _load_cache(self) -> None:
@@ -244,12 +289,46 @@ class OmdbClient:
             self._cache = {}
 
     def _save_cache_atomic(self) -> None:
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : pattern atomic safe
+        # 1. Ecrire dans le .tmp via write() + flush() + fsync() pour forcer
+        #    la donnee a disque avant le rename (sinon crash systeme entre
+        #    write et replace -> tmp vide promu en cache officiel -> perte).
+        # 2. Verifier que le tmp existe ET a une taille non nulle avant
+        #    replace. Sinon, garder l'ancien cache et logguer un warning.
+        # 3. Sur toute exception en cours d'ecriture, nettoyer le .tmp pour
+        #    eviter d'accumuler des fichiers orphelins.
+        #
+        # Fix issue #620 : le snapshot du cache est pris SOUS `self._lock`.
+        # `json.dumps` itere `self._cache` ; un `_cache_set` concurrent (OMDb
+        # est appele depuis le ThreadingHTTPServer REST et depuis le JobRunner)
+        # le fait grossir pendant cette iteration -> `RuntimeError: dictionary
+        # changed size during iteration`, que le `except (OSError,
+        # PermissionError, ValueError)` ci-dessous n'attrape PAS : l'exception
+        # remonte jusqu'a l'appelant et fait echouer l'identification.
+        # L'ecriture disque (write + fsync + replace) reste volontairement HORS
+        # du verrou : un fsync lent ne doit pas bloquer les threads qui
+        # alimentent le cache.
+        tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
         try:
-            tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-            tmp.write_text(json.dumps(self._cache, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.cache_path)
-        except (OSError, PermissionError) as exc:
+            with self._lock:
+                snapshot = dict(self._cache)
+            payload = json.dumps(snapshot, ensure_ascii=False)
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())  # force write to disk avant rename
+            if tmp.exists() and tmp.stat().st_size > 0:
+                tmp.replace(self.cache_path)
+            else:
+                logger.warning("omdb cache tmp write failed, keeping previous cache")
+                if tmp.exists():
+                    with contextlib.suppress(OSError):
+                        tmp.unlink()
+        except (OSError, PermissionError, ValueError) as exc:
             logger.debug("omdb cache save warning: %s", exc)
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
 
     def _cache_get(self, key: str) -> Optional[Dict[str, Any]]:
         entry = self._cache.get(key)
@@ -298,14 +377,29 @@ class OmdbClient:
         full_params["apikey"] = self.api_key
 
         self._rate_limit_wait()
+
+        # Fix audit 2026-05-26 (v1.5.6) Vague L : omdb-1 — circuit breaker inerte.
+        # Avant : `response.raise_for_status()` etait appele APRES `_breaker.call(...)`.
+        # Comme la Session a `raise_on_status=False` (cf _http_utils.py:47), un
+        # status 5xx/429/401 ne levait aucune HTTPError dans le lambda, donc le
+        # breaker ne comptait pas l'echec : 100 reponses 503 consecutives
+        # laissaient le circuit ferme. On deplace `raise_for_status()` a
+        # l'INTERIEUR du lambda pour que les status d'erreur (5xx/429) levent
+        # bien HTTPError vu par le breaker (cf _is_server_down dans
+        # _circuit_breaker.py:51-67 — 5xx et 429 ouvrent le circuit, 4xx hors
+        # 429 ne le ferment pas).
+        # Issue #798 : la borne de taille est appliquee A LA LECTURE du flux
+        # (get_bounded), pas apres que requests ait deja alloue tout le corps.
+        # ResponseTooLargeError derive de ValueError : le breaker ne la compte
+        # pas comme un echec serveur, et le `except` ci-dessous l'attrape
+        # exactement comme l'ancien `ValueError("Response too large")`.
+        def _do_get() -> requests.Response:
+            resp = get_bounded(self._session, OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
+            resp.raise_for_status()
+            return resp
+
         try:
-            response = self._breaker.call(
-                lambda: self._session.get(OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
-            )
-            response.raise_for_status()
-            _body = getattr(response, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
+            response = self._breaker.call(_do_get)
             data = response.json()
         except (requests.RequestException, CircuitOpenError, ValueError, KeyError, TypeError) as exc:
             logger.debug("omdb HTTP error: %s", exc)
@@ -396,14 +490,52 @@ class OmdbClient:
         # Test avec un IMDb id connu (tt0111161 = The Shawshank Redemption).
         # On fait l'appel HTTP DIRECTEMENT (pas via find_by_imdb_id) pour capter
         # le status code et les headers OMDb (X-RateLimit-*) que _http_get masque.
+        # Fix bug 2026-06-05 : on passe par self._breaker.call(_do_get) avec
+        # raise_for_status() pour que les 429 ouvrent bien le circuit (comme
+        # _http_get), sinon un user qui spamme "Tester" sur quota epuise envoie
+        # 1 req/s sans jamais ouvrir le breaker. Inversement, breaker deja
+        # ouvert renvoie immediatement error_code='quota' sans toucher au reseau.
         params = {"i": "tt0111161", "apikey": self.api_key}
         self._rate_limit_wait()
-        try:
-            response = self._session.get(
+
+        def _do_get() -> requests.Response:
+            resp = get_bounded(
+                self._session,
                 OMDB_API_BASE,
                 params=params,
                 timeout=self.timeout_s,
             )
+            resp.raise_for_status()
+            return resp
+
+        try:
+            response = self._breaker.call(_do_get)
+        except ResponseTooLargeError:
+            # Issue #798 : le corps est desormais refuse PENDANT la lecture, donc
+            # avant que `response` n'existe. On rend le meme verdict que l'ancien
+            # garde-fou post-materialisation (`invalid_resp`) ; les compteurs de
+            # quota ne sont pas disponibles puisque la reponse a ete abandonnee.
+            logger.warning("omdb test_connection : reponse au-dela de la borne de taille, abandonnee")
+            return {
+                "ok": False,
+                "message": "Reponse OMDb illisible",
+                "error_code": "invalid_resp",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
+        except CircuitOpenError:
+            # Circuit deja ouvert (5+ echecs recents : quota ou panne OMDb).
+            # On ne touche pas au reseau et on retourne immediatement le code
+            # 'quota' (cas le plus probable d'ouverture sur OMDb).
+            return {
+                "ok": False,
+                "message": "Quota depasse pour aujourd'hui",
+                "error_code": "quota",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
         except requests.Timeout:
             return {
                 "ok": False,
@@ -412,6 +544,42 @@ class OmdbClient:
                 "quota_remaining": None,
                 "quota_limit": None,
                 "quota_reset_at": None,
+            }
+        except requests.HTTPError as exc:
+            # raise_for_status a leve : on a une reponse attachee avec status
+            # et headers (notamment X-RateLimit-* sur 429).
+            response = getattr(exc, "response", None)
+            headers = getattr(response, "headers", {}) or {}
+            quota_remaining = _parse_quota_int(headers.get("X-RateLimit-Remaining"))
+            quota_limit = _parse_quota_int(headers.get("X-RateLimit-Limit"))
+            quota_reset_at = headers.get("X-RateLimit-Reset") or None
+            status = int(getattr(response, "status_code", 0) or 0)
+
+            if status == 401:
+                return {
+                    "ok": False,
+                    "message": "Cle API invalide",
+                    "error_code": "auth",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            if status == 429:
+                return {
+                    "ok": False,
+                    "message": "Quota depasse pour aujourd'hui",
+                    "error_code": "quota",
+                    "quota_remaining": quota_remaining,
+                    "quota_limit": quota_limit,
+                    "quota_reset_at": quota_reset_at,
+                }
+            return {
+                "ok": False,
+                "message": f"Erreur HTTP {status}" if status else "Erreur HTTP",
+                "error_code": "network",
+                "quota_remaining": quota_remaining,
+                "quota_limit": quota_limit,
+                "quota_reset_at": quota_reset_at,
             }
         except requests.RequestException as exc:
             logger.debug("omdb test_connection network error: %s", exc)
@@ -424,48 +592,15 @@ class OmdbClient:
                 "quota_reset_at": None,
             }
 
-        # Capture des headers de quota (présents sur réponse 2xx OU 429)
+        # 2xx (raise_for_status n'a pas leve) — capture des headers de quota
         headers = getattr(response, "headers", {}) or {}
         quota_remaining = _parse_quota_int(headers.get("X-RateLimit-Remaining"))
         quota_limit = _parse_quota_int(headers.get("X-RateLimit-Limit"))
         quota_reset_at = headers.get("X-RateLimit-Reset") or None
 
-        status = int(getattr(response, "status_code", 0) or 0)
-
-        if status == 401:
-            return {
-                "ok": False,
-                "message": "Cle API invalide",
-                "error_code": "auth",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
-        if status == 429:
-            return {
-                "ok": False,
-                "message": "Quota depasse pour aujourd'hui",
-                "error_code": "quota",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
-        if status >= 400:
-            return {
-                "ok": False,
-                "message": f"Erreur HTTP {status}",
-                "error_code": "network",
-                "quota_remaining": quota_remaining,
-                "quota_limit": quota_limit,
-                "quota_reset_at": quota_reset_at,
-            }
-
         # 2xx — parser le body. OMDb peut renvoyer 200 + Response=False
         # quand la clé est invalide (selon version). On gère ce cas.
         try:
-            _body = getattr(response, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = response.json()
         except ValueError:
             return {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -9,12 +10,12 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
-from cinesort.infra._http_utils import make_session_with_retry
-import contextlib
+from cinesort.infra._http_utils import get_bounded, make_session_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,19 @@ _SEARCH_CACHE_TTL_S = 7 * 24 * 3600  # 7 jours pour les search:* / tv_search:*
 
 # Prefixes de cle qui correspondent a des lookups deterministes (TTL long).
 # Les autres (search, tv_search) utilisent _SEARCH_CACHE_TTL_S.
-_DETERMINISTIC_PREFIXES = ("movie|", "find_tmdb|", "find_imdb|", "tv_ep:")
+#
+# R5-finding-3 (fix minimal) : les cles `movie|{id}`, `find_tmdb|{id}`,
+# `find_imdb|{iid}` n'incluent PAS la langue, parce que les endpoints HTTP
+# correspondants ont leur parametre `language` HARD-PINNED sur "fr-FR" (cf
+# _get_movie_detail_cached, find_by_tmdb_id, find_by_imdb_id). Le contenu
+# cache (title, collection_name, genres) est donc TOUJOURS en francais et
+# cfg.tmdb_language n'affecte PAS ces endpoints.
+# Si la langue devient un jour configurable sur ces 3 endpoints, il FAUT
+# inclure la langue dans la cle de cache (ex: "movie|{language}|{mid}") sinon
+# cross-contamination du cache entre langues. La cle "tv_ep:" inclut deja la
+# langue. La cle "movie_alt_titles|" ne passe pas de parametre language a TMDb
+# (l'API retourne toutes les langues), elle est donc reellement deterministe.
+_DETERMINISTIC_PREFIXES = ("movie|", "movie_alt_titles|", "find_tmdb|", "find_imdb|", "tv_ep:")
 
 
 def _clamp_ttl_days(ttl_days: int | float | None) -> int:
@@ -160,8 +173,30 @@ class TmdbClient:
         Leve `CircuitOpenError` si le breaker est ouvert (caller doit traiter
         ca comme un echec reseau normal — typiquement fallback gracieux qui
         retourne None / liste vide).
+
+        AUDIT 2026-06-10 (REAL 2/2, meme classe que omdb-1) : la Session a
+        `raise_on_status=False`, donc un 5xx/429 ne levait aucune HTTPError dans
+        le lambda et le breaker NE comptait PAS l'echec -> 100 reponses 503
+        laissaient le circuit ferme (le scenario #76 inoperant : ~3,5s de retries
+        x 5000 films). On leve raise_for_status DANS le lambda UNIQUEMENT pour les
+        statuts serveur-down (5xx/429) afin que le breaker les voie ; les 4xx
+        (401 cle invalide, 404...) passent intacts pour ne pas casser les callers
+        qui les gerent gracieusement (ex validate_connection).
+
+        Issue #798 : la borne anti-OOM du corps est appliquee ICI, une fois,
+        au lieu des 8 copies post-materialisation qui ne protegeaient rien.
+        `ResponseTooLargeError` derive de `ValueError` : le breaker la laisse
+        passer SANS compter d'echec (cf `CircuitBreaker.call`) — une reponse
+        aberrante n'est pas un signal « serveur en panne ».
         """
-        return self._breaker.call(lambda: self._session.get(url, params=params, timeout=self.timeout_s))
+
+        def _do_get() -> requests.Response:
+            resp = get_bounded(self._session, url, params=params, timeout=self.timeout_s)
+            if resp.status_code >= 500 or resp.status_code == 429:
+                resp.raise_for_status()
+            return resp
+
+        return self._breaker.call(_do_get)
 
     def _debug(self, message: str) -> None:
         if str(os.environ.get("CINESORT_DEBUG", "")).strip().lower() not in _DEBUG_ENV_VALUES:
@@ -291,18 +326,74 @@ class TmdbClient:
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
-            tmp.write_text(
-                json.dumps(self._cache, ensure_ascii=False, separators=(",", ":")),
-                encoding="utf-8",
-            )
-            os.replace(tmp, self.cache_path)
-            self._dirty = False
+            # Fix audit Vague H (parite OmdbClient._save_cache_atomic) : write +
+            # flush + fsync avant rename pour eviter qu'un crash systeme entre
+            # write et os.replace ne promeuve un .tmp partiel en cache officiel
+            # (cache 50-100MB -> JSON corrompu -> re-fetch API sur tous les films).
+            try:
+                payload = json.dumps(self._cache, ensure_ascii=False, separators=(",", ":"))
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())  # force write to disk avant rename
+                if tmp.exists() and tmp.stat().st_size > 0:
+                    os.replace(tmp, self.cache_path)
+                    self._dirty = False
+                else:
+                    logger.warning("tmdb cache tmp write failed, keeping previous cache")
+                    if tmp.exists():
+                        with contextlib.suppress(OSError):
+                            tmp.unlink()
+            except (OSError, PermissionError, ValueError) as exc:
+                logger.debug("tmdb cache save warning: %s", exc)
+                if tmp.exists():
+                    with contextlib.suppress(OSError):
+                        tmp.unlink()
 
     def flush(self) -> None:
         try:
             self._save_cache_atomic(force=True)
         except (OSError, PermissionError) as exc:
             self._debug(f"cache flush warning path={self.cache_path} error={exc}")
+
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling dashboard. On expose CM + close() + __del__
+    # best-effort. close() flush egalement le cache TMDb (force=True) pour
+    # ne pas perdre les ecritures throttlees en attente.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente et flush le cache (idempotent)."""
+        # Flush cache d'abord pour persister les ecritures en attente
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            self.flush()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "TmdbClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # __del__ peut etre invoque pendant l'interpreter shutdown : on ne
+        # tente PAS de flush le cache ici (risque de raise sur threading
+        # primitives deja teardown). On ferme juste la session.
+        try:
+            session = getattr(self, "_session", None)
+            if session is not None:
+                session.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------------------------
     # API calls
@@ -322,12 +413,14 @@ class TmdbClient:
             logger.debug("TMDb: GET /authentication -> %d (%.1fs)", r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, ConnectionError, TimeoutError) as e:
             logger.warning("TMDb: echec validate_key — %s", e)
-            return False, f"Erreur reseau: {e}"
+            # LOTD-INT-03 : str(e) requests embarque l'URL ?api_key=<cle en
+            # clair> ; les logs sont scrubbés, le message renvoye au FRONT ne
+            # l'est PAS (meme politique que safe_integration_error : exception
+            # complete cote serveur, diagnostic sans secret cote client).
+            host = urlsplit(url).netloc or "api.themoviedb.org"
+            return False, f"Erreur reseau: {type(e).__name__} ({host})"
 
         try:
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
         except (KeyError, TypeError, ValueError):
             data = {}
@@ -378,9 +471,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug(
                 "TMDb: search '%s' (%s) -> %d resultats (%.1fs)",
@@ -430,25 +520,49 @@ class TmdbClient:
                 )
             )
 
-        self._cache_set(cache_key, [r.__dict__ for r in results])
-        # best-effort save
-        try:
-            self._save_cache_atomic()
-        except (OSError, PermissionError) as exc:
-            self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
+        # R8-041 (F4) : NE PAS cacher une réponse VIDE (200 + results=[]) comme un
+        # résultat positif valide. `_cache_get` fait `if cached is not None`, vrai
+        # pour [] -> il servait [] pendant 7 jours (TTL search) => film figé
+        # « non identifié » à travers les re-scans après UN simple hoquet TMDb,
+        # même quand TMDb répond ensuite correctement. Une liste vide n'est pas
+        # mise en cache -> le prochain appel re-interroge TMDb (récupération).
+        if results:
+            self._cache_set(cache_key, [r.__dict__ for r in results])
+            # best-effort save
+            try:
+                self._save_cache_atomic()
+            except (OSError, PermissionError) as exc:
+                self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
         return results
 
-    def _get_movie_detail_cached(self, movie_id: int) -> Optional[Dict[str, Any]]:
-        """Recupere le detail d'un film TMDb (cache local). Stocke poster + collection."""
+    def _get_movie_detail_cached(self, movie_id: int, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """Recupere le detail d'un film TMDb (cache local). Stocke poster + collection.
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : collection_name, genres et
+        production_companies sont toujours en francais.
+        """
         mid = int(movie_id or 0)
         if mid <= 0:
             return None
 
         cache_key = f"movie|{mid}"
-        cached = self._cache_get(cache_key)
-        if isinstance(cached, dict):
-            return cached
+        # E4-bis (revue Lot E) : force_refresh saute la LECTURE du cache mais
+        # ne purge rien — si le fetch echoue, le fallback stale (plus bas)
+        # reste disponible ; s'il reussit, _cache_set ecrase l'entree.
+        if not force_refresh:
+            cached = self._cache_get(cache_key)
+            if isinstance(cached, dict):
+                return cached
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `movie|{mid}` n'inclut PAS la langue. cfg.tmdb_language
+        # n'affecte donc PAS l'output de cet endpoint (collection_name, genres,
+        # production_companies sont toujours retournes en francais). Si la
+        # langue devient un jour configurable ici, il FAUT inclure la langue
+        # dans cache_key (ex: f"movie|{language}|{mid}") pour eviter une
+        # cross-contamination du cache entre langues. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/movie/{mid}"
         params = {
             "api_key": self.api_key,
@@ -458,9 +572,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: GET /movie/%d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -505,9 +616,13 @@ class TmdbClient:
             self._debug(f"movie detail cache save warning movie_id={mid} error={exc}")
         return cache_entry
 
-    def get_movie_poster_path(self, movie_id: int) -> Optional[str]:
-        """Retourne poster_path pour un film TMDb (cache local)."""
-        detail = self._get_movie_detail_cached(movie_id)
+    def get_movie_poster_path(self, movie_id: int, force_refresh: bool = False) -> Optional[str]:
+        """Retourne poster_path pour un film TMDb (cache local).
+
+        E4-bis : force_refresh saute la lecture du cache (re-fetch TMDb) en
+        conservant le fallback stale si l'API echoue.
+        """
+        detail = self._get_movie_detail_cached(movie_id, force_refresh=force_refresh)
         if not detail:
             return None
         poster = detail.get("poster_path")
@@ -548,8 +663,10 @@ class TmdbClient:
             return None
         return value if value > 0 else None
 
-    def get_movie_poster_thumb_url(self, movie_id: int, size: str = "w92") -> Optional[str]:
-        poster = self.get_movie_poster_path(movie_id)
+    def get_movie_poster_thumb_url(
+        self, movie_id: int, size: str = "w92", force_refresh: bool = False
+    ) -> Optional[str]:
+        poster = self.get_movie_poster_path(movie_id, force_refresh=force_refresh)
         if not poster:
             return None
         p = str(poster).strip()
@@ -567,6 +684,11 @@ class TmdbClient:
         P1.1.c : symétrique à find_by_imdb_id. Permet de cross-checker un NFO
         qui contient <tmdbid>27205</tmdbid> contre le titre officiel TMDb
         (détection NFO pollué/copié-collé).
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : le `title` retourne est toujours en
+        francais.
         """
         try:
             mid = int(str(tmdb_id).strip())
@@ -586,15 +708,18 @@ class TmdbClient:
                 except TypeError:
                     pass
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `find_tmdb|{mid}` n'inclut PAS la langue. Le `title`
+        # stocke dans le cache est donc toujours en francais, independamment de
+        # cfg.tmdb_language. Si la langue devient un jour configurable ici, il
+        # FAUT inclure la langue dans cache_key (ex: f"find_tmdb|{language}|{mid}")
+        # pour eviter cross-contamination du cache. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/movie/{mid}"
         params = {"api_key": self.api_key, "language": "fr-FR"}
         _t0 = time.monotonic()
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_tmdb_id %d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -626,10 +751,108 @@ class TmdbClient:
         logger.info("TMDb: find_by_tmdb_id %d -> '%s' (%s)", mid, result.title, result.year)
         return result
 
+    def get_alternative_titles(
+        self,
+        movie_id: int,
+        country_code: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Recupere les titres alternatifs d'un film TMDb (cache persistent).
+
+        VN-D.2 : sert au matching cross-langue (FR/EN/JP/ES) quand le sim_best
+        sur title/original_title est faible (< 0.85). Permet d'identifier
+        "Le Voyage de Chihiro" comme alias de "Spirited Away" (TMDb expose
+        les titres dans toutes les langues).
+
+        Parameters
+        ----------
+        movie_id : int
+            Identifiant TMDb du film.
+        country_code : str, optional
+            Filtre ISO-3166-1 (ex: "FR", "US"). Si None, retourne toutes les
+            alternatives. Le filtre est applique cote client apres cache.
+
+        Returns
+        -------
+        list[dict]
+            Liste de {"iso_3166_1": str, "title": str, "type": str}.
+            Vide si pas d'alternative, l'API echoue ou movie_id invalide.
+
+        Notes
+        -----
+        Cache persistant (cle `movie_alt_titles|{id}`) reutilise au prochain
+        scan. TTL : meme que le cache movie (long, deterministe).
+        """
+        try:
+            mid = int(movie_id or 0)
+        except (TypeError, ValueError):
+            return []
+        if mid <= 0:
+            return []
+
+        cache_key = f"movie_alt_titles|{mid}"
+        cached = self._cache_get(cache_key)
+        if isinstance(cached, list):
+            titles = cached
+        else:
+            url = f"{TMDB_API_BASE}/movie/{mid}/alternative_titles"
+            params = {"api_key": self.api_key}
+            _t0 = time.monotonic()
+            try:
+                r = self._http_get(url, params=params)
+                r.raise_for_status()
+                data = r.json()
+                logger.debug(
+                    "TMDb: GET /movie/%d/alternative_titles -> %d (%.1fs)",
+                    mid,
+                    r.status_code,
+                    time.monotonic() - _t0,
+                )
+            except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
+                logger.debug("TMDb: echec alternative_titles /movie/%d — %s", mid, exc)
+                self._debug(f"get_alternative_titles warning movie_id={mid} error={exc}")
+                stale = self._cache_get_stale(cache_key)
+                if isinstance(stale, list):
+                    logger.info("TMDb: alternative_titles /movie/%d — fallback cache expire", mid)
+                    titles = stale
+                else:
+                    return []
+            else:
+                if not isinstance(data, dict):
+                    self._debug(f"get_alternative_titles warning movie_id={mid} error=payload_non_dict")
+                    return []
+                raw_titles = data.get("titles") or []
+                titles = []
+                for it in raw_titles:
+                    if not isinstance(it, dict):
+                        continue
+                    title = str(it.get("title") or "").strip()
+                    if not title:
+                        continue
+                    titles.append(
+                        {
+                            "iso_3166_1": str(it.get("iso_3166_1") or "").upper(),
+                            "title": title,
+                            "type": str(it.get("type") or ""),
+                        }
+                    )
+                self._cache_set(cache_key, titles)
+                with contextlib.suppress(OSError, PermissionError):
+                    self._save_cache_atomic()
+
+        if country_code:
+            cc = str(country_code).strip().upper()
+            return [t for t in titles if t.get("iso_3166_1") == cc]
+        return list(titles)
+
     def find_by_imdb_id(self, imdb_id: str) -> Optional[TmdbResult]:
         """Lookup TMDb via /find endpoint avec un IMDb ID externe.
 
         Retourne le premier film trouve ou None.
+
+        R5-finding-3 : `language` est HARD-PINNED sur "fr-FR" (cf params plus
+        bas) et la cle de cache n'inclut PAS la langue. cfg.tmdb_language est
+        donc ignoree pour cet endpoint : le `title` retourne est toujours en
+        francais.
         """
         iid = (imdb_id or "").strip()
         if not iid or not iid.startswith("tt"):
@@ -642,15 +865,18 @@ class TmdbClient:
                 return None
             return TmdbResult(**cached) if isinstance(cached, dict) else None
 
+        # R5-finding-3 (fix minimal) : language est HARD-PINNED sur "fr-FR" et
+        # la cle de cache `find_imdb|{iid}` n'inclut PAS la langue. Le `title`
+        # stocke dans le cache est donc toujours en francais, independamment de
+        # cfg.tmdb_language. Si la langue devient un jour configurable ici, il
+        # FAUT inclure la langue dans cache_key (ex: f"find_imdb|{language}|{iid}")
+        # pour eviter cross-contamination du cache. Cf evidence R5 bug 3.
         url = f"{TMDB_API_BASE}/find/{iid}"
         params = {"api_key": self.api_key, "external_source": "imdb_id", "language": "fr-FR"}
         _t0 = time.monotonic()
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_imdb_id %s -> %d (%.1fs)", iid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -727,9 +953,6 @@ class TmdbClient:
                 params["first_air_date_year"] = int(year)
             resp = self._http_get(f"{TMDB_API_BASE}/search/tv", params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return []
@@ -762,9 +985,14 @@ class TmdbClient:
                 }
             )
 
-        # _cache_set et _save_cache_atomic gerent leur propre lock
-        self._cache_set(cache_key, cache_items)
-        self._save_cache_atomic(force=False)
+        # R8-097 (filet F4) : JUMEAU de R8-041 côté TV. Ne PAS cacher une réponse
+        # VIDE (200 + results=[]) comme valide -> `cached is not None and isinstance
+        # (cached, list)` est vrai pour [] -> série figée « non identifiée » 7 jours
+        # après UN hoquet TMDb. Une liste vide n'est pas mise en cache.
+        if cache_items:
+            # _cache_set et _save_cache_atomic gerent leur propre lock
+            self._cache_set(cache_key, cache_items)
+            self._save_cache_atomic(force=False)
         return out
 
     def get_tv_episode_title(
@@ -787,9 +1015,6 @@ class TmdbClient:
             url = f"{TMDB_API_BASE}/tv/{series_id}/season/{season_number}/episode/{episode_number}"
             resp = self._http_get(url, params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return None

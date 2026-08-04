@@ -431,10 +431,9 @@ class SingleFolderIsConformWithTemplateTests(unittest.TestCase):
     """single_folder_is_conform avec naming_template."""
 
     def test_conform_with_default_template(self) -> None:
-        from cinesort.domain.duplicate_support import single_folder_is_conform, movie_dir_title_year
-
         # Cf issue #83 phase 2 : _norm_for_tokens depuis l'origine (title_helpers)
         from cinesort.domain.core import windows_safe
+        from cinesort.domain.duplicate_support import movie_dir_title_year, single_folder_is_conform
         from cinesort.domain.title_helpers import _norm_for_tokens
 
         result = single_folder_is_conform(
@@ -450,10 +449,9 @@ class SingleFolderIsConformWithTemplateTests(unittest.TestCase):
 
     def test_conform_fallback_without_template(self) -> None:
         """Sans template, le fallback historique fonctionne."""
-        from cinesort.domain.duplicate_support import single_folder_is_conform, movie_dir_title_year
-
         # Cf issue #83 phase 2 : _norm_for_tokens depuis l'origine (title_helpers)
         from cinesort.domain.core import windows_safe
+        from cinesort.domain.duplicate_support import movie_dir_title_year, single_folder_is_conform
         from cinesort.domain.title_helpers import _norm_for_tokens
 
         result = single_folder_is_conform(
@@ -478,6 +476,7 @@ class NamingSettingsTests(unittest.TestCase):
     def _make_api(self):
         import tempfile
         from pathlib import Path
+
         import cinesort.ui.api.cinesort_api as backend
 
         tmp = tempfile.mkdtemp(prefix="cinesort_naming_")
@@ -570,6 +569,7 @@ class PreviewNamingEndpointTests(unittest.TestCase):
     def _make_api(self):
         import tempfile
         from pathlib import Path
+
         import cinesort.ui.api.cinesort_api as backend
 
         tmp = tempfile.mkdtemp(prefix="cinesort_naming_prev_")

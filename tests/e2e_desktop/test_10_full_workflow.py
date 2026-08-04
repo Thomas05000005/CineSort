@@ -17,13 +17,13 @@ try:
 except ImportError:
     allure = None
 
-from .pages.base_page import BasePage
 from .pages.accueil_page import AccueilPage
+from .pages.base_page import BasePage
 from .pages.bibliotheque_page import BibliothequePage
 from .utils.wait_helpers import (
+    wait_for_api_ready,
     wait_for_scan_complete,
     wait_for_table_loaded,
-    wait_for_api_ready,
 )
 
 

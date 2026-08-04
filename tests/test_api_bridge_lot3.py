@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from contextlib import closing
+import json
+import os
 import shutil
 import sqlite3
 import tempfile
 import threading
 import time
-import json
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-import cinesort.ui.api.cinesort_api as backend
-import cinesort.domain.core as core
 import cinesort.app.plan_support as plan_support
+import cinesort.domain.core as core
+import cinesort.ui.api.cinesort_api as backend
 from cinesort.ui.api import cinesort_api as api_mod
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_terminal
@@ -21,6 +22,14 @@ from tests._helpers import wait_run_done as _wait_terminal
 
 class ApiBridgeLot3Tests(unittest.TestCase):
     def setUp(self) -> None:
+        # Racine temporaire BRUTE, volontairement non canonisee : sur le runner
+        # GitHub Windows %TEMP% vaut C:\Users\RUNNER~1\... (nom court 8.3) et
+        # traverse des jonctions. Ce fut un contournement (.resolve() ici) tant
+        # que open_path() comparait deux CHAINES (resolve() vs absolute()) et
+        # refusait donc ces chemins pourtant legitimes ; la garde compare
+        # desormais des chemins REELS (cf test_vague_h_security.py, classe
+        # OpenPathJunctionTests), les tests tournent donc sur le chemin tel que
+        # le systeme le donne.
         self._tmp = tempfile.mkdtemp(prefix="cinesort_lot3_")
         self.root = Path(self._tmp) / "root"
         self.state_dir = Path(self._tmp) / "state"
@@ -519,6 +528,10 @@ class ApiBridgeLot3Tests(unittest.TestCase):
                 "state_dir": str(self.state_dir),
                 "tmdb_enabled": False,
                 "collection_folder_enabled": True,
+                # M-07 hotfix Vague M : desactive l'auto-recompute background
+                # (v1.5.4 Vague I) qui ecrit des logs "QUALITE ..." apres
+                # done=True, causant une race sur rs.logs[0] (off-by-one).
+                "auto_recompute_quality_on_scan": False,
             }
         )
         run_id = start["run_id"]
@@ -528,11 +541,19 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.assertIsNotNone(rs)
         assert rs is not None
 
+        # Snapshot du compteur de logs deja presents (start_plan en cree
+        # plusieurs : START PLAN / Scan folders / Plan built / PLAN READY).
+        # On verifie le contrat de la cap : peu importe combien de logs
+        # pre-existent, apres avoir push MAX+250 logs, len == MAX et le
+        # premier message survivant est log-(pre + 250 - 0) calcule.
+        len(rs.logs)
         for i in range(api_mod.MAX_RUN_LOG_ITEMS + 250):
             rs.log("DEBUG", f"log-{i}")
 
         self.assertEqual(len(rs.logs), api_mod.MAX_RUN_LOG_ITEMS)
-        self.assertEqual(rs.logs[0]["msg"], "log-250")
+        # Total inserted = pre + (MAX + 250) ; kept = last MAX ; dropped = pre + 250
+        # First surviving log message index = (pre + 250) - pre = 250 si pre <= 250.
+        self.assertEqual(rs.logs[0]["msg"], f"log-{250}")
 
     def test_terminal_runs_memory_is_bounded(self) -> None:
         class _FakeSnap:
@@ -568,6 +589,79 @@ class ApiBridgeLot3Tests(unittest.TestCase):
 
         self.assertEqual(count_done, api_mod.MAX_TERMINAL_RUNS_IN_MEMORY)
         self.assertIn("active_keep", api._runs)  # type: ignore[attr-defined]
+
+    def test_purge_under_cap_does_not_query_runner_status(self) -> None:
+        """PERF : sous le cap, la purge ne doit interroger AUCUN run.
+
+        `runner.get_status()` retombe en BDD des que le JobRunner a evince le
+        run (cleanup H6), et chaque retombee coute 3 connexions SQLite neuves.
+        Comme `_get_run()` declenche la purge a chaque lecture d'etat, la
+        boucle faisait payer O(runs en memoire) ouvertures de connexion par
+        sondage de progression -> les scans successifs ralentissaient en
+        O(n^2). Sous le cap la boucle ne pouvait de toute facon rien evincer
+        (`terminal` est un sous-ensemble de `_runs`) : elle doit etre court-
+        circuitee, donc zero appel a get_status.
+        """
+        calls: list = []
+
+        class _FakeRunner:
+            def get_status(self, run_id: str):
+                calls.append(run_id)
+                return None  # simule le run deja evince par le cleanup H6
+
+        class _FakeRun:
+            def __init__(self, started_ts: float):
+                self.running = False
+                self.started_ts = started_ts
+                self.runner = _FakeRunner()
+
+        api = backend.CineSortApi()
+        under_cap = api_mod.MAX_TERMINAL_RUNS_IN_MEMORY
+        with api._runs_lock:  # type: ignore[attr-defined]
+            for i in range(under_cap):
+                api._runs[f"done_{i:03d}"] = _FakeRun(float(i))  # type: ignore[attr-defined]
+            api._purge_terminal_runs_locked()  # type: ignore[attr-defined]
+            remaining = len(api._runs)  # type: ignore[attr-defined]
+
+        self.assertEqual(calls, [], f"purge sous le cap : {len(calls)} appels a runner.get_status (attendu 0)")
+        # Aucune eviction non plus : la purge sous le cap est un no-op complet.
+        self.assertEqual(remaining, under_cap)
+
+    def test_get_run_polling_does_not_scale_with_runs_in_memory(self) -> None:
+        """PERF : le cout d'une lecture d'etat ne doit pas croitre avec l'historique.
+
+        Reproduit le defaut de bout en bout : 40 lectures `_get_run()` avec
+        N runs termines en memoire. Avant le correctif, chaque lecture
+        balayait les N entrees et interrogeait le runner pour chacune.
+        """
+        calls: list = []
+
+        class _FakeRunner:
+            def get_status(self, run_id: str):
+                calls.append(run_id)
+                return None
+
+        class _FakeRun:
+            def __init__(self, started_ts: float):
+                self.running = False
+                self.started_ts = started_ts
+                self.runner = _FakeRunner()
+
+        api = backend.CineSortApi()
+        n_runs = api_mod.MAX_TERMINAL_RUNS_IN_MEMORY - 5
+        with api._runs_lock:  # type: ignore[attr-defined]
+            for i in range(n_runs):
+                api._runs[f"done_{i:03d}"] = _FakeRun(float(i))  # type: ignore[attr-defined]
+
+        for _ in range(40):
+            api._get_run("done_000")  # type: ignore[attr-defined]
+
+        self.assertEqual(
+            calls,
+            [],
+            f"40 lectures d'etat avec {n_runs} runs en memoire ont declenche "
+            f"{len(calls)} interrogations du runner (attendu 0)",
+        )
 
     def test_get_or_create_infra_reuses_same_store_and_runner_for_same_state_dir(self) -> None:
         api = backend.CineSortApi()
@@ -681,7 +775,15 @@ class ApiBridgeLot3Tests(unittest.TestCase):
             res = api.open_path(str(target_file))
 
         self.assertTrue(res.get("ok"), res)
-        mocked_startfile.assert_called_once_with(str(folder))
+        # open_path ouvre toujours le chemin RESOLU (garde anti path-traversal),
+        # jamais la chaine fournie : sous un %TEMP% derriere une jonction ou en
+        # 8.3 les deux ecritures different alors que c'est le meme dossier reel.
+        mocked_startfile.assert_called_once()
+        opened = str(mocked_startfile.call_args.args[0])
+        self.assertEqual(
+            os.path.normcase(os.path.realpath(opened)),
+            os.path.normcase(os.path.realpath(str(folder))),
+        )
 
     def test_save_settings_rejects_explicit_empty_root(self) -> None:
         api = backend.CineSortApi()

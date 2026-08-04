@@ -1,0 +1,67 @@
+/* ============================================================================
+ * inline-overrides.css
+ * ----------------------------------------------------------------------------
+ * Bug Console #3 (v1.5.x) : extraction des inline styles de index.html pour
+ * satisfaire la CSP `style-src 'self'` (sans 'unsafe-inline' ni nonce).
+ *
+ * Anciens emplacements dans web/dashboard/index.html :
+ *   - L33-44 : bloc <style> inline (V5B-01 shell v5 minimal)
+ *   - L71    : attribut style sur #loginBtn (width 100% + center)
+ *
+ * NB : les tier hex (#FFD700 Gold, #C0C0C0 Silver, #CD7F32 Bronze,
+ *      #E5E4E2 Platinum) ne sont PAS touches — ce fichier ne contient
+ *      aucune couleur tier (uniquement layout shell + bouton login).
+ * ============================================================================ */
+
+/* --- V5B-01 : layout shell v5 minimal (sidebar mount + main flex + right panel) --- */
+.v5-shell {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+}
+
+.v5-sidebar-mount {
+  flex-shrink: 0;
+}
+
+.v5-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.v5-topbar-mount {
+  flex-shrink: 0;
+}
+
+.v5-breadcrumb-mount {
+  flex-shrink: 0;
+  padding: var(--sp-2) var(--sp-4) 0;
+}
+
+.v5-content {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-4);
+  overflow-y: auto;
+}
+
+.v5-content > .view {
+  display: none;
+}
+
+.v5-content > .view.active {
+  display: block;
+}
+
+/* Phase 2 : inspecteur droit (right panel) — spec 04 Shell 3 zones */
+.v5-right-panel-mount {
+  flex-shrink: 0;
+}
+
+/* --- Bouton login : pleine largeur centre (ex-inline style L71) --- */
+#loginBtn {
+  width: 100%;
+  justify-content: center;
+}

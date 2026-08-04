@@ -16,6 +16,7 @@ import unittest
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any
+
 from tests._helpers import find_free_port as _find_free_port
 
 _ROOT = Path(__file__).resolve().parents[1]

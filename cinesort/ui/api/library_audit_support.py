@@ -13,9 +13,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from cinesort.infra import state
+from cinesort.domain.core import windows_safe
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
-    try:
-        settings = api.settings.get_settings()
-        state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        store, _ = api._get_or_create_infra(state_dir)
-        runs = store.run.list_runs(limit=1)
-    except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
-        logger.warning("library_audit cannot resolve latest run: %s", exc)
-        return None
-    if not runs:
-        return None
-    return str(runs[0].get("run_id") or "") or None
+    # B1-bis (revue Lot C-fix) : jumeau de library_support._resolve_run_id —
+    # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
+    # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
+    # corrige (skip des runs utilitaires).
+    from cinesort.ui.api import library_support
+
+    return library_support._resolve_run_id(api, None)
 
 
 def _decade_from_year(year: int) -> Optional[str]:
@@ -94,6 +90,22 @@ def get_films_by_decade(api: Any, filters: Optional[Dict[str, Any]] = None) -> D
             "total": N,
         }
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_films_by_decade_impl(api, filters)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_films_by_decade failed for filters=%s", filters)
+        return {
+            "ok": False,
+            "error": "films_by_decade_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger la distribution par decennie.",
+        }
+
+
+def _get_films_by_decade_impl(api: Any, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Implementation reelle de get_films_by_decade, sans wrap global (Vague G)."""
     resolved_rid = _resolve_latest_run_id(api)
     if not resolved_rid:
         return {"ok": True, "run_id": None, "by_decade": {}, "total": 0}
@@ -177,6 +189,79 @@ def _collect_owned_by_collection(rows: List[Dict[str, Any]]) -> Dict[int, Dict[s
     return grouped
 
 
+def _matching_candidates(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Candidats de la row qui correspondent REELLEMENT a sa proposition.
+
+    `PlanRow.candidates` n'est pas trie : `pick_best_candidate` classe une COPIE
+    locale et `_build_resolved_row` reserialise la liste d'origine. Prendre
+    `candidates[0]` a l'aveugle rendrait donc le tmdb_id d'un AUTRE film.
+    On ne retient que les candidats dont (titre, annee) redonnent exactement
+    `proposed_title` / `proposed_year`, tries par score decroissant.
+
+    Une annee absente (0) n'est PAS un joker : `_build_unresolved_row` produit
+    `proposed_year = 0` et des candidats sans annee, qui matcheraient alors sur
+    le seul titre. `_build_resolved_row` exige `chosen.year`, donc toute row
+    reellement resolue porte une annee — refuser 0 ne coute rien et ferme la
+    porte a une revendication de possession sur une row non resolue.
+    """
+
+    def _key(value: Any) -> str:
+        return windows_safe(str(value or "")).strip().casefold()
+
+    wanted_title = _key(row.get("proposed_title"))
+    if not wanted_title:
+        return []
+    try:
+        wanted_year = int(row.get("proposed_year") or 0)
+    except (TypeError, ValueError):
+        return []
+    if wanted_year <= 0:
+        return []
+
+    matching: List[Dict[str, Any]] = []
+    for cand in row.get("candidates") or []:
+        if not isinstance(cand, dict):
+            continue
+        if _key(cand.get("title")) != wanted_title:
+            continue
+        try:
+            cand_year = int(cand.get("year") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cand_year != wanted_year:
+            continue
+        matching.append(cand)
+
+    def _score(cand: Dict[str, Any]) -> float:
+        try:
+            return float(cand.get("score") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # `sorted` est stable : a score egal l'ordre du plan est conserve.
+    return sorted(matching, key=_score, reverse=True)
+
+
+def _plan_row_tmdb_id(row: Dict[str, Any]) -> Optional[int]:
+    """Resout le tmdb_id d'une PlanRow serialisee, ou None.
+
+    `PlanRow` (`cinesort/domain/core.py`) ne porte AUCUN `tmdb_id` top-level :
+    le tmdb_id reel vit sur les `Candidate`. Le seul producteur de
+    `row["tmdb_id"]` est `film_support.overlay_tmdb_override`, applique par
+    `history_support._enrich_plan_payload` UNIQUEMENT quand l'utilisateur a
+    choisi un candidat A LA MAIN (table `film_tmdb_overrides`). Pour tous les
+    matchs automatiques — la quasi-totalite d'une bibliotheque — la clef est
+    absente et `owned_tmdb_ids` restait vide : le match primaire des sagas etait
+    mort, la completude reposait sur le seul repli (titre, annee).
+
+    La priorite (`chosen_tmdb_id` > `tmdb_id` > candidat) reste celle du helper
+    canonique du depot, `film_support._resolve_chosen_tmdb_id` : on ne duplique
+    pas une variante, on lui restreint seulement les candidats offerts.
+    """
+    resolved = _resolve_chosen_tmdb_id(row, _matching_candidates(row))
+    return int(resolved) if resolved > 0 else None
+
+
 def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any]]:
     """Charge le plan en preservant tmdb_collection_id/name + tmdb_id.
 
@@ -196,9 +281,14 @@ def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any
         out.append(
             {
                 "row_id": str(r.get("row_id") or ""),
-                "title": r.get("proposed_title") or r.get("nfo_title") or "",
+                # #714 (meme famille) : le repli `r.get("nfo_title")` etait une
+                # seconde clef fantome — `PlanRow` porte `nfo_path`, jamais
+                # `nfo_title`, et aucun enrichissement ne la pose. Repli mort.
+                "title": r.get("proposed_title") or "",
                 "year": int(r.get("proposed_year") or 0),
-                "tmdb_id": r.get("tmdb_id"),
+                # #714 : `r.get("tmdb_id")` etait une clef FANTOME (absente du
+                # dataclass PlanRow) -> owned_tmdb_ids toujours vide.
+                "tmdb_id": _plan_row_tmdb_id(r),
                 "tmdb_collection_id": r.get("tmdb_collection_id"),
                 "tmdb_collection_name": r.get("tmdb_collection_name"),
             }
@@ -216,14 +306,31 @@ def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[
         # On reutilise le client TMDb existant sur api si dispo.
         client = getattr(api, "_tmdb_client", None)
         if client is None:
-            # Best-effort : instancier via settings
+            # AUDIT 2026-06-10 (REAL 2/2) : `getattr(api, "_tmdb_client")` est
+            # toujours None (attribut inexistant) et TmdbClient(api_key=api_key)
+            # OMETTAIT le parametre requis cache_path -> TypeError avale ->
+            # _fetch_collection_parts retournait toujours None ->
+            # get_incomplete_sagas retournait toujours sagas:[] (feature morte).
+            # On construit le client correctement, avec cle dé-masquee + cache_path.
+            import cinesort.infra.state as _state
             from cinesort.infra.tmdb_client import TmdbClient
+            from cinesort.ui.api.settings_support import normalize_user_path
 
-            settings = api.settings.get_settings()
+            settings = api._internal_settings()
             api_key = str(settings.get("tmdb_api_key") or "").strip()
             if not api_key:
                 return None
-            client = TmdbClient(api_key=api_key)
+            state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+            try:
+                cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+            except (TypeError, ValueError):
+                cache_ttl_days = 30
+            client = TmdbClient(
+                api_key=api_key,
+                cache_path=state_dir / "tmdb_cache.json",
+                timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+                cache_ttl_days=cache_ttl_days,
+            )
         # Appel direct collection/{id}
         url = f"https://api.themoviedb.org/3/collection/{int(collection_id)}"
         params = {"api_key": getattr(client, "api_key", None), "language": "fr-FR"}

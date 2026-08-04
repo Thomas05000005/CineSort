@@ -19,6 +19,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     SPECTRAL_CUTOFF_LOSSLESS,
     SPECTRAL_CUTOFF_LOSSY_HIGH,
@@ -32,8 +34,6 @@ from .constants import (
     SPECTRAL_SEGMENT_OFFSET_S,
     SPECTRAL_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)
@@ -302,11 +302,15 @@ def analyze_spectral(
         return SpectralResult(cutoff_hz=0.0, lossy_verdict="error", confidence=0.0, rms_db=rms_db)
 
     cutoff_hz = find_cutoff_hz(spec_mean, SPECTRAL_SAMPLE_RATE)
+    # Le signal est toujours resample a SPECTRAL_SAMPLE_RATE (48 kHz), donc cutoff_hz
+    # est borne au Nyquist analyse (24 kHz). On clamp le sample_rate transmis au
+    # cross-check Nyquist de classify_cutoff sur ce meme referentiel, sinon la
+    # branche lossless_native_nyquist est morte pour toute source >=48 kHz.
     verdict, confidence = classify_cutoff(
         cutoff_hz,
         rms_db,
         codec=codec,
-        sample_rate=sample_rate,
+        sample_rate=min(int(sample_rate), SPECTRAL_SAMPLE_RATE),
         film_era=film_era,
     )
     return SpectralResult(

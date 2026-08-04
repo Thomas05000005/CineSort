@@ -33,7 +33,6 @@ from cinesort.domain import i18n_messages
 from cinesort.ui.api import settings_support
 from tests._helpers import find_free_port as _find_free_port
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALES_DIR = PROJECT_ROOT / "locales"
 DASHBOARD_VIEWS_DIR = PROJECT_ROOT / "web" / "dashboard" / "views"

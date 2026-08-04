@@ -1,14 +1,17 @@
 """§16 v7.5.0 — Score composite V2 (Platinum/Gold/Silver/Bronze/Reject).
 
-Remplace progressivement `composite_score.py` v1. Agrege toutes les metriques
-des sections §3-§15 en :
+VN-B.1 (Vague N batch 2) : V2 est desormais la source de verite UNIQUE
+pour `global_score` / `global_tier` cote UI (defaut
+`composite_score_version=2`). Agrege toutes les metriques des sections
+§3-§15 en :
     - 3 categories ponderees (Video 60% / Audio 35% / Coherence 5%)
     - 9 regles d'ajustement contextuel
     - confidence-weighted scoring
     - warnings auto-collectes
 
-Coexiste avec la v1 (composite_score.py reste le comportement par defaut pour
-les rows historiques). La v2 est stockee separement en BDD.
+`composite_score.py` (V1) survit en kill-switch de rollback explicite et
+pour la lecture de rows historiques (vocabulaire reference/excellent/...
+bon/mediocre/degrade), mais n'est plus la voie nominale.
 """
 
 from __future__ import annotations
@@ -84,12 +87,15 @@ def weighted_score_with_confidence(
     - Le poids effectif de chaque item = weight * confidence.
     - Si tous les items ont confidence = 0 -> renvoyer (50.0, 0.0) fallback neutre.
     - Si la liste est vide -> (50.0, 0.0).
+    - Les items avec confidence=0 (ex: "reserve" audio) sont exclus du calcul
+      de la confidence moyenne pour ne pas diluer artificiellement la confiance
+      des items reellement mesures.
     """
     if not scores:
         return 50.0, 0.0
     total_eff_weight = 0.0
     weighted_sum = 0.0
-    total_raw_weight = 0.0
+    contributing_weight = 0.0  # somme des poids des items avec confidence > 0
     weighted_conf_sum = 0.0
     for value, weight, confidence in scores:
         w = float(weight)
@@ -97,12 +103,13 @@ def weighted_score_with_confidence(
         eff = w * c
         total_eff_weight += eff
         weighted_sum += float(value) * eff
-        total_raw_weight += w
-        weighted_conf_sum += c * w
+        if c > 0.0:
+            contributing_weight += w
+            weighted_conf_sum += c * w
     if total_eff_weight <= 0:
         return 50.0, 0.0
     score = weighted_sum / total_eff_weight
-    mean_conf = weighted_conf_sum / total_raw_weight if total_raw_weight > 0 else 0.0
+    mean_conf = weighted_conf_sum / contributing_weight if contributing_weight > 0 else 0.0
     return _clamp(score), max(0.0, min(1.0, mean_conf))
 
 
@@ -134,8 +141,8 @@ def _score_resolution(video: Any) -> Tuple[float, float, str]:
         return 30.0, 0.9, "reject"  # upscale deguise en 4K
     if width >= 3800 or height >= 2100:
         return 100.0, 1.0, "platinum"  # vrai 4K/UHD
-    if width >= 1900 or height >= 1060:
-        return 85.0, 1.0, "gold"  # 1080p
+    if width >= 1900 or height >= 1000:
+        return 85.0, 1.0, "gold"  # 1080p (seuil aligne sur quality_score._resolution_label)
     if width >= 1280 or height >= 680:
         return 70.0, 1.0, "silver"  # 720p
     if width > 0:
@@ -153,16 +160,21 @@ def _score_hdr(video: Any, normalized_probe: Optional[Dict[str, Any]]) -> Tuple[
         return 50.0, 0.0, flags
 
     video_data = (normalized_probe or {}).get("video") or {}
-    has_hdr10 = bool(video_data.get("has_hdr10"))
-    has_hdr10_plus = bool(getattr(video, "has_hdr10_plus_detected", False)) or bool(video_data.get("has_hdr10_plus"))
-    has_dv = bool(video_data.get("has_dv"))
+    # AUDIT 2026-06-10 (REAL 2/2) : le probe normalise expose hdr10 /
+    # hdr_dolby_vision / hdr10_plus / dv_present (cf _normalize_ffprobe.py:93-111),
+    # PAS has_hdr10 / has_dv / has_hdr10_plus. Avec les mauvaises cles, tout
+    # contenu HDR10/Dolby Vision etait score comme SDR (60.0, confiance 0.3) et
+    # les flags dv_profile_5 / hdr_metadata_missing jamais leves.
+    has_hdr10 = bool(video_data.get("hdr10"))
+    has_hdr10_plus = bool(getattr(video, "has_hdr10_plus_detected", False)) or bool(video_data.get("hdr10_plus"))
+    has_dv = bool(video_data.get("hdr_dolby_vision")) or bool(video_data.get("dv_present"))
     dv_profile = str(video_data.get("dv_profile") or "").strip()
     max_cll = video_data.get("max_cll")
     max_fall = video_data.get("max_fall")
 
     if has_dv and dv_profile == "5":
         flags.append("dv_profile_5")
-    if has_hdr10 and (max_cll is None or max_fall is None):
+    if has_hdr10 and (not max_cll or not max_fall):
         flags.append("hdr_metadata_missing")
 
     if has_dv and dv_profile in ("8.1", "8.2", "8.4"):
@@ -286,13 +298,13 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
         return 50.0, 0.0, "bronze"
     verdict = str(getattr(audio, "lossy_verdict", "unknown") or "unknown")
     conf = float(getattr(audio, "lossy_confidence", 0) or 0)
-    if verdict == "lossless":
+    if verdict in ("lossless", "lossless_native_nyquist", "lossless_vintage_master"):
         return 100.0, max(conf, 0.8), "platinum"
-    if verdict == "high_bitrate_lossy":
+    if verdict == "lossy_high":
         return 75.0, max(conf, 0.7), "gold"
-    if verdict == "medium_bitrate_lossy":
+    if verdict == "lossy_mid":
         return 55.0, max(conf, 0.7), "silver"
-    if verdict == "low_bitrate_lossy":
+    if verdict == "lossy_low":
         return 30.0, max(conf, 0.7), "bronze"
     return 60.0, 0.0, "bronze"
 
@@ -583,7 +595,11 @@ def apply_contextual_adjustments(
             video_subs = _patch(video_subs, "resolution", ADJUSTMENT_IMAX_TYPED_BONUS, "imax_typed")
 
     # Regle 6 — fake lossless (codec claim lossless mais cutoff spectral bas)
-    audio_tracks = (normalized_probe or {}).get("audio") or []
+    # AUDIT 2026-06-10 (REAL 2/2) : la cle reelle du probe normalise est
+    # `audio_tracks` (cf _normalize_ffprobe.py:185), pas `audio` -> avant, la
+    # liste etait toujours vide, has_lossless_codec toujours False et le malus
+    # fake-lossless + warning ne se declenchaient jamais.
+    audio_tracks = (normalized_probe or {}).get("audio_tracks") or []
     has_lossless_codec = any(
         str((t or {}).get("codec", "")).lower() in ("flac", "truehd", "dts-hd ma", "mlp")
         for t in (audio_tracks if isinstance(audio_tracks, list) else [])
