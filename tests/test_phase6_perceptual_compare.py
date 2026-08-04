@@ -16,10 +16,10 @@ Couvre :
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import unittest
 from pathlib import Path
+
+from tests._jsexec import node_check
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PERCEPTUAL_MODAL = _ROOT / "web" / "dashboard" / "components" / "perceptual-modal.js"
@@ -188,22 +188,17 @@ class NoNavigateToInNominalFlowTests(unittest.TestCase):
 
 
 class NodeSyntaxCheckTests(unittest.TestCase):
-    """Sanity-check : node --check valide la syntaxe des 2 fichiers modifies."""
+    """Syntaxe valide des 2 fichiers modifies.
+
+    `node --check <chemin>` etait utilise ici : mesure du 2026-08-03, cette
+    commande sort en 0 sur 47 des 48 `.js` de `web/dashboard/` meme avec une
+    erreur de syntaxe averee (modules ESM, aucun `package.json` declarant
+    `"type": "module"`). Le controle passe par le verificateur reel
+    `scripts/check_js_syntax.mjs`.
+    """
 
     def _node_check(self, path: Path) -> None:
-        if not shutil.which("node"):
-            self.skipTest("node introuvable dans le PATH")
-        result = subprocess.run(
-            ["node", "--check", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            f"node --check echoue pour {path.name}:\nstdout={result.stdout}\nstderr={result.stderr}",
-        )
+        node_check(self, path)
 
     def test_perceptual_modal_syntax(self) -> None:
         self._node_check(_PERCEPTUAL_MODAL)
