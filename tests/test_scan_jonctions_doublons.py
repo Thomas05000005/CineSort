@@ -128,6 +128,42 @@ class ScanJonctionsDoublonsTests(unittest.TestCase):
 
             self.assertEqual(len(cands), 1, f"attendu 1 candidat, obtenu {cands}")
 
+    def test_jonction_bouclante_ne_multiplie_pas_le_film(self) -> None:
+        """`lib/Boucle -> lib` : le scenario qui VIDAIT la bibliotheque.
+
+        Verification en conditions reelles du 2026-08-04, sur `main` sans
+        correctif, du scan jusqu'a l'undo :
+
+            1 seul fichier video reel
+              -> 7 lignes de plan (chemins reels distincts : 1)
+              -> check_duplicates rend UN groupe de 6 membres pour ce fichier
+              -> en designant un gagnant, l'apply REEL rend ok=true,
+                 duplicates_user_decided_moved_count=1, AUCUNE erreur
+              -> la bibliotheque contient alors ZERO video
+
+        La bibliotheque se vidait donc avec un apply annonce reussi. L'undo la
+        restaurait, mais encore fallait-il comprendre qu'il s'etait passe
+        quelque chose.
+
+        Ce test ferme le premier maillon : sans lignes en double, aucun groupe
+        de doublons ne se forme, donc il n'y a plus rien a deplacer.
+        """
+        with tempfile.TemporaryDirectory(prefix="jonc_boucle_") as tmp:
+            root = Path(tmp) / "lib"
+            _film(root / "Dune (2021)", "Dune.2021")
+            if not _second_chemin(root / "Boucle", root):
+                self.skipTest("impossible de creer un second chemin vers un dossier")
+
+            cands = self._decouvrir(root)
+
+            reels = {os.path.realpath(str(c)) for c in cands}
+            self.assertEqual(len(reels), 1, "un seul fichier physique dans ce bac a sable")
+            self.assertEqual(
+                len(cands),
+                1,
+                f"une jonction bouclante ne doit pas multiplier le film : {cands}",
+            )
+
     def test_lien_pointant_droit_sur_un_dossier_annee_ne_duplique_pas(self) -> None:
         """`Lien -> Films/Dune (2021)` : le raccourci `(YYYY)` doit aussi etre couvert.
 
