@@ -308,10 +308,14 @@ class JamaisRenoncerTests(_SandboxCase):
 
     def test_un_systeme_de_fichiers_sans_inode_ne_fait_disparaitre_personne(self) -> None:
         """`st_ino == 0` (partage qui ne renseigne pas l'inode) : le couple ne
-        distingue plus rien et deviendrait un faux « deja vu »."""
+        distingue plus rien et deviendrait un faux « deja vu ». Les DEUX liens
+        visent des dossiers differents : aucun ne doit disparaitre."""
         films = self.root / "Films"
         films.mkdir()
+        autre = self.base / "AUTRE_DISQUE_2"
+        autre.mkdir()
         _make_junction(self.root / "Externe", self.externe)
+        _make_junction(self.root / "ExterneBis", autre)
         vrai_stat = watcher._stat_cible
 
         def _sans_inode(chemin: str):
@@ -323,7 +327,7 @@ class JamaisRenoncerTests(_SandboxCase):
         with mock.patch.object(watcher, "_stat_cible", side_effect=_sans_inode):
             snapshot = watcher._snapshot_root(self.root)
 
-        self.assertEqual(_noms(snapshot), {"Films", "Externe"})
+        self.assertEqual(_noms(snapshot), {"Films", "Externe", "ExterneBis"})
 
     def test_identite_physique_rend_none_quand_elle_ne_dit_rien(self) -> None:
         self.assertIsNone(watcher._identite_physique(None))
