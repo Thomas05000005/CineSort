@@ -215,27 +215,117 @@ class SubmitFeedbackIntegrationTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_submit_feedback_without_quality_report_fails(self):
+        """Sans rapport qualite pour (run_id, row_id), l'endpoint refuse ; avec, il accepte.
+
+        COURSE CORRIGEE (echec CI intermittent "AssertionError: True is not false").
+        La fin du scan declenche un recalcul qualite EN TACHE DE FOND
+        (`auto_recompute_quality_on_scan`, defaut True — cf run_flow_support,
+        bloc lance APRES `rs.done = True`). Ce job ecrit un quality_report pour
+        chaque film du plan. Mesure locale : le rapport apparait 0,4 a 1,1 s
+        apres que `done` passe a True, et jusqu'a plusieurs secondes quand la
+        machine est chargee (suite complete, CI). L'ancienne version de ce test
+        soumettait le feedback ~0,1 s apres `done` : elle ne constatait donc pas
+        une absence, elle gagnait une course. Des que le job de fond arrivait le
+        premier — ce qui est le cas sur les runners de CI — le rapport EXISTAIT,
+        l'endpoint acceptait a juste titre, et l'assertion tombait.
+
+        Correctif : on coupe le declencheur de fond pour MAITRISER l'etat, on
+        verifie explicitement que la table est vide pour ce couple, puis on
+        prouve par CONTRASTE que le refus vient bien de cette absence (la meme
+        requete passe des qu'un rapport existe), et non d'un run_id ou d'un
+        row_id que l'endpoint aurait rejete en amont.
+
+        La coupure est doublee d'un espion sur `recompute_all_scores` : sans lui,
+        un retour du declencheur (toggle ignore, ou cle perdue dans le payload
+        au fil d'un refactor) ne se verrait PAS — verifie par mutation, le test
+        restait vert 6 fois sur 6 avec le toggle force a True. L'espion rend ce
+        retour DETERMINISTE a detecter, et garantit qu'aucun ecrivain de
+        quality_reports ne tourne pendant la fenetre d'observation.
+        """
+        from cinesort.ui.api import quality_audit_support
         from cinesort.ui.api.cinesort_api import CineSortApi
 
         folder = self.root / "Film.2020"
         folder.mkdir()
         (folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+        _p_recompute = mock.patch.object(
+            quality_audit_support,
+            "recompute_all_scores",
+            side_effect=lambda *_a, **_k: {"ok": False, "message": "desactive par le test"},
+        )
+        recompute_spy = _p_recompute.start()
+        self.addCleanup(_p_recompute.stop)
+
         api = CineSortApi()
-        start = api.run.start_plan({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
+        start = api.run.start_plan(
+            {
+                "root": str(self.root),
+                "state_dir": str(self.state_dir),
+                "tmdb_enabled": False,
+                # Coupe le SEUL ecrivain de quality_reports de ce scenario.
+                "auto_recompute_quality_on_scan": False,
+            }
+        )
         import time as _time
 
-        while not api.run.get_status(start["run_id"], 0).get("done"):
+        run_id = start["run_id"]
+        store, _runner = api._get_or_create_infra(self.state_dir)
+
+        # Barriere DETERMINISTE : `rs.done` est positionne AU MILIEU du job de
+        # plan (il reste tout le bloc post-scan a derouler derriere), alors que
+        # le statut terminal en base n'est ecrit qu'apres le RETOUR du job
+        # (job_runner._run_worker -> mark_run_done). Attendre DONE en base, et
+        # pas seulement `done`, garantit qu'aucun travail de fin de scan ne
+        # reste en vol quand on constate l'etat de la table quality_reports.
+        _deadline = _time.monotonic() + 60.0
+        _status = ""
+        while _time.monotonic() < _deadline:
+            _status = str((store.run.get_run(run_id) or {}).get("status") or "")
+            if _status in ("DONE", "FAILED", "CANCELLED"):
+                break
             _time.sleep(0.05)
-        plan = api.run.get_plan(start["run_id"])
+        self.assertEqual(_status, "DONE", f"le scan doit se terminer en DONE (statut={_status!r})")
+        # Le declencheur de fond est evalue AVANT ce statut terminal : si le
+        # toggle avait ete ignore, l'espion l'aurait deja enregistre ici.
+        self.assertFalse(
+            recompute_spy.called,
+            "le scan a lance un recalcul qualite de fond malgre "
+            "auto_recompute_quality_on_scan=False : l'etat observe plus bas "
+            "ne serait plus maitrise (course restauree)",
+        )
+
+        plan = api.run.get_plan(run_id)
         rows = plan.get("rows", [])
         self.assertTrue(rows)
-        # Pas de quality_report généré → le endpoint doit refuser
-        r = api.quality.submit_score_feedback(
-            run_id=start["run_id"],
-            row_id=rows[0]["row_id"],
-            user_tier="Gold",
+        row_id = rows[0]["row_id"]
+
+        # Pre-condition EXPLICITE : c'est bien une absence, pas un "pas encore la".
+        self.assertIsNone(
+            store.quality.get_quality_report(run_id=run_id, row_id=row_id),
+            "pre-condition : aucun quality_report ne doit exister pour ce film "
+            "(auto_recompute_quality_on_scan est desactive pour ce run)",
         )
-        self.assertFalse(r.get("ok"))
+
+        r = api.quality.submit_score_feedback(run_id=run_id, row_id=row_id, user_tier="Gold")
+        self.assertFalse(r.get("ok"), "sans rapport qualite, le feedback doit etre refuse")
+
+        # Contraste : seul le rapport manquait. On l'ecrit, la MEME requete passe.
+        store.quality.upsert_quality_report(
+            run_id=run_id,
+            row_id=row_id,
+            score=72,
+            tier="Gold",
+            reasons=[],
+            metrics={},
+            profile_id="CinemaLux_v1",
+            profile_version=1,
+        )
+        r2 = api.quality.submit_score_feedback(run_id=run_id, row_id=row_id, user_tier="Silver")
+        self.assertTrue(r2.get("ok"), f"avec rapport qualite, le feedback doit passer : {r2}")
+        self.assertEqual(r2.get("computed_tier"), "Gold")
+        self.assertEqual(r2.get("computed_score"), 72)
+        self.assertEqual(r2.get("tier_delta"), -1)
 
     def test_invalid_run_id(self):
         from cinesort.ui.api.cinesort_api import CineSortApi
