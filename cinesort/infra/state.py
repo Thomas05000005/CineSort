@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -179,9 +180,31 @@ def atomic_tmp_path(target: Path) -> Path:
     return target.with_name(f"{target.name}{ATOMIC_TMP_INFIX}{stamp}")
 
 
+#: Forme EXACTE d'un `.tmp` produit par `atomic_tmp_path` : l'infixe, puis
+#: `pid.thread.nanosecondes.uuid8`, ancre en FIN de nom.
+#:
+#: Une simple recherche de sous-chaine `".tmp." in name` serait le sens
+#: PERMISSIF, et `sweep_atomic_tmp_orphans` est un chemin DESTRUCTIF lance au
+#: demarrage, recursivement, sur `state_dir` (app.py). Or les bacs de
+#: quarantaine vivent sous `<state_dir>/runs/tri_films_*/_review/` : le
+#: balayage traverse donc des repertoires contenant les VIDEOS DE
+#: L'UTILISATEUR. Un fichier quarantine nomme `Movie.2020.tmp.1080p.mkv`
+#: serait supprime au prochain demarrage — sans confirmation, sans undo.
+#:
+#: Le filtre d'age n'y change rien : il protege les ecrivains VIVANTS, mais un
+#: fichier legitime a par construction plus d'une heure, donc il est toujours
+#: eligible. C'est bien le predicat de nom qui doit trancher.
+_ATOMIC_TMP_RE = re.compile(r"\.tmp\.\d+\.\d+\.\d+\.[0-9a-f]{8}\Z")
+
+
 def is_atomic_tmp_name(name: str) -> bool:
-    """True si `name` est un temporaire produit par `atomic_tmp_path`."""
-    return ATOMIC_TMP_INFIX in name
+    """True si `name` a EXACTEMENT la forme produite par `atomic_tmp_path`.
+
+    Reconnait la forme, pas une sous-chaine : un fichier de l'utilisateur ne
+    peut etre pris pour un orphelin qu'en reproduisant `pid.thread.ns.uuid8`
+    en fin de nom.
+    """
+    return _ATOMIC_TMP_RE.search(name) is not None
 
 
 # Age au-dela duquel un `.tmp` d'ecriture atomique n'est plus le fichier

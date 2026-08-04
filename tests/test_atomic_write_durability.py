@@ -41,6 +41,7 @@ from cinesort.infra.state import (
     atomic_write_bytes,
     atomic_write_json,
     atomic_write_text,
+    is_atomic_tmp_name,
     sweep_atomic_tmp_orphans,
 )
 from cinesort.ui.api import library_actions_support, run_data_support, tmdb_support
@@ -720,6 +721,49 @@ class TestBalayageOrphelins(unittest.TestCase):
         self.assertEqual(sweep_atomic_tmp_orphans(self.root), 0)
         self.assertTrue(vrai.exists(), "le cache REEL a ete supprime par le balayage")
         self.assertTrue(film.exists(), "un fichier video a ete supprime par le balayage")
+
+    def test_un_fichier_utilisateur_contenant_tmp_est_epargne(self) -> None:
+        """Le trou que `test_ne_touche_jamais_un_fichier_qui_nest_pas_un_tmp` laissait.
+
+        Ce test-la utilise `film.mkv`, qui ne contient pas `.tmp.` : il passait
+        donc AUSSI avec le predicat permissif `".tmp." in name`. Le cas dangereux
+        est celui d'un fichier de l'utilisateur dont le nom contient la
+        sous-chaine.
+
+        Pourquoi ce n'est pas theorique : `app.py` lance
+        `sweep_atomic_tmp_orphans(state_dir, recursive=True)` au demarrage, et
+        les bacs de quarantaine vivent sous
+        `<state_dir>/runs/tri_films_*/_review/`. Le balayage traverse donc des
+        repertoires contenant les VIDEOS de l'utilisateur.
+
+        Le filtre d'age ne protege pas ici : il vise les ecrivains vivants, or un
+        fichier legitime a par construction plus d'une heure.
+        """
+        vieux = time.time() - 90 * 24 * 3600
+        bac = self.root / "runs" / "tri_films_20260804" / "_review" / "_user_marked_for_deletion"
+        bac.mkdir(parents=True, exist_ok=True)
+        pieges = [
+            bac / "Movie.2020.tmp.1080p.mkv",
+            bac / "Film.tmp.mkv",
+            self.root / "sauvegarde.tmp.2024.01.01.zip",
+            # Forme correcte mais PAS en fin de nom : ce n'est pas un des notres.
+            self.root / "cache.tmp.123.456.789.deadbeef.extra.mkv",
+        ]
+        for p in pieges:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"contenu utilisateur")
+            os.utime(p, (vieux, vieux))
+
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root, recursive=True), 0)
+        for p in pieges:
+            self.assertTrue(p.exists(), f"fichier utilisateur supprime par le balayage : {p.name}")
+
+    def test_un_vrai_orphelin_reste_balaye(self) -> None:
+        """Contrepartie : resserrer le predicat ne doit pas le rendre inerte."""
+        orphelin = self._orphan(self.root, "tmdb_cache.json", age_s=7200)
+        self.assertTrue(is_atomic_tmp_name(orphelin.name), orphelin.name)
+        self.assertEqual(sweep_atomic_tmp_orphans(self.root), 1)
+        self.assertFalse(orphelin.exists())
 
     def test_target_name_restreint_a_une_seule_cible(self) -> None:
         mien = self._orphan(self.root, "film.nfo", age_s=7200)
