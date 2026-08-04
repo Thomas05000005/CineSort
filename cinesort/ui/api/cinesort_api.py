@@ -580,8 +580,10 @@ class CineSortApi:
     def _state_dir_key(self, state_dir: Path) -> str:
         return runtime_support.state_dir_key(state_dir)
 
-    def _run_paths_for(self, state_dir: Path, run_id: str, *, ensure_exists: bool) -> state.RunPaths:
-        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists)
+    def _run_paths_for(
+        self, state_dir: Path, run_id: str, *, ensure_exists: bool, exclusive: bool = False
+    ) -> state.RunPaths:
+        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists, exclusive=exclusive)
 
     def _get_or_create_infra(self, state_dir: Path) -> Tuple[SQLiteStore, JobRunner]:
         return runtime_support.get_or_create_infra(self, state_dir, env_truthy_fn=_env_truthy)
@@ -597,6 +599,11 @@ class CineSortApi:
 
     def _generate_unique_run_id(self, store: SQLiteStore) -> str:
         return runtime_support.generate_unique_run_id(self, store)
+
+    def _reserve_unique_run(self, store: SQLiteStore, state_dir: Path) -> Tuple[str, state.RunPaths]:
+        """Reserve un run_id ET son dossier de run d'un seul tenant (cf.
+        runtime_support.reserve_unique_run)."""
+        return runtime_support.reserve_unique_run(self, store, state_dir)
 
     def _build_cfg_from_settings(self, settings: Dict[str, Any], root: Path) -> core.Config:
         # PRAGMA-02 fix : passer state_dir pour que mode "auto" resolve la

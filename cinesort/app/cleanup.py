@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import errno
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
@@ -17,10 +16,6 @@ from cinesort.domain.core import (
 )
 
 _logger = logging.getLogger(__name__)
-
-# ERROR_NOT_SAME_DEVICE : Windows ne renseigne pas toujours errno.EXDEV sur un
-# rename inter-volumes, on teste donc aussi le winerror brut.
-_WINERROR_NOT_SAME_DEVICE = 17
 
 # Issue #517 : un sidecar credible ne pese pas 500 Mo. Au-dela, un fichier dont
 # l'extension est dans une famille residuelle (.txt, .jpg, .nfo...) est presume
@@ -288,10 +283,10 @@ def _move_dir_without_destructive_fallback(
 ) -> None:
     """Déplace un DOSSIER entier sans jamais dégrader en copie destructive.
 
-    `shutil.move` (utilisé par `atomic_move`) retombe sur copytree + rmtree dès
-    que `os.rename` échoue — y compris pour un banal verrou Windows sur UN
-    fichier interne (indexeur, antivirus, aperçu Explorateur, éditeur de .nfo).
-    Mesuré sur Windows 11 avec un simple `open()` sur `BBB/film.srt` :
+    `shutil.move` retombe sur copytree + rmtree dès que `os.rename` échoue — y
+    compris pour un banal verrou Windows sur UN fichier interne (indexeur,
+    antivirus, aperçu Explorateur, éditeur de .nfo). Mesuré sur Windows 11 avec
+    un simple `open()` sur `BBB/film.srt` :
 
     - `Path.rename` -> PermissionError WinError 5, source INTACTE (3 fichiers),
       destination ABSENTE ; rien n'a bougé.
@@ -301,20 +296,17 @@ def _move_dir_without_destructive_fallback(
       copie n'est journalisée nulle part — donc invisible de l'undo.
 
     Ici `bucket_root` est sous `cfg.root` et `src` est un enfant direct de
-    `cfg.root` : le même volume est garanti en pratique, `Path.rename` est
-    atomique et « tout ou rien ». On ne repasse par `atomic_move` (et son
-    journal write-ahead, qui n'existe que pour rattraper la non-atomicité de la
-    copie) que sur un vrai EXDEV, seul cas où la copie est l'unique issue.
+    `cfg.root` : le même volume est garanti en pratique, `os.rename` est
+    atomique et « tout ou rien ». D'où `allow_copy_fallback=False`, qui ne
+    dégrade en copie que sur un vrai EXDEV.
+
+    On reste DANS `atomic_move` (issue #670) : son journal write-ahead ne sert
+    pas qu'à rattraper la non-atomicité de la copie, il est aussi la seule trace
+    du déplacement si l'app meurt entre le `rename` et le `record_apply_op` qui
+    suit chez l'appelant. Sortir ce site du journal rendrait un tel déplacement
+    invisible de l'undo ET de la réconciliation au boot.
     """
-    try:
-        src.rename(dst)
-    except OSError as exc:
-        cross_device = getattr(exc, "errno", None) == errno.EXDEV or (
-            getattr(exc, "winerror", None) == _WINERROR_NOT_SAME_DEVICE
-        )
-        if not cross_device:
-            raise
-        atomic_move(record_op, src=src, dst=dst, op_type="MOVE_DIR")
+    atomic_move(record_op, src=src, dst=dst, op_type="MOVE_DIR", allow_copy_fallback=False)
 
 
 def _move_dirs_to_bucket(
@@ -341,9 +333,14 @@ def _move_dirs_to_bucket(
     `res.<counter_attr>` est donc incrémenté à CHAQUE succès, et chaque échec
     est compté dans `res.errors` puis décrit dans `res.error_messages`.
 
-    Renvoie le nombre de dossiers réellement déplacés (en dry-run, le nombre de
-    dossiers éligibles : aucun déplacement n'est tenté mais le compteur sert au
-    diagnostic de prévisualisation).
+    Ces deux compteurs restent sous `if not dry_run` (#561) : en prévisualisation
+    aucun dossier ne bouge, et `res.<counter_attr>` est remonté tel quel à l'UI
+    (`apply_core` -> rapport d'apply). Un incrément en dry-run annoncerait à
+    l'utilisateur des dossiers partis vers `_Vide` / `_Nettoyage` qui sont
+    toujours en place.
+
+    Renvoie le nombre de dossiers réellement déplacés (0 si dry_run ou aucun
+    éligible).
     """
     # Cycle app.cleanup <-> app.apply_core : apply_core importe cleanup en
     # top-level donc on garde apply_core en import tardif ici.
@@ -363,6 +360,14 @@ def _move_dirs_to_bucket(
             if not dry_run:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 _move_dir_without_destructive_fallback(record_op, src=src, dst=dst)
+                # Comptage ICI, juste apres le rename abouti : le compteur suit
+                # la realite disque dossier par dossier (un echec sur le suivant
+                # ne doit plus faire perdre ce qui a deja bouge).
+                # ...et SOUS `if not dry_run` (#561) : en dry-run rien ne bouge,
+                # annoncer des dossiers deplaces dans la preview serait un
+                # mensonge expose tel quel a l'UI.
+                moved += 1
+                setattr(res, counter_attr, int(getattr(res, counter_attr, 0) or 0) + 1)
                 _record_apply_op(
                     record_op,
                     op_type="MOVE_DIR",
@@ -387,8 +392,6 @@ def _move_dirs_to_bucket(
                 _append_error_message(res, partial)
                 log("ERROR", partial)
             continue
-        moved += 1
-        setattr(res, counter_attr, int(getattr(res, counter_attr, 0) or 0) + 1)
     return moved
 
 
