@@ -297,9 +297,22 @@ class OmdbClient:
         #    replace. Sinon, garder l'ancien cache et logguer un warning.
         # 3. Sur toute exception en cours d'ecriture, nettoyer le .tmp pour
         #    eviter d'accumuler des fichiers orphelins.
+        #
+        # Fix issue #620 : le snapshot du cache est pris SOUS `self._lock`.
+        # `json.dumps` itere `self._cache` ; un `_cache_set` concurrent (OMDb
+        # est appele depuis le ThreadingHTTPServer REST et depuis le JobRunner)
+        # le fait grossir pendant cette iteration -> `RuntimeError: dictionary
+        # changed size during iteration`, que le `except (OSError,
+        # PermissionError, ValueError)` ci-dessous n'attrape PAS : l'exception
+        # remonte jusqu'a l'appelant et fait echouer l'identification.
+        # L'ecriture disque (write + fsync + replace) reste volontairement HORS
+        # du verrou : un fsync lent ne doit pas bloquer les threads qui
+        # alimentent le cache.
         tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
         try:
-            payload = json.dumps(self._cache, ensure_ascii=False)
+            with self._lock:
+                snapshot = dict(self._cache)
+            payload = json.dumps(snapshot, ensure_ascii=False)
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(payload)
                 f.flush()
