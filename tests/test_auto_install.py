@@ -134,6 +134,47 @@ class TestInstallFfprobe(unittest.TestCase):
                     install_ffprobe()
                 self.assertFalse((tools / "ffprobe.exe").exists())
 
+    @patch("cinesort.infra.probe.auto_install.urlretrieve")
+    def test_interrupted_copy_leaves_no_truncated_binary(self, mock_urlretrieve):
+        """Revue PR #739 : une copie interrompue ne doit PAS laisser de ffprobe.exe tronque.
+
+        `install_ffprobe` court-circuite tout le telechargement sur
+        `ffprobe_path.exists()` : un binaire partiel serait pris pour une
+        install valide a tous les boots suivants et jamais reinstalle.
+        On simule un disque plein au milieu de shutil.copyfileobj.
+        """
+
+        def fake_download(url, dest):
+            with zipfile.ZipFile(dest, "w") as zf:
+                zf.writestr("ffmpeg-7.1/bin/ffprobe.exe", b"ffprobe-binary-complete")
+
+        mock_urlretrieve.side_effect = fake_download
+
+        def exploding_copy(src, dst, length=0):
+            dst.write(b"ffprobe-tr")  # debut de binaire deja ecrit...
+            raise OSError(28, "No space left on device")  # ...puis coupure
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = Path(tmp) / "tools"
+            tools.mkdir()
+            with patch("cinesort.infra.probe.auto_install.get_tools_dir", return_value=tools):
+                with patch(
+                    "cinesort.infra.probe.auto_install.shutil.copyfileobj",
+                    side_effect=exploding_copy,
+                ):
+                    with self.assertRaises(OSError):
+                        install_ffprobe()
+            self.assertFalse(
+                (tools / "ffprobe.exe").exists(),
+                "ecriture non atomique : un ffprobe.exe tronque reste sur disque et "
+                "sera pris pour une install valide au prochain boot",
+            )
+            self.assertEqual(
+                list(tools.iterdir()),
+                [],
+                "le temporaire d'extraction doit etre nettoye apres l'echec",
+            )
+
 
 class TestInstallMediainfo(unittest.TestCase):
     """Tests pour install_mediainfo (mock urlretrieve)."""

@@ -191,14 +191,36 @@ def _extract_entry_bounded(zf: zipfile.ZipFile, entry: str, dest: Path) -> None:
     l'entree. On refuse (fail-closed) toute entree dont la taille decompressee
     annoncee depasse _MAX_UNCOMPRESSED_BYTES, puis on copie en flux chunke plutot
     que de charger l'entree entiere en memoire via zf.read().
+
+    L'ecriture est ATOMIQUE (revue PR #739) : la copie chunkee s'etale sur des
+    centaines de Mo, donc une coupure en cours de route (disque plein, arret du
+    process, erreur reseau sur un tools/ monte) laissait un binaire TRONQUE a
+    `dest`. Or `install_ffprobe` / `install_mediainfo` court-circuitent tout le
+    telechargement sur un simple `dest.exists()` : ce binaire mort etait ensuite
+    pris pour une install valide et jamais reinstalle. On copie donc dans un
+    temporaire du meme repertoire, puis on bascule par os.replace ; en cas
+    d'echec, `dest` reste absent et le temporaire est nettoye.
     """
     info = zf.getinfo(entry)
     if info.file_size > _MAX_UNCOMPRESSED_BYTES:
         raise IntegrityError(
             f"entree '{entry}' trop volumineuse ({info.file_size} octets decompresses, cap {_MAX_UNCOMPRESSED_BYTES})"
         )
-    with zf.open(entry) as src, open(dest, "wb") as dst:
-        shutil.copyfileobj(src, dst, length=1 << 20)
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix=dest.name + ".", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        # os.fdopen EN PREMIER dans le `with` : les contextes sont entres de
+        # gauche a droite, donc le fd est possede (et donc ferme) meme si
+        # zf.open() leve ensuite sur une entree de zip illisible.
+        with os.fdopen(tmp_fd, "wb") as dst, zf.open(entry) as src:
+            shutil.copyfileobj(src, dst, length=1 << 20)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        # Nettoyage best-effort : mieux vaut un .tmp residuel qu'un binaire
+        # tronque a `dest` que le prochain boot prendrait pour valide.
+        with suppress(OSError):
+            tmp_path.unlink()
+        raise
 
 
 def install_ffprobe(
