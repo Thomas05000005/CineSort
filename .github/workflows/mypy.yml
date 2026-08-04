@@ -19,6 +19,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Un nouveau push sur une PR rend le run precedent sans objet : on l'annule
+  # au lieu de le laisser occuper un slot. Mesure du 2026-08-03 : 247 runs
+  # perimes sur 999 en file, pour 16 slots d'execution.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Sur main, au contraire, on laisse le run aller au bout : c'est la reference.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   mypy:
     name: mypy check
@@ -34,13 +42,21 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/uv.lock
+
       - name: Install mypy + project deps
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install "mypy>=1.13,<2"
+          uv pip install --system "mypy>=1.13,<2"
           # Installer les deps prod pour que mypy puisse resoudre les types
           # des libs tierces (rapidfuzz, segno, etc.)
-          python -m pip install -r requirements.txt
+          uv pip install --system -r requirements.txt
 
       - name: Run mypy (informational, non-blocking)
         # Non-bloquant tant que la dette type-hints est reduite.

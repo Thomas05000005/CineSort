@@ -28,6 +28,9 @@
 
 import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
+// Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
+// natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
+import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -38,7 +41,12 @@ export const PARAMETRES_GROUPS = [
     id: "sources", label: "Sources", icon: "📂",
     sections: [
       { id: "roots", label: "Dossiers racines", fields: [
-        { key: "roots", label: "Chemins racine", type: "multi-path", hint: "Un par ligne (ou séparés par ;)", required: true },
+        // Fix audit 2026-06-07 UX medium : label "Chemins racine" est jargonneux.
+        // L'utilisateur cherche "Dossier de films" ou "Bibliotheque". Hint plus
+        // explicite pour expliquer ce qui est attendu.
+        { key: "roots", label: "Dossiers de films à analyser", type: "multi-path",
+          hint: "Un dossier par ligne (ou séparés par ;). Ex : D:\\Films, E:\\Cinéma. Au moins un dossier est requis pour scanner.",
+          required: true },
       ]},
       { id: "exclusions", label: "Exclusions", fields: [
         { key: "excluded_patterns", label: "Patterns d'exclusion (glob)", type: "multi-path",
@@ -76,8 +84,12 @@ export const PARAMETRES_GROUPS = [
       { id: "perceptual", label: "Analyse perceptuelle", fields: [
         { key: "perceptual_enabled", label: "Activer l'analyse perceptuelle", type: "toggle" },
         { key: "perceptual_auto_on_scan", label: "Auto-lancer sur scan", type: "toggle" },
-        { key: "perceptual_workers_count", label: "Workers parallèles (scan)", type: "number", min: 1, max: 16, default: 2,
-          hint: "Nombre de films analysés en parallèle. Auto si parallélisme = Auto.", advanced: true },
+        // AUDIT 2026-06-11 (R4-P1) : clé CANONIQUE perceptual_workers (= celle du GET
+        // et du moteur). L'ancien alias perceptual_workers_count n'était jamais
+        // renvoyé par le GET, et le POST de l'objet settings entier écrasait la
+        // saisie avec l'écho canonique périmé -> réglage ignoré + champ figé au défaut.
+        { key: "perceptual_workers", label: "Workers parallèles (scan)", type: "number", min: 0, max: 16, default: 0,
+          hint: "0 = auto. Nombre de films analysés en parallèle.", advanced: true },
         { key: "perceptual_frames_count", label: "Frames analysées par film", type: "number", min: 5, max: 30, advanced: true },
         { key: "perceptual_timeout_per_film_s", label: "Timeout par film (s)", type: "number", min: 30, max: 600, advanced: true },
         { key: "perceptual_audio_deep", label: "Audio analyse approfondie", type: "toggle", advanced: true },
@@ -85,8 +97,8 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "subtitles", label: "Sous-titres", fields: [
         { key: "subtitle_detection_enabled", label: "Détection sous-titres externes", type: "toggle" },
-        { key: "subtitle_lang_priority", label: "Priorité des langues", type: "text", placeholder: "fr;en;original",
-          hint: "Séparées par ; (la première trouvée est la principale)." },
+        // R8-065-lang (F5) : champ "subtitle_lang_priority" RETIRÉ — fantôme write-only jamais
+        // lu (la clé consommée par le pipeline sous-titres est subtitle_expected_languages).
         { key: "subtitle_expected_languages", label: "Langues attendues", type: "text", placeholder: "fr;en", hint: "Séparées par ;", advanced: true },
       ]},
       { id: "scoring", label: "Scoring qualité", fields: [
@@ -105,13 +117,16 @@ export const PARAMETRES_GROUPS = [
         { key: "naming_preset", label: "Preset", type: "select", options: [
           {v:"default",l:"Défaut"},{v:"plex",l:"Plex"},{v:"jellyfin",l:"Jellyfin"},{v:"quality",l:"Qualité"},{v:"custom",l:"Custom"},
         ]},
-        { key: "naming_template", label: "Template général", type: "text", placeholder: "{title} ({year})",
-          hint: "Variables disponibles : {title} {year} {resolution} {codec} {audio} {source}.", advanced: true },
+        // R8-071 (F5) : champ "naming_template" (général) RETIRÉ — fantôme jamais lu par
+        // le pipeline de nommage (canoniques = naming_movie_template / naming_tv_template).
         { key: "naming_movie_template", label: "Template film", type: "text", placeholder: "{title} ({year})" },
         { key: "naming_tv_template", label: "Template série", type: "text", placeholder: "{series} ({year})" },
       ]},
       { id: "rules", label: "Règles", fields: [
-        { key: "windows_safe", label: "Noms sûrs Windows (échappe < > : \" / \\ | ? *)", type: "toggle" },
+        // R8-101 (filet F5) : toggle "windows_safe" RETIRÉ — fantôme. La fonction
+        // windows_safe() est appliquée INCONDITIONNELLEMENT (apply_core/duplicate_support,
+        // aucun gate settings) -> l'échappement Windows est toujours actif (sécurité), le
+        // toggle laissait croire qu'on pouvait le désactiver.
         { key: "lowercase_extensions", label: "Extensions en minuscule (.mkv vs .MKV)", type: "toggle" },
         { key: "separator", label: "Séparateur entre éléments", type: "select", options: [
           {v:" ",l:"Espace (Inception 2010)"},
@@ -127,7 +142,11 @@ export const PARAMETRES_GROUPS = [
     sections: [
       { id: "organization", label: "Organisation", fields: [
         { key: "collection_folder_enabled", label: "Regrouper les sagas dans _Collection/", type: "toggle" },
-        { key: "collection_folder", label: "Nom du dossier collections", type: "text", placeholder: "_Collection",
+        // AUDIT 2026-06-11 (R4-P9) : clé CANONIQUE collection_folder_name (= celle
+        // du GET et du backend). L'alias collection_folder n'était jamais renvoyé
+        // par le GET -> le champ retombait sur le placeholder au rechargement
+        // alors que la vraie valeur était persistée (même pattern que R4-P1).
+        { key: "collection_folder_name", label: "Nom du dossier collections", type: "text", placeholder: "_Collection",
           hint: "Nom du sous-dossier où regrouper les films d'une même saga.", advanced: true },
         { key: "enable_tv_detection", label: "Détection séries TV", type: "toggle" },
       ]},
@@ -150,24 +169,36 @@ export const PARAMETRES_GROUPS = [
       ]},
       { id: "jellyfin", label: "Jellyfin", fields: [
         { key: "jellyfin_enabled", label: "Activer", type: "toggle" },
-        { key: "jellyfin_url", label: "URL Jellyfin", type: "text", placeholder: "http://jellyfin.local:8096" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL aligne sur TMDb/OMDb.
+        { key: "jellyfin_url", label: "URL Jellyfin", type: "text", placeholder: "http://jellyfin.local:8096",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:8096). À trouver dans Tableau de bord > Réseau de Jellyfin." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver la cle API.
         { key: "jellyfin_api_key", label: "Clé API", type: "api-key",
-          testMethod: "integrations/test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" } },
+          testMethod: "integrations/test_jellyfin_connection", testParams: { url: "$jellyfin_url", api_key: "$value" },
+          hint: "À créer dans Jellyfin > Tableau de bord > Clés API > +. Nommez-la « CineSort » pour la retrouver facilement." },
         { key: "jellyfin_refresh_on_apply", label: "Refresh auto après apply", type: "toggle" },
         { key: "jellyfin_sync_watched", label: "Sync watched", type: "toggle" },
       ]},
       { id: "plex", label: "Plex", fields: [
         { key: "plex_enabled", label: "Activer", type: "toggle" },
-        { key: "plex_url", label: "URL Plex", type: "text", placeholder: "http://plex.local:32400" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL.
+        { key: "plex_url", label: "URL Plex", type: "text", placeholder: "http://plex.local:32400",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:32400). Port Plex par défaut : 32400." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver le token Plex.
         { key: "plex_token", label: "Token Plex", type: "api-key",
-          testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" } },
+          testMethod: "integrations/test_plex_connection", testParams: { url: "$plex_url", token: "$value" },
+          hint: "À récupérer dans Plex Web > Compte > Avancées : valeur du paramètre X-Plex-Token (visible dans l'URL d'un média via « Obtenir les informations »)." },
         { key: "plex_refresh_on_apply", label: "Refresh après apply", type: "toggle" },
       ]},
       { id: "radarr", label: "Radarr", fields: [
         { key: "radarr_enabled", label: "Activer", type: "toggle" },
-        { key: "radarr_url", label: "URL Radarr", type: "text", placeholder: "http://radarr.local:7878" },
+        // Fix audit 2026-06-07 UX medium : hint d'URL.
+        { key: "radarr_url", label: "URL Radarr", type: "text", placeholder: "http://radarr.local:7878",
+          hint: "URL complète incluant http:// ou https:// et le port (ex : http://192.168.1.10:7878). Port Radarr par défaut : 7878." },
+        // Fix audit 2026-06-08 UX medium : hint manquant pour trouver la cle API.
         { key: "radarr_api_key", label: "Clé API", type: "api-key",
-          testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" } },
+          testMethod: "integrations/test_radarr_connection", testParams: { url: "$radarr_url", api_key: "$value" },
+          hint: "À récupérer dans Radarr > Paramètres > Général > Sécurité > API Key." },
       ]},
       { id: "omdb", label: "OMDb", fields: [
         { key: "omdb_enabled", label: "Activer le cross-check IMDb", type: "toggle",
@@ -230,6 +261,12 @@ export const PARAMETRES_GROUPS = [
   {
     id: "apparence", label: "Apparence", icon: "🎨",
     sections: [
+      // [FR-only 2026-07-10 / PHASE5_ARBITRAGES §1] Sélecteur de langue RETIRÉ :
+      // les 9 vues principales sont en français en dur (zéro appel t()), donc
+      // proposer « English » était une promesse trompeuse (seuls la sidebar, la
+      // top-bar et les messages backend basculaient). Le backend garde la
+      // machinerie `locale` (en.json + /api/settings/set_locale) pour un usage
+      // avancé via settings.json ; l'UI assume le français.
       { id: "theme", label: "Thème", fields: [
         { key: "theme", label: "Thème de l'interface", type: "select", options: [
           {v:"studio",l:"Studio"},{v:"cinema",l:"Cinéma"},{v:"luxe",l:"Luxe"},{v:"neon",l:"Neon"},
@@ -237,8 +274,9 @@ export const PARAMETRES_GROUPS = [
         { key: "animation_level", label: "Niveau d'animation", type: "select", options: [
           {v:"subtle",l:"Subtil"},{v:"moderate",l:"Modéré"},{v:"intense",l:"Intense"},
         ], livePreview: "animation" },
-        { key: "animations_enabled", label: "Activer les animations", type: "toggle",
-          hint: "Décocher pour une interface 100% statique (utile sur PC bas de gamme).", advanced: true },
+        // R8-067 (F5) : toggle "animations_enabled" RETIRÉ — fantôme cosmétique jamais
+        // consommé (aucun JS ne lit s.animations_enabled). L'intensité d'animation est
+        // pilotée par animation_level (sélecteur au-dessus : subtil/modéré/intense).
       ]},
       { id: "effects", label: "Effets visuels", fields: [
         { key: "effect_speed", label: "Vitesse animations (%)", type: "range", min: 0, max: 100, default: 50, advanced: true, livePreview: "effect_speed" },
@@ -258,12 +296,25 @@ export const PARAMETRES_GROUPS = [
   {
     id: "avance", label: "Avancé", icon: "⚙️",
     sections: [
+      // VO-A UI : Stockage SQLite — tri-etat (auto/local_ssd/nas_smb) + toggle
+      // EXCLUSIVE qui doit OBLIGATOIREMENT passer par dangerConfirmModal avec
+      // countdown 3s (memoire user actions dangereuses, P0 #233).
+      { id: "stockage-sqlite", label: "Stockage SQLite", fields: [
+        { key: "__advanced_pragma__", label: "", type: "advanced-pragma" },
+      ]},
+      // VO-B-CONFIG : Scan parallele — tri-etat auto/manuel + N workers [1..64].
+      // En mode auto : delegue a VO-A detect_storage (SSD=8 workers, SMB=4, autre=1).
+      // En mode manuel : l'utilisateur force une valeur entre 1 et 64.
+      // Backward compat (memoire user) : manuel=1 = comportement strictement sequentiel.
+      { id: "scan", label: "Scan", fields: [
+        { key: "__scan_max_workers__", label: "", type: "scan-max-workers" },
+      ]},
       { id: "parallelism", label: "Parallélisme", fields: [
         { key: "perceptual_parallelism_mode", label: "Mode parallélisme", type: "select", options: [
           {v:"auto",l:"Auto"},{v:"max",l:"Max"},{v:"safe",l:"Sécurisé"},{v:"serial",l:"Séquentiel"},
         ]},
-        { key: "worker_count", label: "Nombre de workers globaux", type: "number", min: 1, max: 32, default: 4,
-          hint: "Limite globale pour les opérations parallèles (scan, perceptual, apply).", advanced: true },
+        // R8-068 (F5) : toggle "worker_count" RETIRÉ — inerte, aucune opération ne le lit
+        // (le parallélisme réel est piloté par le mode au-dessus + perceptual_workers_count).
       ]},
       { id: "logs", label: "Logs", fields: [
         { key: "log_level", label: "Niveau de verbosité", type: "select", options: [
@@ -286,10 +337,27 @@ export const PARAMETRES_GROUPS = [
           hint: "Force un appel à GitHub Releases pour détecter une nouvelle version." },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
+        // "retention_days" RETIRE (2026-08-03) : le champ promettait une purge des
+        // "analyses perceptuelles et scores qualité" qui n'existe nulle part cote
+        // backend (aucun lecteur du reglage). Il ne restait que le seul reglage
+        // reellement branche, sur le cron de purge des runs.
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
           hint: "Au-delà, les runs sont purgés automatiquement.", advanced: true },
-        { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
-          hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
+      ]},
+      // VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review + viewer + bouton vider.
+      // Cron 24h cote backend purge _review/_conflicts, _conflicts_sidecars,
+      // _duplicates_identical, _leftovers et rows top-level > TTL jours.
+      // `quarantaine_ttl_days = 0` desactive le cron. Bouton "Vider maintenant"
+      // protege par dangerConfirmModal (countdown 3s si > 50 fichiers).
+      { id: "quarantaine", label: "Quarantaine", fields: [
+        { key: "quarantaine_ttl_days", label: "TTL fichiers en quarantaine (jours)", type: "number", min: 0, max: 365, default: 30,
+          hint: "Bucket _review (conflits, doublons, leftovers, rows non approuvées). 0 = désactivé." },
+        { key: "__quarantine_viewer__", label: "Contenu du bucket _review", type: "action",
+          action: "quarantine_viewer", buttonLabel: "👁️ Voir le bucket",
+          hint: "Inventaire des fichiers actuellement en quarantaine (lecture seule)." },
+        { key: "__quarantine_purge_all__", label: "Vider le bucket maintenant", type: "action",
+          action: "quarantine_purge_all", buttonLabel: "🗑️ Vider maintenant",
+          hint: "Supprime TOUS les fichiers de _review/ sauf les décisions de doublons. Action irréversible — confirmation requise." },
       ]},
       // Sprint orphelins #350 : RGPD Art.20 export portable (library/export_full_library).
       { id: "export-rgpd", label: "Export RGPD", fields: [
@@ -313,8 +381,19 @@ const _state = {
   activeCategory: "sources",
   searchQuery: "",
   saveTimer: null,
+  // F04 (revue post-merge 2026-07-18) : promesse du POST save_settings en vol.
+  // Permet a _loadSettings d'attendre la fin d'un flush declenche par
+  // unmountParametres avant de relire l'etat serveur (sinon on relit un etat
+  // pre-save et on ecrase l'edition de l'utilisateur au remontage).
+  saveInFlight: null,
   savedAt: null,
   saveError: null,
+  // F04 (revue adversaire R1) : `saveError` est de l'etat de VUE (remis a null
+  // par unmountParametres), or le flush part justement AU demontage : un refus
+  // backend (ok:false, 401, 5xx apres les 3 retries de core/api.js) arrivait
+  // donc quand la vue etait deja partie et ne laissait AUCUNE trace. Ce champ-ci
+  // survit au demontage et est re-affiche au prochain montage de la vue.
+  lastFlushError: null,
   // Profils qualite
   profilesList: [],
   activeProfileId: "",
@@ -334,7 +413,17 @@ const _state = {
   // lpips }, hybrid_ready, degraded_mode, installer, ... }. Null = pas encore
   // charge cette session (premier render = "Chargement..." puis fetch).
   probeToolsStatus: null,
+  // VO-A UI : dernier payload retourne par settings/get_advanced_pragma_settings.
+  // Forme : { profile_active, profile_override, available_profiles,
+  // storage_detected, locking_mode_exclusive }. Null = pas encore charge.
+  advancedPragmaState: null,
+  advancedPragmaLoading: false,
   probeToolsLoading: false,
+  // VO-B-CONFIG : dernier payload retourne par settings/get_scan_max_workers.
+  // Forme : { mode, value, effective, storage_detected, auto_suggestion, min, max }.
+  // Null = pas encore charge cette session (premier render = "Chargement..." puis fetch).
+  scanMaxWorkersState: null,
+  scanMaxWorkersLoading: false,
 };
 
 /**
@@ -409,7 +498,12 @@ function _flushPendingScroll() {
   }, 80);
 }
 
-const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
+// Audit ultra 2026-07-13 (M5) : recalibre sur la grille backend CANONIQUE
+// v1.5.7 (cinesort/domain/quality_score.default_quality_profile()["tiers"] ==
+// cinesort/domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS = 70/66/55/40). L'ancienne
+// grille 85/68/54/30 (pre-v1.5.5) etait ECRITE en base au save de profil et
+// divergeait des seuils reellement appliques par le scoring.
+const _DEFAULT_TIERS = { platinum: 70, gold: 66, silver: 55, bronze: 40 };
 const _DEFAULT_WEIGHTS = {
   resolution: 0.25,
   bitrate: 0.20,
@@ -417,6 +511,31 @@ const _DEFAULT_WEIGHTS = {
   audio_bitrate: 0.20,
   audio_channels: 0.10,
   subtitles_fr: 0.10,
+};
+
+// VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026).
+// OPT-IN strict (toggle default OFF). Default sync avec
+// cinesort.domain.tiers_helpers.default_hierarchy_config() :
+// - enabled=false (memo fix #4 ROADMAP : aucune redistribution sur 853 films).
+// - order = 5 dimensions canoniques (drag-and-drop user). Backend filtre
+//   les inconnues automatiquement.
+const _DEFAULT_HIERARCHY_DIMENSIONS = [
+  "resolution",
+  "video_codec",
+  "hdr",
+  "audio",
+  "release_group",
+];
+const _HIERARCHY_DIMENSION_LABELS = {
+  resolution: "Résolution",
+  video_codec: "Codec vidéo",
+  hdr: "HDR (DV / HDR10+)",
+  audio: "Audio",
+  release_group: "Release group",
+};
+const _DEFAULT_TIER_HIERARCHY = {
+  enabled: false,
+  order: _DEFAULT_HIERARCHY_DIMENSIONS.slice(),
 };
 const _WEIGHT_LABELS = {
   resolution: "Résolution",
@@ -506,7 +625,10 @@ function _isFieldConfigured(field, settings) {
   const val = settings[field.key];
   if (val === undefined || val === null || val === "") return false;
   if (field.type === "toggle") return Boolean(val);
-  if (field.type === "number") return Number(val) !== 0;
+  // AUDIT 2026-06-11 (R4-P13) : 0 est une valeur CONFIGUREE pour un champ
+  // number dont le min est 0 (ex: perceptual_workers=0 = auto) - l'ancien
+  // `!== 0` degradait le badge de section a "partial" pour une valeur legitime.
+  if (field.type === "number") return field.min === 0 ? Number.isFinite(Number(val)) : Number(val) !== 0;
   return true;
 }
 
@@ -633,7 +755,7 @@ function _refreshOmdbStatusPanel(container) {
  * auto, MAJ). Refresh in-place via _refreshProbeToolsPanel.
  * Endpoints :
  *   runtime/get_probe_tools_status  -> chargement initial (cache 90s)
- *   runtime/recheck_probe_tools     -> force recheck (boutton Tester)
+ *   runtime/recheck_probe_tools     -> force recheck (bouton « Vérifier »)
  *   runtime/auto_install_probe_tools -> HTTP download winget-free
  *   runtime/update_probe_tools       -> winget upgrade
  * ============================================================= */
@@ -648,8 +770,8 @@ function _formatBundledSize(bytes) {
 
 /**
  * Rend une ligne du tableau outils. `info` = entree status.tools[key].
- * `kind` : "managed" (ffprobe/mediainfo : actions Tester+Reinstaller)
- *        | "bundled-exe" (fpcalc : Tester uniquement)
+ * `kind` : "managed" (ffprobe/mediainfo : actions Vérifier + Réinstaller)
+ *        | "bundled-exe" (fpcalc : bundled, pas d'action utilisateur)
  *        | "bundled-asset" (LPIPS : pas d'action, juste affichage).
  */
 function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
@@ -677,8 +799,8 @@ function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
   let actionsHtml = "";
   if (kind === "managed") {
     actionsHtml = `
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tool-action="test" data-probe-tool="${_esc(toolKey)}">Tester</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-probe-tool-action="reinstall" data-probe-tool="${_esc(toolKey)}">Réinstaller</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tool-action="test" data-probe-tool="${_esc(toolKey)}" title="Re-vérifier si ${_esc(displayLabel)} est installé sur le système">Vérifier</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--ghost" data-probe-tool-action="reinstall" data-probe-tool="${_esc(toolKey)}" title="Réinstaller via winget (Microsoft Store)">Réinstaller</button>
     `;
   } else if (kind === "bundled-exe") {
     actionsHtml = `<span class="parametres-muted">(bundled)</span>`;
@@ -695,6 +817,145 @@ function _renderProbeToolRow(toolKey, displayLabel, info, kind) {
 }
 
 /**
+ * VO-B-CONFIG : rend la section "Scan" (tri-etat workers auto/manuel).
+ *
+ * `state` = payload retourne par settings/get_scan_max_workers :
+ *   { mode, value, effective, storage_detected, auto_suggestion, min, max }
+ *
+ * En mode "auto", l'input number "value" est masque (le backend choisit
+ * en fonction de VO-A detect_storage). En mode "manual", il est visible
+ * et editable entre [min..max] (1..64). Le champ est applique au blur OU
+ * a l'Enter pour eviter les writes intermediaires.
+ */
+function _renderScanMaxWorkersSection(state) {
+  if (_state.scanMaxWorkersLoading) {
+    return `<div class="parametres-muted">Chargement de la configuration scan…</div>`;
+  }
+  if (!state || typeof state !== "object") {
+    return `<div class="parametres-muted">Statut non disponible. <button type="button" class="v5-btn v5-btn--sm" data-scan-workers-reload>Recharger</button></div>`;
+  }
+
+  const mode = String(state.mode || "auto");
+  const value = Number(state.value || 1);
+  const effective = Number(state.effective || 1);
+  const detected = String(state.storage_detected || "local_ssd");
+  const autoSuggestion = Number(state.auto_suggestion || 1);
+  const minVal = Number(state.min || 1);
+  const maxVal = Number(state.max || 64);
+
+  const detectedLabel = detected === "nas_smb"
+    ? "NAS / SMB"
+    : "SSD local";
+
+  const isManual = mode === "manual";
+  const numberHidden = isManual ? "" : ' style="display:none"';
+
+  const activeBadge = `<span class="parametres-tools-mode parametres-tools-mode--ok">Workers actifs : ${escapeHtml(String(effective))}</span>`;
+
+  return `<div class="parametres-scan-max-workers">
+    <p class="parametres-section-intro">
+      Nombre de workers pour la phase 1 du scan (parallelisation iter_videos).
+      <strong>Auto</strong> s'adapte au stockage détecté
+      (<em>${escapeHtml(detectedLabel)}</em> &rArr; ${escapeHtml(String(autoSuggestion))} workers).
+      Manuel = vous forcez une valeur entre ${escapeHtml(String(minVal))} et ${escapeHtml(String(maxVal))}.
+    </p>
+    <div class="parametres-field">
+      <label class="parametres-field-label" for="parametres-scan-workers-mode">Mode</label>
+      <select id="parametres-scan-workers-mode" class="parametres-select" data-scan-workers-mode>
+        <option value="auto" ${mode === "auto" ? "selected" : ""}>Auto (synergie storage)</option>
+        <option value="manual" ${mode === "manual" ? "selected" : ""}>Manuel (forcer N)</option>
+      </select>
+      <span class="parametres-field-hint">${activeBadge}</span>
+    </div>
+    <div class="parametres-field" data-scan-workers-value-wrapper${numberHidden}>
+      <label class="parametres-field-label" for="parametres-scan-workers-value">
+        Workers (${escapeHtml(String(minVal))}-${escapeHtml(String(maxVal))})
+      </label>
+      <input type="number" id="parametres-scan-workers-value" class="parametres-input"
+             min="${escapeHtml(String(minVal))}" max="${escapeHtml(String(maxVal))}" step="1"
+             value="${escapeHtml(String(value))}" data-scan-workers-value>
+      <span class="parametres-field-hint">
+        Backward compat : valeur 1 = comportement strictement séquentiel (aucune parallélisation).
+      </span>
+    </div>
+    <p class="parametres-scan-max-workers-message parametres-muted" data-scan-workers-message></p>
+  </div>`;
+}
+
+/**
+ * VO-A UI : rend la section "Stockage SQLite" (tri-etat profil + toggle EXCLUSIVE).
+ *
+ * `state` = payload retourne par settings/get_advanced_pragma_settings :
+ *   { profile_active, profile_override, available_profiles, storage_detected,
+ *     locking_mode_exclusive }
+ *
+ * IMPORTANT : la bascule "Verrouillage EXCLUSIVE" est DANGEREUSE (empeche
+ * toute lecture concurrente). Le handler attache (_attachAdvancedPragmaHandlers)
+ * intercepte le change et ouvre dangerConfirmModal avec countdown 3s avant
+ * de propager la modification au backend (memoire user actions dangereuses).
+ */
+function _renderAdvancedPragmaSection(state) {
+  if (_state.advancedPragmaLoading) {
+    return `<div class="parametres-muted">Chargement des paramètres de stockage…</div>`;
+  }
+  if (!state || typeof state !== "object") {
+    return `<div class="parametres-muted">Statut non disponible. <button type="button" class="v5-btn v5-btn--sm" data-advanced-pragma-reload>Recharger</button></div>`;
+  }
+
+  const profiles = Array.isArray(state.available_profiles) ? state.available_profiles : [];
+  const override = String(state.profile_override || "auto");
+  const active = String(state.profile_active || "auto");
+  const detected = String(state.storage_detected || "local_ssd");
+  const exclusive = !!state.locking_mode_exclusive;
+
+  const detectedLabel = detected === "nas_smb"
+    ? "NAS / SMB"
+    : "SSD local";
+
+  const profileOptions = profiles.length > 0
+    ? profiles.map((p) =>
+        `<option value="${escapeHtml(String(p.v))}" ${String(p.v) === override ? "selected" : ""}>${escapeHtml(String(p.l))}</option>`,
+      ).join("")
+    : `<option value="auto" selected>Auto (détection)</option>
+       <option value="local_ssd">SSD local (perf max)</option>
+       <option value="nas_smb">NAS / SMB (sécurisé)</option>`;
+
+  const activeBadge = active === "nas_smb"
+    ? `<span class="parametres-tools-mode parametres-tools-mode--warn">Actif : NAS / SMB</span>`
+    : `<span class="parametres-tools-mode parametres-tools-mode--ok">Actif : SSD local</span>`;
+
+  const exclusiveBadge = exclusive
+    ? `<span class="parametres-tools-mode parametres-tools-mode--warn">⚠ Verrouillage EXCLUSIVE activé</span>`
+    : "";
+
+  return `<div class="parametres-advanced-pragma">
+    <p class="parametres-section-intro">
+      Profil SQLite adapté au stockage de la base. <strong>Auto</strong> détecte
+      automatiquement (stockage détecté : <em>${escapeHtml(detectedLabel)}</em>).
+    </p>
+    <div class="parametres-field">
+      <label class="parametres-field-label" for="parametres-storage-profile">Profil de stockage</label>
+      <select id="parametres-storage-profile" class="parametres-select" data-advanced-pragma-profile>
+        ${profileOptions}
+      </select>
+      <span class="parametres-field-hint">${activeBadge}</span>
+    </div>
+    <label class="parametres-field parametres-field--toggle">
+      <input type="checkbox" class="parametres-checkbox"
+             data-advanced-pragma-exclusive
+             ${exclusive ? "checked" : ""}
+             aria-describedby="parametres-exclusive-hint">
+      <span class="parametres-field-label">Verrouillage EXCLUSIVE (lectures exclusives)</span>
+      <span id="parametres-exclusive-hint" class="parametres-field-hint">
+        Mode dangereux : aucun autre processus ne peut lire la base en parallèle.
+        Une confirmation supplémentaire est requise. ${exclusiveBadge}
+      </span>
+    </label>
+    <p class="parametres-advanced-pragma-message parametres-muted" data-advanced-pragma-message></p>
+  </div>`;
+}
+
+/**
  * Rend la table complete des outils externes. `status` = payload retourne
  * par runtime/get_probe_tools_status. Si null/loading, on affiche un placeholder.
  */
@@ -703,7 +964,10 @@ function _renderProbeToolsTable(status) {
     return `<div class="parametres-tools-loading parametres-muted">Vérification des outils externes…</div>`;
   }
   if (!status || typeof status !== "object") {
-    return `<div class="parametres-tools-loading parametres-muted">Statut non disponible. Cliquez sur « Tester » pour vérifier.</div>`;
+    return `<div class="parametres-tools-loading parametres-muted">
+      Statut des outils externes non disponible.
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="recheck" style="margin-left:8px">↻ Détecter maintenant</button>
+    </div>`;
   }
   const tools = (status.tools && typeof status.tools === "object") ? status.tools : {};
   const rows = [
@@ -731,9 +995,9 @@ function _renderProbeToolsTable(status) {
       <tbody>${rows}</tbody>
     </table>
     <div class="parametres-tools-actions">
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck">↻ Recheck (force)</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install">⬇ Installer auto (ffprobe + MediaInfo)</button>
-      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update">⇧ Mettre à jour (winget)</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck" title="Re-détecter les outils installés sur le système (ignore le cache)">↻ Vérifier (forcer la détection)</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~110 Mo, empreinte SHA256 vérifiée avant installation)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
+      <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update" title="Mettre à jour via winget (nécessite Windows Package Manager)">⇧ Mettre à jour (winget)</button>
     </div>
     <p class="parametres-tools-message" data-probe-tools-message></p>
   </div>`;
@@ -865,8 +1129,15 @@ function _renderField(field, value, query) {
     }
 
     case "api-key": {
+      // Fix audit 2026-06-08 UX medium : label "Tester" trop ambigu (declenche un
+      // appel reseau reel). Pour OMDb, on precise que ca consomme du quota.
+      const isOmdbTest = field.key === "omdb_api_key";
+      const testLabel = isOmdbTest ? "Tester (consomme 1 appel quota)" : "Tester la connexion";
+      const testTitle = isOmdbTest
+        ? "Effectue un appel reel a OMDb pour valider la cle. Consomme 1 requete de votre quota quotidien."
+        : "Effectue un appel reseau reel au service pour valider la cle/URL.";
       const testBtn = field.testMethod
-        ? `<button type="button" class="v5-btn v5-btn--sm" data-test-method="${_esc(field.testMethod)}" data-test-field="${_esc(field.key)}">Tester</button>`
+        ? `<button type="button" class="v5-btn v5-btn--sm" data-test-method="${_esc(field.testMethod)}" data-test-field="${_esc(field.key)}" title="${_esc(testTitle)}">${_esc(testLabel)}</button>`
         : "";
       return `<div class="parametres-field"${advAttr}>
         <label class="parametres-field-label" for="${id}">${labelHtml}</label>
@@ -929,6 +1200,16 @@ function _renderField(field, value, query) {
       // Le contenu reel est rendu apres apiPost("runtime/get_probe_tools_status").
       return `<div class="parametres-field parametres-field--probe-tools">${_renderProbeToolsTable(_state.probeToolsStatus)}</div>`;
 
+    case "advanced-pragma":
+      // VO-A UI : section "Stockage SQLite" tri-etat + toggle EXCLUSIVE.
+      // Le contenu reel est rendu apres settings/get_advanced_pragma_settings.
+      return `<div class="parametres-field parametres-field--advanced-pragma" data-advanced-pragma-host>${_renderAdvancedPragmaSection(_state.advancedPragmaState)}</div>`;
+
+    case "scan-max-workers":
+      // VO-B-CONFIG : tri-etat auto/manuel + input number 1..64.
+      // Le contenu reel est rendu apres settings/get_scan_max_workers.
+      return `<div class="parametres-field parametres-field--scan-max-workers" data-scan-workers-host>${_renderScanMaxWorkersSection(_state.scanMaxWorkersState)}</div>`;
+
     default:
       return `<div class="parametres-field">[type ${_esc(field.type)} non supporté pour « ${_esc(field.label)} »]</div>`;
   }
@@ -944,6 +1225,12 @@ function _renderProfilsQualite() {
   const draft = _state.profileDraft || { tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
   const tiers = draft.tiers || { ..._DEFAULT_TIERS };
   const weights = draft.weights || { ..._DEFAULT_WEIGHTS };
+  // VP-B : hierarchie qualite (default OFF, opt-in user).
+  const hierarchy = draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY };
+  const hierarchyEnabled = !!hierarchy.enabled;
+  const hierarchyOrder = (Array.isArray(hierarchy.order) && hierarchy.order.length > 0)
+    ? hierarchy.order.filter((d) => _DEFAULT_HIERARCHY_DIMENSIONS.includes(d))
+    : _DEFAULT_HIERARCHY_DIMENSIONS.slice();
 
   const totalWeight = Object.values(weights).reduce((s, v) => s + (Number(v) || 0), 0);
   const totalDisplay = totalWeight.toFixed(2);
@@ -1010,6 +1297,48 @@ function _renderProfilsQualite() {
       </div>
     </div>
 
+    <h4 class="parametres-subheading">Hiérarchie qualité (TRaSH 2026)</h4>
+    <p class="parametres-section-intro">
+      Mode avancé "Quality Trumps All" inspiré de TRaSH-Guides / Radarr.
+      Certaines dimensions techniques (résolution, codec, HDR, audio, release group)
+      imposent un plancher de tier (ex&nbsp;: un 2160p vérifié ne pourra pas être
+      Bronze). <strong>Activer ce mode peut redistribuer 30-40&nbsp;% de votre
+      bibliothèque actuelle — utilisez la simulation avant d'activer.</strong>
+      Par défaut désactivé pour préserver vos scores existants.
+    </p>
+    <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
+      <label class="parametres-hierarchy-toggle">
+        <input type="checkbox" data-parametres-hierarchy-enabled
+               ${hierarchyEnabled ? "checked" : ""}
+               aria-label="Activer la hiérarchie qualité multi-axes (TRaSH 2026)">
+        <span>Activer la hiérarchie qualité multi-axes</span>
+      </label>
+      <div class="parametres-hierarchy-order" data-parametres-hierarchy-order
+           aria-label="Ordre des dimensions (la première a la priorité la plus haute)">
+        <p class="parametres-hierarchy-order-intro">
+          Ordre de priorité (haut = plus prioritaire). Réorganisez avec
+          ↑ / ↓ pour ajuster les plafonds et planchers.
+        </p>
+        <ol class="parametres-hierarchy-list">
+          ${hierarchyOrder.map((dim, idx) => `
+            <li class="parametres-hierarchy-row" data-hierarchy-dim="${_esc(dim)}">
+              <span class="parametres-hierarchy-rank">${idx + 1}.</span>
+              <span class="parametres-hierarchy-label">${_esc(_HIERARCHY_DIMENSION_LABELS[dim] || dim)}</span>
+              <span class="parametres-hierarchy-controls">
+                <button type="button" class="v5-btn v5-btn--ghost v5-btn--xs"
+                        data-hierarchy-move="up" data-hierarchy-dim-target="${_esc(dim)}"
+                        ${idx === 0 ? "disabled" : ""}
+                        aria-label="Monter ${_esc(dim)}">↑</button>
+                <button type="button" class="v5-btn v5-btn--ghost v5-btn--xs"
+                        data-hierarchy-move="down" data-hierarchy-dim-target="${_esc(dim)}"
+                        ${idx === hierarchyOrder.length - 1 ? "disabled" : ""}
+                        aria-label="Descendre ${_esc(dim)}">↓</button>
+              </span>
+            </li>`).join("")}
+        </ol>
+      </div>
+    </div>
+
     <div class="parametres-profils-actions">
       <button type="button" class="v5-btn v5-btn--primary" data-parametres-profils-action="save">
         💾 Sauvegarder comme nouveau profil
@@ -1022,6 +1351,66 @@ function _renderProfilsQualite() {
       </button>
     </div>
     <p class="parametres-profils-message" data-parametres-profils-message></p>
+
+    <!-- VP-F (Vague P batch 6) : import/export Recyclarr YAML + breakdown 5 axes + upgrade_until_score -->
+    <h4 class="parametres-subheading">Profils qualité (compatibilité Recyclarr / TRaSH 2026)</h4>
+    <p class="parametres-section-intro">
+      Importez ou exportez votre profil au format Recyclarr v6+ YAML, compatible avec
+      les <em>Custom Format Groups</em> TRaSH-Guides. Le format embarque l'intégralité
+      du profil CineSort dans la clé <code>cinesort_profile</code> pour un round-trip
+      sans perte.
+    </p>
+
+    <div class="parametres-profils-recyclarr" data-vpf-recyclarr-host>
+      <div class="parametres-profils-recyclarr-actions">
+        <button type="button" class="v5-btn" data-vpf-action="export-yaml"
+                aria-label="Exporter le profil actif au format Recyclarr YAML">
+          📤 Exporter YAML (Recyclarr)
+        </button>
+        <button type="button" class="v5-btn" data-vpf-action="import-yaml"
+                aria-label="Importer un profil depuis YAML Recyclarr">
+          📥 Importer YAML (Recyclarr)
+        </button>
+        <button type="button" class="v5-btn v5-btn--ghost" data-vpf-action="show-presets"
+                aria-label="Voir les presets embarqués TRaSH 2026">
+          📚 Presets TRaSH 2026
+        </button>
+      </div>
+      <textarea class="parametres-input parametres-profils-yaml" data-vpf-yaml-textarea
+                rows="8" placeholder="Collez ici votre YAML Recyclarr puis cliquez sur Importer YAML, ou cliquez sur Exporter YAML pour obtenir le profil actif."
+                aria-label="Zone YAML Recyclarr"></textarea>
+      <p class="parametres-profils-message" data-vpf-recyclarr-message></p>
+    </div>
+
+    <h4 class="parametres-subheading">Score d'arrêt des upgrades</h4>
+    <p class="parametres-section-intro">
+      Au-dessus de ce score, l'UI n'affichera plus de recommandation
+      d'upgrade pour ces films (réduit le bruit décisionnel). Par défaut
+      <strong>10000</strong> (jamais arrêter).
+    </p>
+    <div class="parametres-profils-upgrade-until" data-vpf-upgrade-host>
+      <label for="parametres-upgrade-until-score">Score seuil d'arrêt&nbsp;:</label>
+      <input type="number" id="parametres-upgrade-until-score"
+             class="parametres-input"
+             min="0" max="100000" step="100" value="10000"
+             data-vpf-upgrade-input
+             aria-label="upgrade_until_score">
+      <button type="button" class="v5-btn v5-btn--primary" data-vpf-action="save-upgrade-until">
+        ✓ Enregistrer
+      </button>
+      <p class="parametres-profils-message" data-vpf-upgrade-message></p>
+    </div>
+
+    <h4 class="parametres-subheading">Détail du scoring (5 axes)</h4>
+    <p class="parametres-section-intro">
+      Décomposition du scoring par axe technique. Le poids affiché est la
+      contribution maximale théorique du profil actif sur chaque axe.
+    </p>
+    <div class="parametres-profils-breakdown" data-vpf-breakdown-host>
+      <p class="parametres-section-intro" data-vpf-breakdown-loading>
+        Chargement…
+      </p>
+    </div>
   </div>`;
 }
 
@@ -1166,15 +1555,41 @@ async function _loadProfiles() {
           label: active.label,
           tiers: { ..._DEFAULT_TIERS, ...(active.tiers || {}) },
           weights: { ..._DEFAULT_WEIGHTS, ...(active.weights || {}) },
+          // VP-B : tier_hierarchy charge depuis profil backend (default OFF).
+          tier_hierarchy: _mergeTierHierarchy(active.tier_hierarchy),
         };
       } else {
-        _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
       }
     }
   } catch (_e) {
     _state.profilesList = [];
-    _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
+    _state.profileDraft = {
+      id: "", label: "",
+      tiers: { ..._DEFAULT_TIERS },
+      weights: { ..._DEFAULT_WEIGHTS },
+      tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+    };
   }
+}
+
+// VP-B : merge tier_hierarchy backend vers shape canonique UI (default OFF
+// si profil legacy sans cle). Filtre les dimensions inconnues (backend deja
+// resilient mais on prefere belt-and-suspenders cote UI).
+function _mergeTierHierarchy(raw) {
+  const out = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() };
+  if (!raw || typeof raw !== "object") return out;
+  if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
+  if (Array.isArray(raw.order)) {
+    const filtered = raw.order.filter((d) => _DEFAULT_HIERARCHY_DIMENSIONS.includes(d));
+    if (filtered.length > 0) out.order = filtered;
+  }
+  return out;
 }
 
 async function _setActiveProfile(profileId) {
@@ -1189,6 +1604,7 @@ async function _setActiveProfile(profileId) {
           id: active.id, label: active.label,
           tiers: { ..._DEFAULT_TIERS, ...(active.tiers || {}) },
           weights: { ..._DEFAULT_WEIGHTS, ...(active.weights || {}) },
+          tier_hierarchy: _mergeTierHierarchy(active.tier_hierarchy),
         };
       }
       _showProfilMessage("✓ Profil activé.", "ok");
@@ -1216,44 +1632,144 @@ async function _saveProfileAsNew() {
     _showProfilMessage(`Erreur : somme des poids = ${total.toFixed(2)}, doit être ~1.00 (± 5 %).`, "error");
     return;
   }
-  const name = window.prompt("Nom du nouveau profil :", "MonProfil_v1");
-  if (!name) return;
-  const profile = {
-    id: String(name).trim(),
-    label: String(name).trim(),
-    description: "Profil personnalisé",
-    version: 1,
-    tiers: draft.tiers,
-    weights: draft.weights,
-  };
-  try {
-    const res = await apiPost("settings/save_profile", { profile });
-    if (res && res.data && res.data.ok) {
-      _showProfilMessage(`✓ Profil "${name}" sauvegardé.`, "ok");
-      await _loadProfiles();
-      _rerenderActiveCategory();
-    } else {
-      const errs = res?.data?.errors ? ` (${res.data.errors.join(" ; ")})` : "";
-      _showProfilMessage(`Erreur : ${res?.data?.message || "sauvegarde refusée"}${errs}`, "error");
+  // Fix audit 2026-06-07 UX medium : window.prompt natif est interdit (memoire
+  // user actions_dangereuses + casse l'UX WebView2). Remplacement par une
+  // modale custom avec validation cote UI (regex + longueur).
+  await _promptNewProfileName(async (name) => {
+    const profile = {
+      id: String(name).trim(),
+      label: String(name).trim(),
+      description: "Profil personnalisé",
+      version: 1,
+      tiers: draft.tiers,
+      weights: draft.weights,
+      // VP-B : transmet la config hierarchie (OFF par defaut). Backend
+      // normalise via validate_quality_profile -> normalize_hierarchy_config.
+      tier_hierarchy: draft.tier_hierarchy || { ..._DEFAULT_TIER_HIERARCHY },
+    };
+    try {
+      const res = await apiPost("settings/save_profile", { profile });
+      if (res && res.data && res.data.ok) {
+        _showProfilMessage(`✓ Profil "${name}" sauvegardé.`, "ok");
+        await _loadProfiles();
+        _rerenderActiveCategory();
+      } else {
+        const errs = res?.data?.errors ? ` (${res.data.errors.join(" ; ")})` : "";
+        _showProfilMessage(`Erreur : ${res?.data?.message || "sauvegarde refusée"}${errs}`, "error");
+      }
+    } catch (err) {
+      _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
     }
-  } catch (err) {
-    _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
-  }
+  });
+}
+
+/* Revue post-merge 2026-08-03 — deux defauts cumules sur la saisie du nom :
+ *
+ * (1) MESSAGE D'ERREUR INVISIBLE. components/modal.js appelle `onClick()` PUIS
+ *     `closeModal()` sans condition, et closeModal fait `overlay.remove()` de
+ *     maniere synchrone : le texte etait donc ecrit dans un noeud DEJA DETACHE
+ *     et n'atteignait jamais l'ecran. La modale rouverte repartait en plus de la
+ *     valeur par defaut, effacant la saisie. Symptome vecu : le champ redevient
+ *     « MonProfil_v1 », rien n'explique pourquoi, l'utilisateur reboucle.
+ *     Correctif : on transmet la saisie ET le motif du refus a la modale
+ *     rouverte, au lieu d'ecrire dans un noeud mort.
+ *
+ * (2) REGEX ASCII DANS UNE UI FRANCAISE. `[A-Za-z0-9 _-]` refusait tout accent :
+ *     « Qualité max », « Ciné 4K » etaient rejetes — le cas courant, pas un cas
+ *     tordu. On accepte desormais lettres et chiffres Unicode, espace,
+ *     apostrophe, tiret et underscore. `/`, `\`, `.`, `:` et les caracteres de
+ *     controle restent exclus (le nom sert d'`id` de profil ; il n'est jamais
+ *     transforme en chemin cote backend — il est stocke dans
+ *     settings.custom_quality_profiles — mais on garde la liste courte).
+ *
+ *     `\p{M}` (marques combinantes) est inclus en plus de `\p{L}` : un « é »
+ *     colle depuis un texte en forme NFD est la sequence « e » + U+0301, que
+ *     `\p{L}` seul refuse. Mesure faite avec la regex reelle : « Qualité max »
+ *     passe en NFC et echouait en NFD. Une marque combinante ne peut etre ni un
+ *     separateur de chemin ni un caractere de controle.
+ */
+const _PROFILE_NAME_RE = /^[\p{L}\p{M}\p{N} '’_-]{3,40}$/u;
+const _PROFILE_NAME_HELP =
+  "3 à 40 caractères. Lettres (accents acceptés), chiffres, espaces, apostrophes, tirets, underscores.";
+const _PROFILE_NAME_DEFAULT = "MonProfil_v1";
+
+/**
+ * Modale custom pour demander un nom de profil. Remplace window.prompt() natif
+ * (incompatible WebView2, viole la memoire user "JAMAIS window.prompt/confirm/alert").
+ *
+ * @param {Function} onSubmit - appele avec le nom valide.
+ * @param {{initialValue?: string, errorMessage?: string}} [opts] - etat reinjecte
+ *        quand la modale se rouvre apres un refus de validation.
+ */
+function _promptNewProfileName(onSubmit, opts) {
+  return new Promise((resolve) => {
+    const initialValue = opts && opts.initialValue != null ? String(opts.initialValue) : _PROFILE_NAME_DEFAULT;
+    const errorMessage = opts && opts.errorMessage ? String(opts.errorMessage) : "";
+    const bodyHtml = `
+      <p>Saisissez un nom pour le nouveau profil qualité.</p>
+      <label class="parametres-profile-name-label" for="parametres-profile-name-input">Nom du profil</label>
+      <input id="parametres-profile-name-input" type="text" class="v5-input" value="${escapeHtml(initialValue)}"
+             autocomplete="off" spellcheck="false" data-parametres-profile-name-input
+             style="width:100%;margin-top:4px;">
+      <p class="text-muted font-sm mt-2" data-parametres-profile-name-error
+         ${errorMessage ? 'role="alert"' : ""}
+         style="min-height:1.2em;${errorMessage ? "color:#DC2626;font-weight:600;" : ""}">
+        ${escapeHtml(errorMessage || _PROFILE_NAME_HELP)}
+      </p>
+    `;
+    showModal({
+      title: "Nouveau profil qualité",
+      body: bodyHtml,
+      actions: [
+        { label: "Annuler", cls: "", onClick: () => { resolve(); } },
+        { label: "Créer", cls: "btn-primary", onClick: () => {
+          const overlay = document.getElementById("dashModal");
+          const input = overlay?.querySelector("[data-parametres-profile-name-input]");
+          const value = input?.value?.trim() || "";
+          if (!_PROFILE_NAME_RE.test(value)) {
+            // modal.js va fermer la modale quoi qu'il arrive : inutile d'ecrire
+            // dans l'overlay courant (il sera detache). On rouvre en portant le
+            // motif du refus ET la saisie de l'utilisateur.
+            setTimeout(() => {
+              _promptNewProfileName(onSubmit, {
+                initialValue: value,
+                errorMessage: `Nom invalide. ${_PROFILE_NAME_HELP}`,
+              }).then(resolve);
+            }, 0);
+            return;
+          }
+          // OK : execute la callback puis resolve
+          Promise.resolve(onSubmit(value)).finally(() => resolve());
+        } },
+      ],
+    });
+  });
 }
 
 async function _recomputeScores() {
-  if (!window.confirm("Re-calculer les scores avec ce profil ?\n\nCette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.")) return;
-  _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
-  try {
-    const res = await apiPost("quality/recompute_all_scores", {});
-    if (res && res.data && res.data.ok) {
-      _showProfilMessage(`✓ Re-calcul lancé : job_id = ${res.data.job_id || "?"}.`, "ok");
-    } else {
-      _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
-    }
-  } catch (err) {
-    _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
-  }
+  // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+  // natif par dangerConfirmModal (ecrasement des scores de toute la biblio = destructif).
+  // Memoire utilisateur exige modale custom + confirm supplementaire.
+  dangerConfirmModal({
+    title: "Re-calculer les scores avec ce profil ?",
+    consequence: "Cette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.",
+    countdownSeconds: 3,
+    confirmLabel: "Lancer le re-calcul",
+    cancelLabel: "Annuler",
+    onConfirm: async () => {
+      _showProfilMessage("Re-calcul en cours… (voir vue Qualité)", "info");
+      try {
+        const res = await apiPost("quality/recompute_all_scores", {});
+        if (res && res.data && res.data.ok) {
+          _showProfilMessage(`✓ Re-calcul lancé : job_id = ${res.data.job_id || "?"}.`, "ok");
+        } else {
+          _showProfilMessage(`Erreur : ${res?.data?.message || "re-calcul impossible"}`, "error");
+        }
+      } catch (err) {
+        _showProfilMessage(`Erreur : ${err?.message || err}`, "error");
+      }
+    },
+  });
 }
 
 function _showProfilMessage(msg, level) {
@@ -1329,25 +1845,72 @@ function _readFieldValue(field, fieldEl) {
   }
 }
 
-function _scheduleSave() {
-  if (_state.saveTimer) clearTimeout(_state.saveTimer);
-  _state.saveTimer = setTimeout(async () => {
-    try {
-      const res = await apiPost("settings/save_settings", { settings: _state.settings });
-      if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+// F04 (revue adversaire R1) : borne d'attente du flush au montage de la vue
+// (cf. _loadSettings). Un save local repond en < 100 ms ; au-dela, mieux vaut
+// afficher les parametres que geler l'ecran sur son skeleton.
+const FLUSH_WAIT_MAX_MS = 1500;
+
+// F04 (revue post-merge 2026-07-18) : corps du save extrait du setTimeout pour
+// pouvoir etre declenche AUSSI hors debounce (flush au demontage de la vue).
+// Aucun `opts.signal` volontairement : le flush doit survivre a
+// `abortCurrentNav()` que le router appelle juste apres `_currentCleanup()`.
+async function _saveSettingsNow() {
+  // Seul `savedAt` est garde par `_state.containerRef` : c'est lui qui produisait
+  // le badge fantome « ✓ Sauvegarde a HH:MM » au remontage de la vue.
+  // F04 (revue adversaire R1) : l'ECHEC, lui, doit etre pose INCONDITIONNELLEMENT
+  // (etat module, pas du DOM) et memorise dans `lastFlushError` qui survit au
+  // demontage — sinon un flush refuse par le backend perdait l'edition en
+  // silence, exactement comme avant le correctif.
+  try {
+    const res = await apiPost("settings/save_settings", { settings: _state.settings });
+    if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+      _state.lastFlushError = null;
+      if (_state.containerRef) {
         _state.savedAt = new Date();
         _state.saveError = null;
-        invalidateSettingsCache();
-        _updateSavedIndicator();
-      } else {
-        _state.saveError = res?.data?.message || "Erreur inconnue";
-        _updateSavedIndicator();
       }
-    } catch (err) {
-      _state.saveError = err?.message || "Erreur réseau";
+      invalidateSettingsCache();
+      _updateSavedIndicator();
+    } else {
+      const msg = res?.data?.message || "Erreur inconnue";
+      _state.saveError = msg;
+      _state.lastFlushError = msg;
       _updateSavedIndicator();
     }
+  } catch (err) {
+    const msg = err?.message || "Erreur réseau";
+    _state.saveError = msg;
+    _state.lastFlushError = msg;
+    _updateSavedIndicator();
+  }
+}
+
+// F04 (revue adversaire R1) : re-affiche au montage l'echec d'un flush survenu
+// pendant que la vue etait demontee. Sans ce rappel, l'utilisateur retrouvait
+// son ANCIEN reglage (ecrase par _loadSettings) sans aucun message.
+function _surfacePendingFlushError() {
+  if (!_state.lastFlushError) return;
+  _state.savedAt = null;
+  _state.saveError = `Dernière modification NON enregistrée (${_state.lastFlushError}) — vérifiez la valeur et ressaisissez-la.`;
+  _updateSavedIndicator();
+}
+
+function _scheduleSave() {
+  if (_state.saveTimer) clearTimeout(_state.saveTimer);
+  _state.saveTimer = setTimeout(() => {
+    _state.saveTimer = null;
+    _state.saveInFlight = _saveSettingsNow();
   }, 500);
+}
+
+// F04 : envoie immediatement le save en attente (debounce non echu). Appele par
+// unmountParametres — sans lui, quitter la vue < 500 ms apres une frappe perdait
+// silencieusement l'edition (clearTimeout nu, aucun beforeunload dans le dashboard).
+function _flushPendingSave() {
+  if (!_state.saveTimer) return;
+  clearTimeout(_state.saveTimer);
+  _state.saveTimer = null;
+  _state.saveInFlight = _saveSettingsNow();
 }
 
 function _updateSavedIndicator() {
@@ -1358,20 +1921,56 @@ function _updateSavedIndicator() {
     return;
   }
   if (_state.savedAt) {
-    el.innerHTML = `<span class="parametres-saved-indicator--ok">✓ Sauvegardé</span>`;
-    setTimeout(() => {
-      if (el.querySelector(".parametres-saved-indicator--ok")) el.innerHTML = "";
-    }, 2500);
+    // Fix audit 2026-06-07 UX high : badge persistant avec horodatage HH:MM:SS
+    // au lieu d'un toast 2500ms qui disparait. L'utilisateur a tout moment voit
+    // la derniere heure de sauvegarde, meme s'il scrolle ou regarde ailleurs.
+    let timeLabel = "";
+    try {
+      timeLabel = _state.savedAt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch (_e) { timeLabel = ""; }
+    el.innerHTML = `<span class="parametres-saved-indicator--ok">✓ Sauvegardé${timeLabel ? ` à ${_esc(timeLabel)}` : ""}</span>`;
   } else {
     el.innerHTML = "";
   }
 }
 
 async function _loadSettings() {
-  const res = await apiPost("settings/get_settings", {});
-  if (res && res.data && typeof res.data === "object") {
-    _state.settings = res.data.data || res.data || {};
+  // F04 : si un flush de sauvegarde est encore en vol (quitte puis revenu sur
+  // la vue en moins d'un aller-retour reseau), on l'attend avant de relire le
+  // serveur — sinon on recharge un etat pre-save et l'edition est perdue.
+  //
+  // F04 (revue adversaire R1) : attente BORNEE. Cet await est sur le chemin de
+  // MONTAGE de la vue (initParametres, bloc aria-busy) et l'apiPost du flush
+  // part sans `timeoutMs`, avec jusqu'a 3 retries + backoff (core/api.js) : sans
+  // borne, l'ecran Parametres restait fige sur son skeleton tant que le POST
+  // n'avait pas repondu. Au-dela de la borne on relit le serveur sans attendre ;
+  // un echec tardif reste signale par `lastFlushError`.
+  const pendingSave = _state.saveInFlight;
+  if (pendingSave) {
+    let waitTimer = null;
+    const bound = new Promise((resolve) => { waitTimer = setTimeout(resolve, FLUSH_WAIT_MAX_MS); });
+    try {
+      await Promise.race([Promise.resolve(pendingSave).catch(() => {}), bound]);
+    } finally {
+      if (waitTimer) clearTimeout(waitTimer);
+    }
+    if (_state.saveInFlight === pendingSave) _state.saveInFlight = null;
   }
+  const res = await apiPost("settings/get_settings", {});
+  // BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est
+  // un objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
+  // silencieusement a `_state.settings`, ce qui faisait croire que le
+  // chargement avait reussi. Au premier toggle (Mode expert), `_scheduleSave`
+  // partait POSTer cet objet d'erreur + retombait sur le meme 401 -> badge
+  // rouge "Authentification refusee par le backend." dans l'indicateur de
+  // sauvegarde, alors que la vraie cause est l'echec initial. On detecte
+  // explicitement l'erreur et on throw pour que `initParametres` affiche le
+  // banner d'erreur avec bouton "Reessayer" (parcours UX clair).
+  if (!res || !res.data || typeof res.data !== "object" || res.data.ok === false) {
+    const msg = res?.data?.message || `Erreur ${res?.status || "inconnue"}.`;
+    throw new Error(msg);
+  }
+  _state.settings = res.data.data || res.data || {};
 }
 
 /* =============================================================
@@ -1465,10 +2064,18 @@ function _openResetModal() {
   document.body.appendChild(overlay);
   overlay._previouslyFocused = document.activeElement;
 
+  // R8-078 (F6-a) : piège de focus Tab/Shift+Tab — même helper partagé que les modales
+  // standard (modal.js). Le handler est posé sur l'overlay -> nettoyé automatiquement par
+  // overlay.remove() dans close(). AVANT : aucun trap -> le focus s'échappait vers le fond.
+  trapFocus(overlay);
+
   const input = overlay.querySelector("[data-parametres-reset-input]");
   const confirmBtn = overlay.querySelector("[data-parametres-reset-confirm]");
   const cancelBtn = overlay.querySelector("[data-parametres-reset-cancel]");
   const countdownEl = overlay.querySelector("[data-parametres-reset-countdown]");
+  // R8-078 (F6-a) : focus initial dans la modale (comme les modales standard) -> le trap
+  // démarre avec le focus à l'intérieur.
+  if (input) { try { input.focus(); } catch (_e) { /* noop */ } }
   const warningEl = overlay.querySelector("[data-parametres-reset-warning]");
 
   let countdownTimer = null;
@@ -1676,6 +2283,13 @@ function _bindFields(container) {
         _state.omdbLastTest = null;
         _refreshOmdbStatusPanel(container);
       }
+      // Fix audit 2026-06-08 UX medium : si le champ a un testMethod, effacer le
+      // resultat affiche apres modification (sinon "✓ Connexion réussie" reste
+      // affiche pour une valeur differente non encore testee).
+      if (field.testMethod) {
+        const resEl = container.querySelector(`[data-test-result-for="${key}"]`);
+        if (resEl) { resEl.textContent = ""; resEl.className = "parametres-test-result"; }
+      }
       _scheduleSave();
     };
     if (field.type === "toggle" || field.type === "select") fieldEl.addEventListener("change", handler);
@@ -1683,11 +2297,50 @@ function _bindFields(container) {
   });
 
   // API-key show/hide
+  // LOTC-B3 : le GET settings renvoie le masque SEC-H3 ('••••••••') pour
+  // rest_api_token — basculer input.type revelait (et 📋 copiait) le MASQUE,
+  // 401 garanti cote appareil distant. On resout le vrai Bearer via
+  // settings/reveal_rest_token (R7-10, refuse hors localhost) avant d'afficher.
+  let _realRestToken = null;
+  const _isMaskedToken = (v) => /^[•*]+$/.test(String(v || "").trim());
+  const _restMsg = (text, isError) => {
+    const el = container.querySelector("[data-rest-token-msg]");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "parametres-test-result" + (text ? (isError ? " parametres-test-result--error" : " parametres-test-result--ok") : "");
+  };
+  const _getRealRestToken = async () => {
+    if (_realRestToken != null) return _realRestToken;
+    try {
+      const res = await apiPost("settings/reveal_rest_token");
+      const d = (res && res.data) || res || {};
+      if (d.ok && d.rest_api_token) {
+        _realRestToken = String(d.rest_api_token);
+        return _realRestToken;
+      }
+    } catch (_e) { /* refuse (distant) ou reseau : message cote appelant */ }
+    return null;
+  };
   container.querySelectorAll("[data-api-key-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const id = btn.dataset.apiKeyToggle;
       const input = container.querySelector("#" + id);
-      if (input) input.type = input.type === "password" ? "text" : "password";
+      if (!input) return;
+      const reveal = input.type === "password";
+      if (input.dataset.fieldKey === "rest_api_token") {
+        if (reveal && _isMaskedToken(input.value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé révélable en local uniquement.", true); return; }
+          input.value = real;
+          _restMsg("", false);
+        } else if (!reveal && _realRestToken != null && input.value === _realRestToken) {
+          // Re-masquage : restaurer le masque du GET pour ne pas laisser le
+          // vrai token dans le DOM (sans toucher _state.settings ni l'autosave ;
+          // une saisie manuelle de l'utilisateur est preservee telle quelle).
+          input.value = String(_state.settings.rest_api_token || "");
+        }
+      }
+      input.type = reveal ? "text" : "password";
     });
   });
 
@@ -1729,7 +2382,22 @@ function _bindFields(container) {
           _refreshOmdbStatusPanel(container);
           if (resultEl) { resultEl.textContent = ""; resultEl.className = "parametres-test-result"; }
         } else if (resultEl) {
-          resultEl.textContent = ok ? "✓ Connexion réussie" : `✗ Échec : ${payload.message || payload.error || "inconnu"}`;
+          // Fix audit 2026-06-08 UX medium : afficher infos de diagnostic riches
+          // retournees par le backend (server_name, version, movies_count,
+          // libraries) au lieu d'un simple "Connexion reussie".
+          if (ok) {
+            const parts = [];
+            if (payload.server_name) parts.push(String(payload.server_name));
+            if (payload.version) parts.push(`v${payload.version}`);
+            const counts = [];
+            if (typeof payload.movies_count === "number") counts.push(`${payload.movies_count} films`);
+            else if (Array.isArray(payload.libraries) && payload.libraries.length) counts.push(`${payload.libraries.length} bibliothèques`);
+            const head = parts.length ? ` — ${parts.join(" ")}` : "";
+            const tail = counts.length ? ` (${counts.join(", ")} détectés)` : "";
+            resultEl.textContent = `✓ Connexion réussie${head}${tail}`;
+          } else {
+            resultEl.textContent = `✗ Échec : ${payload.message || payload.error || "inconnu"}`;
+          }
           resultEl.className = `parametres-test-result parametres-test-result--${ok ? "ok" : "error"}`;
         }
       } catch (err) {
@@ -1763,22 +2431,41 @@ function _bindFields(container) {
   if (copyBtn && tokenInput) {
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(tokenInput.value);
+        // LOTC-B3 : le champ peut contenir le masque SEC-H3 -> copier la vraie
+        // valeur revelee, jamais les puces.
+        let value = tokenInput.value;
+        if (_isMaskedToken(value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé copiable en local uniquement.", true); return; }
+          value = real;
+        }
+        await navigator.clipboard.writeText(value);
         if (msgEl) { msgEl.textContent = "✓ Copié"; msgEl.className = "parametres-test-result parametres-test-result--ok"; setTimeout(() => { msgEl.textContent = ""; }, 1800); }
       } catch (_e) { if (msgEl) msgEl.textContent = "Échec copie"; }
     });
   }
   if (regenBtn && tokenInput) {
     regenBtn.addEventListener("click", () => {
-      if (!window.confirm("Régénérer le token ? Les clients distants devront utiliser la nouvelle clé.")) return;
-      const bytes = new Uint8Array(24);
-      crypto.getRandomValues(bytes);
-      const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      tokenInput.value = b64;
-      tokenInput.type = "text";
-      _state.settings.rest_api_token = b64;
-      if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
-      _scheduleSave();
+      // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
+      // natif par dangerConfirmModal (regen token = invalide tous les clients distants).
+      dangerConfirmModal({
+        title: "Régénérer le token API ?",
+        consequence: "Les clients distants (mobile, navigateur autre poste) devront utiliser la nouvelle clé. Les connexions en cours seront perdues.",
+        confirmLabel: "Régénérer",
+        cancelLabel: "Annuler",
+        onConfirm: () => {
+          const bytes = new Uint8Array(24);
+          crypto.getRandomValues(bytes);
+          const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+          tokenInput.value = b64;
+          tokenInput.type = "text";
+          _state.settings.rest_api_token = b64;
+          _realRestToken = b64; // LOTC-B3 : l'ancien token revele est perime
+
+          if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
+          _scheduleSave();
+        },
+      });
     });
   }
 
@@ -1816,6 +2503,143 @@ function _bindFields(container) {
       } catch (err) {
         if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
       } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // VQ-2 QUARANTAINE-TTL : viewer du bucket _review (route /quarantine_viewer).
+  // Inventaire lecture seule des fichiers en quarantaine, trie par mtime DESC.
+  container.querySelectorAll('[data-action="quarantine_viewer"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="quarantine_viewer"]');
+      btn.disabled = true;
+      if (resultEl) { resultEl.textContent = "Chargement…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
+      try {
+        const res = await apiPost("run/list_quarantine_bucket", { limit: 500 });
+        const data = res && res.data ? res.data : res;
+        if (!data || data.ok === false) {
+          throw new Error((data && (data.message || data.error)) || "Echec inventaire.");
+        }
+        const total = Number(data.files_count || 0);
+        const sizeBytes = Number(data.total_size_bytes || 0);
+        const sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
+        if (!data.exists) {
+          if (resultEl) {
+            resultEl.textContent = "Bucket _review absent (rien à afficher).";
+            resultEl.className = "parametres-test-result parametres-test-result--info";
+          }
+          return;
+        }
+        const subdirCounts = Object.entries(data.by_subdir || {})
+          .map(([k, v]) => `${escapeHtml(k)} : ${v?.count || 0}`)
+          .join(" · ");
+        const sample = (data.files || []).slice(0, 20).map((f) => {
+          const age = Number(f.age_days || 0).toFixed(1);
+          const sub = escapeHtml(String(f.subdir || ""));
+          const rel = escapeHtml(String(f.rel || f.path || ""));
+          return `<li><code>${rel}</code> <span class="parametres-muted">(${sub}, ${age}j)</span></li>`;
+        }).join("");
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div><strong>${total}</strong> fichier(s) en quarantaine · <strong>${sizeMo} Mo</strong></div>
+            <div class="parametres-muted">${subdirCounts || "(vide)"}</div>
+            ${sample ? `<ul class="parametres-quarantine-sample">${sample}</ul>` : ""}
+            ${total > 20 ? `<div class="parametres-muted">(${total - 20} fichier(s) supplémentaire(s) non listé(s))</div>` : ""}
+          `;
+          resultEl.className = "parametres-test-result parametres-test-result--ok";
+        }
+      } catch (err) {
+        if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // VQ-2 QUARANTAINE-TTL : bouton "Vider maintenant" — DANGEREUX.
+  // Memoire actions dangereuses utilisateur : dangerConfirmModal OBLIGATOIRE
+  // avec liste elements + consequence + countdown 3s si > 50 fichiers.
+  container.querySelectorAll('[data-action="quarantine_purge_all"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resultEl = container.querySelector('[data-action-result-for="quarantine_purge_all"]');
+      btn.disabled = true;
+      try {
+        // 1) On interroge le bucket pour avoir un decompte fiable (declenche
+        // le countdown 3s si > 50 fichiers, exigence memoire utilisateur).
+        // FIX #2/#6/#10 : la modale doit refleter ce que "Vider maintenant"
+        // supprime REELLEMENT (purge_review_bucket_all scope <root>/_review sauf
+        // _duplicates_user_decided), pas l'agregat viewer files_count qui inclut
+        // aussi les buckets runs et les decisions preservees -> l'utilisateur
+        // confirmait N et obtenait deleted << N. On utilise donc le perimetre
+        // purgeable (purge_scope_*) et un echantillon filtre au meme perimetre.
+        let total = 0;
+        let sample = [];
+        let sizeMo = "0";
+        try {
+          const listRes = await apiPost("run/list_quarantine_bucket", { limit: 50 });
+          const listData = listRes && listRes.data ? listRes.data : listRes;
+          if (listData && listData.ok !== false) {
+            total = Number(listData.purge_scope_files_count || 0);
+            // R2 : echantillon backend aligne sur le perimetre purgeable
+            // (purge_scope_sample) — l'ancien filtre sur `files` (top-50 toutes
+            // buckets) pouvait etre vide alors que total > 0. Fallback conserve.
+            sample = Array.isArray(listData.purge_scope_sample) && listData.purge_scope_sample.length
+              ? listData.purge_scope_sample.slice(0, 10)
+              : (listData.files || [])
+                  .filter((f) => !f.source_root && f.subdir !== "_duplicates_user_decided")
+                  .slice(0, 10)
+                  .map((f) => f.rel || f.path);
+            const sizeBytes = Number(listData.purge_scope_size_bytes || 0);
+            sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
+          }
+        } catch (_listErr) {
+          // best-effort, on continue meme si l'inventaire echoue
+        }
+
+        if (total === 0) {
+          if (resultEl) {
+            resultEl.textContent = "Bucket déjà vide.";
+            resultEl.className = "parametres-test-result parametres-test-result--info";
+          }
+          btn.disabled = false;
+          return;
+        }
+
+        const sampleHtml = sample.length
+          ? `<ul class="parametres-quarantine-sample">${sample.map((s) => `<li><code>${escapeHtml(String(s))}</code></li>`).join("")}</ul>`
+          : "";
+        const countdown = total > 50 ? 3 : 0;
+        dangerConfirmModal({
+          title: `Vider le bucket _review (${total} fichier(s)) ?`,
+          consequence: `Cette action va supprimer définitivement <strong>${total}</strong> fichier(s) en quarantaine (~${sizeMo} Mo). Les décisions de doublons (_duplicates_user_decided) sont préservées. ${sampleHtml}`,
+          countdownSeconds: countdown,
+          confirmLabel: "Vider maintenant",
+          cancelLabel: "Annuler",
+          onConfirm: async () => {
+            if (resultEl) { resultEl.textContent = "Suppression en cours…"; resultEl.className = "parametres-test-result parametres-test-result--info"; }
+            try {
+              const res = await apiPost("run/purge_quarantine_bucket_all", { dry_run: false });
+              const data = res && res.data ? res.data : res;
+              if (!data || data.ok === false) {
+                throw new Error((data && (data.message || data.error)) || "Echec suppression.");
+              }
+              const deleted = Number(data.deleted || 0);
+              const freedMo = Number(data.bytes_freed || 0) / 1024 / 1024;
+              if (resultEl) {
+                resultEl.textContent = `✓ ${deleted} fichier(s) supprimé(s) (${freedMo.toFixed(1)} Mo libérés).`;
+                resultEl.className = "parametres-test-result parametres-test-result--ok";
+              }
+            } catch (err) {
+              if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
+            } finally {
+              btn.disabled = false;
+            }
+          },
+          onCancel: () => { btn.disabled = false; },
+        });
+      } catch (err) {
+        if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
         btn.disabled = false;
       }
     });
@@ -1860,11 +2684,14 @@ function _bindFields(container) {
       }
       try {
         const res = await apiPost("runtime/get_update_info", { force_refresh: true });
-        const ok = !!(res && res.ok !== false);
-        const data = (res && res.data) || {};
+        // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+        const _payload = (res && res.data) || res || {};
+        const ok = !!(_payload.ok !== false);
+        const data = _payload;
         if (!ok) {
           if (resultEl) {
-            resultEl.textContent = `✗ ${res?.message || res?.error || "Echec du check"}`;
+            // Fix audit 2026-05-25 (v1.5.3) Vague F : payload imbrique dans res.data
+            resultEl.textContent = `✗ ${_payload?.message || res?.error || "Echec du check"}`;
             resultEl.className = "parametres-test-result parametres-test-result--error";
           }
           return;
@@ -1919,9 +2746,300 @@ function _bindFields(container) {
     _loadProbeToolsStatus(container, { force: false });
   }
 
+  // VO-A UI : Stockage SQLite (tri-etat profil + toggle EXCLUSIVE)
+  _bindAdvancedPragmaActions(container);
+  // Auto-load au premier rendu si la section "stockage-sqlite" est presente
+  if (container.querySelector("[data-advanced-pragma-host]") && _state.advancedPragmaState === null && !_state.advancedPragmaLoading) {
+    _loadAdvancedPragmaState(container);
+  }
+
+  // VO-B-CONFIG : Scan parallele (tri-etat workers auto/manuel)
+  _bindScanMaxWorkersActions(container);
+  if (container.querySelector("[data-scan-workers-host]") && _state.scanMaxWorkersState === null && !_state.scanMaxWorkersLoading) {
+    _loadScanMaxWorkersState(container);
+  }
+
   // QR dashboard auto-load
   if (container.querySelector("[data-qr-dashboard]")) {
     _loadQrDashboard(container);
+  }
+}
+
+/**
+ * VO-A UI : refresh le panneau "Stockage SQLite" sans full re-render.
+ * Re-attache les handlers (idempotent via data-bound).
+ */
+function _refreshAdvancedPragmaPanel(container) {
+  const host = container.querySelector("[data-advanced-pragma-host]");
+  if (!host) return;
+  host.innerHTML = _renderAdvancedPragmaSection(_state.advancedPragmaState);
+  _bindAdvancedPragmaActions(container);
+}
+
+/**
+ * VO-A UI : charge l'etat initial via settings/get_advanced_pragma_settings.
+ */
+async function _loadAdvancedPragmaState(container) {
+  _state.advancedPragmaLoading = true;
+  _refreshAdvancedPragmaPanel(container);
+  try {
+    const res = await apiPost("settings/get_advanced_pragma_settings", {});
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.advancedPragmaState = data;
+    } else {
+      _state.advancedPragmaState = null;
+    }
+  } catch (err) {
+    _state.advancedPragmaState = null;
+  } finally {
+    _state.advancedPragmaLoading = false;
+    _refreshAdvancedPragmaPanel(container);
+  }
+}
+
+/**
+ * VO-A UI : applique le profil + locking_mode via settings/set_advanced_pragma_settings.
+ * Met a jour _state.advancedPragmaState avec la reponse et refresh.
+ */
+async function _applyAdvancedPragma(container, profileName, lockingExclusive, msgEl) {
+  if (msgEl) msgEl.textContent = "Application en cours…";
+  try {
+    const res = await apiPost("settings/set_advanced_pragma_settings", {
+      profile_name: String(profileName || "auto"),
+      locking_mode_exclusive: !!lockingExclusive,
+    });
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.advancedPragmaState = {
+        ...(_state.advancedPragmaState || {}),
+        profile_active: data.profile_active,
+        profile_override: data.profile_override,
+        storage_detected: data.storage_detected || _state.advancedPragmaState?.storage_detected,
+        locking_mode_exclusive: !!data.locking_mode_exclusive,
+        available_profiles: _state.advancedPragmaState?.available_profiles || [],
+      };
+      _refreshAdvancedPragmaPanel(container);
+      const newMsg = container.querySelector("[data-advanced-pragma-message]");
+      if (newMsg) newMsg.textContent = "✓ Paramètres de stockage enregistrés.";
+      return true;
+    }
+    if (msgEl) msgEl.textContent = `Erreur : ${data?.message || "échec de l'enregistrement"}`;
+    return false;
+  } catch (err) {
+    if (msgEl) msgEl.textContent = `Erreur réseau : ${err?.message || err}`;
+    return false;
+  }
+}
+
+/**
+ * VO-A UI : bind des handlers select profil + toggle EXCLUSIVE.
+ *
+ * Le toggle EXCLUSIVE est DANGEREUX (memoire user actions dangereuses) :
+ *   - JAMAIS window.confirm/prompt/alert
+ *   - dangerConfirmModal avec countdown 3s OBLIGATOIRE
+ *   - Cancel = checkbox revient a son etat initial (pas de changement)
+ */
+function _bindAdvancedPragmaActions(container) {
+  // Bouton "Recharger" si state null
+  const reloadBtn = container.querySelector("[data-advanced-pragma-reload]");
+  if (reloadBtn && reloadBtn.dataset.bound !== "1") {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", () => _loadAdvancedPragmaState(container));
+  }
+
+  // Select profil — applique direct (pas dangereux)
+  const profileSelect = container.querySelector("[data-advanced-pragma-profile]");
+  if (profileSelect && profileSelect.dataset.bound !== "1") {
+    profileSelect.dataset.bound = "1";
+    profileSelect.addEventListener("change", async () => {
+      const msg = container.querySelector("[data-advanced-pragma-message]");
+      const currentExclusive = !!(_state.advancedPragmaState && _state.advancedPragmaState.locking_mode_exclusive);
+      await _applyAdvancedPragma(container, profileSelect.value, currentExclusive, msg);
+    });
+  }
+
+  // Toggle EXCLUSIVE — DANGEREUX : dangerConfirmModal + countdown 3s
+  const exclusiveToggle = container.querySelector("[data-advanced-pragma-exclusive]");
+  if (exclusiveToggle && exclusiveToggle.dataset.bound !== "1") {
+    exclusiveToggle.dataset.bound = "1";
+    exclusiveToggle.addEventListener("change", () => {
+      const target = !!exclusiveToggle.checked;
+      const previous = !target; // on connait l'ancien etat
+      const msg = container.querySelector("[data-advanced-pragma-message]");
+      const currentProfile = _state.advancedPragmaState?.profile_override || "auto";
+
+      if (!target) {
+        // Desactivation : pas de confirmation (revenir a un mode safe)
+        _applyAdvancedPragma(container, currentProfile, false, msg);
+        return;
+      }
+
+      // Activation EXCLUSIVE : modale obligatoire avec countdown 3s
+      // Memoire feedback_cinesort_actions_dangereuses : JAMAIS window.confirm.
+      dangerConfirmModal({
+        title: "Verrouillage exclusif de la base de données",
+        consequence: "Mode EXCLUSIVE : aucun autre processus (UI distant, CLI, plugin) ne pourra lire la base de données en parallèle. À utiliser uniquement si vous êtes seul·e à utiliser CineSort sur cette machine.",
+        items: [
+          "Aucun autre processus ne peut lire la DB en parallèle",
+          "Les clients REST distants seront refusés tant que ce mode est actif",
+          "Désactivable à tout moment depuis ce même écran",
+        ],
+        countdownSeconds: 3,
+        confirmLabel: "Activer EXCLUSIVE",
+        cancelLabel: "Annuler",
+        onConfirm: async () => {
+          await _applyAdvancedPragma(container, currentProfile, true, msg);
+        },
+      });
+
+      // Reset visuel immediat : si l'utilisateur annule, l'etat de la checkbox
+      // doit refleter l'ancien etat. _applyAdvancedPragma fera un refresh
+      // complet en cas de succes ; en cas d'annulation, on remet manuellement.
+      // On revert tout de suite puis on laisse onConfirm faire le refresh si
+      // confirme (le refresh re-rend la section avec la bonne valeur).
+      setTimeout(() => {
+        const stillActive = !!(_state.advancedPragmaState && _state.advancedPragmaState.locking_mode_exclusive);
+        if (!stillActive && exclusiveToggle.isConnected) {
+          exclusiveToggle.checked = previous;
+        }
+      }, 100);
+    });
+  }
+}
+
+/* =============================================================
+ * VO-B-CONFIG : Scan parallele (tri-etat workers auto/manuel)
+ * ============================================================= */
+
+/**
+ * Refresh le panneau "Scan" sans full re-render. Re-attache les handlers
+ * (idempotent via data-bound).
+ */
+function _refreshScanMaxWorkersPanel(container) {
+  const host = container.querySelector("[data-scan-workers-host]");
+  if (!host) return;
+  host.innerHTML = _renderScanMaxWorkersSection(_state.scanMaxWorkersState);
+  _bindScanMaxWorkersActions(container);
+}
+
+/**
+ * Charge l'etat initial via settings/get_scan_max_workers.
+ */
+async function _loadScanMaxWorkersState(container) {
+  _state.scanMaxWorkersLoading = true;
+  _refreshScanMaxWorkersPanel(container);
+  try {
+    const res = await apiPost("settings/get_scan_max_workers", {});
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.scanMaxWorkersState = data;
+    } else {
+      _state.scanMaxWorkersState = null;
+    }
+  } catch (err) {
+    _state.scanMaxWorkersState = null;
+  } finally {
+    _state.scanMaxWorkersLoading = false;
+    _refreshScanMaxWorkersPanel(container);
+  }
+}
+
+/**
+ * Applique la combinaison (mode, value) via settings/set_scan_max_workers.
+ */
+async function _applyScanMaxWorkers(container, mode, value, msgEl) {
+  if (msgEl) msgEl.textContent = "Application en cours…";
+  try {
+    const payload = { mode: String(mode || "auto") };
+    if (mode === "manual") {
+      payload.value = Number(value);
+    }
+    const res = await apiPost("settings/set_scan_max_workers", payload);
+    const data = res && res.data ? res.data : res;
+    if (data && data.ok) {
+      _state.scanMaxWorkersState = {
+        ...(_state.scanMaxWorkersState || {}),
+        mode: data.mode,
+        value: data.value,
+        effective: data.effective,
+        storage_detected: data.storage_detected,
+        auto_suggestion: data.auto_suggestion,
+        min: data.min,
+        max: data.max,
+      };
+      _refreshScanMaxWorkersPanel(container);
+      const newMsg = container.querySelector("[data-scan-workers-message]");
+      if (newMsg) newMsg.textContent = "✓ Configuration scan enregistrée.";
+      return true;
+    }
+    if (msgEl) msgEl.textContent = `Erreur : ${data?.message || "échec de l'enregistrement"}`;
+    return false;
+  } catch (err) {
+    if (msgEl) msgEl.textContent = `Erreur réseau : ${err?.message || err}`;
+    return false;
+  }
+}
+
+/**
+ * Bind des handlers select mode + input value.
+ *
+ * Memoire user "Pas de window.confirm/alert/prompt" : aucune dialog native.
+ * Le toggle mode applique immediatement (changement non-destructif).
+ * L'input value applique au blur OU sur Enter (evite N writes intermediaires
+ * pendant la frappe).
+ */
+function _bindScanMaxWorkersActions(container) {
+  // Bouton "Recharger" si state null
+  const reloadBtn = container.querySelector("[data-scan-workers-reload]");
+  if (reloadBtn && reloadBtn.dataset.bound !== "1") {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", () => _loadScanMaxWorkersState(container));
+  }
+
+  // Select mode — change applique direct
+  const modeSelect = container.querySelector("[data-scan-workers-mode]");
+  if (modeSelect && modeSelect.dataset.bound !== "1") {
+    modeSelect.dataset.bound = "1";
+    modeSelect.addEventListener("change", async () => {
+      const msg = container.querySelector("[data-scan-workers-message]");
+      const newMode = String(modeSelect.value || "auto");
+      const currentValue = Number(_state.scanMaxWorkersState?.value || 1);
+      // Show / hide l'input number selon le mode (UX)
+      const wrapper = container.querySelector("[data-scan-workers-value-wrapper]");
+      if (wrapper) {
+        wrapper.style.display = newMode === "manual" ? "" : "none";
+      }
+      await _applyScanMaxWorkers(container, newMode, currentValue, msg);
+    });
+  }
+
+  // Input value (mode manuel uniquement) — applique au blur ou Enter
+  const valueInput = container.querySelector("[data-scan-workers-value]");
+  if (valueInput && valueInput.dataset.bound !== "1") {
+    valueInput.dataset.bound = "1";
+    const applyFromInput = async () => {
+      const msg = container.querySelector("[data-scan-workers-message]");
+      const raw = valueInput.value;
+      const n = Number(raw);
+      const minVal = Number(_state.scanMaxWorkersState?.min || 1);
+      const maxVal = Number(_state.scanMaxWorkersState?.max || 64);
+      if (!Number.isFinite(n) || n < minVal || n > maxVal) {
+        if (msg) msg.textContent = `Valeur invalide : doit être un entier entre ${minVal} et ${maxVal}.`;
+        return;
+      }
+      const currentMode = String(_state.scanMaxWorkersState?.mode || "manual");
+      // Si l'utilisateur edite la valeur sans avoir bascule en manuel, on bascule pour eux
+      const targetMode = currentMode === "manual" ? "manual" : "manual";
+      await _applyScanMaxWorkers(container, targetMode, Math.floor(n), msg);
+    };
+    valueInput.addEventListener("blur", applyFromInput);
+    valueInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyFromInput();
+      }
+    });
   }
 }
 
@@ -1944,7 +3062,22 @@ function _bindProbeToolsActions(container) {
           await _loadProbeToolsStatus(container, { force: true });
           _setProbeToolsMessage(container, "✓ Statut rafraîchi.", "ok");
         } else if (action === "auto_install") {
-          _setProbeToolsMessage(container, "Installation auto en cours… (téléchargement HTTP, ~30-60s)", "info");
+          // Confirmation : DL HTTPS ~110 Mo + écriture dans %LOCALAPPDATA% — action sensible.
+          const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                "Installer automatiquement ffprobe et MediaInfo ?\n\n"
+                + "• Téléchargement HTTPS : environ 110 Mo\n"
+                + "• Durée estimée : 1 à 3 minutes\n"
+                + "• Empreinte SHA256 vérifiée avant installation : en cas d'écart, rien n'est installé\n"
+                + "• Destination : dossier utilisateur (pas besoin d'admin)\n\n"
+                + "Confirmer l'installation ?",
+              )
+            : true;
+          if (!ok) {
+            _setProbeToolsMessage(container, "Installation annulée.", "info");
+            return;
+          }
+          _setProbeToolsMessage(container, "Installation en cours… (téléchargement HTTP, environ 30-60 s)", "info");
           const res = await apiPost("runtime/auto_install_probe_tools", {});
           const data = res && res.data ? res.data : res;
           if (data && data.ok) {
@@ -1960,6 +3093,18 @@ function _bindProbeToolsActions(container) {
             await _loadProbeToolsStatus(container, { force: true });
           }
         } else if (action === "update") {
+          const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                "Mettre à jour ffprobe et MediaInfo via winget ?\n\n"
+                + "• Utilise Windows Package Manager (doit être installé)\n"
+                + "• Met à jour vers les dernières versions disponibles\n\n"
+                + "Confirmer la mise à jour ?",
+              )
+            : true;
+          if (!ok) {
+            _setProbeToolsMessage(container, "Mise à jour annulée.", "info");
+            return;
+          }
           _setProbeToolsMessage(container, "Mise à jour winget en cours…", "info");
           const res = await apiPost("runtime/update_probe_tools", {});
           const data = res && res.data ? res.data : res;
@@ -1994,9 +3139,22 @@ function _bindProbeToolsActions(container) {
       all.forEach((b) => { b.disabled = true; });
       try {
         if (action === "test") {
-          _setProbeToolsMessage(container, `Test ${tool}…`, "info");
+          _setProbeToolsMessage(container, `Vérification de ${tool} en cours…`, "info");
           await _loadProbeToolsStatus(container, { force: true });
+          _setProbeToolsMessage(container, `✓ ${tool} vérifié.`, "ok");
         } else if (action === "reinstall") {
+          const okR = (typeof window !== "undefined" && typeof window.confirm === "function")
+            ? window.confirm(
+                `Réinstaller ${tool} via winget ?\n\n`
+                + "• Utilise Windows Package Manager\n"
+                + "• Remplace la version existante\n\n"
+                + "Confirmer la réinstallation ?",
+              )
+            : true;
+          if (!okR) {
+            _setProbeToolsMessage(container, "Réinstallation annulée.", "info");
+            return;
+          }
           _setProbeToolsMessage(container, `Réinstallation de ${tool} (winget)…`, "info");
           const res = await apiPost("runtime/install_probe_tools", { options: { tools: [tool], scope: "user" } });
           const data = res && res.data ? res.data : res;
@@ -2060,6 +3218,54 @@ function _bindProfilsQualite(container) {
     });
   });
 
+  // VP-B (Vague P) : toggle hierarchie qualite (default OFF).
+  const hierarchyToggle = container.querySelector("[data-parametres-hierarchy-enabled]");
+  if (hierarchyToggle) {
+    hierarchyToggle.addEventListener("change", (ev) => {
+      if (!_state.profileDraft) {
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+      }
+      if (!_state.profileDraft.tier_hierarchy) {
+        _state.profileDraft.tier_hierarchy = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() };
+      }
+      _state.profileDraft.tier_hierarchy.enabled = !!ev.target.checked;
+    });
+  }
+
+  // VP-B : reorder dimensions (haut/bas).
+  container.querySelectorAll("[data-hierarchy-move]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const dim = btn.dataset.hierarchyDimTarget;
+      const direction = btn.dataset.hierarchyMove;
+      if (!dim || !direction) return;
+      if (!_state.profileDraft) {
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+      }
+      const hier = _state.profileDraft.tier_hierarchy
+        || (_state.profileDraft.tier_hierarchy = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() });
+      const order = Array.isArray(hier.order) && hier.order.length > 0
+        ? hier.order.slice()
+        : _DEFAULT_HIERARCHY_DIMENSIONS.slice();
+      const idx = order.indexOf(dim);
+      if (idx === -1) return;
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= order.length) return;
+      [order[idx], order[swapIdx]] = [order[swapIdx], order[idx]];
+      hier.order = order;
+      _rerenderActiveCategory();
+    });
+  });
+
   // Boutons d'action
   container.querySelectorAll("[data-parametres-profils-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2067,12 +3273,227 @@ function _bindProfilsQualite(container) {
       if (action === "save") _saveProfileAsNew();
       else if (action === "recompute") _recomputeScores();
       else if (action === "reset") {
-        _state.profileDraft = { id: "", label: "", tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
-        _showProfilMessage("Seuils et poids restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.", "info");
+        _state.profileDraft = {
+          id: "", label: "",
+          tiers: { ..._DEFAULT_TIERS },
+          weights: { ..._DEFAULT_WEIGHTS },
+          // VP-B : reset hierarchie au default OFF.
+          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
+        };
+        _showProfilMessage("Seuils, poids et hiérarchie restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.", "info");
         _rerenderActiveCategory();
       }
     });
   });
+
+  // VP-F (Vague P batch 6) : import/export Recyclarr YAML + breakdown + upgrade_until_score.
+  _bindVPFRecyclarrActions(container);
+  _bindVPFUpgradeUntilScore(container);
+  // Charge le breakdown (lazy ; pas bloquant pour le rendu).
+  _loadVPFBreakdown(container);
+  // Charge la valeur initiale de upgrade_until_score.
+  _loadVPFUpgradeUntilScore(container);
+}
+
+/* =============================================================
+ * 12bis) VP-F (Vague P batch 6) — Recyclarr import/export + breakdown
+ * ============================================================= */
+
+function _showVPFMessage(selector, msg, level) {
+  const el = _state.containerRef?.querySelector(selector);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = `parametres-profils-message ${level ? `parametres-profils-message--${level}` : ""}`;
+}
+
+function _bindVPFRecyclarrActions(container) {
+  container.querySelectorAll("[data-vpf-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.vpfAction;
+      try {
+        if (action === "export-yaml") {
+          await _vpfExportRecyclarrYaml();
+        } else if (action === "import-yaml") {
+          await _vpfImportRecyclarrYaml();
+        } else if (action === "show-presets") {
+          await _vpfShowEmbeddedPresets();
+        }
+      } catch (e) {
+        _showVPFMessage("[data-vpf-recyclarr-message]", `Erreur : ${e?.message || e}`, "error");
+      }
+    });
+  });
+}
+
+async function _vpfExportRecyclarrYaml() {
+  const textarea = _state.containerRef?.querySelector("[data-vpf-yaml-textarea]");
+  if (!textarea) return;
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Export en cours…", "info");
+  const res = await apiPost("quality/export_recyclarr_yaml", {});
+  if (res && res.data && res.data.ok) {
+    textarea.value = res.data.yaml || "";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `✓ Profil exporté (${res.data.profile_id || "actif"}). Copiez le YAML ci-dessus.`,
+      "ok"
+    );
+  } else {
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "export impossible"}`,
+      "error"
+    );
+  }
+}
+
+async function _vpfImportRecyclarrYaml() {
+  const textarea = _state.containerRef?.querySelector("[data-vpf-yaml-textarea]");
+  if (!textarea) return;
+  const yaml = String(textarea.value || "").trim();
+  if (!yaml) {
+    _showVPFMessage("[data-vpf-recyclarr-message]", "Collez d'abord du YAML dans la zone.", "warning");
+    return;
+  }
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Import en cours…", "info");
+  const res = await apiPost("quality/import_recyclarr_yaml", { yaml_text: yaml, activate: false });
+  if (res && res.data && res.data.ok) {
+    const lossy = res.data.lossy ? " (reconstruction approximative)" : " (lossless)";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `✓ Profil "${res.data.profile_id}" importé${lossy}.`,
+      "ok"
+    );
+    // Rafraichit la liste des profils pour faire apparaitre le nouveau custom.
+    await _loadProfiles();
+    _rerenderActiveCategory();
+  } else {
+    const errs = Array.isArray(res?.data?.errors) ? ` (${res.data.errors.join(" ; ")})` : "";
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "import refusé"}${errs}`,
+      "error"
+    );
+  }
+}
+
+async function _vpfShowEmbeddedPresets() {
+  _showVPFMessage("[data-vpf-recyclarr-message]", "Chargement des presets embarqués…", "info");
+  const res = await apiPost("quality/get_embedded_presets", {});
+  if (res && res.data && res.data.ok) {
+    const presets = res.data.presets || [];
+    if (presets.length === 0) {
+      _showVPFMessage(
+        "[data-vpf-recyclarr-message]",
+        "Aucun preset embarqué disponible.",
+        "warning"
+      );
+      return;
+    }
+    const labels = presets
+      .map((p) => `${p.label} (${p.preset_id}) — ${p.enabled_by_default ? "ON" : "OFF par défaut"}`)
+      .join("\n");
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `${presets.length} preset(s) embarqué(s) : ${labels}. Tous DÉSACTIVÉS par défaut (AC-3).`,
+      "info"
+    );
+  } else {
+    _showVPFMessage(
+      "[data-vpf-recyclarr-message]",
+      `Erreur : ${res?.data?.message || "chargement impossible"}`,
+      "error"
+    );
+  }
+}
+
+function _bindVPFUpgradeUntilScore(container) {
+  const saveBtn = container.querySelector('[data-vpf-action="save-upgrade-until"]');
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const input = container.querySelector("[data-vpf-upgrade-input]");
+      if (!input) return;
+      const score = parseInt(input.value, 10);
+      if (Number.isNaN(score) || score < 0 || score > 100000) {
+        _showVPFMessage(
+          "[data-vpf-upgrade-message]",
+          "Valeur invalide (0..100000 attendu).",
+          "error"
+        );
+        return;
+      }
+      _showVPFMessage("[data-vpf-upgrade-message]", "Enregistrement…", "info");
+      try {
+        const res = await apiPost("quality/set_upgrade_until_score", { score });
+        if (res && res.data && res.data.ok) {
+          _showVPFMessage(
+            "[data-vpf-upgrade-message]",
+            `✓ Score d'arrêt mis à jour : ${res.data.upgrade_until_score}.`,
+            "ok"
+          );
+        } else {
+          _showVPFMessage(
+            "[data-vpf-upgrade-message]",
+            `Erreur : ${res?.data?.message || "sauvegarde refusée"}`,
+            "error"
+          );
+        }
+      } catch (e) {
+        _showVPFMessage("[data-vpf-upgrade-message]", `Erreur : ${e?.message || e}`, "error");
+      }
+    });
+  }
+}
+
+async function _loadVPFUpgradeUntilScore(container) {
+  try {
+    const res = await apiPost("quality/get_upgrade_until_score", {});
+    if (res && res.data && res.data.ok) {
+      const input = container.querySelector("[data-vpf-upgrade-input]");
+      if (input && typeof res.data.upgrade_until_score === "number") {
+        input.value = String(res.data.upgrade_until_score);
+      }
+    }
+  } catch (_e) {
+    // Silencieux : le default 10000 est deja dans le HTML.
+  }
+}
+
+async function _loadVPFBreakdown(container) {
+  const host = container.querySelector("[data-vpf-breakdown-host]");
+  if (!host) return;
+  try {
+    const res = await apiPost("quality/get_breakdown_5_axes", {});
+    if (res && res.data && res.data.ok) {
+      const axes = res.data.axes || [];
+      const totalWeight = axes.reduce((s, a) => s + (Number(a.weight) || 0), 0);
+      const rows = axes
+        .map((a) => {
+          const w = Number(a.weight) || 0;
+          const pct = totalWeight > 0 ? Math.round((w / totalWeight) * 100) : 0;
+          return `<div class="parametres-breakdown-row" data-axis="${escapeHtml(a.id)}">
+            <span class="parametres-breakdown-label">${escapeHtml(a.label || a.id)}</span>
+            <span class="parametres-breakdown-bar" aria-hidden="true">
+              <span class="parametres-breakdown-bar-fill" style="width: ${pct}%"></span>
+            </span>
+            <span class="parametres-breakdown-value">${w} pts (${pct}%)</span>
+          </div>`;
+        })
+        .join("");
+      host.innerHTML = `<div class="parametres-breakdown-grid">${rows}</div>
+        <p class="parametres-section-intro">
+          Total théorique max : <strong>${totalWeight} pts</strong>. Score d'arrêt
+          des upgrades configuré : <strong>${res.data.upgrade_until_score || 10000}</strong>.
+        </p>`;
+    } else {
+      host.innerHTML = `<p class="parametres-section-intro parametres-profils-message--warning">
+        Breakdown indisponible : ${escapeHtml(res?.data?.message || "réponse vide")}.
+      </p>`;
+    }
+  } catch (e) {
+    host.innerHTML = `<p class="parametres-section-intro parametres-profils-message--error">
+      Erreur : ${escapeHtml(e?.message || String(e))}.
+    </p>`;
+  }
 }
 
 /* =============================================================
@@ -2137,6 +3558,34 @@ function _uninstallCtrlK() {
   }
 }
 
+/* Ctrl+S — la table de raccourcis de core/keyboard.js (ligne 44) annonce
+ * « Enregistrer » a l'utilisateur, et le handler global fait bien un
+ * preventDefault() puis emet `cinesort:save-request`. Mais AUCUNE vue n'ecoutait
+ * cet evenement : le raccourci bloquait le « Enregistrer » natif du navigateur
+ * et ne faisait rien — une promesse affichee mais jamais tenue.
+ *
+ * Les Parametres sont le seul ecran ou « Enregistrer » a un sens : on y branche
+ * le flush du debounce, exactement ce que fait deja la sortie de vue. Ailleurs
+ * l'evenement reste sans effet (comportement inchange). */
+let _saveRequestHandler = null;
+
+function _installSaveRequest() {
+  if (_saveRequestHandler || typeof window === "undefined") return;
+  _saveRequestHandler = () => {
+    // Pas de save en vol et rien en attente -> ne rien faire (pas de POST inutile).
+    if (!_state.saveTimer) return;
+    _flushPendingSave();
+  };
+  window.addEventListener("cinesort:save-request", _saveRequestHandler);
+}
+
+function _uninstallSaveRequest() {
+  if (_saveRequestHandler && typeof window !== "undefined") {
+    window.removeEventListener("cinesort:save-request", _saveRequestHandler);
+  }
+  _saveRequestHandler = null;
+}
+
 /* =============================================================
  * 15) ENTRY POINTS
  * ============================================================= */
@@ -2168,7 +3617,11 @@ export async function initParametres(container) {
   }
 
   _refreshAll();
+  // F04 (revue adversaire R1) : APRES _refreshAll (qui (re)cree l'indicateur
+  // dans le DOM), on re-affiche l'echec d'un flush parti au demontage.
+  _surfacePendingFlushError();
   _installCtrlK();
+  _installSaveRequest();
   _flushPendingScroll();
 
   // Listener hashchange : si on est deja sur /parametres et que l'utilisateur
@@ -2190,8 +3643,12 @@ export async function initParametres(container) {
 }
 
 export function unmountParametres() {
-  if (_state.saveTimer) { clearTimeout(_state.saveTimer); _state.saveTimer = null; }
+  // F04 : NE PAS annuler le debounce sans l'envoyer. Quitter la vue < 500 ms
+  // apres une frappe partait sinon sans jamais POSTer settings/save_settings,
+  // et _loadSettings ecrasait l'edition au retour (perte silencieuse).
+  _flushPendingSave();
   _uninstallCtrlK();
+  _uninstallSaveRequest();
   if (_state.hashChangeHandler && typeof window !== "undefined") {
     window.removeEventListener("hashchange", _state.hashChangeHandler);
     _state.hashChangeHandler = null;
@@ -2200,5 +3657,9 @@ export function unmountParametres() {
   _state.containerRef = null;
   _state.searchQuery = "";
   _state.savedAt = null;
+  // savedAt/saveError sont de l'etat de VUE : ils repartent a zero.
+  // F04 (revue adversaire R1) : `lastFlushError` N'EST PAS remis a zero ici —
+  // c'est lui qui porte l'echec du flush declenche par ce demontage meme, et il
+  // doit survivre pour etre affiche au prochain montage.
   _state.saveError = null;
 }

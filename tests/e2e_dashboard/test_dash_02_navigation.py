@@ -5,7 +5,6 @@ Lancer : pytest tests/e2e_dashboard/test_dash_02_navigation.py -v
 
 from __future__ import annotations
 
-
 _NAV_TABS = ["status", "library", "quality", "jellyfin", "plex", "radarr", "logs", "settings"]
 
 

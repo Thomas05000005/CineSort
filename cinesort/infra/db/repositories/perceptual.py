@@ -2,8 +2,8 @@
 
 Migration #85 phase B4 (2026-05-16) : meme pattern que B1/B2/B3 :
 - Code metier vit DANS PerceptualRepository
-- _PerceptualMixin devient thin wrapper backward-compat
-- SQLiteStore conserve son inheritance
+- B8 CLOSE (2026-05, commit 482f3e6) : _PerceptualMixin et l'heritage MRO supprimes
+- SQLiteStore expose store.perceptual (heritage MRO supprime en B8)
 
 Methodes exposees :
     upsert_perceptual_report, get_perceptual_report, list_perceptual_reports,
@@ -18,7 +18,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
-
 
 _PERCEPTUAL_TABLES = ("perceptual_reports",)
 
@@ -218,9 +217,12 @@ class PerceptualRepository(_BaseRepository):
         with self._managed_conn() as conn:
             cur = conn.execute(
                 """
+                -- AUDIT 2026-06-14 (R7-15) : COUNT(DISTINCT row_id) au lieu de
+                -- COUNT(*) : re-scanner la meme biblio (nouveau run_id, memes
+                -- row_id) creait plusieurs reports par film -> compteurs gonfles.
                 SELECT date(ts, 'unixepoch', 'localtime') as d,
                        AVG(global_score_v2) as avg_score,
-                       COUNT(*) as n
+                       COUNT(DISTINCT row_id) as n
                 FROM perceptual_reports
                 WHERE global_score_v2 IS NOT NULL
                   AND ts >= ? AND ts <= ?
@@ -252,7 +254,9 @@ class PerceptualRepository(_BaseRepository):
         with self._managed_conn() as conn:
             cur = conn.execute(
                 """
-                SELECT COUNT(*) FROM perceptual_reports
+                -- AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter
+                -- N fois un film re-scanne (insight "N films <tier> ce mois").
+                SELECT COUNT(DISTINCT row_id) FROM perceptual_reports
                 WHERE global_tier_v2 = ? AND ts >= ?
                 """,
                 (str(tier).lower(), float(since_ts)),
@@ -281,6 +285,29 @@ class PerceptualRepository(_BaseRepository):
             )
             row = cur.fetchone()
             return int(row[0] or 0) if row else 0
+
+    def get_perceptual_report_stats(self, *, run_id: str) -> Dict[str, Any]:
+        """Retourne {count, max_ts} pour les rapports perceptuels de ce run.
+
+        Miroir de QualityRepository.get_quality_report_stats : utilise pour la
+        signature du cache dashboard afin que toute modification des
+        perceptual_reports (ex: analyse perceptuelle batch) invalide le cache.
+        """
+        self._ensure_perceptual_tables()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt, MAX(ts) AS max_ts
+                FROM perceptual_reports
+                WHERE run_id=?
+                """,
+                (str(run_id),),
+            )
+            row = cur.fetchone()
+        return {
+            "count": int((row["cnt"] if row else 0) or 0),
+            "max_ts": float((row["max_ts"] if row else 0.0) or 0.0),
+        }
 
     def _parse_perceptual_row(self, row: Any) -> Dict[str, Any]:
         """Parse une ligne de perceptual_reports."""

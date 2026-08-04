@@ -45,7 +45,9 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("library_podiums cannot resolve latest run: %s", exc)
         return None
-    return str(runs[0]["run_id"]) if runs else None
+    if not runs:
+        return None
+    return str(runs[0].get("run_id") or "") or None
 
 
 def _aggregate_top(values: List[Optional[str]], limit: int) -> List[Dict[str, Any]]:
@@ -69,6 +71,25 @@ def _aggregate_top(values: List[Optional[str]], limit: int) -> List[Dict[str, An
 
 
 def get_library_podiums(
+    api: Any,
+    run_id: Optional[str] = None,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_library_podiums_impl(api, run_id=run_id, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_library_podiums failed for run_id=%s limit=%s", run_id, limit)
+        return {
+            "ok": False,
+            "error": "podiums_load_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger les podiums.",
+        }
+
+
+def _get_library_podiums_impl(
     api: Any,
     run_id: Optional[str] = None,
     limit: int = 10,

@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.app import JobRunner
+from cinesort.app.apply_batches_reconciliation import reconcile_batches_at_boot
 from cinesort.app.move_reconciliation import reconcile_at_boot
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
@@ -32,10 +34,34 @@ _logger = logging.getLogger(__name__)
 # la session courante, reset si la CineSortApi est recree (tests).
 _RECONCILED_STATE_DIRS: set = set()
 
+# Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) :
+# get_or_create_infra construisait le SQLiteStore + appelait initialize() HORS
+# du _runs_lock (build long), puis recheckait le cache dans le lock. Sous deux
+# appels paralleles avec un cache vide, les DEUX threads passaient initialize()
+# en parallele -> double backup pre_migration, double execution PRAGMA
+# integrity_check, double tentative de migrations. Le second perdant etait
+# finalement jete a la sortie (already win), mais les effets de bord etaient
+# deja survenus.
+#
+# Solution : pattern Event "init in progress" par state_dir. Un seul thread
+# fait l'initialize ; les autres attendent l'Event puis recuperent le cache.
+# On ne tient PAS _runs_lock pendant initialize() (qui peut prendre plusieurs
+# secondes : backup + migrations), seulement le temps de claim l'Event.
+_INIT_IN_PROGRESS: Dict[str, threading.Event] = {}
+_INIT_IN_PROGRESS_LOCK = threading.Lock()
+
 
 def reset_reconciliation_cache_for_tests() -> None:
     """Permet aux tests d'isoler la reconciliation entre runs."""
     _RECONCILED_STATE_DIRS.clear()
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : reset aussi le registre
+    # d'initialisations en cours pour eviter qu'un test residuel ne bloque
+    # un test suivant (Event jamais sette suite a un crash).
+    with _INIT_IN_PROGRESS_LOCK:
+        _INIT_IN_PROGRESS.clear()
+    # v1.3 SQLite cloud-sync warning : reset la dedup des notifications cloud
+    # pour qu'un test puisse re-verifier la publication apres reset.
+    _CLOUD_SYNC_NOTIFIED_STATE_DIRS.clear()
 
 
 def state_dir_key(state_dir: Path) -> str:
@@ -57,6 +83,63 @@ def run_paths_for(state_dir: Path, run_id: str, *, ensure_exists: bool) -> state
         summary_txt=run_dir / "summary.txt",
         validation_json=run_dir / "validation.json",
     )
+
+
+# v1.3 : un seul warning UI par session par state_dir pour eviter de spammer
+# la cloche notifications a chaque create/refresh d'infra. La detection cote
+# store est elle-meme idempotente (juste un attribut), mais la publication
+# UI doit etre throttlee.
+_CLOUD_SYNC_NOTIFIED_STATE_DIRS: set = set()
+
+
+def _publish_cloud_sync_warning_if_any(api: Any, store: SQLiteStore, state_dir_id: str) -> None:
+    """v1.3 SQLite cloud-sync warning : publie une notification UI persistante
+    (non-bloquante) si la DB est posee dans un dossier de synchronisation cloud.
+
+    Le store a deja logue un WARNING dans cinesort.log au moment de
+    l'instanciation (cf. SQLiteStore.__init__). On expose ici un dialog non-
+    bloquant via le notification center : niveau "warning", categorie "system",
+    deduplique par state_dir pour ne pas spammer la cloche a chaque appel a
+    get_or_create_infra (qui peut etre tres frequent en UI).
+
+    Pattern symetrique a _publish_integrity_notification_if_any. Tolerant :
+    toute erreur d'import ou de publication est ignoree (best effort).
+    """
+    provider = getattr(store, "cloud_sync_provider", None)
+    if not provider:
+        return
+    if state_dir_id in _CLOUD_SYNC_NOTIFIED_STATE_DIRS:
+        return
+    title = "Base SQLite dans un dossier cloud"
+    body = (
+        f"La base est posee dans un dossier synchronise ({provider}). "
+        "Risque de corruption silencieuse : le moteur de sync peut copier le "
+        "fichier .sqlite alors que des pages sont encore dans le -wal ou "
+        "-shm. Recommandation : deplacer la DB vers "
+        "%LOCALAPPDATA%\\CineSort\\db\\ ou exclure .sqlite/.sqlite-wal/"
+        ".sqlite-shm de la synchronisation. Voir docs/TROUBLESHOOTING.md "
+        "section 8."
+    )
+    try:
+        add_notification(
+            api,
+            event_type="db_cloud_sync",
+            title=title,
+            body=body,
+            level="warning",
+            category="system",
+            data={
+                "provider": provider,
+                "db_path": str(getattr(store, "db_path", "")),
+            },
+        )
+        _CLOUD_SYNC_NOTIFIED_STATE_DIRS.add(state_dir_id)
+        _logger.warning(
+            "v1.3: notification UI publiee — DB SQLite dans dossier cloud (%s)",
+            provider,
+        )
+    except Exception as exc:
+        _logger.warning("v1.3: publication notification cloud-sync echouee: %s", exc)
 
 
 def _publish_integrity_notification_if_any(api: Any, store: SQLiteStore) -> None:
@@ -145,89 +228,211 @@ def get_or_create_infra(
         except (OSError, TypeError, ValueError):
             return
 
-    with api._runs_lock:
-        existing = api._infra_by_state_dir.get(key)
-        if existing:
-            # Fix audit 2026-05-24 : avant on rappelait .initialize() a chaque
-            # endpoint, ce qui retriggerait _backup_before_migrations() ->
-            # spam de backups (9 backups DB en 13s observe en prod).
-            # initialize() est idempotent et a deja ete appele au premier
-            # create. On retourne directement le cache.
-            return existing
+    # Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) : claim-or-wait pattern.
+    # Cas 1 : cache present -> retour immediat.
+    # Cas 2 : cache absent, mais un autre thread est en train d'initialiser
+    #         pour CE state_dir -> on attend l'Event puis on relit le cache.
+    # Cas 3 : cache absent et personne n'initialise -> on devient le builder
+    #         et on cree un Event pour les futurs threads qui arriveraient
+    #         pendant notre initialize().
+    init_event: Optional[threading.Event] = None
+    we_are_the_builder = False
+    while True:
+        with api._runs_lock:
+            existing = api._infra_by_state_dir.get(key)
+            if existing:
+                # Fix audit 2026-05-24 : initialize() est idempotent + deja
+                # appele au premier create. On retourne directement le cache.
+                return existing
+            # Cache absent : voir si un autre thread initialise deja.
+            with _INIT_IN_PROGRESS_LOCK:
+                pending = _INIT_IN_PROGRESS.get(key)
+                if pending is None:
+                    # On devient le builder. Pose un Event pour les autres.
+                    init_event = threading.Event()
+                    _INIT_IN_PROGRESS[key] = init_event
+                    we_are_the_builder = True
+                else:
+                    init_event = pending
+                    we_are_the_builder = False
+        if we_are_the_builder:
+            break
+        # On n'est pas builder : attendre la fin de l'initialize, puis reboucler
+        # pour relire le cache. Timeout defensif pour eviter un freeze infini
+        # si le builder a crash (l'Event sera nettoye par le finally du
+        # builder, mais on garde un cap).
+        init_event.wait(timeout=60.0)
+        # Reboucle pour relire le cache. Si le cache est absent (le builder a
+        # echoue), on retente l'init nous-meme.
 
-    store = SQLiteStore(
-        db_path_for_state_dir(state_dir),
-        busy_timeout_ms=8000,
-        debug_logger=_sqlite_debug,
-    )
-    version = store.initialize()
-    _sqlite_debug(f"SQLite initialized at {store.db_path}, schema version={version}")
+    try:
+        # VO-A-NAS : DB_LOCAL_GUARD fail-closed avant toute ouverture SQLite.
+        # Refuse les chemins UNC (\\server\share\...) sauf override explicite
+        # via env CINESORT_ALLOW_UNC_DB=1. Cf Sonarr #1886 (corruption SQLite
+        # silencieuse sur SMB). Le guard leve RuntimeError si UNC sans override,
+        # ce qui se propage a CineSortApi et empeche le boot.
+        from cinesort.infra.db.nas_validation import db_local_guard
 
-    # V2-11 audit QA 20260504 : si l'integrity_check a detecte une corruption,
-    # publier une notification UI persistante (consommee par le notification
-    # center au prochain affichage). Independant de la reconciliation, car
-    # peut arriver meme sans pending_moves.
-    _publish_integrity_notification_if_any(api, store)
+        resolved_db_path = db_path_for_state_dir(state_dir)
+        db_local_guard(resolved_db_path)
 
-    # CR-1 audit QA 20260429 : reconciliation des moves orphelins au 1er boot
-    # de chaque state_dir. Si un crash a interrompu un apply precedent, on
-    # examine apply_pending_moves et on classifie/cleanup chaque entree.
-    if key not in _RECONCILED_STATE_DIRS:
+        # PRAGMA-01 fix : lire le settings storage_profile_override AVANT
+        # d'instancier le store pour propager le choix utilisateur (auto /
+        # local_ssd / nas_smb) au PRAGMA profile applique aux connexions
+        # SQLite. Sans ce kwarg, SQLiteStore autodetectait systematiquement
+        # via detect_storage_type, ignorant le selecteur de l'UI Settings.
+        # Tolerant : tout echec de lecture retombe sur None (autodetect).
+        pragma_profile_kwarg: Optional[str] = None
         try:
-            notify = getattr(api, "_notify", None)
-            report = reconcile_at_boot(store, notify=notify)
-            if report.get("examined", 0) > 0:
-                _logger.info(
-                    "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
-                    report["examined"],
-                    report.get("completed", 0),
-                    report.get("rolled_back", 0),
-                    len(report.get("duplicated", [])),
-                    len(report.get("lost", [])),
-                )
+            from cinesort.ui.api.settings_support import (
+                _normalize_storage_profile,
+                read_settings,
+            )
+
+            _settings_for_profile = read_settings(state_dir)
+            _override = _normalize_storage_profile(_settings_for_profile.get("storage_profile_override"))
+            pragma_profile_kwarg = None if _override == "auto" else _override
         except Exception as exc:
-            _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
-        # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
-        # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
-        # en BDD pour toujours. On les marque FAILED avec message de crash.
-        try:
-            with store._managed_conn() as conn:  # type: ignore[attr-defined]
-                cursor = conn.execute(
-                    "SELECT run_id FROM runs WHERE status = ?",
-                    ("RUNNING",),
-                )
-                orphan_run_ids = [row[0] for row in cursor.fetchall()]
-                if orphan_run_ids:
-                    conn.execute(
-                        "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) WHERE status = ?",
-                        ("FAILED", "Crash detecte au boot (run orphelin)", "RUNNING"),
+            _logger.debug(
+                "PRAGMA-01: lecture storage_profile_override echouee (autodetect): %s",
+                exc,
+            )
+
+        store = SQLiteStore(
+            resolved_db_path,
+            # R8-025 (F2-d) : NE PAS forcer busy_timeout_ms=8000 ici. 8000 != defaut 5000
+            # declenchait le re-override back-compat de connect_sqlite, qui ECRASAIT le
+            # busy_timeout du profil NAS (30000/60000 sur SMB) -> SQLITE_BUSY premature,
+            # y compris pendant les ALTER/CREATE INDEX de migration. On laisse le DEFAUT
+            # (5000 == _DEFAULT_BUSY_TIMEOUT_MS) -> le back-compat ne se declenche pas ->
+            # le PROFIL (apply_pragmas : NAS 30000/60000, local 5000) fait foi.
+            # (Le re-override explicite reste dispo pour les callers/tests qui passent une
+            #  valeur != 5000 deliberement, ex. test_db_robustness busy_timeout_ms=3000.)
+            busy_timeout_ms=5000,
+            debug_logger=_sqlite_debug,
+            pragma_profile_name=pragma_profile_kwarg,
+        )
+        version = store.initialize()
+        _sqlite_debug(f"SQLite initialized at {store.db_path}, schema version={version}")
+
+        # V2-11 audit QA 20260504 : si l'integrity_check a detecte une corruption,
+        # publier une notification UI persistante (consommee par le notification
+        # center au prochain affichage). Independant de la reconciliation, car
+        # peut arriver meme sans pending_moves.
+        _publish_integrity_notification_if_any(api, store)
+
+        # v1.3 SQLite cloud-sync warning : si la DB est dans un dossier
+        # synchronise (OneDrive/Dropbox/GDrive/iCloud/Box/pCloud/Mega), publier
+        # un dialog non-bloquant dans le notification center. Deduplique par
+        # state_dir pour ne pas spammer la cloche.
+        _publish_cloud_sync_warning_if_any(api, store, key)
+
+        # CR-1 audit QA 20260429 : reconciliation des moves orphelins au 1er boot
+        # de chaque state_dir. Si un crash a interrompu un apply precedent, on
+        # examine apply_pending_moves et on classifie/cleanup chaque entree.
+        if key not in _RECONCILED_STATE_DIRS:
+            try:
+                notify = getattr(api, "_notify", None)
+                report = reconcile_at_boot(store, notify=notify)
+                if report.get("examined", 0) > 0:
+                    _logger.info(
+                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
+                        report["examined"],
+                        report.get("completed", 0),
+                        report.get("rolled_back", 0),
+                        len(report.get("duplicated", [])),
+                        len(report.get("lost", [])),
                     )
-                    _logger.warning(
-                        "Boot cleanup: %d run(s) orphelin(s) marques FAILED: %s",
-                        len(orphan_run_ids),
-                        ", ".join(orphan_run_ids[:5]),
+            except Exception as exc:
+                _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
+            # VN-E.2 : nettoyer les apply_batches PENDING-zombi (status='PENDING').
+            # Pattern symetrique a reconcile_at_boot mais cible apply_batches au
+            # lieu de apply_pending_moves. Idempotent.
+            # R5-finding-4 fix : au boot, tout PENDING est par definition zombie
+            # (aucun process apply ne tourne encore, le boot etant le tout premier
+            # acces au store du process courant). Le defaut DEFAULT_MAX_AGE_HOURS=1.0
+            # laissait passer les batches recents (<1h) lors d'une relance rapide
+            # post-crash, ce qui est precisement le cas le plus frequent. On force
+            # max_age_hours=0.0 pour capturer tous les PENDING avec started_ts<now.
+            try:
+                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
+                if batches_report.get("pending_found", 0) > 0:
+                    _logger.info(
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
+                        batches_report["pending_found"],
+                        batches_report.get("completed", 0),
+                        batches_report.get("rolled_back", 0),
                     )
-        except Exception as exc:
-            _logger.warning("orphan runs cleanup: ignored (%s)", exc)
-        _RECONCILED_STATE_DIRS.add(key)
+            except Exception as exc:
+                _logger.warning("reconcile_batches_at_boot: erreur ignoree (boot continue): %s", exc)
+            # AUDIT 2026-06-11 (R4-P6) : re-masquer les secrets des
+            # runs.config_json HISTORIQUES (ecrits en clair avant le fix R1b
+            # 63517d7). Idempotent, best-effort, ne bloque jamais le boot.
+            try:
+                from cinesort.ui.api.run_flow_support import scrub_historical_run_configs  # noqa: PLC0415
 
-    def _jobrunner_debug(msg: str) -> None:
-        if not env_truthy_fn("CINESORT_DEBUG"):
-            return
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            api._append_text(state_dir / "debug_jobrunner.log", f"[{ts}] {msg}\n")
-        except (OSError, TypeError, ValueError):
-            return
+                scrub_report = scrub_historical_run_configs(store)
+                if scrub_report.get("scrubbed", 0) > 0:
+                    _logger.info(
+                        "scrub_historical_run_configs: %d/%d runs.config_json re-masques",
+                        scrub_report["scrubbed"],
+                        scrub_report["scanned"],
+                    )
+            except Exception as exc:
+                _logger.warning("scrub_historical_run_configs: erreur ignoree (boot continue): %s", exc)
+            # R5-CRASH-1 fix : nettoyer les runs orphelins (status='RUNNING' sans
+            # processus actif). Si l'app a crash mid-scan, le run reste RUNNING
+            # en BDD pour toujours. On les marque FAILED avec message de crash.
+            try:
+                with store._managed_conn() as conn:  # type: ignore[attr-defined]
+                    cursor = conn.execute(
+                        "SELECT run_id FROM runs WHERE status = ?",
+                        ("RUNNING",),
+                    )
+                    orphan_run_ids = [row[0] for row in cursor.fetchall()]
+                    if orphan_run_ids:
+                        conn.execute(
+                            "UPDATE runs SET status = ?, error_message = COALESCE(error_message, ?) WHERE status = ?",
+                            ("FAILED", "Crash detecte au boot (run orphelin)", "RUNNING"),
+                        )
+                        _logger.warning(
+                            "Boot cleanup: %d run(s) orphelin(s) marques FAILED: %s",
+                            len(orphan_run_ids),
+                            ", ".join(orphan_run_ids[:5]),
+                        )
+            except Exception as exc:
+                _logger.warning("orphan runs cleanup: ignored (%s)", exc)
+            _RECONCILED_STATE_DIRS.add(key)
 
-    runner = JobRunner(store, debug_logger=_jobrunner_debug)
+        def _jobrunner_debug(msg: str) -> None:
+            if not env_truthy_fn("CINESORT_DEBUG"):
+                return
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                api._append_text(state_dir / "debug_jobrunner.log", f"[{ts}] {msg}\n")
+            except (OSError, TypeError, ValueError):
+                return
 
-    with api._runs_lock:
-        already = api._infra_by_state_dir.get(key)
-        if already:
-            return already
-        api._infra_by_state_dir[key] = (store, runner)
-        return store, runner
+        runner = JobRunner(store, debug_logger=_jobrunner_debug)
+
+        with api._runs_lock:
+            already = api._infra_by_state_dir.get(key)
+            if already:
+                return already
+            api._infra_by_state_dir[key] = (store, runner)
+            return store, runner
+    finally:
+        # Fix audit 2026-05-26 (v1.5.6) Vague L (conc-4) : que le build
+        # reussisse, throw, ou cas race (already), on RELACHE toujours
+        # l'Event pour debloquer les threads en attente, et on retire
+        # l'entree du registre pour permettre une nouvelle tentative si
+        # le build a echoue.
+        with _INIT_IN_PROGRESS_LOCK:
+            current = _INIT_IN_PROGRESS.get(key)
+            if current is init_event:
+                _INIT_IN_PROGRESS.pop(key, None)
+        if init_event is not None:
+            init_event.set()
 
 
 def get_run(api: Any, run_id: str) -> Optional[Any]:
@@ -237,6 +442,25 @@ def get_run(api: Any, run_id: str) -> Optional[Any]:
 
 
 def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
+    safe_max_keep = max(1, int(max_keep or 1))
+
+    # PERF (scans successifs qui ralentissent) : garde AVANT la boucle.
+    # `terminal` est toujours un sous-ensemble de `api._runs` (les runs
+    # actifs sont sautes), donc `len(api._runs) <= safe_max_keep` implique
+    # `len(terminal) <= safe_max_keep` : le `return` d'en dessous serait pris
+    # de toute facon. La boucle etait donc un pur no-op fonctionnel — mais un
+    # no-op TRES cher : elle appelle `rs.runner.get_status(rid)` par entree,
+    # et ce get_status retombe en BDD des que le JobRunner a evince le run
+    # (cleanup H6 : il ne conserve que les 5 derniers runs termines). Chaque
+    # retombee BDD = `RunRepository.get_run` = 3 connexions SQLite neuves
+    # (verif du groupe de schema + user_version + la requete), chacune avec
+    # son cycle PRAGMA + INSERT pragma_history + COMMIT.
+    # Comme `get_run()` declenche cette purge a CHAQUE lecture d'etat, le
+    # polling de progression d'un scan payait O(runs en memoire) ouvertures
+    # de connexion par sondage -> cout total O(n^2) sur une serie de scans.
+    if len(api._runs) <= safe_max_keep:
+        return
+
     terminal: List[Tuple[float, str]] = []
     for rid, rs in api._runs.items():
         if rs.running:
@@ -247,7 +471,6 @@ def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
         ts = float((snap.ended_ts if snap else None) or rs.started_ts or 0.0)
         terminal.append((ts, rid))
 
-    safe_max_keep = max(1, int(max_keep or 1))
     if len(terminal) <= safe_max_keep:
         return
 
@@ -477,6 +700,22 @@ def get_diagnostic(api: Any) -> Dict[str, Any]:
          roots: [...], lib_total, lib_scored, log_path, settings_path,
          last_run_id, last_run_status, timestamp}}
     """
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint diagnostique appele depuis l'ecran Aide.
+    try:
+        return _get_diagnostic_impl(api)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        _logger.exception("get_diagnostic failed")
+        return {
+            "ok": False,
+            "error": "diagnostic_failed",
+            "message": str(exc),
+            "user_message": "Impossible de generer le diagnostic.",
+        }
+
+
+def _get_diagnostic_impl(api: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_diagnostic, sans wrap global (Vague G)."""
     settings = _safe_read_settings_for_diag(api)
 
     # db_schema_version : on essaie de lire la valeur via le store, sinon ""

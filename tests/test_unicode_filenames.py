@@ -16,8 +16,8 @@ from cinesort.domain.core import windows_safe
 from cinesort.domain.naming import (
     build_naming_context,
     check_path_length,
-    format_movie_folder,
     folder_matches_template,
+    format_movie_folder,
 )
 
 

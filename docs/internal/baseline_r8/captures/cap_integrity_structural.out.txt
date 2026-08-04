@@ -1,0 +1,267 @@
+REPO = C:\Users\blanc\projects\CineSort
+Captures STRUCTURELLES (read-only, grep + line-read) — baseline_r8
+
+
+==============================================================================
+F-V10-LOSER-ATOMIC : move losers/marked HORS du try/except par-row
+==============================================================================
+Mecanisme : move_duplicate_losers_to_user_decided + move_marked_for_deletion_to_bucket sont appeles AVANT la boucle
+for-row et EN DEHORS du try/except par-row -> si un move loser
+echoue a mi-parcours, aucune compensation/rollback intra-batch.
+
+
+  Appels losers/marked (AVANT la boucle) :
+    cinesort\app\apply_core.py:1303 [appel loser]          move_duplicate_losers_to_user_decided(
+    cinesort\app\apply_core.py:1320 [appel marked]          move_marked_for_deletion_to_bucket(
+
+  Boucle par-row + try/except par-row (APRES les appels ci-dessus) :
+    cinesort\app\apply_core.py:1437 [for-row]      for idx, row in enumerate(rows, start=1):
+    cinesort\app\apply_core.py:1550 [try par-row]          try:
+    cinesort\app\apply_core.py:1650 [1er except par-row]          except PermissionError as exc:
+
+  appel_loser(1303) et appel_marked(1320) < for-row(1437) < try-par-row(1550) : True
+  => les moves losers/marked ne sont JAMAIS dans le try par-row [1550..1650] : True
+
+==============================================================================
+F-V10-LOSER-COUNTER : losers incrementent duplicates_identical_moved_count (lockstep _deleted_count), aucun compteur loser dedie
+==============================================================================
+Mecanisme : move_duplicate_losers_to_user_decided incremente le
+MEME compteur (duplicates_identical_moved_count) que la suppression
+DUPLICATE_IDENTICAL, lequel est increment lockstep avec
+duplicates_identical_deleted_count -> un loser deplace gonfle le
+compteur de doublons 'supprimes', il n'existe aucun compteur loser.
+
+  Lockstep moved/deleted dans le chemin DUPLICATE_IDENTICAL :
+    cinesort\app\apply_core.py:690 [moved++]              res.duplicates_identical_moved_count += 1
+    cinesort\app\apply_core.py:691 [deleted++ (lockstep)]              res.duplicates_identical_deleted_count += 1
+
+  Increments DANS les helpers losers (reutilisent le compteur doublons) :
+    cinesort\app\apply_core.py:1042 [loser path moved++]                  res.duplicates_identical_moved_count += 1
+    cinesort\app\apply_core.py:1056 [loser path moved++]              res.duplicates_identical_moved_count += 1
+    cinesort\app\apply_core.py:1077 [loser path moved++]          res.duplicates_identical_moved_count += 1
+
+  Contraste : le chemin 'marked_for_deletion' a SON compteur dedie :
+    cinesort\app\apply_core.py:1175 [marked path (compteur dedie)]                  res.marked_for_deletion_moved_count += 1
+    cinesort\app\apply_core.py:1189 [marked path (compteur dedie)]              res.marked_for_deletion_moved_count += 1
+    cinesort\app\apply_core.py:1208 [marked path (compteur dedie)]          res.marked_for_deletion_moved_count += 1
+
+  compteur loser dedie incremente dans apply_core : 0 (attendu 0)
+
+==============================================================================
+F-V4B-RB1 : mark_apply_operation_undo_status JAMAIS appele dans apply_rollback.py
+==============================================================================
+Mecanisme : rollback_forward ne met a jour QUE apply_batch_modes.rollback_status (via mark_rollback_status).
+Il n'appelle jamais mark_apply_operation_undo_status -> les ops
+revertees gardent undo_status='PENDING' en base (etat incoherent).
+
+  apply_rollback.py : occurrences de mark_apply_operation_undo_status = 0 (attendu 0)
+  apply_support.py  : occurrences = 9 (prouve que l'API existe et est utilisee ailleurs)
+    cinesort\ui\api\apply_support.py:417 [usage cote support]              store.apply.mark_apply_operation_undo_status(
+    cinesort\ui\api\apply_support.py:434 [usage cote support]                  store.apply.mark_apply_operation_undo_status(
+    cinesort\ui\api\apply_support.py:453 [usage cote support]                      store.apply.mark_apply_operation_undo_status(
+
+  Ce que rollback_forward met a jour A LA PLACE (rollback_status seulement) :
+    cinesort\app\apply_rollback.py:380 [rollback_status only]          store.apply.mark_rollback_status(bid, ROLLBACK_IN_PROGRESS)
+    cinesort\app\apply_rollback.py:489 [rollback_status only]          store.apply.mark_rollback_status(
+
+==============================================================================
+F-V4B-RB2 : reconcile scanne WHERE status='PENDING' seulement ; un batch reverti est FAILED -> jamais reconcilie
+==============================================================================
+Mecanisme : _list_pending_batches filtre status='PENDING'. Or
+le chemin d'echec apply fige apply_batches.status='FAILED' AVANT
+rollback_forward, et rollback_forward ne retouche jamais
+apply_batches.status -> un batch FAILED echappe a la reconciliation.
+
+    cinesort\app\apply_batches_reconciliation.py:77 [filtre PENDING-only]                  WHERE status = 'PENDING' AND started_ts < ?
+
+  Cote apply (chemin d'echec) : FAILED fige AVANT rollback_forward :
+    cinesort\ui\api\apply_support.py:2215 [close_apply_batch(FAILED)]                      status="FAILED",
+    cinesort\ui\api\apply_support.py:2238 [rollback_forward (apres)]                  atomic_rollback_summary = _atomic_rollback_forward(
+
+  apply_rollback.py touche apply_batches.status/close_apply_batch : 0 fois (attendu 0 -> statut reste FAILED)
+
+==============================================================================
+[4]/[5][7] : close_apply_batch(status='DONE') hardcode malgre erreurs ; FAILED fige avant rollback_forward
+==============================================================================
+Mecanisme : le chemin de cloture normal hardcode status='DONE'
+independamment de result.errors (l'auditeur distingue pourtant
+DONE/PARTIAL juste au-dessus). Le chemin d'echec fige FAILED avant
+rollback_forward (cf RB2).
+
+  Cloture normale (DONE hardcode) :
+    cinesort\ui\api\apply_support.py:1565 [close_apply_batch]              store.apply.close_apply_batch(
+    cinesort\ui\api\apply_support.py:1567 [status='DONE' hardcode]                  status="DONE",
+
+  Contraste : l'auditeur, lui, distingue DONE/PARTIAL sur result.errors :
+    cinesort\ui\api\apply_support.py:1522 [auditor.end DONE/PARTIAL]                  status="DONE" if getattr(result, "errors", 0) == 0 else "PARTIAL",
+
+==============================================================================
+[18] 025 (run_pause_status) : INSERT INTO runs_new ... SELECT ... NULL pour paused_at
+==============================================================================
+Mecanisme : la recreation de table 'runs' reinjecte les rows via
+SELECT, mais hardcode NULL pour la colonne paused_at -> tout
+paused_at pre-existant est ecrase a NULL au self-heal/migration.
+
+  Bloc INSERT ... SELECT (paused_at force a NULL) :
+    cinesort\infra\db\migrations\025_run_pause_status.sql:56 [INSERT INTO runs_new]  INSERT INTO runs_new (
+    cinesort\infra\db\migrations\025_run_pause_status.sql:61 [SELECT]  SELECT
+    cinesort\infra\db\migrations\025_run_pause_status.sql:64 [NULL <- ecrase paused_at]    error_message, NULL
+    cinesort\infra\db\migrations\025_run_pause_status.sql:65 [FROM runs]  FROM runs;
+
+==============================================================================
+[19] _bootstrap_schema_latest : aucun insert dans schema_migrations
+==============================================================================
+Mecanisme : le fallback bootstrap commit user_version mais n'appelle
+jamais _record_migration / n'INSERT pas dans schema_migrations ->
+apres un self-heal bootstrap, schema_migrations est incoherent avec
+l'etat reel du schema.
+
+  def _bootstrap_schema_latest -> ligne 224 (corps L224..318)
+    cinesort\infra\db\sqlite_store.py:307 [commit user_version (mais...)]                      conn.execute(f"PRAGMA user_version = {int(version)}")
+  '_record_migration' present dans le corps   : False (attendu False)
+  'schema_migrations' present dans le corps    : False (attendu False)
+
+  Contraste : MigrationManager.apply appelle bien _record_migration :
+    cinesort\infra\db\migration_manager.py:282 [apply() trace schema_migrations]                      self._record_migration(conn, version, path.name)
+
+==============================================================================
+[20] _is_idempotent_error : ne couvre que sqlite3.OperationalError
+==============================================================================
+Mecanisme : _is_idempotent_error type son parametre en
+sqlite3.OperationalError, et il n'est attrape que dans des blocs
+`except sqlite3.OperationalError` -> une migration partielle qui
+leve IntegrityError/DatabaseError n'est PAS toleree en idempotence.
+
+    cinesort\infra\db\migration_manager.py:23 [signature OperationalError-only]  def _is_idempotent_error(exc: sqlite3.OperationalError) -> bool:
+
+  Sites d'appel (tous sous except sqlite3.OperationalError) :
+    cinesort\infra\db\migration_manager.py:260 [appel]                                  if _is_idempotent_error(stmt_exc):
+    cinesort\infra\db\migration_manager.py:254 [  garde par]                              except sqlite3.OperationalError as stmt_exc:
+
+  Idem dans _bootstrap_schema_latest (sqlite_store.py) :
+    cinesort\infra\db\sqlite_store.py:297 [appel bootstrap]                              if _is_idempotent_error(stmt_exc):
+    cinesort\infra\db\sqlite_store.py:292 [  garde par]                          except sqlite3.OperationalError as stmt_exc:
+
+  Fragments tolERES (whitelist statique) :
+    cinesort\infra\db\migration_manager.py:18  "duplicate column name",
+    cinesort\infra\db\migration_manager.py:19  "already exists",
+
+==============================================================================
+F-V6-SCHEMA-IRC / F-V8-SCHEMA-REGISTRY : incremental_row_cache (mig 008) + vec_films_hash (mig 032) absents du registry
+==============================================================================
+Mecanisme : REQUIRED_SCHEMA_TABLES + SCHEMA_GROUPS sont la liste de
+verite du self-heal de schema. La table incremental_row_cache (mig
+008) et vec_films_hash (mig 032) n'y figurent pas -> le filet
+self-healing ne se declenche jamais pour ces tables.
+
+  REQUIRED_SCHEMA_TABLES debute L75 ; SCHEMA_GROUPS debute L102
+
+  incremental_row_cache (table de migration 008_incr_row_cache.sql) :
+    present dans REQUIRED_SCHEMA_TABLES/registry : False (attendu False)
+    cinesort\infra\db\sqlite_store.py:110 [groupe 'incremental' (2 autres tables seulement)]      "incremental": ("incremental_file_hashes", "incremental_scan_cache"),
+
+  Aveu explicite dans repositories/scan.py :
+    cinesort\infra\db\repositories\scan.py:67 [commentaire d'aveu]          # pas listee dans SCHEMA_GROUPS["incremental"]).
+
+  vec_films_hash (table de migration 032-vector-search-tables.sql) :
+    present dans REQUIRED_SCHEMA_TABLES/registry : False (attendu False)
+
+  NOTE (anti-faux-positif) : film_field_locks (mig 030) present dans le registry : True (=> le gap concerne 008 et 032, PAS 030)
+
+==============================================================================
+RESUME (json)
+==============================================================================
+{
+  "F-V10-LOSER-ATOMIC": {
+    "call_move_losers": 1303,
+    "call_move_marked": 1320,
+    "for_row_loop": 1437,
+    "per_row_try": 1550,
+    "per_row_first_except": 1650,
+    "calls_outside_loop_and_try": true,
+    "verdict": "CONFIRME"
+  },
+  "F-V10-LOSER-COUNTER": {
+    "lockstep_moved_line": 690,
+    "lockstep_deleted_line": 691,
+    "loser_increments_shared_counter": [
+      1042,
+      1056,
+      1077
+    ],
+    "dedicated_loser_counter_increments": 0,
+    "marked_path_has_dedicated_counter_lines": [
+      1175,
+      1189,
+      1208
+    ],
+    "verdict": "CONFIRME"
+  },
+  "F-V4B-RB1": {
+    "mark_undo_status_in_apply_rollback": 0,
+    "mark_undo_status_in_apply_support": 9,
+    "mark_rollback_status_calls_in_rollback": [
+      380,
+      489
+    ],
+    "verdict": "CONFIRME"
+  },
+  "F-V4B-RB2": {
+    "reconcile_where_pending_line": 77,
+    "close_failed_line": 2215,
+    "rollback_forward_call_line": 2238,
+    "failed_frozen_before_rollback": true,
+    "rollback_touches_batch_status": 0,
+    "verdict": "CONFIRME"
+  },
+  "[4]/[5][7]": {
+    "close_apply_batch_line": 1565,
+    "status_done_hardcoded_line": 1567,
+    "auditor_distinguishes_done_partial_line": 1522,
+    "verdict": "CONFIRME"
+  },
+  "[18]_025_null_paused_at": {
+    "file": "cinesort\\infra\\db\\migrations\\025_run_pause_status.sql",
+    "insert_line": 56,
+    "select_line": 61,
+    "null_projection_line": 64,
+    "from_runs_line": 65,
+    "paused_at_column_present": true,
+    "verdict": "CONFIRME"
+  },
+  "[19]_bootstrap_no_schema_migrations": {
+    "bootstrap_def_line": 224,
+    "bootstrap_body_range": [
+      224,
+      318
+    ],
+    "record_migration_in_body": false,
+    "schema_migrations_in_body": false,
+    "user_version_commit_line": 307,
+    "manager_apply_records_line": 282,
+    "verdict": "CONFIRME"
+  },
+  "[20]_idempotent_operational_only": {
+    "def_line": 23,
+    "manager_call_lines": [
+      260
+    ],
+    "bootstrap_call_lines": [
+      297
+    ],
+    "tolerated_fragments_lines": [
+      18,
+      19
+    ],
+    "verdict": "CONFIRME"
+  },
+  "F-V6/F-V8-SCHEMA-REGISTRY": {
+    "required_schema_tables_line": 75,
+    "schema_groups_line": 102,
+    "incremental_row_cache_in_registry": false,
+    "vec_films_hash_in_registry": false,
+    "film_field_locks_030_in_registry": true,
+    "scan_repo_admission_line": 67,
+    "verdict": "CONFIRME"
+  }
+}
