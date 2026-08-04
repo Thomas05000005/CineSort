@@ -77,10 +77,11 @@ infra/    I/O (SQLiteStore + 10 repositories, clients TMDb/Plex/Jellyfin/Radarr,
           serveur REST)
 ```
 
-Contrats (identifiants exacts, utiles pour lire un echec CI) :
-`domain_pure` — domain n'importe ni app, ni infra, ni ui.
-`infra_bounded` — infra n'importe ni app, ni ui.
-`app_bounded` — app n'importe pas ui.
+Contrats, libelles **exacts** tels qu'ils apparaissent dans un echec CI (ce sont
+des phrases, pas des identifiants — cherchez-les tels quels dans `.importlinter`) :
+`Domain ne doit importer ni app, ni infra, ni ui`
+`Infra ne doit importer ni app, ni ui`
+`App ne doit pas importer ui`
 
 **Front** : `web/dashboard/` uniquement (ESM vanilla, aucun framework). Il n'y a
 plus de `web/views/` ni `web/components/` de premier niveau — ne pas chercher de
@@ -120,9 +121,15 @@ en suite complete, qui passe en isolation, est presque toujours cela.
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
-build style revert deps sec rel`. Un autre type fait echouer un check
-**obligatoire**. `sec` = correctif de securite (CWE identifie), `rel` = fiabilite
-(ecriture atomique, fsync, course entre ecrivains).
+build style revert deps sec rel`. `sec` = correctif de securite (CWE identifie),
+`rel` = fiabilite (ecriture atomique, fsync, course entre ecrivains).
+Un autre type fait rougir le check `PR title linter`, qui **ne bloque PAS** la
+fusion : les 7 checks requis par la protection de branche sont `Lint, Tests,
+Build` / `Analyze python` / `Analyze javascript-typescript` / `Scan secrets` /
+`bandit scan` / `pip-audit` / `mypy check`, et le linter de titre n'en fait pas
+partie (verifie 2026-08-03 ; quatre PR en `i18n(...)`, `ui-sec(...)` et
+`chore+docs(...)` ont deja fusionne). Respecter la convention reste utile : elle
+alimente le classement de Release Drafter.
 
 **Erreurs d'API** : passer par `cinesort/ui/api/_responses.py:err()`, jamais un
 `return {"ok": False}` nu.
@@ -152,3 +159,29 @@ produit un backlog de 177 PR et 248 issues.
 
 Detail et historique : `docs/internal/CLAUDE.md` et
 `docs/internal/CLAUDE_HISTORY.md`.
+
+## Dette technique connue
+
+Les chiffres ci-dessous ne se recopient pas : ils se **remesurent**.
+
+```bash
+# Sur Windows, PYTHONIOENCODING=utf-8 est OBLIGATOIRE : le script plante sinon
+# en ecrivant son propre rapport (UnicodeEncodeError cp1252 sur un caractere
+# non-ASCII).
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe scripts/measure_codebase_health.py
+```
+
+Mesure du 2026-08-03 : **230 fichiers Python, 91 224 LOC**. Les regles ruff
+tolerees (hors barriere CI) donnent la forme de la dette : `PLR2004` 394
+(constantes magiques), `RUF100` 185 (noqa devenus inutiles), `C901` 168
+(complexite), `PLR0913` 153 (trop de parametres), `BLE001` 41 (except nu).
+Neuf modules depassent 1 000 lignes, tous dans `ui/api/` et `app/` — c'est la
+que la refonte paie le plus. Le plan associe est
+`docs/internal/audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md`.
+
+`tests/test_doc_consistency.py` verifie que cette section reste presente et que
+ce fichier ne revendique pas de note de sante inventee. Il lit **`/CLAUDE.md`**,
+pas `docs/internal/CLAUDE.md` : une refonte de ce fichier qui supprime ces
+references fait echouer la CI — c'est arrive le 2026-08-03, ou la creation de ce
+fichier a transforme 4 tests jusque-la **skippes** (la racine n'avait pas de
+`CLAUDE.md`) en 4 echecs sur `main`.
