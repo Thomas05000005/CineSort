@@ -196,12 +196,29 @@ def extract_single_frame(
     NATIVE du fichier et les pixels relus etaient decales — comparaison de deux
     fichiers de resolutions differentes silencieusement fausse).
 
+    Corollaire (revue PR #845) : sans dimensions valides, aucun ``scale`` ne peut
+    etre construit, donc la fonction n'a AUCUN moyen de tenir ce contrat. Elle
+    retourne alors ``b""`` sans lancer ffmpeg (fail-closed) plutot que de sortir
+    une frame native que l'appelant relirait de travers.
+
     La politique de downscale 4K reste chez les appelants, qui sont les seuls a
     connaitre la resolution native (cf ``extract_representative_frames`` et
     ``extract_aligned_frames``).
     """
     pix_fmt = "gray16le" if bit_depth >= 10 else "gray"
     out_w, out_h = int(width), int(height)
+
+    if out_w <= 0 or out_h <= 0:
+        # Probe incomplet (largeur/hauteur inconnues, cf extract_representative_frames
+        # qui recopie `width`/`height` tels quels). parse_raw_frame rejette deja ce
+        # cas (w <= 0 -> array vide), on evite juste de payer un sous-processus
+        # ffmpeg par timestamp pour une frame qui sera jetee.
+        logger.debug(
+            "extract_single_frame: dimensions cible invalides (%dx%d), extraction ignoree",
+            out_w,
+            out_h,
+        )
+        return b""
 
     cmd = [
         ffmpeg_path,
@@ -211,10 +228,9 @@ def extract_single_frame(
         str(media_path),
     ]
 
-    # Resolution de sortie forcee (dimensions invalides : laisser ffmpeg sortir
-    # le natif, parse_raw_frame rejettera de toute facon la frame).
-    if out_w > 0 and out_h > 0:
-        cmd += ["-vf", f"scale={out_w}:{out_h}"]
+    # Resolution de sortie forcee. Les dimensions non positives ont deja ete
+    # rejetees plus haut, donc ce filtre est TOUJOURS present sur une frame rendue.
+    cmd += ["-vf", f"scale={out_w}:{out_h}"]
 
     cmd += [
         "-frames:v",

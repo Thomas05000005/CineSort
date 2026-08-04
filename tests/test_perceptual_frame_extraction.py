@@ -200,12 +200,21 @@ class ExtractSingleFrameTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=1920:1080")
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
-    def test_no_scale_when_dims_invalid(self, mock_run) -> None:
-        """Dimensions inconnues (0) → pas de filtre bidon dans la commande."""
-        mock_run.return_value = (0, b"", "")
-        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 0, 0, 8)
-        cmd = mock_run.call_args[0][0]
-        self.assertNotIn("-vf", cmd)
+    def test_invalid_dims_return_empty_without_calling_ffmpeg(self, mock_run) -> None:
+        """Revue PR #845 : dimensions inconnues (0) -> b"" et AUCUN ffmpeg lance.
+
+        Sans dimensions cible, `scale` ne peut pas etre construit et ffmpeg
+        sortirait la frame en resolution NATIVE : exactement le decalage de
+        pixels que l'issue #559 corrige. parse_raw_frame jetait deja la frame
+        (w <= 0 -> array vide), mais un sous-processus etait paye par timestamp.
+        """
+        mock_run.return_value = (0, b"\x80" * 100, "")
+        for width, height in ((0, 0), (0, 1080), (1920, 0), (-1920, -1080)):
+            with self.subTest(width=width, height=height):
+                mock_run.reset_mock()
+                out = extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, width, height, 8)
+                self.assertEqual(out, b"")
+                mock_run.assert_not_called()
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
     def test_pix_fmt_by_bit_depth(self, mock_run) -> None:
