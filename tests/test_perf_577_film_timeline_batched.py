@@ -377,9 +377,7 @@ class BatchedRepositoryEquivalenceTests(unittest.TestCase):
         pairs = [(f"run{index}", f"S|{index}") for index in range(3)]
 
         reference_batches = self.fx.store.apply.list_apply_batches_for_runs(run_ids=run_ids)
-        reference_ops = self.fx.store.apply.list_apply_operations_for_rows(
-            batch_ids=self.batch_ids, row_ids=row_ids
-        )
+        reference_ops = self.fx.store.apply.list_apply_operations_for_rows(batch_ids=self.batch_ids, row_ids=row_ids)
         reference_reports = self.fx.store.quality.get_quality_reports_for_pairs(pairs=pairs)
 
         original_chunk = apply_repo_module._SQL_CHUNK
