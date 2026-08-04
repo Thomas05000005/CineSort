@@ -591,3 +591,22 @@ Avant exécution, l'utilisateur doit valider :
 ---
 
 *Préparation 2026-05-14 par Claude Code. Validé par utilisateur le [DATE_VALIDATION]. Exécution démarrée le [DATE_DEMARRAGE].*
+
+---
+
+## 11. Journal des bornes d'imports différés (`MAX_LAZY_IMPORTS_BY_LAYER`)
+
+Le cliquet de `tests/test_refactor_84_progress_v77.py::test_lazy_imports_bounded` est posé
+**à zéro marge** sur la mesure réelle. Toute PR qui ajoute un import différé le fait donc
+rougir — c'est voulu : chaque ajout doit être une décision, pas une dérive. Ce journal
+enregistre les décisions.
+
+Règle : on ne remonte une borne que si l'import différé est **nécessaire** (cycle réel), et
+on en profite pour **redescendre** toute couche qui aurait pris de la marge dormante — une
+marge non reprise laisse passer une récidive gratuite.
+
+| date | couche | avant → après | raison |
+|---|---|---|---|
+| 2026-08-03 | toutes | — | valeurs initiales, mesurées à zéro marge |
+| 2026-08-04 | `app` | 24 → **23** | marge dormante reprise (mesure réelle = 23) |
+| 2026-08-04 | `ui` | 110 → **111** | PR#853 : `film_support` importe tardivement `history_support.get_plan_row`. Les deux modules se référencent mutuellement ; un import de tête crée un cycle à l'import du paquet. Le total global reste à 170, `app` rendant le point que `ui` prend. |
