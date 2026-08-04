@@ -276,16 +276,14 @@ class TmdbGenreScoringTests(unittest.TestCase):
         probe_result = {"normalized": _probe(9000), "cache_hit": False}
 
         fake_tmdb = MagicMock()
-        fake_tmdb.get_movie_metadata_for_perceptual.return_value = {
-            "genres": ["Science Fiction", "Action"]
-        }
+        fake_tmdb.get_movie_metadata_for_perceptual.return_value = {"genres": ["Science Fiction", "Action"]}
         fake_report = {"score": 50, "tier": "Silver", "reasons": [], "metrics": {"detected": {}}}
 
-        with patch.object(quality_report_support, "ProbeService") as mock_probe_cls, patch.object(
-            quality_report_support, "_build_tmdb_client", return_value=fake_tmdb
-        ) as mock_build, patch.object(
-            quality_report_support, "compute_quality_score", return_value=fake_report
-        ) as mock_score:
+        with (
+            patch.object(quality_report_support, "ProbeService") as mock_probe_cls,
+            patch.object(quality_report_support, "_build_tmdb_client", return_value=fake_tmdb) as mock_build,
+            patch.object(quality_report_support, "compute_quality_score", return_value=fake_report) as mock_score,
+        ):
             mock_probe = MagicMock()
             mock_probe.probe_file.return_value = probe_result
             mock_probe_cls.return_value = mock_probe
@@ -307,9 +305,7 @@ class TmdbGenreScoringTests(unittest.TestCase):
         # Les deux passes du two-pass recoivent tmdb_genres (via _base_kwargs).
         self.assertEqual(mock_score.call_count, 2)
         for call in mock_score.call_args_list:
-            self.assertEqual(
-                call.kwargs.get("tmdb_genres"), ["Science Fiction", "Action"]
-            )
+            self.assertEqual(call.kwargs.get("tmdb_genres"), ["Science Fiction", "Action"])
 
 
 if __name__ == "__main__":
