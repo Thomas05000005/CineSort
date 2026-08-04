@@ -8,9 +8,10 @@ import time
 import unicodedata
 from contextvars import ContextVar
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
 
 import cinesort.domain.core as core_mod
+from cinesort.app._dir_utils import is_reparse_point
 from cinesort.app.cleanup import (
     _move_empty_top_level_dirs,
     _move_residual_top_level_dirs,
@@ -490,17 +491,91 @@ def mkdir_counted(
         seen_dry_run.add(mkdir_key)
 
 
+class _SafeWalk(NamedTuple):
+    """Résultat d'une descente qui ne franchit AUCUN point d'analyse.
+
+    `blocked` porte les chemins écartés (points d'analyse, dossiers illisibles) :
+    l'appelant DOIT s'en servir pour ne pas transformer un refus en succès
+    silencieux (compteur « dossier source supprimé », log de fin d'opération).
+    """
+
+    files: list[Path]
+    dirs: list[Path]
+    blocked: list[Path]
+
+
+def _walk_without_crossing_reparse_points(root: Path) -> _SafeWalk:
+    """Descente explicite sous `root` qui s'arrête sur tout point d'analyse.
+
+    Issue #891 — `Path.rglob("*")` DESCEND dans une jonction NTFS (`mklink /J`) :
+    `is_symlink()` y répond False, `is_dir()` True, et l'énumération traverse
+    vers la cible. Sur les chemins destructifs de l'apply (balayage autour d'un
+    film puis déplacement/suppression), cela faisait sortir de `cfg.root` sans
+    qu'aucun chemin ne quitte `cfg.root` en apparence : `ensure_inside_root`
+    était contourné, des octets d'un autre volume entraient dans la
+    bibliothèque et un dossier hors racine était supprimé, le tout `errors=0`.
+
+    Le scan, lui, DOIT continuer à traverser les jonctions (analyser est le but
+    de l'app) : ce helper est réservé aux chemins destructifs, où l'erreur va
+    dans le sens restrictif — un point d'analyse est écarté, jamais traversé.
+
+    PRÉCONDITION : `root` lui-même n'est PAS testé ici (il serait énuméré via
+    `iterdir`, donc traversé). L'appelant doit avoir vérifié
+    `is_reparse_point(root)` en amont — c'est ce que font `merge_dir_safe` et
+    `prune_empty_dirs`.
+    """
+    files: list[Path] = []
+    dirs: list[Path] = []
+    blocked: list[Path] = []
+    pending: list[Path] = [root]
+    while pending:
+        current = pending.pop(0)
+        try:
+            entries = sorted(current.iterdir())
+        except (OSError, ValueError) as exc:
+            # Illisible = on ne sait pas ce qu'il y a dedans : on le signale au
+            # lieu de le laisser passer pour vide (sens restrictif).
+            _logger.debug("walk_no_reparse: enumeration impossible %s: %s", current, exc)
+            blocked.append(current)
+            continue
+        children: list[Path] = []
+        for entry in entries:
+            if is_reparse_point(entry):
+                blocked.append(entry)
+                continue
+            try:
+                if entry.is_dir():
+                    dirs.append(entry)
+                    children.append(entry)
+                elif entry.is_file():
+                    files.append(entry)
+            except (OSError, ValueError) as exc:
+                _logger.debug("walk_no_reparse: type illisible %s: %s", entry, exc)
+                blocked.append(entry)
+        # Pré-ordre : les enfants du dossier courant avant ses frères restants.
+        pending[:0] = children
+    return _SafeWalk(files=files, dirs=dirs, blocked=blocked)
+
+
 def prune_empty_dirs(root: Path) -> bool:
     """Supprime tous les sous-dossiers vides puis `root` lui-même si vide.
 
     Renvoie True si au moins un dossier a été supprimé. Les erreurs OS sont
     ignorées (skip silencieux).
+
+    Issue #891 — aucun point d'analyse n'est traversé ni supprimé : ni `root`
+    lui-même (sinon `iterdir` énumère la cible et des dossiers vides HORS
+    bibliothèque sont supprimés), ni un sous-dossier (sinon `rmdir` détruit le
+    point de montage lui-même dès que sa cible est vide).
     """
     if not root.exists() or not root.is_dir():
         return False
+    if is_reparse_point(root):
+        _logger.debug("prune_empty_dirs: racine = point d'analyse, refus: %s", root)
+        return False
     removed_any = False
     for directory in sorted(
-        [path for path in root.rglob("*") if path.is_dir()], key=lambda path: len(path.parts), reverse=True
+        _walk_without_crossing_reparse_points(root).dirs, key=lambda path: len(path.parts), reverse=True
     ):
         try:
             if not any(directory.iterdir()):
@@ -892,6 +967,18 @@ def merge_dir_safe(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED)
         log("WARN", f"MERGE source missing, skip: {src_dir}")
         return
+    # Issue #891 : fusionner DEPUIS une jonction viderait un autre volume dans la
+    # bibliotheque. Refus compte comme erreur : la fusion demandee n'a pas eu
+    # lieu, elle ne doit pas etre maquillee en succes (`merges_count`).
+    if is_reparse_point(src_dir):
+        res.errors += 1
+        message = (
+            f"FUSION REFUSEE : '{src_dir}' est un point d'analyse (jonction NTFS / lien) "
+            f"pointant hors de la bibliotheque. Rien n'a ete deplace."
+        )
+        _append_error_message(res, message)
+        log("ERROR", f"MERGE source is a reparse point, refuse: {src_dir}")
+        return
     if not dst_dir.exists():
         mkdir_counted(dst_dir, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
     if not dst_dir.is_dir():
@@ -902,7 +989,11 @@ def merge_dir_safe(
     log("INFO", f"MERGE_DIR: {src_dir} -> {dst_dir}")
     res.merges_count += 1
 
-    all_files = [path for path in src_dir.rglob("*") if path.is_file()]
+    # Issue #891 : descente explicite, `rglob` traverserait les jonctions.
+    walk = _walk_without_crossing_reparse_points(src_dir)
+    for blocked_path in walk.blocked:
+        log("WARN", f"MERGE: point d'analyse NON traverse, laisse en place: {blocked_path}")
+    all_files = walk.files
     handled_for_leftovers: Set[Path] = set()
 
     for src_file in all_files:
@@ -950,10 +1041,18 @@ def merge_dir_safe(
         # apres apply reel : on doit incrementer source_dirs_deleted_count, peu
         # importe qu'il y ait eu des leftovers ou non. L'ancien check
         # `len(leftover_files) == 0` sous-estimait le compteur en preview UI.
-        res.source_dirs_deleted_count += 1
+        #
+        # Issue #891 : sauf si la descente a bute sur un point d'analyse. Il
+        # restera dans `src_dir`, que l'apply reel ne pourra donc pas supprimer
+        # (prune_empty_dirs refuse aussi de le traverser) : annoncer sa
+        # suppression serait une promesse que l'apply ne tiendra pas.
+        if walk.blocked:
+            log("WARN", f"MERGE: source conservee (point d'analyse a l'interieur): {src_dir}")
+        else:
+            res.source_dirs_deleted_count += 1
         return
 
-    remaining_files = [path for path in src_dir.rglob("*") if path.is_file()]
+    remaining_files = _walk_without_crossing_reparse_points(src_dir).files
     for src_file in remaining_files:
         move_to_review_bucket(
             src_file,
