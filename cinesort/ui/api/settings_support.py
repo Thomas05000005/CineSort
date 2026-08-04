@@ -1746,8 +1746,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "lowercase_extensions" in payload:
         out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
     if "separator" in payload:
-        sep = str(payload.get("separator") or ".")
-        out["separator"] = sep if sep in {".", " ", "_", "-"} else "."
+        sep = str(payload.get("separator") or " ")
+        out["separator"] = sep if sep in {".", " ", "_", "-"} else " "
     return out
 
 
