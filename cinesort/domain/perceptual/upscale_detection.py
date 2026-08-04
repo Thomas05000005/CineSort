@@ -200,7 +200,8 @@ def combine_fake_4k_verdicts(
     Returns:
         "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
         "fake_4k_probable"  : un seul conclut fake (conf 0.70)
-        "4k_native"         : aucun ne conclut fake (conf 0.90)
+        "4k_native"         : aucun ne conclut fake
+                              (conf 0.90 si les 2 signaux consultes, 0.60 si un seul)
         "ambiguous"         : les 2 sont indisponibles (conf 0.30)
     """
     # Normalise : SSIM peut etre None ou -1 (flag "non calcule")
@@ -217,4 +218,10 @@ def combine_fake_4k_verdicts(
         return ("fake_4k_confirmed", 0.95)
     if fft_says_fake or ssim_says_fake:
         return ("fake_4k_probable", 0.70)
-    return ("4k_native", 0.90)
+    # Aucun signal ne conclut fake. La confiance depend du nombre de signaux
+    # reellement consultes : un consensus a deux signaux (0.90) est plus solide
+    # qu'un verdict fonde sur un seul signal disponible (0.60), l'autre — absent —
+    # ayant pu conclure fake. Cf audit-bot:2026-07-25-A1.
+    if fft_available and ssim_available:
+        return ("4k_native", 0.90)
+    return ("4k_native", 0.60)

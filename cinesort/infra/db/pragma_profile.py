@@ -32,10 +32,12 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,23 @@ _VALID_PRAGMA_HISTORY_SOURCES = ("auto", "manual_settings", "env_override")
 # une table d'audit/debug, l'historique ancien n'a aucune valeur metier. La
 # purge se fait par id (PK AUTOINCREMENT monotone) -> un DELETE range indexe.
 _PRAGMA_HISTORY_MAX_ROWS = 500
+
+# AUDIT ULTRA 2026-08 (pragma_profile.py:229-268) : la purge ci-dessus avait
+# borne la TAILLE de la table, pas la FREQUENCE d'ecriture. Chaque ouverture de
+# connexion payait toujours INSERT + SELECT MAX(id) + DELETE + commit ; or
+# `SQLiteStore._managed_conn` ouvre une connexion NEUVE par appel de repository
+# (mesure locale : 3,9 ms/connexion contre 0,07 ms pour un `sqlite3.connect`
+# nu, x55). L'historique garde une vraie valeur de diagnostic (« quel profil a
+# ete applique sur ce chemin ? »), on ne le supprime donc PAS : on le rend
+# OCCASIONNEL. Le gate ci-dessous memorise, par processus, le dernier couple
+# (profil, source) reellement enregistre pour un chemin DB donne ; une nouvelle
+# ligne n'est ecrite qu'au premier boot ou lors d'un CHANGEMENT de profil/source.
+#
+# Le gate est volontairement borne : quelques dizaines de chemins DB suffisent
+# (prod = 1 seul ; la suite de tests en cree beaucoup, d'ou l'eviction FIFO).
+_PRAGMA_HISTORY_GATE_MAX_ENTRIES = 64
+_pragma_history_gate_lock = threading.Lock()
+_pragma_history_gate: Dict[str, Tuple[str, str]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +210,75 @@ def get_pragma_snapshot(conn: sqlite3.Connection) -> Dict[str, object]:
     return snapshot
 
 
+def _history_gate_key(db_path: Optional[str]) -> str:
+    """Cle de dedup stable pour un chemin DB (casse + separateurs normalises)."""
+    if db_path is None:
+        return ""
+    text = str(db_path)
+    try:
+        return os.path.normcase(os.path.abspath(text))
+    except (OSError, ValueError, TypeError):
+        # Chemin exotique (URI sqlite, ':memory:' sur un cwd supprime...) :
+        # la chaine brute reste une cle utilisable, juste moins normalisee.
+        return text
+
+
+def should_record_pragma_history(
+    db_path: Optional[str],
+    profile_name: str,
+    source: str = "auto",
+) -> bool:
+    """True si cette ouverture doit ecrire une ligne d'audit `pragma_history`.
+
+    Politique (AUDIT ULTRA 2026-08) : l'audit est OCCASIONNEL, pas systematique.
+    On enregistre au premier boot pour un chemin DB donne, puis uniquement si le
+    profil applique ou la source (`auto` / `manual_settings` / `env_override`)
+    CHANGE. Toutes les autres ouvertures — l'ecrasante majorite, un repository
+    ouvrant une connexion neuve par methode — ne paient plus INSERT + purge +
+    commit.
+
+    La reservation est optimiste et faite SOUS VERROU : deux threads qui ouvrent
+    simultanement la meme DB ne produisent pas deux lignes. Si l'INSERT echoue
+    ensuite (table absente parce que la migration 028 n'est pas encore passee),
+    `_record_pragma_history` relache la reservation pour qu'une ouverture
+    ulterieure — post-migration — reessaie : une DB fraiche garde donc bien sa
+    ligne d'audit.
+    """
+    key = _history_gate_key(db_path)
+    state = (str(profile_name), str(source))
+    with _pragma_history_gate_lock:
+        if _pragma_history_gate.get(key) == state:
+            return False
+        while len(_pragma_history_gate) >= _PRAGMA_HISTORY_GATE_MAX_ENTRIES:
+            _pragma_history_gate.pop(next(iter(_pragma_history_gate)), None)
+        _pragma_history_gate[key] = state
+        return True
+
+
+def _remember_pragma_history_recorded(
+    db_path: Optional[str],
+    profile_name: str,
+    source: str,
+) -> None:
+    """Marque (db_path, profil, source) comme deja enregistre dans ce processus."""
+    key = _history_gate_key(db_path)
+    with _pragma_history_gate_lock:
+        _pragma_history_gate[key] = (str(profile_name), str(source))
+
+
+def _forget_pragma_history_gate(db_path: Optional[str]) -> None:
+    """Relache la reservation : la prochaine ouverture reessaiera d'ecrire."""
+    key = _history_gate_key(db_path)
+    with _pragma_history_gate_lock:
+        _pragma_history_gate.pop(key, None)
+
+
+def reset_pragma_history_gate() -> None:
+    """Vide le gate (tests, ou changement de politique a chaud)."""
+    with _pragma_history_gate_lock:
+        _pragma_history_gate.clear()
+
+
 def _record_pragma_history(
     conn: sqlite3.Connection,
     *,
@@ -199,7 +287,7 @@ def _record_pragma_history(
     storage_type_detected: Optional[str],
     pragmas_snapshot: Mapping[str, object],
     source: str,
-) -> None:
+) -> bool:
     """Insere une ligne dans `pragma_history` (migration 028).
 
     Tolerant : si la table n'existe pas (DB pre-migration 028, DB de test
@@ -209,6 +297,11 @@ def _record_pragma_history(
     `pragmas_snapshot` est serialise en JSON (sort_keys=True pour
     deterministe). `source` est libre cote schema mais on documente les
     valeurs canoniques via `_VALID_PRAGMA_HISTORY_SOURCES`.
+
+    Retourne True si la ligne a bien ete commitee, False sinon (table absente,
+    erreur SQLite, commit rejete). Le gate de frequence est mis a jour en
+    consequence : succes -> on memorise, echec -> on relache la reservation pour
+    qu'une ouverture ulterieure reessaie.
     """
     try:
         payload = json.dumps(dict(pragmas_snapshot), sort_keys=True, default=str)
@@ -266,6 +359,8 @@ def _record_pragma_history(
             )
             with contextlib.suppress(sqlite3.Error):
                 conn.rollback()
+            _forget_pragma_history_gate(db_path)
+            return False
     except sqlite3.OperationalError as exc:
         # Cas attendu : table absente (migration 028 pas encore appliquee).
         # On log en DEBUG car ce n'est pas une erreur fonctionnelle.
@@ -274,6 +369,10 @@ def _record_pragma_history(
             exc,
         )
         # Aucun INSERT n'a abouti -> pas de transaction implicite a fermer.
+        # On relache la reservation : la DB vient peut-etre d'etre creee et la
+        # migration 028 passera juste apres -> la prochaine ouverture ecrira.
+        _forget_pragma_history_gate(db_path)
+        return False
     except sqlite3.Error as exc:
         logger.warning(
             "_record_pragma_history: insertion a echoue (%s) -- audit perdu",
@@ -281,6 +380,11 @@ def _record_pragma_history(
         )
         with contextlib.suppress(sqlite3.Error):
             conn.rollback()
+        _forget_pragma_history_gate(db_path)
+        return False
+
+    _remember_pragma_history_recorded(db_path, profile_name, source)
+    return True
 
 
 def apply_pragmas(
@@ -309,6 +413,12 @@ def apply_pragmas(
     `pragma_history` existe, une ligne d'audit est inseree apres readback.
     Backward compat : tous les nouveaux kwargs ont un defaut, l'appel
     `apply_pragmas(conn, profile_name)` continue de marcher inchange.
+
+    AUDIT ULTRA 2026-08 : `record_history=True` reste inconditionnel ici (c'est
+    un ordre explicite du caller, sur lequel s'appuient les tests de retention).
+    C'est le caller normal, `connect_sqlite`, qui interroge desormais
+    `should_record_pragma_history()` pour ne l'activer qu'au boot ou sur
+    changement de profil, au lieu d'ecrire a chaque ouverture de connexion.
     """
     profile = PROFILES.get(profile_name)
     if profile is None:
@@ -390,6 +500,8 @@ __all__ = [
     "detect_storage_type",
     "get_pragma_snapshot",
     "is_unc_path",
+    "reset_pragma_history_gate",
     "resolve_profile",
+    "should_record_pragma_history",
     "_record_pragma_history",
 ]
