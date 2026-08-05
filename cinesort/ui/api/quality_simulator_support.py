@@ -198,9 +198,25 @@ def _get_active_profile(api: Any) -> Dict[str, Any]:
         }
 
 
+def _get_store(api: Any) -> Optional[Any]:
+    """Résout le SQLiteStore comme le reste de l'UI-API.
+
+    CineSortApi n'expose PAS d'attribut `_store` : l'ancien `getattr(api, "_store")`
+    renvoyait toujours None → le simulateur retournait systématiquement une liste
+    vide en prod (seul le test qui injectait api._store le masquait). On passe par
+    le point d'entrée canonique _get_or_create_infra(_get_state_dir()).
+    """
+    try:
+        store, _ = api._get_or_create_infra(api._get_state_dir())
+        return store
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.warning("quality_simulator cannot get store: %s", exc)
+        return None
+
+
 def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str, Any]]:
     """Retourne une liste de quality_reports (chaque dict contient metrics.subscores)."""
-    store = getattr(api, "_store", None)
+    store = _get_store(api)
     if store is None:
         return []
 
@@ -228,8 +244,11 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
+    store = _get_store(api)
+    if store is None:
+        return None
     try:
-        latest = api._store.run.get_latest_run()
+        latest = store.run.get_latest_run()
         return latest.get("run_id") if isinstance(latest, dict) else None
     except (AttributeError, KeyError):
         return None
