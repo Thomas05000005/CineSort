@@ -34,7 +34,7 @@ from cinesort.domain.calibration import analyze_feedback_bias, compute_tier_delt
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS, validate_rules
 from cinesort.domain.custom_rules_templates import list_templates
-from cinesort.domain.film_history import _load_plan_rows_from_jsonl
+from cinesort.domain.film_history import _load_plan_rows_from_jsonl, _resolve_run_dir
 from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_locale, t
 from cinesort.domain.naming import (
     PRESETS,
@@ -580,8 +580,10 @@ class CineSortApi:
     def _state_dir_key(self, state_dir: Path) -> str:
         return runtime_support.state_dir_key(state_dir)
 
-    def _run_paths_for(self, state_dir: Path, run_id: str, *, ensure_exists: bool) -> state.RunPaths:
-        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists)
+    def _run_paths_for(
+        self, state_dir: Path, run_id: str, *, ensure_exists: bool, exclusive: bool = False
+    ) -> state.RunPaths:
+        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists, exclusive=exclusive)
 
     def _get_or_create_infra(self, state_dir: Path) -> Tuple[SQLiteStore, JobRunner]:
         return runtime_support.get_or_create_infra(self, state_dir, env_truthy_fn=_env_truthy)
@@ -597,6 +599,11 @@ class CineSortApi:
 
     def _generate_unique_run_id(self, store: SQLiteStore) -> str:
         return runtime_support.generate_unique_run_id(self, store)
+
+    def _reserve_unique_run(self, store: SQLiteStore, state_dir: Path) -> Tuple[str, state.RunPaths]:
+        """Reserve un run_id ET son dossier de run d'un seul tenant (cf.
+        runtime_support.reserve_unique_run)."""
+        return runtime_support.reserve_unique_run(self, store, state_dir)
 
     def _build_cfg_from_settings(self, settings: Dict[str, Any], root: Path) -> core.Config:
         # PRAGMA-02 fix : passer state_dir pour que mode "auto" resolve la
@@ -1279,7 +1286,8 @@ class CineSortApi:
         url = str(data.get("jellyfin_url") or "").strip()
         api_key = str(data.get("jellyfin_api_key") or "").strip()
         user_id = str(data.get("jellyfin_user_id") or "").strip()
-        timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+        # Cf issue #434 : clamp_timeout coherent avec les endpoints de test ci-dessus.
+        timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
         if not url or not api_key:
             return _err_response("Jellyfin non configuré.", category="state", level="info", log_module=__name__)
 
@@ -1358,7 +1366,12 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : le vrai dossier de run est `runs/tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Le chemin
+        # etait construit sans le prefixe -> plan.jsonl jamais trouve -> "Aucun
+        # film dans ce run" silencieux en prod. _resolve_run_dir applique la
+        # convention canonique tout en tolerant les runs anterieurs (dossier nu).
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1366,7 +1379,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("jellyfin_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("jellyfin_timeout_s"), default=10.0)
             # NB : module-style pour permettre patch("cinesort.infra.jellyfin_client.JellyfinClient").
             client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
@@ -1431,7 +1445,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1505,7 +1520,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1513,7 +1529,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("plex_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
             client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except _plex_mod.PlexError as exc:
@@ -1584,13 +1601,15 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
 
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
@@ -1621,7 +1640,8 @@ class CineSortApi:
         if mid <= 0:
             return _err_response("radarr_movie_id invalide.", category="validation", level="info", log_module=__name__)
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
