@@ -23,8 +23,8 @@ documentees :
     deux groupes ne peuvent pas exposer le meme ensemble de row_ids
     (test_groupes_partitionnent_les_row_ids, sur le VRAI moteur de groupement).
 
-Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+Lancer, depuis la racine du depot :
+  ./.venv/Scripts/python.exe -X utf8 -m pytest \
       tests/test_revue_post_merge_f07_badge_decide_cle_derivee.py -q
 """
 
