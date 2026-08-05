@@ -20,6 +20,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.tiers_helpers import normalize_tier_string
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _get_store, _resolve_run_id
 
@@ -306,7 +307,10 @@ def _recompute_in_memory(
         extras = float(subs.get("extras") or 0)
 
         score_before = int(rep.get("score") or 0)
-        tier_before = rep.get("tier") or _tier_for(score_before, base_tiers)
+        # Normalise le tier stocke (peut etre un ancien nom FR: Premium/Bon/...)
+        # vers le nom canonique anglais, sinon la distribution before/after et la
+        # matrice de shift produisent des cles fantomes ("Premium>Platinum").
+        tier_before = normalize_tier_string(rep.get("tier")) or _tier_for(score_before, base_tiers)
 
         score_after = _apply_weights(video, audio, extras, target_weights)
         tier_after = _tier_for(score_after, target_tiers)

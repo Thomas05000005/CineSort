@@ -213,6 +213,37 @@ class RecomputeInMemoryTests(unittest.TestCase):
         # video dominant => row 1 (video=80) score_after > score_before
         self.assertGreater(out[0]["score_after"], 70)
 
+    def test_legacy_tier_before_normalized(self):
+        """Audit 2026-07-09 : un rapport stocke avec un ancien nom FR (Premium/Bon/
+        Moyen/...) doit voir son tier_before normalise vers le nom canonique
+        anglais, sinon la distribution before/after et la matrice de shift
+        produisent des cles fantomes ("Premium>Platinum")."""
+        reports = [
+            {
+                "row_id": "1",
+                "score": 90,
+                "tier": "Premium",
+                "metrics": {"subscores": {"video": 90, "audio": 90, "extras": 90}, "detected": {}},
+            },
+            {
+                "row_id": "2",
+                "score": 60,
+                "tier": "Moyen",
+                "metrics": {"subscores": {"video": 60, "audio": 60, "extras": 60}, "detected": {}},
+            },
+        ]
+        baseline = {
+            "weights": {"video": 60, "audio": 30, "extras": 10},
+            "tiers": {"premium": 85, "bon": 68, "moyen": 54},
+        }
+        target = dict(baseline)
+        out = _recompute_in_memory(reports, baseline, target)
+        tiers_before = {r["tier_before"] for r in out}
+        self.assertNotIn("Premium", tiers_before)
+        self.assertNotIn("Moyen", tiers_before)
+        self.assertIn("Platinum", tiers_before)
+        self.assertIn("Silver", tiers_before)
+
 
 class RunSimulationIntegrationTests(unittest.TestCase):
     def setUp(self):
