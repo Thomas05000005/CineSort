@@ -246,5 +246,146 @@ class CrossCheckRowsWithProbeTests(unittest.TestCase):
         self.assertEqual(n, 0)
 
 
+class NonNumericDurationTests(unittest.TestCase):
+    """Cf #541 — une seule `duration_s` illisible ne doit pas tuer la phase 6.1.b.
+
+    `_normalize_merge.py` n'ecrit que `float | None`, mais une ligne de cache
+    probe issue d'un schema anterieur (ou d'une base editee a la main) est relue
+    SANS revalidation. Sans garde, `float(duration_s)` leve, l'exception remonte
+    a `run_flow_support.py` dont le `except (..., ValueError)` l'avale, et le
+    cross-check runtime disparait pour la bibliotheque ENTIERE — silencieusement.
+    """
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp(prefix="probe_baddur_")
+        # Deux films distincts : le 1er porte le cache corrompu, le 2nd est sain.
+        # C'est le 2nd qui prouve l'ISOLATION (il doit rester cross-checke).
+        (Path(self.tmp_dir) / "Corrompu.mkv").write_bytes(b"\x00" * 1024)
+        (Path(self.tmp_dir) / "Sain.mkv").write_bytes(b"\x00" * 1024)
+
+        self.mock_store = MagicMock()
+        self.mock_tmdb = MagicMock()
+        self.mock_tmdb.get_movie_runtime.return_value = 148
+        self.settings = {"probe_backend": "auto"}
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _rows(self):
+        return [
+            _FakeRow(
+                proposed_title="Corrompu",
+                proposed_year=2010,
+                confidence=70,
+                folder=self.tmp_dir,
+                video="Corrompu.mkv",
+                candidates=[_FakeCandidate("Corrompu", 2010, 27205)],
+            ),
+            _FakeRow(
+                proposed_title="Sain",
+                proposed_year=2010,
+                confidence=70,
+                folder=self.tmp_dir,
+                video="Sain.mkv",
+                candidates=[_FakeCandidate("Sain", 2010, 27205)],
+            ),
+        ]
+
+    @staticmethod
+    def _probe_side_effect(bad_value):
+        """1er appel -> duree illisible, 2nd -> 148 min exactes (match parfait).
+
+        Iterable de longueur EXACTE : un 3e appel leverait StopIteration, ce qui
+        est le signal voulu si la boucle changeait de forme.
+        """
+        return [
+            {"ok": True, "normalized": {"duration_s": bad_value}},
+            {"ok": True, "normalized": {"duration_s": 148 * 60}},
+        ]
+
+    @patch("cinesort.infra.probe.ProbeService")
+    def test_string_duration_isolates_row_and_spares_the_rest(self, MockProbe):
+        """Coeur du correctif : la row suivante est TOUJOURS cross-checkee."""
+        MockProbe.return_value.probe_file.side_effect = self._probe_side_effect("N/A")
+
+        rows = self._rows()
+        n = cross_check_rows_with_probe(rows, self.mock_store, self.settings, self.mock_tmdb)
+
+        # La row corrompue est ecartee, pas scoree.
+        self.assertEqual(rows[0].confidence, 70)
+        # La row SAINE qui la suit garde son bonus de match parfait (+20) :
+        # c'est exactement ce que la ValueError non gardee faisait perdre.
+        self.assertEqual(rows[1].confidence, 90)
+        self.assertEqual(n, 1)
+
+    @patch("cinesort.infra.probe.ProbeService")
+    def test_non_scalar_duration_isolates_row_typeerror_branch(self, MockProbe):
+        """Une valeur non scalaire est truthy et leve TypeError, pas ValueError."""
+        MockProbe.return_value.probe_file.side_effect = self._probe_side_effect(["148", "60"])
+
+        rows = self._rows()
+        n = cross_check_rows_with_probe(rows, self.mock_store, self.settings, self.mock_tmdb)
+
+        self.assertEqual(rows[0].confidence, 70)
+        self.assertEqual(rows[1].confidence, 90)
+        self.assertEqual(n, 1)
+
+    @patch("cinesort.infra.probe.ProbeService")
+    def test_bad_duration_is_signalled_in_logs(self, MockProbe):
+        """Isoler ne suffit pas : la valeur fautive doit etre SIGNALEE."""
+        MockProbe.return_value.probe_file.side_effect = self._probe_side_effect("unknown")
+
+        with self.assertLogs("cinesort.app.runtime_probe_check", level="WARNING") as captured:
+            cross_check_rows_with_probe(self._rows(), self.mock_store, self.settings, self.mock_tmdb)
+
+        joined = "\n".join(captured.output)
+        self.assertIn("unknown", joined)
+        self.assertIn("Corrompu.mkv", joined)
+
+    @patch("cinesort.infra.probe.ProbeService")
+    def test_phase_report_counts_the_discarded_row(self, MockProbe):
+        """Le rapport de phase doit refleter la row ecartee, pas l'avaler."""
+        MockProbe.return_value.probe_file.side_effect = self._probe_side_effect("N/A")
+
+        messages = []
+        cross_check_rows_with_probe(
+            self._rows(),
+            self.mock_store,
+            self.settings,
+            self.mock_tmdb,
+            log=lambda level, message: messages.append((level, message)),
+        )
+
+        summaries = [message for _level, message in messages if "probe cross-check :" in message]
+        self.assertEqual(len(summaries), 1)
+        self.assertIn("1 duree de cache illisible", summaries[0])
+        # Et le compteur "sans duree probable" (cas NORMAL) ne doit PAS absorber
+        # la row corrompue : les deux causes restent distinguables.
+        self.assertIn("0 sans duree probable", summaries[0])
+
+    @patch("cinesort.infra.probe.ProbeService")
+    def test_report_stays_unchanged_when_no_bad_duration(self, MockProbe):
+        """Cas nominal : aucun segment parasite ajoute au rapport."""
+        MockProbe.return_value.probe_file.return_value = {
+            "ok": True,
+            "normalized": {"duration_s": 148 * 60},
+        }
+
+        messages = []
+        cross_check_rows_with_probe(
+            self._rows(),
+            self.mock_store,
+            self.settings,
+            self.mock_tmdb,
+            log=lambda level, message: messages.append((level, message)),
+        )
+
+        summaries = [message for _level, message in messages if "probe cross-check :" in message]
+        self.assertEqual(len(summaries), 1)
+        self.assertNotIn("illisible", summaries[0])
+
+
 if __name__ == "__main__":
     unittest.main()
