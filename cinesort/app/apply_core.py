@@ -116,6 +116,43 @@ def build_apply_context(
     )
 
 
+class _CompteurEchecsJournal:
+    """Compte les ecritures de journal qui ECHOUENT, ou qu'elles echouent.
+
+    Interpose UNE seule fois a l'entree d'`apply_rows`, avant tout autre
+    emballage. Les `RecordOpWithJournal` et les closures d'injection de row_id
+    construits en aval l'enveloppent, donc tout echec finit par remonter ICI —
+    quel que soit le nombre de couches au-dessus.
+
+    Premiere tentative : compter sur le callable recu par `record_apply_op`.
+    Elle ne marchait pas — ce callable est un emballage cree A L'INTERIEUR
+    d'`apply_rows`, jete a la fin de chaque row, alors que la finalisation lit
+    l'objet d'ORIGINE. Mesure : le compteur restait a 0 sur un vrai apply dont
+    CHAQUE ecriture echouait.
+
+    Ne modifie AUCUN comportement : l'exception est relancee telle quelle, donc
+    les tolerances existantes (record_apply_op, atomic_move) s'appliquent
+    exactement comme avant.
+    """
+
+    __slots__ = ("_fn", "journal_failures", "journal_store", "journal_batch_id")
+
+    def __init__(self, fn: Callable[[Dict[str, Any]], None]) -> None:
+        self._fn = fn
+        self.journal_failures = 0
+        # Ces deux attributs sont lus par `atomic_move` (cf move_journal) : les
+        # perdre desactiverait silencieusement le journal write-ahead.
+        self.journal_store = getattr(fn, "journal_store", None)
+        self.journal_batch_id = getattr(fn, "journal_batch_id", None)
+
+    def __call__(self, payload: Dict[str, Any]) -> None:
+        try:
+            self._fn(payload)
+        except BaseException:
+            self.journal_failures += 1
+            raise
+
+
 def record_apply_op(
     record_op: Optional[Callable[[Dict[str, Any]], None]],
     *,
@@ -158,6 +195,10 @@ def record_apply_op(
         # disque (record_apply_op est appelee apres atomic_move) -> etat mixte sur le FS,
         # rows restantes jamais traitees, et move non journalise donc non annulable.
         _logger.warning("record_apply_op: echec journalisation %s src=%s: %s", op_type, src_path, e, exc_info=True)
+        # Le compteur voyage sur le callable lui-meme — `record_op` porte deja
+        # `journal_store` et `journal_batch_id` par le meme mecanisme. C'est ce
+        # qui permet de couvrir les 14 sites d'appel SANS les modifier un par
+        # un, donc sans risquer d'en oublier un.
         return False
 
 
@@ -1477,7 +1518,10 @@ def move_duplicate_losers_to_user_decided(
             log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Un DOSSIER entier bouge ici ; sur un verrou Windows d'UN fichier interne,
+                # `shutil.move` degrade en copytree+rmtree et laisse la source eventree.
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1664,7 +1708,9 @@ def move_marked_for_deletion_to_bucket(
             log("INFO", f"{bucket_label}: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Meme raison qu'au site DUPLICATE_LOSER ci-dessus (dossier entier).
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1757,7 +1803,9 @@ def move_collection_folder(
     log("INFO", f"Move collection folder: {folder} -> {target}")
     if not dry_run:
         (cfg.root / cfg.collection_root_name).mkdir(parents=True, exist_ok=True)
-        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR")
+        # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+        # `target` est sous `cfg.root`, comme `folder` : meme volume, `os.rename` suffit.
+        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
         record_apply_op(
             record_op,
             op_type="MOVE_DIR",
@@ -1805,6 +1853,14 @@ def apply_rows(
     `op_conflict` (conflit detecte via delta sur compteurs de conflits),
     `error` (exception attrapee). Backward compat : si None, comportement inchange.
     """
+    # Interposition du compteur d'echecs de journal, AVANT tout autre emballage.
+    # `record_apply_op` rend `False` depuis toujours quand la journalisation
+    # echoue, mais AUCUN de ses 14 sites d'appel ne lisait ce retour : un apply
+    # pouvait deplacer des dossiers, ne rien journaliser, et se declarer
+    # reussi. C'est le symptome de #901 — batch cree, `counts.total = 0`, undo
+    # indisponible, aucune erreur remontee.
+    if record_op is not None and not isinstance(record_op, _CompteurEchecsJournal):
+        record_op = _CompteurEchecsJournal(record_op)
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
         cfg,
@@ -2482,6 +2538,21 @@ def apply_rows(
         res.errors += 1
         _append_error_message(res, f"NETTOYAGE DOSSIERS VIDES : {exc}")
         log("ERROR", f"apply: nettoyage dossiers vides echoue: {exc}")
+    # Un apply qui a bouge des dossiers sans pouvoir les journaliser N'EST PAS
+    # un apply reussi du point de vue de l'utilisateur : il ne pourra pas
+    # revenir en arriere. On ne le fait pas ECHOUER — le disque a deja bouge —
+    # mais on cesse de le taire.
+    res.journal_failures = int(getattr(record_op, "journal_failures", 0) or 0)
+    if res.journal_failures:
+        _append_error_message(
+            res,
+            f"{res.journal_failures} operation(s) effectuee(s) sur le disque mais NON journalisee(s) : "
+            "l'annulation de cet apply sera incomplete.",
+        )
+        log(
+            "ERROR",
+            f"apply: {res.journal_failures} operation(s) non journalisee(s) — undo incomplet pour ce batch.",
+        )
     _logger.info(
         "apply: termine — renames=%d moves=%d skipped=%d quarantined=%d errors=%d (dry_run=%s)",
         res.renames,
@@ -3199,7 +3270,10 @@ def quarantine_row(
             return
         log("INFO", f"QUARANTINE folder: {folder} -> {target}")
         if not dry_run:
-            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR")
+            # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+            # Le dossier du film part en entier sous `_review/` : une degradation en
+            # copytree+rmtree y dedoublerait le contenu et eventrerait la source.
+            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR", allow_copy_fallback=False)
             record_apply_op(
                 record_op,
                 op_type="QUARANTINE_DIR",
