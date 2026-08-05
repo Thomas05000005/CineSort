@@ -524,22 +524,18 @@ class RunFacade(_BaseFacade):
         """
         return self._api._undo_by_row_preview_impl(run_id, batch_id=batch_id)
 
-    def undo_selected_rows(
-        self,
-        run_id: str,
-        row_ids: list = None,
-        dry_run: bool = True,
-        batch_id: str = None,
-        atomic: bool = True,
-    ) -> Dict[str, Any]:
-        """Annule selectivement les rows choisies (undo v5). `dry_run=True` ne touche rien.
-
-        Cf CineSortApi._undo_selected_rows_impl pour la doc complete.
-        """
-        return self._api._undo_selected_rows_impl(
-            run_id,
-            row_ids=row_ids,
-            dry_run=dry_run,
-            batch_id=batch_id,
-            atomic=atomic,
-        )
+    # `undo_selected_rows` a ete RETIRE de cette facade le 2026-08-05 (#944).
+    #
+    # Le dispatcher REST decouvre les methodes publiques par `dir(facade)` :
+    # tant qu'elle etait ici, `POST /api/run/undo_selected_rows` remettait des
+    # dossiers de films a leur emplacement d'origine pour quiconque disposait du
+    # jeton — sans la liste des elements, sans la consequence affichee et sans le
+    # delai de 3 s au-dela de 50, c'est-a-dire sans AUCUNE des trois garanties
+    # que la regle n3 du CLAUDE.md impose a une action destructive. Or aucune UI
+    # ne l'appelait : la capacite etait donc atteignable, et exclusivement par un
+    # chemin qui ne pouvait offrir aucune de ces garanties.
+    #
+    # L'implementation reste disponible (`CineSortApi._undo_selected_rows_impl`,
+    # `apply_support.undo_selected_rows`) et reste couverte par ses tests. La
+    # REMETTRE ICI exige de livrer la modale destructive dans le meme lot — sinon
+    # on rouvre exactement le meme trou.

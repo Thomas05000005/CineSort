@@ -909,37 +909,44 @@ class RunFacadeAutoApproveUndoExtensionTests(unittest.TestCase):
             self.api.run.undo_by_row_preview("run_xyz")
         mocked.assert_called_once_with("run_xyz", batch_id=None)
 
-    def test_undo_selected_rows_exposed_and_delegates(self) -> None:
-        self.assertTrue(callable(getattr(self.api.run, "undo_selected_rows", None)))
-        sentinel = {"ok": True, "undone": 2}
-        with patch.object(self.api, "_undo_selected_rows_impl", return_value=sentinel) as mocked:
-            result = self.api.run.undo_selected_rows(
-                "run_xyz",
-                row_ids=["r1", "r2"],
-                dry_run=False,
-                batch_id="b_99",
-                atomic=False,
-            )
-        mocked.assert_called_once_with(
-            "run_xyz",
-            row_ids=["r1", "r2"],
-            dry_run=False,
-            batch_id="b_99",
-            atomic=False,
-        )
-        self.assertEqual(result, sentinel)
+    def test_undo_selected_rows_N_EST_PLUS_expose_par_la_facade(self) -> None:
+        """#944 : un chemin destructif ne doit pas etre joignable sans sa modale.
 
-    def test_undo_selected_rows_defaults(self) -> None:
-        sentinel = {"ok": True}
-        with patch.object(self.api, "_undo_selected_rows_impl", return_value=sentinel) as mocked:
-            self.api.run.undo_selected_rows("run_xyz")
-        mocked.assert_called_once_with(
-            "run_xyz",
-            row_ids=None,
-            dry_run=True,
-            batch_id=None,
-            atomic=True,
+        Le dispatcher REST decouvre les methodes publiques des facades par
+        `dir(facade)`. Tant que `undo_selected_rows` etait exposee,
+        `POST /api/run/undo_selected_rows` remettait des dossiers de films a
+        leur emplacement d'origine pour quiconque disposait du jeton, sans la
+        liste des elements, sans la consequence affichee et sans le delai de
+        3 s au-dela de 50 — soit AUCUNE des trois garanties de la regle n3.
+        Et aucune UI ne l'appelait : la seule facon de l'atteindre etait
+        precisement celle qui n'offrait aucune garantie.
+
+        La REMETTRE exige de livrer la modale destructive dans le meme lot.
+        """
+        self.assertIsNone(
+            getattr(self.api.run, "undo_selected_rows", None),
+            "undo_selected_rows est de retour sur la facade : elle redevient joignable "
+            "en REST. Ne la reexposer qu'avec la modale destructive (liste des "
+            "elements, consequence, delai de 3 s au-dela de 50).",
         )
+
+    def test_l_implementation_interne_reste_disponible(self) -> None:
+        """On retire l'EXPOSITION, pas la capacite : l'UI future en aura besoin."""
+        self.assertTrue(callable(getattr(self.api, "_undo_selected_rows_impl", None)))
+
+    def test_la_route_REST_a_bien_disparu(self) -> None:
+        """Le test qui compte : l'ATTRIBUT absent doit se traduire par une ROUTE absente.
+
+        Verifier l'attribut seul serait insuffisant — c'est le dispatcher, et
+        lui seul, qui decide de ce qui est joignable depuis le reseau.
+        """
+        from cinesort.infra.rest_server import _get_api_methods
+
+        routes = _get_api_methods(self.api)
+        self.assertNotIn("run/undo_selected_rows", routes)
+        # Controle positif : le dispatcher voit bien les AUTRES methodes de la
+        # meme facade, donc son silence n'est pas un artefact de mesure.
+        self.assertIn("run/undo_by_row_preview", routes)
 
 
 # ---------------------------------------------------------------------------
