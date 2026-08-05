@@ -512,6 +512,7 @@
     "plan_empty_or_missing": "Plan empty or missing.",
     "plan_not_ready": "Plan not ready.",
     "plan_not_found": "Plan not found.",
+    "plan_corrupted": "Corrupted plan: apply refused so it never runs on a truncated plan. {{detail}}",
     "disk_space_insufficient": "Insufficient disk space.",
     "duplicate_check_failed": "Duplicate check failed: {{detail}}",
     "internal_run_id_unexpected": "Internal error: unexpected run_id.",
