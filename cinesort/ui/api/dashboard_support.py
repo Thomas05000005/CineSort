@@ -1627,6 +1627,29 @@ def _compute_trend_30days(store: Any) -> List[Dict[str, Any]]:
     return points
 
 
+def _log_insight_skipped(name: str, exc: BaseException) -> None:
+    """Trace un insight Home abandonne apres une erreur du store (issue #545).
+
+    Niveau WARNING, PAS debug. La verbosite par defaut du produit est INFO
+    (`app.py`, `CINESORT_LOG_LEVEL > CINESORT_DEBUG > defaut INFO`) : un
+    `logger.debug` laisserait l'echec aussi invisible qu'un `pass` nu, alors que
+    c'est exactement cette invisibilite qui est le defaut. Le prix de cette
+    famille est deja paye dans ce produit : une `AttributeError` avalee sur
+    `get_movies` / `get_all_movies` a fait passer la source de dates Jellyfin
+    pour vide pendant des mois (cf `library_timeline_support`, audit 2026-06-10).
+
+    L'appelant continue DELIBEREMENT : la Home est un agregat best-effort et
+    faire echouer tout le payload pour un encart serait une regression. Ce qui
+    change, c'est que l'absence d'un insight n'est plus indistinguable de « rien
+    a signaler » : le type d'exception et son message sont desormais lisibles au
+    niveau de log par defaut. A noter que ces sites ne couvrent QUE
+    `AttributeError`/`OSError` : une `sqlite3.Error` n'herite pas d'`OSError` et
+    remonte donc jusqu'au garde global de `get_global_stats`, qui la rend
+    visible en `ok=False`.
+    """
+    logger.warning("insights: %s abandonne apres erreur du store (%s: %s)", name, type(exc).__name__, exc)
+
+
 def _compute_active_insights(
     api: Any,
     store: Any,
@@ -1667,8 +1690,8 @@ def _compute_active_insights(
                     }
                 )
                 break
-    except (AttributeError, OSError):
-        pass
+    except (AttributeError, OSError) as exc:
+        _log_insight_skipped("run_in_progress", exc)
 
     # 2. Nouveaux Reject sur le dernier run
     # Revue vague 3 R2 : `latest_scan_rid` (resolu par get_latest_run, exclut les
@@ -1694,8 +1717,11 @@ def _compute_active_insights(
                         "icon": "alert-triangle",
                     }
                 )
-        except (AttributeError, OSError):
-            pass
+        except (AttributeError, OSError) as exc:
+            # Site le plus couteux du lot : sans trace, la Home n'affiche aucune
+            # alerte Reject et l'utilisateur lit « rien a signaler » alors que le
+            # comptage n'a jamais eu lieu.
+            _log_insight_skipped(f"quality_reject (run_id={latest_rid})", exc)
 
     # 3. Insights MÉTIER dérivés du bibliothécaire (R8-049/051/052 F5) : on traduit les
     #    suggestions generate_suggestions vers les types attendus par _INSIGHT_ROUTE_BY_TYPE
@@ -1771,8 +1797,8 @@ def _compute_active_insights(
                     "icon": "film",
                 }
             )
-    except (AttributeError, OSError):
-        pass
+    except (AttributeError, OSError) as exc:
+        _log_insight_skipped("dnr_partial", exc)
 
     # 5. Nouveaux Platinum ce mois
     try:
@@ -1789,8 +1815,8 @@ def _compute_active_insights(
                     "icon": "award",
                 }
             )
-    except (AttributeError, OSError):
-        pass
+    except (AttributeError, OSError) as exc:
+        _log_insight_skipped("new_platinum_month", exc)
 
     # Tri par severity puis count desc
     severity_order = {"warning": 0, "info": 1, "success": 2}

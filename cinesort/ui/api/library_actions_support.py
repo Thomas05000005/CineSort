@@ -14,7 +14,9 @@ Persistance :
   additif, aucun chemin d'annulation) n'est plus ecrit : les marques deja sur
   disque sont migrees a la lecture (migrate_legacy_deletion_marks) puis le
   fichier est supprime.
-- Les exports sont ecrits dans `%LOCALAPPDATA%/CineSort/exports/`.
+- Les exports sont ecrits dans `<state_dir>/exports/` — le `state_dir` des
+  settings, pas le dossier par defaut (issue #522). Sans `state_dir` configure,
+  cela reste `%LOCALAPPDATA%/CineSort/exports/`.
 - Les rescans sont lances via JobRunner (job background).
 """
 
@@ -1115,9 +1117,26 @@ _EXPORT_FIELDS = (
 )
 
 
-def _exports_dir() -> Path:
-    """Repertoire des exports : `%LOCALAPPDATA%/CineSort/exports/`."""
-    base = state.default_state_dir() / "exports"
+def _exports_dir(api: Any) -> Path:
+    """Repertoire des exports : `<state_dir>/exports/`.
+
+    Issue #522 : cette fonction ecrivait toujours dans
+    `state.default_state_dir()/exports` (= `%LOCALAPPDATA%/CineSort/exports/`),
+    en ignorant le `state_dir` configure par l'utilisateur. Un user-data
+    deplace (NAS, 2e disque) laissait donc l'export dans l'ancien emplacement,
+    hors de la zone que le reste du produit lit et purge.
+
+    La zone d'ecriture reste BORNEE au dossier d'etat : on ne prend pas un
+    chemin quelconque, seulement `settings["state_dir"]`, resolu par le meme
+    `normalize_user_path` que les 5 autres sites du module. `state_dir` absent
+    ou vide retombe sur `state.default_state_dir()` : comportement actuel
+    inchange pour une configuration par defaut.
+    """
+    settings = api.settings.get_settings()
+    state_dir = normalize_user_path(
+        settings.get("state_dir") if isinstance(settings, dict) else None, state.default_state_dir()
+    )
+    base = state_dir / "exports"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -1198,7 +1217,7 @@ def export_films(
     count = len(export_rows)
 
     try:
-        exports_dir = _exports_dir()
+        exports_dir = _exports_dir(api)
         ts = time.strftime("%Y%m%d_%H%M%S")
         fname = f"library_export_{resolved}_{ts}.{fmt_norm}"
         file_path = exports_dir / fname
