@@ -556,6 +556,7 @@
     "plan_empty_or_missing": "Plan vide ou introuvable.",
     "plan_not_ready": "Plan pas prêt.",
     "plan_not_found": "Plan introuvable.",
+    "plan_corrupted": "Plan corrompu : l'application est refusee pour ne pas travailler sur un plan ampute. {{detail}}",
     "disk_space_insufficient": "Espace disque insuffisant.",
     "duplicate_check_failed": "Vérification des doublons impossible: {{detail}}",
     "internal_run_id_unexpected": "Erreur interne : run_id inattendu.",

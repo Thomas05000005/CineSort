@@ -15,6 +15,47 @@ from cinesort.ui.api.settings_support import clamp_year
 
 logger = logging.getLogger(__name__)
 
+#: Nombre de numeros de ligne cites dans le message d'erreur (le reste est
+#: resume par "...") — un plan entierement illisible ne doit pas produire un
+#: message de plusieurs milliers de caracteres dans l'UI.
+_MAX_REPORTED_INVALID_LINES = 5
+
+
+class PlanCorruptedError(ValueError):
+    """`plan.jsonl` contient des lignes illisibles : le plan chargé serait AMPUTÉ.
+
+    Issue #519. Le correctif « propose » par l'audit etait d'ignorer la ligne
+    fautive et de continuer. C'est le sens PERMISSIF sur un chemin destructif :
+    `plan.jsonl` est le fichier que l'APPLY relit pour renommer et DEPLACER des
+    dossiers de films. Un plan ampute de trois lignes s'appliquerait avec
+    `errors=0` et trois films resteraient silencieusement en place, sans que
+    personne ne puisse le savoir — exactement le « succes silencieux » proscrit.
+
+    On leve donc, comme avant, mais en NOMMANT la perte : nombre de lignes
+    illisibles, leurs numeros, et le nombre de lignes lisibles. Le fichier est
+    parcouru EN ENTIER avant de lever, pour que le compteur soit complet et pas
+    seulement « la premiere ligne qui a casse ».
+
+    Herite de ``ValueError`` — donc de la meme famille que le
+    ``json.JSONDecodeError`` leve auparavant : tous les appelants qui
+    attrapaient deja `ValueError` (apply, get_plan, load_validation, resync)
+    continuent de l'attraper, aucun chemin d'erreur existant n'est perdu.
+    """
+
+    def __init__(self, path: Any, invalid_lines: List[int], readable_rows: int) -> None:
+        self.path = str(path)
+        self.invalid_lines = list(invalid_lines)
+        self.readable_rows = int(readable_rows)
+        self.invalid_count = len(self.invalid_lines)
+        head = ", ".join(str(n) for n in self.invalid_lines[:_MAX_REPORTED_INVALID_LINES])
+        if self.invalid_count > _MAX_REPORTED_INVALID_LINES:
+            head += ", ..."
+        super().__init__(
+            f"Plan corrompu: {self.invalid_count} ligne(s) illisible(s) "
+            f"(ligne(s) {head}) sur {self.invalid_count + self.readable_rows} "
+            f"entree(s) dans {self.path}"
+        )
+
 
 def write_plan_jsonl(plan_jsonl: Path, rows: List[Dict[str, Any]]) -> None:
     """Reecrit `plan.jsonl` EN ENTIER, de facon atomique ET durable.
@@ -182,18 +223,47 @@ def row_from_json(data: Dict[str, Any]) -> core.PlanRow:
 
 
 def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
+    """Charge le plan d'un run. Refuse un plan AMPUTE (issue #519).
+
+    Deux formes de perte silencieuse existaient ici :
+
+    1. ``json.loads`` sans garde : la premiere ligne corrompue faisait remonter
+       un ``JSONDecodeError`` nu. Le refus etait correct (sens restrictif), mais
+       le message ne disait ni combien de lignes etaient touchees ni lesquelles,
+       et l'analyse s'arretait a la premiere.
+    2. ``if isinstance(data, dict)`` : une ligne JSON valide mais non-dict
+       (``null``, ``[]``, un nombre) etait jetee **sans un mot**. Celle-la
+       produisait bel et bien un plan ampute sans erreur — un film disparaissait
+       du plan que l'apply execute.
+
+    Les deux comptent desormais comme des lignes illisibles. Le fichier est lu
+    en entier (compteur complet), puis ``PlanCorruptedError`` est levee ; les
+    lignes lisibles ne sont **jamais** retournees partiellement, sinon l'apply
+    renommerait/deplacerait un sous-ensemble du plan avec ``errors=0``.
+    """
     plan_path = run_paths.plan_jsonl
     if not plan_path.exists():
         raise FileNotFoundError(f"Plan introuvable: {plan_path}")
     rows: List[core.PlanRow] = []
+    invalid_lines: List[int] = []
     with plan_path.open("r", encoding="utf-8") as file_obj:
-        for line in file_obj:
-            line = line.strip()
+        for line_no, raw_line in enumerate(file_obj, start=1):
+            line = raw_line.strip()
             if not line:
                 continue
-            data = json.loads(line)
+            try:
+                data = json.loads(line)
+            except ValueError:
+                invalid_lines.append(line_no)
+                continue
             if isinstance(data, dict):
                 rows.append(row_from_json(data))
+            else:
+                invalid_lines.append(line_no)
+    if invalid_lines:
+        error = PlanCorruptedError(plan_path, invalid_lines, len(rows))
+        logger.error("%s", error)
+        raise error
     return rows
 
 
@@ -347,6 +417,7 @@ def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
     except (OSError, AttributeError):
         return int(fallback or 0)
     count = 0
+    unreadable = 0
     try:
         with plan_path.open("r", encoding="utf-8") as file_obj:
             for line in file_obj:
@@ -355,15 +426,31 @@ def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
                     continue
                 try:
                     data = json.loads(line_s)
-                except (ValueError, json.JSONDecodeError):
-                    # Ligne malformee : ignoree (cohere avec
-                    # load_rows_from_plan_jsonl qui leve, mais ici on veut
-                    # robustesse pour le compteur).
+                except ValueError:
+                    # Ligne malformee : elle ne peut pas etre comptee, mais elle
+                    # n'est plus passee sous silence (issue #519).
+                    unreadable += 1
                     continue
-                if isinstance(data, dict) and data.get("row_id"):
+                if not isinstance(data, dict):
+                    unreadable += 1
+                elif data.get("row_id"):
                     count += 1
     except (OSError, PermissionError):
         return int(fallback or 0)
+    if unreadable:
+        # Issue #519 : ce compteur est la source unique de verite du "nombre de
+        # films" affiche partout (dashboard, historique, bibliotheque). Sur un
+        # plan corrompu il renvoie donc un nombre INFERIEUR a la realite. On ne
+        # fabrique pas de nombre plausible a la place (le fallback
+        # stats.planned_rows serait une mesure inventee) : on renvoie le compte
+        # honnete des lignes exploitables, et on dit que le plan est ampute.
+        # L'apply, lui, REFUSE ce plan (load_rows_from_plan_jsonl -> PlanCorruptedError).
+        logger.warning(
+            "count_plan_rows: %d ligne(s) illisible(s) dans %s — le compteur (%d) sous-estime le plan",
+            unreadable,
+            plan_path,
+            count,
+        )
     return count
 
 
