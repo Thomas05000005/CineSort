@@ -33,6 +33,7 @@ from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_devi
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
@@ -51,9 +52,14 @@ _log = logging.getLogger(__name__)
 # cote backend. La promesse "Annulation possible pendant 24h" (Spec 08 §3.5,
 # PR #394) etait cosmetique : la carte UI affichait un countdown mais le
 # backend acceptait toujours l'undo. On refuse desormais avec 410 Gone une
-# fois passe ce delai. Constante en miroir de dashboard_support._UNDO_DEADLINE_SECONDS
-# pour eviter une dependance circulaire entre modules ui.api.
-_UNDO_DEADLINE_SECONDS = 24 * 3600
+# fois passe ce delai.
+#
+# Issue #491 : la constante etait recopiee ici « en miroir de
+# dashboard_support », pretendument pour eviter une dependance circulaire entre
+# modules `ui.api` — mais la valeur n'a jamais eu besoin de vivre dans `ui` :
+# elle est desormais lue depuis `domain.run_models.UNDO_DEADLINE_SECONDS`, seule
+# source, ce qui supprime le miroir sans creer la moindre arete entre les deux
+# modules `ui.api`.
 
 
 class _DuplicateCheckError(Exception):
@@ -299,7 +305,7 @@ def build_undo_preview_payload(
     # de la preview undo, pas seulement dans le dashboard. La carte UI peut
     # ainsi rejeter localement un click utilisateur tardif sans aller-retour.
     now_ts = time.time()
-    expired = bool(apply_ts > 0 and (now_ts - apply_ts) > _UNDO_DEADLINE_SECONDS)
+    expired = bool(apply_ts > 0 and (now_ts - apply_ts) > UNDO_DEADLINE_SECONDS)
 
     payload = {
         "ok": True,
@@ -1102,7 +1108,7 @@ def undo_selected_rows(
     # _execute_undo_ops, permettant un undo reel apres expiration. La dry_run
     # au-dessus reste autorisee meme expiree (apercu UI). Miroir exact 410.
     apply_ts = float(batch.get("started_ts") or 0.0)
-    if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+    if apply_ts > 0 and (time.time() - apply_ts) > UNDO_DEADLINE_SECONDS:
         return _err_response(
             "L'annulation n'est plus possible (delai 24h depasse).",
             category="state",
@@ -1443,11 +1449,11 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
     uctx = _extract_undo_context(preview, batch)
 
     # Fix audit 2026-05-24 (v1.5.2) : enforcement backend du delai 24h.
-    # On refuse l'execution reelle apres _UNDO_DEADLINE_SECONDS — la dry_run
+    # On refuse l'execution reelle apres UNDO_DEADLINE_SECONDS — la dry_run
     # reste autorisee pour que l'UI puisse afficher l'apercu meme expire.
     if not bool(dry_run):
         apply_ts = float(batch.get("started_ts") or 0.0)
-        if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+        if apply_ts > 0 and (time.time() - apply_ts) > UNDO_DEADLINE_SECONDS:
             return _err_response(
                 "L'annulation n'est plus possible (delai 24h depasse).",
                 category="state",

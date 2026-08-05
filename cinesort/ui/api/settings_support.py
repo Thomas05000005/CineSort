@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
+from cinesort.app.updater import is_valid_github_repo
 from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.naming import PRESETS, validate_template
@@ -1909,9 +1910,27 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["update_check_enabled"] = to_bool(payload.get("update_check_enabled"), True)
     if "update_github_repo" in payload:
         repo = str(payload.get("update_github_repo") or "").strip()
-        # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
-        if not repo or re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+        # SSRF defense (#240) : un `owner/repo` hors format part sinon tel quel
+        # dans l'URL de l'API GitHub.
+        #
+        # Issue #556 : le motif etait recopie ici, avec pour seul garde-fou un
+        # commentaire disant qu'il devait rester identique a celui de
+        # `app/updater`. C'est desormais le validateur de l'updater lui-meme
+        # qui tranche — un seul endroit ou changer la regle. `ui -> app` est
+        # autorise par les contrats d'architecture (seul `app -> ui` est
+        # interdit).
+        #
+        # La chaine VIDE reste acceptee : c'est la valeur par defaut du reglage
+        # et le seul moyen, pour l'utilisateur, de revenir au depot integre.
+        if not repo or is_valid_github_repo(repo):
             out["update_github_repo"] = repo
+        else:
+            # Trace du rejet. On ne remonte deliberement PAS d'erreur bloquante
+            # jusqu'a l'UI : la vue Parametres enregistre en continu (debounce
+            # 500 ms, parametres.js `_scheduleSave`), donc chaque frappe
+            # intermediaire — "owner" avant la barre oblique — declencherait un
+            # refus de TOUT l'enregistrement. Cf. la reserve de la PR.
+            logger.debug("settings: update_github_repo ignore, format owner/repo attendu (%r)", repo)
     # R8-068 (F5) : "worker_count" RETIRÉ — toggle inerte, aucune opération ne le lit
     # (parallélisme réel piloté par perceptual_workers_count + le mode de scan).
     # AUDIT 2026-06-11 (R3) : perceptual_workers(_count) est gere par
