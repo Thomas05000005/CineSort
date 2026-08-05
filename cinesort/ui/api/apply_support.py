@@ -39,6 +39,7 @@ from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
 from cinesort.ui.api._validators import clamp_timeout, requires_valid_run_id
+from cinesort.ui.api.run_data_support import PlanCorruptedError
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 logger = logging.getLogger(__name__)
@@ -1500,6 +1501,31 @@ def _validate_apply(
         )
     try:
         ctx = api._run_context_for_apply(run_id)
+    except PlanCorruptedError as exc:
+        # Issue #519 : le refus etait deja acquis (PlanCorruptedError herite de
+        # ValueError, donc de la branche ci-dessous), mais l'utilisateur lisait
+        # "Impossible d'appliquer les changements." — un message qui ne distingue
+        # pas un plan CORROMPU d'un run introuvable ou d'un disque plein. Sur le
+        # chemin destructif, la perte doit etre NOMMEE : combien de lignes du
+        # plan sont illisibles, et lesquelles.
+        api.log_api_exception(
+            "apply",
+            exc,
+            run_id=run_id,
+            extra={
+                "dry_run": bool(dry_run),
+                "quarantine_unapproved": bool(quarantine_unapproved),
+                "decision_count": len(decisions),
+                "phase": "load_context",
+                "invalid_plan_lines": exc.invalid_count,
+            },
+        )
+        return _err_response(
+            t("errors.plan_corrupted", detail=str(exc)),
+            category="state",
+            level="error",
+            log_module=__name__,
+        )
     except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception(
             "apply",
@@ -2728,6 +2754,15 @@ def _restore_jellyfin_watched(
         result = restore_watched(client, user_id, snapshot, operations)
         if result.restored > 0:
             log_fn("INFO", f"Jellyfin sync : {result.restored} statut(s) vu restauré(s).")
+        if result.counters_lost > 0:
+            # #535 : le statut vu est revenu, mais pas le nombre de lectures ni
+            # la date. Silencieux jusqu'ici, c'etait une perte de donnees
+            # invisible pour l'utilisateur.
+            log_fn(
+                "WARN",
+                f"Jellyfin sync : {result.counters_lost} film(s) restauré(s) SANS leur historique "
+                "(nombre de lectures et date perdus — serveur trop ancien pour l'API UserData ?).",
+            )
         if result.not_found > 0:
             log_fn("WARN", f"Jellyfin sync : {result.not_found} film(s) non retrouvé(s) après re-indexation.")
         if result.errors > 0:

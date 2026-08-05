@@ -36,6 +36,7 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import ResponseTooLargeError, get_bounded, make_session_with_retry
+from cinesort.infra.fs_safety import FileTooLargeError, read_text_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ _MIN_INTERVAL_S = 1.0
 # Hard cap LRU sur le cache (eviter de derives RAM si l'utilisateur scanne
 # 100k films sur plusieurs annees).
 _CACHE_MAX_ENTRIES = 50_000
+
+# Borne dure de taille du fichier cache sur disque (DoS). Cf #539 audit 2026-06-06 :
+# read_text() charge tout en RAM avant deserialization, donc un cache corrompu
+# peut OOM. 50 MB couvre largement MAX_ENTRIES x ~700 octets. Applique via
+# fs_safety.read_text_bounded (borne DISQUE, distincte des bornes reseau).
+_CACHE_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 @dataclass(frozen=True)
@@ -274,7 +281,7 @@ class OmdbClient:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.exists():
-                raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                raw = json.loads(read_text_bounded(self.cache_path, max_bytes=_CACHE_MAX_BYTES))
                 if isinstance(raw, dict):
                     # Hard cap : ne charger que les MAX entries (plus recentes = fin)
                     if len(raw) > _CACHE_MAX_ENTRIES:
@@ -284,6 +291,38 @@ class OmdbClient:
                         self._cache = raw
                 else:
                     self._cache = {}
+        except FileTooLargeError as exc:
+            # Le fichier depasse la borne : on a REFUSE de le lire, donc il est
+            # mort. Le laisser en place a deux couts qui ne s'arretent jamais —
+            # l'avertissement se repete a CHAQUE demarrage, et l'espace disque
+            # n'est jamais recupere puisque la sauvegarde suivante ecrit un
+            # fichier NEUF a cote.
+            #
+            # On l'ecarte vers un emplacement UNIQUE (`.oversized`), pas vers un
+            # nom horodate : au plus UNE copie perimee existe a la fois, donc la
+            # croissance reste bornee, et il en reste une a inspecter. Une
+            # suppression pure rendrait le diagnostic impossible ; une rotation
+            # datee ferait exactement ce qu'on cherche a eviter.
+            #
+            # Traite A PART des autres OSError, a dessein : un refus de
+            # permission ou un disque plein ne doit surtout PAS declencher de
+            # deplacement de fichier.
+            self._cache = {}
+            ecarte = self.cache_path.with_suffix(self.cache_path.suffix + ".oversized")
+            try:
+                taille = self.cache_path.stat().st_size
+                os.replace(str(self.cache_path), str(ecarte))
+                logger.warning(
+                    "omdb cache: %d octets > borne %d, fichier ecarte vers %s (cache reparti a vide)",
+                    taille,
+                    _CACHE_MAX_BYTES,
+                    ecarte.name,
+                )
+            except OSError as err:
+                # L'ecarter est un CONFORT, pas une obligation : si ca echoue,
+                # on repart quand meme sur un cache vide plutot que d'echouer
+                # le chargement.
+                logger.warning("omdb cache: %s ; mise a l'ecart impossible : %s", exc, err)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             logger.debug("omdb cache load failed: %s", exc)
             self._cache = {}

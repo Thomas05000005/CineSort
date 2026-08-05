@@ -3,18 +3,47 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import cinesort.ui.api._validators as _validators
 from cinesort.ui.api.export_support import (
     _SECRET_KEYS,
     EXPORT_FORMAT_VERSION,
+    _resolve_run_dir,
     _sanitize_settings,
+    _UnsafeRunId,
     export_full_library,
 )
+
+_IS_WINDOWS = os.name == "nt"
+
+
+def _make_dir_link(link: Path, target: Path) -> None:
+    """Cree un lien de dossier vers `target` (meme approche que l'issue #517).
+
+    Sous Windows : une VRAIE jonction NTFS (`mklink /J`). C'est le seul vecteur
+    par lequel la garde de containment peut se declencher en production, un
+    run_id bien forme ne pouvant pas contenir de `..`. La creation de jonction
+    ne demande aucun privilege : un echec est une erreur dure, jamais un skip.
+
+    Ailleurs : un lien symbolique de dossier, equivalent fonctionnel.
+    """
+    if _IS_WINDOWS:
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not link.exists():
+            raise AssertionError(f"mklink /J a echoue (rc={proc.returncode}): {proc.stdout} {proc.stderr}")
+        return
+    link.symlink_to(target, target_is_directory=True)
 
 
 class SanitizeSettingsTests(unittest.TestCase):
@@ -166,6 +195,110 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
             json.dumps(out, ensure_ascii=False)
         except (TypeError, ValueError) as e:
             self.fail(f"Payload pas serializable: {e}")
+
+
+class RunIdValidationTests(unittest.TestCase):
+    """Issue #427 (CWE-22) — `last_done_run_id` sort de la base et doit etre valide.
+
+    Les deux gardes sont eprouvees SEPAREMENT : un run_id hors format qui reste
+    lexicalement sous state_dir/runs n'active que la premiere ; un run_id qui
+    s'echappe du repertoire n'active que la seconde.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_runid_"))
+        self.state_dir = self._tmp / "state"
+        (self.state_dir / "runs").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _api_with_run_id(self, run_id: str) -> MagicMock:
+        """Fabrique une api dont la BASE renvoie `run_id` comme dernier run DONE.
+
+        Le run_id est injecte par la source reelle (`get_runs_summary`), pas en
+        court-circuitant la garde : aucun mock ne fabrique la condition testee.
+        """
+        api = MagicMock()
+        api._state_dir = self.state_dir
+        api.settings.get_settings.return_value = {"data": {}}
+        store = MagicMock()
+        store.run.get_runs_summary.return_value = [
+            {"run_id": run_id, "status": "DONE", "start_ts": 0.0, "duration_s": 1.0, "total_rows": 0}
+        ]
+        api._get_or_create_infra.return_value = (store, MagicMock())
+        return api
+
+    def test_malformed_run_id_in_db_is_refused(self) -> None:
+        """Garde 1 : hors format. `ab` reste sous runs/, seul le regex peut le rejeter."""
+        out = export_full_library(self._api_with_run_id("ab"))
+        self.assertFalse(out["ok"])
+
+    def test_run_id_with_forbidden_characters_is_refused(self) -> None:
+        """Un run_id porteur d'espaces et de ponctuation est refuse."""
+        out = export_full_library(self._api_with_run_id("run id!"))
+        self.assertFalse(out["ok"])
+
+    def test_refused_run_id_is_not_reflected_back_to_the_caller(self) -> None:
+        """La valeur alteree est loggee, jamais renvoyee : pas de reflexion vers l'UI."""
+        tampered = "run id!<script>"
+        out = export_full_library(self._api_with_run_id(tampered))
+        self.assertFalse(out["ok"])
+        self.assertNotIn(tampered, json.dumps(out, ensure_ascii=False))
+
+    def test_legitimate_run_id_formats_still_export(self) -> None:
+        """Garde-fou anti-regression : les formats reellement produits passent."""
+        for run_id in ("20260803_141500_123", "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "demo_1754200000_ab12cd"):
+            with self.subTest(run_id=run_id):
+                out = export_full_library(self._api_with_run_id(run_id))
+                self.assertTrue(out["ok"], f"{run_id} refuse a tort")
+                self.assertEqual(out["last_done_run_id"], run_id)
+
+    def test_resolve_run_dir_refuses_directory_outside_runs(self) -> None:
+        """Garde 2 : containment, eprouvee directement sur le helper."""
+        outside = self._tmp / "outside"
+        outside.mkdir()
+        with self.assertRaises(_UnsafeRunId):
+            _resolve_run_dir(self.state_dir, "../../outside")
+
+    def test_resolve_run_dir_refuses_a_junction_pointing_outside(self) -> None:
+        """Garde 2 sur son SEUL vecteur reel : un run_id BIEN FORME qui echappe.
+
+        `../../outside` ne prouve pas grand-chose : `is_valid_run_id` le rejette
+        en amont, la garde de containment n'est jamais atteinte en production
+        avec une telle valeur. Le cas exploitable est un run_id conforme au
+        regex dont le dossier `runs/tri_films_<id>` est une jonction NTFS (ou
+        un lien symbolique) vers l'exterieur de `state_dir`.
+        """
+        run_id = "20260803_141500_123"
+        self.assertTrue(_validators.is_valid_run_id(run_id), "le run_id du test doit passer la garde 1")
+        outside = self._tmp / "outside"
+        (outside / "runs_voles").mkdir(parents=True)
+        _make_dir_link(self.state_dir / "runs" / f"tri_films_{run_id}", outside / "runs_voles")
+
+        with self.assertRaises(_UnsafeRunId):
+            _resolve_run_dir(self.state_dir, run_id)
+
+    def test_export_refuses_a_run_whose_directory_escapes_state_dir(self) -> None:
+        """Bout en bout : l'echappement remonte en refus d'export, pas en export vide."""
+        run_id = "20260803_141500_123"
+        outside = self._tmp / "outside"
+        (outside / "runs_voles").mkdir(parents=True)
+        _make_dir_link(self.state_dir / "runs" / f"tri_films_{run_id}", outside / "runs_voles")
+
+        out = export_full_library(self._api_with_run_id(run_id))
+        self.assertFalse(out["ok"])
+        self.assertNotIn("films", out)
+
+    def test_resolve_run_dir_returns_none_when_run_purged(self) -> None:
+        """Un run efface du disque est un cas NORMAL : None, pas une exception."""
+        self.assertIsNone(_resolve_run_dir(self.state_dir, "20260803_141500_123"))
+
+    def test_resolve_run_dir_finds_prefixed_directory(self) -> None:
+        """Le dossier reellement produit par `state.new_run` porte le prefixe `tri_films_`."""
+        run_dir = self.state_dir / "runs" / "tri_films_20260803_141500_123"
+        run_dir.mkdir()
+        self.assertEqual(_resolve_run_dir(self.state_dir, "20260803_141500_123"), run_dir.resolve())
 
 
 class ExportFullLibraryEdgeCasesTests(unittest.TestCase):

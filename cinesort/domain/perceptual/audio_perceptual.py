@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK_FULL
@@ -23,6 +24,7 @@ from .constants import (
     CREST_FACTOR_COMPRESSED,
     CREST_FACTOR_EXCELLENT,
     CREST_FACTOR_GOOD,
+    DRC_CONFIDENCE_SINGLE_METRIC,
     DRC_CREST_CINEMA,
     DRC_CREST_STANDARD,
     DRC_LRA_CINEMA,
@@ -54,6 +56,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _CODEC_RANK: List[tuple[str, int]] = [(pat, rank) for pat, rank, _label in _CODEC_RANK_FULL]
+
+# Issue #508 : erreurs qu'un `ffmpeg` peut faire remonter hors du canal
+# `returncode` — expiration du timeout de `tracked_run`, binaire disparu,
+# volume reseau qui se detache en cours d'analyse.
+_FFMPEG_FAILURES = (subprocess.TimeoutExpired, OSError)
 
 # Regex pour astats
 _RE_RMS = re.compile(r"RMS level.*?:\s*([-\d.]+)", re.IGNORECASE)
@@ -146,7 +153,18 @@ def analyze_loudnorm(
         "info",
         "-",
     ]
-    rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    # Issue #508 : sans cette garde, un timeout ffmpeg sur loudnorm faisait
+    # remonter TimeoutExpired jusqu'a `_audio_task`, et `run_parallel_tasks`
+    # marquait la tache audio ENTIERE en echec — astats, clipping, empreinte
+    # Chromaprint et Mel etaient perdus alors qu'ils n'avaient pas encore
+    # tourne. `None` est deja le contrat de "loudnorm non mesure" (cf. stderr
+    # vide juste en dessous) et `_compute_audio_score` le traite en NEUTRE
+    # (s_lra=50), pas en "bon" : une mesure ratee ne devient pas flatteuse.
+    try:
+        rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    except _FFMPEG_FAILURES as exc:
+        logger.warning("loudnorm: ffmpeg indisponible/timeout sur %s: %s", media_path, exc)
+        return None
     if not stderr:
         logger.debug("loudnorm: pas de sortie stderr rc=%d", rc)
         return None
@@ -227,7 +245,14 @@ def analyze_astats(
         "info",
         "-",
     ]
-    _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    # Issue #508 : meme raisonnement que loudnorm. `None` => noise_floor /
+    # dynamic_range / crest_factor restent None, donc scores NEUTRES (50) dans
+    # `_compute_audio_score`, jamais 95.
+    try:
+        _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    except _FFMPEG_FAILURES as exc:
+        logger.warning("astats: ffmpeg indisponible/timeout sur %s: %s", media_path, exc)
+        return None
     if not stderr:
         return None
 
@@ -294,7 +319,16 @@ def analyze_clipping_segments(
         "info",
         "-",
     ]
-    _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    # Issue #508 : le verdict "unknown" avec total_segments=0 est le contrat de
+    # "clipping non mesure". `_compute_audio_score` exige explicitement
+    # total_segments > 0 avant de scorer le clipping (garde R8-098), donc ce
+    # retour laisse le neutre 80 en place au lieu du 90 "parfait" — la mesure
+    # ratee ne se transforme pas en bonne nouvelle.
+    try:
+        _rc, _stdout, stderr = run_ffmpeg_text(cmd, timeout_s)
+    except _FFMPEG_FAILURES as exc:
+        logger.warning("clipping: ffmpeg indisponible/timeout sur %s: %s", media_path, exc)
+        return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
     if not stderr:
         return {"total_segments": 0, "clipping_segments": 0, "clipping_pct": 0.0, "verdict": "unknown"}
 
@@ -586,6 +620,14 @@ def classify_drc(
           "unknown"              : crest et lra non disponibles
 
     Strategie : somme des scores crest (0/1/2) et LRA (0/1/2), seuillee.
+
+    Issue #752 — le score 0 d'une metrique ABSENTE etait indiscernable du score 0
+    d'une metrique MESUREE basse : `astats` en echec (crest=None) suffisait a
+    renvoyer ("broadcast_compressed", 0.85), soit un verdict penalisant ferme
+    rendu sur une seule mesure. Quand une seule des deux metriques est presente,
+    la categorie reste indicative mais la confiance est plafonnee a
+    DRC_CONFIDENCE_SINGLE_METRIC : elle ne peut pas atteindre le niveau d'un
+    consensus a deux mesures concordantes.
     """
     if crest_factor is None and lra is None:
         return ("unknown", 0.0)
@@ -605,6 +647,17 @@ def classify_drc(
             score_lra = 1
 
     combined = score_crest + score_lra
+
+    if crest_factor is None or lra is None:
+        # Une seule metrique mesuree : `combined` vaut au plus 2 et le zero de
+        # la metrique manquante n'est pas une mesure. Categorie conservee,
+        # confiance basse.
+        if combined == 2:
+            return ("cinema", DRC_CONFIDENCE_SINGLE_METRIC)
+        if combined == 1:
+            return ("standard", DRC_CONFIDENCE_SINGLE_METRIC)
+        return ("broadcast_compressed", DRC_CONFIDENCE_SINGLE_METRIC)
+
     if combined >= 3:
         return ("cinema", 0.95)
     if combined == 2:

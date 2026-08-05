@@ -21,7 +21,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from cinesort.infra.log_context import (
     clear_request_id,
@@ -153,6 +153,22 @@ _SHARED_PREFIX = "/shared"
 # V6-01 Polish Total v7.7.0 : fichiers de traduction servis via /locales/<locale>.json.
 # Lus par web/dashboard/core/i18n.js au boot et a chaque setLocale().
 _LOCALES_PREFIX = "/locales"
+# Cf issue #423 : plafond de lecture d'un statique.
+#
+# `_resolve_static_path` verrouille deja le CHEMIN (anti path-traversal, 403
+# hors racine, `is_file()`), mais rien ne bornait la TAILLE : le fichier etait
+# charge entierement en memoire avant d'etre ecrit dans la reponse.
+#
+# Portee reelle, sans la survendre : declencher ce cas suppose de pouvoir
+# ecrire dans `web/` sous le repertoire d'installation. Qui en est capable
+# peut deja remplacer un `.js` servi au navigateur, ce qui est strictement
+# pire qu'un pic de memoire. C'est donc de la defense en profondeur, pas la
+# fermeture d'une porte ouverte a un attaquant distant.
+#
+# 32 Mio : le plus gros statique livre pese 293 Kio (web/shared/components.css),
+# soit deux ordres de grandeur de marge. Aucun asset legitime du dashboard
+# n'approche cette borne.
+_STATIC_MAX_BYTES = 32 * 1024 * 1024
 # Types MIME supplementaires (mimetypes stdlib ne couvre pas tout).
 _EXTRA_MIME: Dict[str, str] = {
     ".woff2": "font/woff2",
@@ -838,13 +854,32 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         return resolved
 
     def _read_static_bytes(self, resolved, scope: str) -> Any:
-        """Helper #174 : lit le fichier resolu, gere les erreurs IO uniformement."""
+        """Helper #174 : lit le fichier resolu, gere les erreurs IO uniformement.
+
+        Cf issue #423 : la lecture est plafonnee a `_STATIC_MAX_BYTES`.
+        """
         try:
-            return resolved.read_bytes()
+            with resolved.open("rb") as handle:
+                # On demande un octet de plus que le plafond : recevoir cet
+                # octet suffit a savoir que le fichier deborde, et la lecture
+                # n'aura jamais alloue davantage. Prefere a un `stat().st_size`
+                # prealable, qui laisse une fenetre entre la mesure et la
+                # lecture et ne borne pas l'allocation par lui-meme.
+                content = handle.read(_STATIC_MAX_BYTES + 1)
         except (OSError, PermissionError) as exc:
             logger.warning("%s static read error: %s", scope, exc)
             self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
             return None
+        if len(content) > _STATIC_MAX_BYTES:
+            logger.warning(
+                "%s static refuse : %s depasse le plafond de %d octets",
+                scope,
+                resolved.name,
+                _STATIC_MAX_BYTES,
+            )
+            self._respond_json(500, {"ok": False, "message": "Fichier trop volumineux."})
+            return None
+        return content
 
     def _serve_dashboard_file(self, url_path: str) -> None:
         """Sert un fichier statique depuis web/dashboard/ avec garde anti path-traversal."""
@@ -1073,8 +1108,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
         # serait de toute facon active.
         if clean == "/api/poster":
-            from urllib.parse import parse_qs  # noqa: PLC0415
-
             from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
             from cinesort.infra.state import default_state_dir  # noqa: PLC0415
 

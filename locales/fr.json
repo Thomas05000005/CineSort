@@ -313,7 +313,7 @@
   "danger_zone": {
     "title": "Zone de danger",
     "reset_title": "Réinitialiser toutes mes données",
-    "reset_desc": "Supprime ta base de donnees, tes parametres, l'historique des runs, les caches TMDb et les analyses perceptuelles.",
+    "reset_desc": "Supprime ta base de données, tes paramètres, l'historique des runs, les caches TMDb et les analyses perceptuelles.",
     "reset_preserve": "<strong>Préserve</strong> : tes fichiers vidéo (jamais touchés), les logs (utiles pour debug).",
     "reset_backup": "Un backup ZIP automatique est créé avant la suppression dans le dossier parent.",
     "current_data": "Données actuelles : ...",
@@ -556,6 +556,7 @@
     "plan_empty_or_missing": "Plan vide ou introuvable.",
     "plan_not_ready": "Plan pas prêt.",
     "plan_not_found": "Plan introuvable.",
+    "plan_corrupted": "Plan corrompu : l'application est refusée pour ne pas travailler sur un plan amputé. {{detail}}",
     "disk_space_insufficient": "Espace disque insuffisant.",
     "duplicate_check_failed": "Vérification des doublons impossible: {{detail}}",
     "internal_run_id_unexpected": "Erreur interne : run_id inattendu.",

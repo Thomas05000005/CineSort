@@ -255,6 +255,51 @@ class CoreHeuristicsTests(unittest.TestCase):
         self.assertIn("Le Salaire de la peur (The Wages of Fear)", queries)
         self.assertEqual(len(queries), len(set(q.lower() for q in queries)))
 
+    def test_tmdb_year_gap_penalty_is_flat(self) -> None:
+        """#451 : la penalite d'ecart d'annee est UNE SEULE marche, pas une gradation.
+
+        La branche `elif year_delta >= 6` etait inatteignable (tout delta >= 6
+        satisfait deja `>= _TMDB_YEAR_FAR_THRESHOLD` == 3) : sa penalite legere
+        n'a jamais ete appliquee. Ce test fige le comportement REEL — un ecart de
+        4 ans et un ecart de 9 ans sont penalises a l'identique, de la penalite
+        LOURDE — pour qu'une "restauration de la gradation" (qui adoucirait les
+        ecarts 3-5 ans, exactement les faux positifs vises par FIX 3) echoue ici.
+        """
+        results = [
+            TmdbResult(
+                id=year,
+                title="Gravity Storm Rising",
+                year=year,
+                original_title="Gravity Storm Rising",
+                popularity=5.0,
+                vote_count=300,
+                vote_average=6.0,
+                poster_path=None,
+            )
+            for year in (2010, 2014, 2019)
+        ]
+        cands = core.build_candidates_from_tmdb(
+            _FakeTmdb(results),
+            query="Gravity Storm Rising",
+            year=2010,
+            language="fr-FR",
+        )
+        by_year = {c.year: c for c in cands}
+        self.assertEqual(set(by_year), {2010, 2014, 2019})
+
+        expected_far = (
+            core._TMDB_SCORE_BASE
+            + core._TMDB_SCORE_SIM_CAP
+            - core._TMDB_YEAR_FAR_HEAVY_PENALTY
+            + core._TMDB_SCORE_POPULAR_BONUS
+        )
+        # dY=4 (3..5) et dY=9 (>= 6) : meme penalite, la LOURDE.
+        self.assertAlmostEqual(by_year[2014].score, expected_far, places=6)
+        self.assertAlmostEqual(by_year[2019].score, expected_far, places=6)
+        self.assertAlmostEqual(by_year[2014].score, by_year[2019].score, places=6)
+        # Garde anti-vacuite : l'annee exacte reste nettement au-dessus.
+        self.assertGreater(by_year[2010].score, by_year[2014].score + 0.30)
+
     def test_pick_best_candidate_prefers_consensus_sources(self) -> None:
         cands = [
             core.Candidate(title="Gravity", year=2013, source="name", score=0.70),
@@ -266,6 +311,43 @@ class CoreHeuristicsTests(unittest.TestCase):
         assert best is not None
         self.assertEqual(best.title, "Gravity")
         self.assertIn("consensus=+", best.note)
+
+    def test_pick_best_candidate_does_not_mutate_input_list(self) -> None:
+        """#450 : le suffixe consensus ne doit PAS etre ecrit dans la liste d'entree.
+
+        `plan_support_replan` stocke la liste `cands` telle quelle dans
+        `PlanRow.candidates` apres l'appel : une mutation en place survivrait
+        a l'appel et polluerait les candidats de l'appelant.
+        """
+        cands = [
+            core.Candidate(title="Gravity", year=2013, source="name", score=0.70, note="src=name"),
+            core.Candidate(title="Gravity", year=2013, source="nfo", score=0.69, note="src=nfo"),
+            core.Candidate(title="Gravity Falls", year=2012, source="tmdb", score=0.74),
+        ]
+        notes_before = [c.note for c in cands]
+
+        best = core.pick_best_candidate(cands)
+
+        assert best is not None
+        # Le bonus a bien ete applique sur la valeur RETOURNEE...
+        self.assertIn("consensus=+", best.note)
+        # ...et AUCUN element de la liste d'entree n'a bouge.
+        self.assertEqual([c.note for c in cands], notes_before)
+        for c in cands:
+            self.assertNotIn("consensus=+", c.note)
+
+    def test_pick_best_candidate_is_idempotent_on_same_list(self) -> None:
+        """#450 : re-evaluer la MEME liste ne doit pas empiler les suffixes."""
+        cands = [
+            core.Candidate(title="Gravity", year=2013, source="name", score=0.70),
+            core.Candidate(title="Gravity", year=2013, source="nfo", score=0.69),
+            core.Candidate(title="Gravity Falls", year=2012, source="tmdb", score=0.74),
+        ]
+        first = core.pick_best_candidate(cands)
+        second = core.pick_best_candidate(cands)
+        assert first is not None and second is not None
+        self.assertEqual(first.note, second.note)
+        self.assertEqual(second.note.count("consensus=+"), 1)
 
     def test_files_identical_quick_uses_hash_cache(self) -> None:
         # Cf #83 etape 2 PR 1 : les fonctions _sha1_quick et

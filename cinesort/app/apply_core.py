@@ -276,34 +276,44 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     NB : la signature publique reste retro-compatible (``max_seconds`` est
     kwarg-only avec un defaut), les callers existants ne changent pas.
     """
-    import time as _time_mod  # local pour eviter shadow du module ``time`` haut
-
     digest = hashlib.sha1(usedforsecurity=False)
-    start = _time_mod.monotonic()
+    start = time.monotonic()
     chunk_8m = 8 * 1024 * 1024
     try:
         size = path.stat().st_size
         with path.open("rb") as file_obj:
             if size < (2 * chunk_8m):
                 while True:
-                    if _time_mod.monotonic() - start > max_seconds:
+                    if time.monotonic() - start > max_seconds:
                         raise TimeoutError(f"sha1_quick timeout ({max_seconds}s) on {path}")
                     block = file_obj.read(1024 * 1024)
                     if not block:
                         break
                     digest.update(block)
             else:
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout head ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
                 file_obj.seek(max(0, size - chunk_8m))
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
     except (OSError, TimeoutError) as exc:
         _logger.warning("sha1_quick failed for %s: %s", path, exc)
         return ""
     return digest.hexdigest()
+
+
+def quick_hash_cache_key_from_stat(path: Path, stat_result: Any) -> Tuple[str, int, int]:
+    """Clef de cache (path, size, mtime_ns) construite depuis un `stat` DEJA obtenu.
+
+    Issue #637 : `quick_hash_cache_key` refaisait systematiquement un `stat()`
+    alors que l'appelant venait d'en faire un. Le calcul de la clef est isole ici
+    pour que les deux chemins (stat frais / stat deja connu) produisent
+    strictement la MEME clef — sinon un cache se scinderait en deux silencieusement.
+    """
+    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
+    return (str(path), int(stat_result.st_size), mtime_ns)
 
 
 def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
@@ -315,8 +325,7 @@ def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
         stat_result = path.stat()
     except (OSError, PermissionError):
         return None
-    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
-    return (str(path), int(stat_result.st_size), mtime_ns)
+    return quick_hash_cache_key_from_stat(path, stat_result)
 
 
 def sha1_quick_cached(path: Path, cache: Optional[Dict[Tuple[str, int, int], str]]) -> str:
@@ -2564,7 +2573,17 @@ def apply_single(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
         return
 
-    if core_mod._single_folder_is_conform(folder.name, title, year, naming_template=cfg.naming_movie_template):
+    # #469 : memes entrees de contexte que `_naming_ctx` ci-dessus (edition +
+    # separator), sinon cette garde NOOP compare le dossier a un nom que ce
+    # meme bloc n'ecrira jamais.
+    if core_mod._single_folder_is_conform(
+        folder.name,
+        title,
+        year,
+        naming_template=cfg.naming_movie_template,
+        edition=edition or "",
+        separator=getattr(cfg, "separator", " "),
+    ):
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
 
@@ -2749,9 +2768,33 @@ def apply_collection_item(
     # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
     # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
     # peut exceder 260 chars meme si sub_dir reste valide.
-    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit.
+    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit. Le
+    # helper `_video_name_with_ext_case` (ITER7), qui rebatissait le nom avec un
+    # suffixe force en minuscules, a ete SUPPRIME du module : mesurer le
+    # kill-switch sur un nom reconstruit reviendrait a mesurer un chemin que
+    # l'apply n'ecrira jamais.
+    #
+    # Issue #661 : les SIDECARS etaient exclus de ce kill-switch alors que la
+    # branche TV les couvre (GATE 3 / TV-MAXPATH). En collection les sidecars
+    # GARDENT leur nom source (`sub_dir / sidecar.name`), et une chaine de
+    # suffixes (.fr.forced.srt, .en.sdh.sup) depasse couramment la longueur de
+    # la video. L'item echouait donc EN COURS DE ROUTE (OSError obscur au
+    # premier sidecar trop long, puis rollback intra-row) au lieu d'etre
+    # proprement saute en amont avec SKIP_PATH_TOO_LONG. On calcule donc les
+    # cibles sidecars AVANT tout deplacement et on les soumet au meme gate.
+    # La liste calculee ici est ensuite REUTILISEE par la boucle de move : un
+    # second classify_sidecars donnerait une reponse potentiellement differente
+    # (le dossier a bouge entre-temps) et ferait mentir le gate.
     _candidate_video_path = sub_dir / video.name
-    _path_err = check_path_length_killswitch(str(_candidate_video_path))
+    _sidecar_targets: list[Tuple[Path, Path]] = [
+        (sidecar, sub_dir / sidecar.name)
+        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+    ]
+    _path_err: Optional[str] = None
+    for _cp in [str(_candidate_video_path)] + [str(_dst) for (_, _dst) in _sidecar_targets]:
+        _path_err = check_path_length_killswitch(_cp)
+        if _path_err is not None:
+            break
     if _path_err is not None:
         log("WARN", _path_err)
         try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
@@ -2811,8 +2854,7 @@ def apply_collection_item(
                 dedup_seen_ops.discard(k)
 
     try:
-        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-            dst = sub_dir / sidecar.name
+        for sidecar, dst in _sidecar_targets:
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
                 op_key = (
@@ -2948,7 +2990,33 @@ def apply_tv_episode(
     # de la série (le dossier) ; new_year l'année. Fallback sur row.* si non fourni.
     _eff_series = (new_title or "").strip() or str(row.tv_series_name or row.proposed_title or "")
     year = int(new_year) if (new_year is not None and int(new_year or 0) > 0) else int(row.proposed_year or 0)
-    season = int(row.tv_season or 0)
+    # #613 (CHEMIN DESTRUCTIF) : `int(row.tv_season or 0)` confondait deux etats
+    # distincts — saison INDETERMINEE (`None` : pattern « Episode 12 » sans saison,
+    # cf. tv_helpers.parse_tv_info) et saison 0, qui est une saison LEGITIME (les
+    # specials Kodi/Jellyfin vivent dans `Saison 00`). L'episode a saison inconnue
+    # partait donc en silence dans `Saison 00`, melange aux specials, sur une
+    # destination FABRIQUEE. Sens restrictif : on refuse bruyamment, le fichier
+    # reste en place, l'utilisateur est informe (log + error_messages + skip dedie).
+    #
+    # `episode`, lui, N'EST PAS garde : depuis la fermeture de la violation
+    # « renommage » (le fichier garde son nom source), le numero d'episode
+    # n'intervient plus dans AUCUN segment du chemin cible — seul le dossier de
+    # serie et le dossier de saison sont construits. Refuser sur `episode is None`
+    # bloquerait un rangement par ailleurs entierement correct.
+    if row.tv_season is None:
+        _season_err = (
+            f"SAISON TV INDETERMINEE : '{video.name}' — la saison n'a pas ete resolue. "
+            f"La ranger dans 'Saison 00' la confondrait avec les specials : "
+            f"renseigner la saison, puis relancer l'application."
+        )
+        log("WARN", _season_err)
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            res.error_messages.append(_season_err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+            pass
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_TV_SAISON_INDETERMINEE)
+        return
+    season = int(row.tv_season)
     episode = int(row.tv_episode or 0)
     ep_title = str(row.tv_episode_title or "").strip()
 
@@ -2964,7 +3032,11 @@ def apply_tv_episode(
         separator=getattr(cfg, "separator", " "),
     )
     series_folder_name = format_tv_series_folder(cfg.naming_tv_template, _naming_ctx)
-    season_folder_name = f"Saison {season:02d}" if season else "Saison 00"
+    # #613 : la ternaire historique (`... if season else "Saison 00"`) etait une
+    # tautologie — `f"Saison {0:02d}"` vaut deja "Saison 00" — et laissait croire
+    # que "Saison 00" etait un FALLBACK. Ce n'en est pas un : c'est le dossier des
+    # specials. Le cas « saison inconnue » est desormais refuse plus haut.
+    season_folder_name = f"Saison {season:02d}"
 
     # REGLE INVIOLABLE n1 : un episode est RANGE, jamais RENOMME.
     #

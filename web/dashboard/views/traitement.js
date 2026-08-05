@@ -151,6 +151,26 @@ let _validationExpanded = new Set();
 // reinjectait silencieusement REJECT pour toutes les lignes hors viewport.
 // rowId -> { ok: bool, year: int|null, decided_at: ts }
 let _decisionsState = new Map();
+
+// Compteur MONOTONE d'ecritures sur `_decisionsState`. C'est la seule identite
+// d'ecriture qui ne peut pas collisionner : `decided_at` est un HORODATAGE, et
+// deux ecritures dans la meme milliseconde y sont indiscernables.
+//
+// Le correctif du 2026-08-05 avait remplace une comparaison d'ORDRE
+// (`decided_at > snapshot_ts`) par une comparaison d'EGALITE sur `decided_at`.
+// Cela reglait le cas courant — le bulk ne prenait plus ses propres ecritures
+// pour des decisions utilisateur — mais laissait une fenetre : une retouche
+// tombant dans la MEME milliseconde que le bulk gardait l'egalite vraie, et
+// « Annuler » ecrasait alors une decision que l'utilisateur venait de prendre.
+// Fenetre plus etroite, meme famille de defaut.
+//
+// `_rev` ne depend d'aucune horloge : chaque ecriture obtient un numero, et
+// deux ecritures distinctes ont toujours des numeros distincts.
+let _decisionsRev = 0;
+function _nextRev() {
+  _decisionsRev += 1;
+  return _decisionsRev;
+}
 // Fix APPLY-2 (2026-05-30) : intervalle polling pendant l'apply (idem scan)
 // et state apply pour les progressions live.
 let _applyStatus = null;
@@ -1942,7 +1962,7 @@ function _initDecisionsState() {
     else if (r.decision === "REJECT" || r.decision === "REJECTED") ok = false;
     else ok = _defaultDecisionOk(r);
     const year = Number(r.proposed_year) || null;
-    _decisionsState.set(rowId, { ok, year, decided_at: Date.now() });
+    _decisionsState.set(rowId, { ok, year, decided_at: Date.now(), rev: _nextRev() });
   }
   // Cleanup d'eventuelles entrees orphelines (rows disparues du plan, ex.
   // rescan). Garde le state focus sur les rows actuelles uniquement.
@@ -1972,7 +1992,7 @@ function _setDecisionOk(rowId, ok) {
   if (!rowId) return;
   const id = String(rowId);
   const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
-  _decisionsState.set(id, { ...prev, ok: !!ok, decided_at: Date.now() });
+  _decisionsState.set(id, { ...prev, ok: !!ok, decided_at: Date.now(), rev: _nextRev() });
 }
 
 function _setDecisionYear(rowId, yearValue) {
@@ -1980,7 +2000,7 @@ function _setDecisionYear(rowId, yearValue) {
   const id = String(rowId);
   const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
   const y = yearValue === "" || yearValue == null ? null : Number(yearValue) || null;
-  _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now() });
+  _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now(), rev: _nextRev() });
 }
 
 // VN-C.3 (Vague N batch 2) : seuil bulk-approve "sûrs" = CONF_HIGH (85),
@@ -2091,20 +2111,56 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   // depuis _decisionsState (source de verite JS). Capture TOUTES les rows du
   // plan, pas seulement celles visibles dans le DOM apres filtre. Sans ca,
   // l'undo ne restaurait que les rows visibles -> perte silencieuse.
-  // Fix race condition (2026-06-05) : on memorise aussi le timestamp du
-  // snapshot. Au rollback (echec API ou undo), les decisions utilisateur
-  // intervenues pendant l'await fetch (decided_at > snapshot_ts) sont
-  // preservees au lieu d'etre ecrasees par un wipe-and-replace de la Map.
-  const snapshot_ts = Date.now();
+  // Fix race condition (2026-06-05) : au rollback (echec API ou undo), les
+  // decisions utilisateur intervenues pendant l'await fetch sont preservees au
+  // lieu d'etre ecrasees par un wipe-and-replace de la Map. Le critere de
+  // reconnaissance est plus bas (`_ecritParCeBulk`) : ce fut un timestamp de
+  // snapshot jusqu'au 2026-08-05, c'est desormais une empreinte exacte.
   const stateSnapshot = new Map();
   for (const [rid, st] of _decisionsState.entries()) {
     stateSnapshot.set(rid, { ...st });
   }
 
   // Mise a jour state JS (source de verite) + DOM visible.
+  //
+  // On memorise l'empreinte EXACTE que ce bulk vient d'ecrire pour chaque row.
+  // C'est elle, et non un ordre de timestamps, qui permettra de reconnaitre
+  // plus bas ce qui vient de nous — cf `_ecritParCeBulk`.
+  const bulkRevs = new Map();
   for (const rid of targetIds) {
     _setDecisionOk(rid, true);
+    const ecrit = _decisionsState.get(rid);
+    bulkRevs.set(rid, ecrit ? ecrit.rev : null);
   }
+
+  // Une row a-t-elle ete retouchee PAR L'UTILISATEUR depuis notre ecriture ?
+  //
+  // L'ancienne garde comparait `current.decided_at > snapshot_ts`, avec
+  // `snapshot_ts` pris AVANT le bulk. Or le bulk ecrit forcement APRES ce
+  // snapshot : des que `Date.now()` avait avance d'une milliseconde entre les
+  // deux, la garde prenait NOS PROPRES ecritures pour des decisions
+  // utilisateur et sautait la row — donc « Annuler » ne faisait RIEN, en
+  // silence.
+  //
+  // Mesure : deux echecs de CI a la signature identique sur main le 2026-08-05
+  // ({r1: true, r2: true, r3: true} au lieu de false), verts en local. La
+  // difference n'etait pas le code mais la RESOLUTION D'HORLOGE : dans la meme
+  // milliseconde `>` est faux et l'annulation marchait ; une milliseconde plus
+  // tard elle ne marchait plus.
+  //
+  // On compare desormais une IDENTITE, pas un ordre : la row porte-t-elle
+  // encore exactement l'empreinte que nous y avons mise ? Aucune horloge
+  // n'intervient dans le verdict.
+  const _ecritParCeBulk = (rid) => {
+    const current = _decisionsState.get(rid);
+    if (!current) return true;
+    const attendue = bulkRevs.get(rid);
+    // Une entree SANS revision ne vient pas de nous : elle precede ce
+    // mecanisme ou a ete posee ailleurs. On la laisse tranquille — le sens
+    // restrictif est de ne PAS ecraser ce dont on n'est pas l'auteur.
+    if (current.rev == null || attendue == null) return false;
+    return current.rev === attendue;
+  };
   if (_activeContainer) {
     _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
       if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
@@ -2134,16 +2190,18 @@ async function _applyBulkApprove(targetIds, approvedCount) {
     // snapshot couvre toutes les rows du plan (pas seulement les visibles).
     // Fix race condition (2026-06-05) : merge selectif au lieu de wipe.
     // Toute decision (clic checkbox / edit year) faite par l'utilisateur
-    // pendant l'await save_validation a decided_at > snapshot_ts et doit
-    // etre preservee. On rollback uniquement les rows qu'on a effectivement
-    // mutees ci-dessus (targetIds) et dont l'utilisateur n'a pas retouche
-    // la decision depuis.
+    // pendant l'await save_validation remplace l'empreinte que ce bulk avait
+    // ecrite, et doit etre preservee. On rollback uniquement les rows qu'on a
+    // effectivement mutees ci-dessus (targetIds) et qui portent ENCORE notre
+    // empreinte.
     for (const rid of targetIds) {
       const current = _decisionsState.get(rid);
       const prev = stateSnapshot.get(rid);
-      // Si l'utilisateur a re-modifie cette row apres notre snapshot,
-      // on respecte son intent et on ne rollback pas.
-      if (current && current.decided_at > snapshot_ts) continue;
+      // Si l'utilisateur a re-modifie cette row DEPUIS NOTRE ECRITURE, on
+      // respecte son intent et on ne rollback pas. Voir `_ecritParCeBulk` :
+      // l'ancienne comparaison de timestamps sautait aussi nos propres
+      // ecritures des que l'horloge avait avance.
+      if (current && !_ecritParCeBulk(rid)) continue;
       if (prev) {
         _decisionsState.set(rid, { ...prev });
       } else {
@@ -2202,7 +2260,7 @@ async function _applyBulkApprove(targetIds, approvedCount) {
         for (const rid of targetIds) {
           const current = _decisionsState.get(rid);
           const prev = stateSnapshot.get(rid);
-          if (current && current.decided_at > snapshot_ts) continue;
+          if (current && !_ecritParCeBulk(rid)) continue;
           if (prev) {
             _decisionsState.set(rid, { ...prev });
           } else {
