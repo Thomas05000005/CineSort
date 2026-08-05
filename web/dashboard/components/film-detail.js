@@ -1085,6 +1085,24 @@ function _closeTmdbManualSearchModal() {
   }
 }
 
+// Issue #413 : le backend sert le cache TMDb même EXPIRÉ quand l'API est
+// injoignable. Sans ce bandeau, l'utilisateur ne peut pas distinguer une
+// réponse fraîche d'une réponse de secours, et choisit un titre périmé en
+// croyant interroger TMDb.
+function _renderTmdbStaleBanner(data) {
+  if (!data || !data.stale) return "";
+  let dated = "";
+  const ts = Number(data.stale_cached_at);
+  if (Number.isFinite(ts) && ts > 0) {
+    try {
+      dated = ` (données du ${new Date(ts * 1000).toLocaleDateString()})`;
+    } catch (_e) {
+      dated = "";
+    }
+  }
+  return `<p class="tmdb-manual-search-stale" role="status">⚠️ TMDb injoignable : résultats issus du cache local${escapeHtml(dated)}.</p>`;
+}
+
 function _renderTmdbSearchResults(results) {
   if (!Array.isArray(results) || results.length === 0) {
     return `<p class="tmdb-manual-search-empty">Aucun résultat. Essayez avec un titre différent ou ajoutez l'année.</p>`;
@@ -1150,7 +1168,7 @@ async function _runTmdbManualSearch(overlay) {
     if (!data || data.ok === false) {
       throw new Error((data && (data.message || data.error)) || "Echec recherche TMDb.");
     }
-    resultsBox.innerHTML = _renderTmdbSearchResults(data.results || []);
+    resultsBox.innerHTML = _renderTmdbStaleBanner(data) + _renderTmdbSearchResults(data.results || []);
   } catch (e) {
     console.error("[film-detail] search_tmdb:", e);
     resultsBox.innerHTML = `<p class="tmdb-manual-search-error">Erreur : ${escapeHtml(e.message || String(e))}</p>`;
