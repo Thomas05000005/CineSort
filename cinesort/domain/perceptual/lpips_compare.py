@@ -11,6 +11,7 @@ desactivee, pas de plantage).
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,8 +107,6 @@ def _is_ort_available() -> bool:
 def _resolve_model_path(model_path: str = LPIPS_MODEL_PATH) -> Optional[Path]:
     """Resolve LPIPS ONNX model (bundle ou source), None si absent."""
     candidates = [Path(model_path)]
-    import sys
-
     if getattr(sys, "frozen", False):
         candidates.insert(0, Path(sys._MEIPASS) / model_path)  # type: ignore[attr-defined]
     for p in candidates:

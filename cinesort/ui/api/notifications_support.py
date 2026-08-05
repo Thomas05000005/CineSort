@@ -6,7 +6,9 @@ avec cap (200 items), permet a l'UI de lister / filtrer / marquer lu / supprimer
 
 Contrat :
     get_notifications(api, unread_only=False, limit=100, category=None)
-        -> { ok, notifications: [...], unread_count }
+        -> { ok, notifications: [...], unread_count, total, returned }
+        `total` = nombre d'elements correspondant au filtre (jamais tronque) ;
+        `returned` = taille de `notifications`, donc borne par `limit` (#772).
     add_notification(api, event_type, title, body, level="info", category="event", data=None)
         -> { ok, notification }
     dismiss_notification(api, notification_id)
@@ -85,6 +87,19 @@ class NotificationStore:
             self._items.append(item)
         return dict(item)
 
+    @staticmethod
+    def _matches(item: Dict[str, Any], unread_only: bool, category: Optional[str]) -> bool:
+        """Predicat de filtrage PARTAGE par `list` et `count` (#772).
+
+        Duplique, les deux auraient derive : `count` doit compter EXACTEMENT
+        ce que `list` retiendrait sans sa limite.
+        """
+        if item.get("dismissed"):
+            return False
+        if unread_only and item.get("read"):
+            return False
+        return not (category and item.get("category") != category)
+
     def list(
         self,
         unread_only: bool = False,
@@ -95,16 +110,24 @@ class NotificationStore:
             snapshot = list(self._items)
         out: List[Dict[str, Any]] = []
         for it in reversed(snapshot):
-            if it.get("dismissed"):
-                continue
-            if unread_only and it.get("read"):
-                continue
-            if category and it.get("category") != category:
+            if not self._matches(it, unread_only, category):
                 continue
             out.append(dict(it))
             if limit and len(out) >= int(limit):
                 break
         return out
+
+    def count(self, unread_only: bool = False, category: Optional[str] = None) -> int:
+        """Nombre d'elements correspondant au filtre, SANS troncature (#772).
+
+        `len(store.list(...))` plafonne a `limit` : il ne repond pas
+        « combien y en a-t-il » mais « combien en ai-je rapatrie ». La limite
+        n'est pas retiree — elle borne la memoire du payload — c'est le
+        comptage qui devient independant d'elle.
+        """
+        with self._lock:
+            snapshot = list(self._items)
+        return sum(1 for it in snapshot if self._matches(it, unread_only, category))
 
     def unread_count(self) -> int:
         with self._lock:
@@ -184,7 +207,12 @@ def get_notifications(
         "ok": True,
         "notifications": items,
         "unread_count": store.unread_count(),
-        "total": len(items),
+        # #772 : `total` = tout ce qui correspond au filtre, `returned` = ce que
+        # la limite a laisse passer. `len(items)` repondait a la seconde question
+        # sous le nom de la premiere : au-dela de `limit`, l'UI affichait la
+        # limite comme si c'etait le total.
+        "total": store.count(unread_only=bool(unread_only), category=category),
+        "returned": len(items),
     }
 
 

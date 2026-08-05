@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import logging
 import re
 import time
@@ -79,8 +80,6 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
     un TmdbClient avec cle vide, lequel echouera sur fetch — comportement
     coherent avec le reste de l'app).
     """
-    import json  # noqa: PLC0415 — import local pour eviter pollution du module
-
     settings_file = state_dir / "settings.json"
     if not settings_file.exists():
         return ""
@@ -764,8 +763,6 @@ def _respond_error_json(
     message: str,
 ) -> None:
     """Reponse JSON d'erreur conforme au pattern `_err_response` de l'app."""
-    import json  # noqa: PLC0415
-
     body = json.dumps(
         {"ok": False, "category": category, "message": message},
         ensure_ascii=False,
