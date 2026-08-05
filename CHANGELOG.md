@@ -362,10 +362,10 @@ Migration **mixin -> Repository** par composition au lieu d'heritage MRO :
 
 ```python
 # AVANT (v1.0.0-beta) — heritage MRO
-class SQLiteStore(_ProbeMixin, _AnomalyMixin, _ScanMixin,
-                  _PerceptualMixin, _QualityMixin, _RunMixin, _ApplyMixin):
+class SQLiteStore(_ProbeMixin, _AnomalyMixin, _ScanMixin, _PerceptualMixin, _QualityMixin, _RunMixin, _ApplyMixin):
     def upsert_probe(self, **kwargs):  # defini dans _ProbeMixin
         ...
+
 
 # APRES (v1.1.0-beta) — composition + thin wrappers backward-compat
 class SQLiteStore(_ProbeMixin, _AnomalyMixin, ...):  # heritage GARDE
