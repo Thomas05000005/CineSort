@@ -23,6 +23,7 @@ from .constants import (
     CREST_FACTOR_COMPRESSED,
     CREST_FACTOR_EXCELLENT,
     CREST_FACTOR_GOOD,
+    DRC_CONFIDENCE_SINGLE_METRIC,
     DRC_CREST_CINEMA,
     DRC_CREST_STANDARD,
     DRC_LRA_CINEMA,
@@ -586,6 +587,14 @@ def classify_drc(
           "unknown"              : crest et lra non disponibles
 
     Strategie : somme des scores crest (0/1/2) et LRA (0/1/2), seuillee.
+
+    Issue #752 — le score 0 d'une metrique ABSENTE etait indiscernable du score 0
+    d'une metrique MESUREE basse : `astats` en echec (crest=None) suffisait a
+    renvoyer ("broadcast_compressed", 0.85), soit un verdict penalisant ferme
+    rendu sur une seule mesure. Quand une seule des deux metriques est presente,
+    la categorie reste indicative mais la confiance est plafonnee a
+    DRC_CONFIDENCE_SINGLE_METRIC : elle ne peut pas atteindre le niveau d'un
+    consensus a deux mesures concordantes.
     """
     if crest_factor is None and lra is None:
         return ("unknown", 0.0)
@@ -605,6 +614,17 @@ def classify_drc(
             score_lra = 1
 
     combined = score_crest + score_lra
+
+    if crest_factor is None or lra is None:
+        # Une seule metrique mesuree : `combined` vaut au plus 2 et le zero de
+        # la metrique manquante n'est pas une mesure. Categorie conservee,
+        # confiance basse.
+        if combined == 2:
+            return ("cinema", DRC_CONFIDENCE_SINGLE_METRIC)
+        if combined == 1:
+            return ("standard", DRC_CONFIDENCE_SINGLE_METRIC)
+        return ("broadcast_compressed", DRC_CONFIDENCE_SINGLE_METRIC)
+
     if combined >= 3:
         return ("cinema", 0.95)
     if combined == 2:
@@ -637,6 +657,7 @@ def _compute_audio_score(
     s_dyn = 50
     s_crest = 50
     s_mel = 70  # defaut quasi-bon (pas de Mel = pas de penalite forte)
+    tp_clipping = False  # #523 : la preuve True Peak doit survivre a la mesure deep
 
     if loud:
         lra = loud.get("loudness_range")
@@ -653,6 +674,7 @@ def _compute_audio_score(
         tp = loud.get("true_peak")
         if tp is not None and tp >= TP_CLIPPING:
             s_clip = max(10, s_clip - 40)
+            tp_clipping = True
 
     if astats:
         nf = astats.get("noise_floor")
@@ -696,13 +718,21 @@ def _compute_audio_score(
     if clip and int(clip.get("total_segments", 0) or 0) > 0:
         pct = clip.get("clipping_pct", 0.0)
         if pct < CLIPPING_ACCEPTABLE_PCT:
-            s_clip = 90
+            s_clip_deep = 90
         elif pct < CLIPPING_MODERATE_PCT:
-            s_clip = 60
+            s_clip_deep = 60
         elif pct < CLIPPING_SEVERE_PCT:
-            s_clip = 30
+            s_clip_deep = 30
         else:
-            s_clip = 10
+            s_clip_deep = 10
+        # #523 : les deux mesures sont INDEPENDANTES. `loud` (true peak) voit un
+        # signal qui touche 0 dBTP ; `clip` (deep) compte les segments ecretes.
+        # La reaffectation seche effacait la preuve TP : un fichier a tp=+0.5 dBTP
+        # mais peu de segments deep ressortait a 90 (« propre ») au lieu de 40.
+        # Sans preuve TP la mesure deep fait autorite (elle est plus fine que le
+        # defaut 80) ; avec preuve TP on garde le pire des deux, une preuve
+        # d'ecretage ne s'annule pas.
+        s_clip = min(s_clip, s_clip_deep) if tp_clipping else s_clip_deep
 
     if mel is not None:
         s_mel = int(getattr(mel, "mel_score", s_mel))

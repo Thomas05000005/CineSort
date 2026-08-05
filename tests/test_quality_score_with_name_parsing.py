@@ -88,6 +88,38 @@ class ReleaseNameParserTests(unittest.TestCase):
         self.assertIn(info.audio_codec_hint, {"truehd", "atmos"})
         self.assertTrue(info.audio_is_lossless)
 
+    def test_atmos_layer_does_not_steal_the_carrier_codec_slot(self) -> None:
+        """#771 : "Atmos" est une COUCHE, elle ne doit pas occuper audio_codec_hint.
+
+        Avant correctif, "atmos" etant le PREMIER motif de _PATTERNS_AUDIO, il
+        prenait le slot codec : un DDP (EAC3, LOSSY) ressortait en
+        codec="atmos" + audio_is_lossless=True, donc mappe sur TrueHD par
+        `_NAME_AUDIO_CODEC_TO_PROBE` -> un web-dl lossy score comme un
+        BluRay lossless.
+        """
+        info = parse_release_name("Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-FLUX.mkv")
+        self.assertTrue(info.audio_is_atmos)
+        self.assertEqual(info.audio_codec_hint, "eac3")
+        self.assertFalse(info.audio_is_lossless)
+
+    def test_dts_x_layer_does_not_steal_the_carrier_codec_slot(self) -> None:
+        """#771, versant DTS:X : le porteur reel (DTS-HD MA) doit etre retenu."""
+        info = parse_release_name("Movie.2020.2160p.BluRay.DTS-HD.MA.DTS-X.7.1-GRP.mkv")
+        self.assertTrue(info.audio_is_dts_x)
+        self.assertEqual(info.audio_codec_hint, "dts_hd_ma")
+        self.assertTrue(info.audio_is_lossless)
+
+    def test_atmos_alone_falls_back_to_truehd(self) -> None:
+        """#771 : la branche de repli atmos -> truehd doit etre ATTEIGNABLE.
+
+        Elle ne l'etait pas : `audio_codec_hint` valait deja "atmos" en sortie
+        de boucle, donc `not info.audio_codec_hint` etait toujours faux.
+        """
+        info = parse_release_name("Movie.2020.1080p.BluRay.Atmos-GRP.mkv")
+        self.assertTrue(info.audio_is_atmos)
+        self.assertEqual(info.audio_codec_hint, "truehd")
+        self.assertTrue(info.audio_is_lossless)
+
     def test_parse_empty(self) -> None:
         info = parse_release_name("")
         self.assertEqual(info.resolution_hint, "")

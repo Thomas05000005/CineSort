@@ -41,6 +41,7 @@ from .constants import (
     GLOBAL_WEIGHT_AUDIO_V2,
     GLOBAL_WEIGHT_COHERENCE_V2,
     GLOBAL_WEIGHT_VIDEO_V2,
+    GRAIN_VINTAGE_ERAS_V2,
     SHORT_FILE_WARN_DURATION_S,
     TIER_BRONZE_THRESHOLD,
     TIER_GOLD_THRESHOLD,
@@ -310,17 +311,25 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
 
 
 def _score_audio_drc(audio: Any) -> Tuple[float, float]:
-    """Score derive de la classification DRC §14."""
+    """Score derive de la classification DRC §14.
+
+    La confiance rendue par `classify_drc` fait AUTORITE quand elle existe : le
+    plancher (`max(conf, ...)`) ne sert que de valeur par defaut lorsque le
+    producteur n'a rien renseigne (0.0, cas d'un rapport ancien ou d'un objet
+    partiel). Avec un plancher inconditionnel, la confiance basse rendue sur une
+    seule metrique mesuree (issue #752) etait remontee a 0.70, et la penalite
+    `broadcast_compressed` pesait de tout son poids sur donnee partielle.
+    """
     if audio is None:
         return 50.0, 0.0
     category = str(getattr(audio, "drc_category", "unknown") or "unknown")
     conf = float(getattr(audio, "drc_confidence", 0) or 0)
     if category == "cinema":
-        return 100.0, max(conf, 0.7)
+        return 100.0, conf if conf > 0 else 0.7
     if category == "standard":
-        return 85.0, max(conf, 0.6)
+        return 85.0, conf if conf > 0 else 0.6
     if category == "broadcast_compressed":
-        return 60.0, max(conf, 0.7)
+        return 60.0, conf if conf > 0 else 0.7
     return 70.0, 0.0
 
 
@@ -542,10 +551,12 @@ def apply_contextual_adjustments(
                 "dnr_partial",
             )
         elif nature == "film_grain":
-            # Regle 9 : tolerance elargie pour films vintage (pre-1970) — moins penalisant,
-            # bonus legerement reduit pour eviter double comptage.
+            # Regle 9 : tolerance master vintage (eres pellicule, < 1999) — le grain
+            # y est attendu, le bonus est donc reduit pour eviter le double comptage.
+            # Le set d'eres vient de GRAIN_VINTAGE_ERAS_V2 (cf. #444 : la liste ecrite
+            # ici testait deux valeurs inexistantes, la regle ne voyait que 16mm_era).
             bonus = ADJUSTMENT_GRAIN_FILM_BONUS
-            if film_era in ("16mm_era", "35mm_golden", "early_color"):
+            if film_era in GRAIN_VINTAGE_ERAS_V2:
                 bonus = int(bonus * 0.7)
                 trace.append("vintage_master_tolerance")
             video_subs = _patch(video_subs, "perceptual_visual", bonus, "grain_film_authentic")
@@ -632,8 +643,9 @@ def collect_warnings(
     # Runtime mismatch
     flag = str(runtime_vs_tmdb_flag or "").lower()
     if flag in ("mismatch", "runtime_mismatch"):
-        video_data = (normalized_probe or {}).get("video") or {}
-        dur_min = int(float(video_data.get("duration_s", 0) or 0) / 60)
+        # duration_s est au TOP-LEVEL de NormalizedProbe, pas dans video subdict.
+        # Cf cinesort/domain/probe_models.py:16 et cinesort/infra/probe/normalize.py:452.
+        dur_min = int(float((normalized_probe or {}).get("duration_s", 0) or 0) / 60)
         warnings.append(
             f"Duree fichier {dur_min} min different notablement de TMDb — possible Theatrical vs Extended Cut."
         )

@@ -90,76 +90,24 @@ class FusionPair:
     fusion: FusionResult
 
 
-def compute_fusion_for_pair(
-    a: FilmFusionInput,
-    b: FilmFusionInput,
-    *,
-    audio_weight: float = DEFAULT_AUDIO_WEIGHT,
-    video_weight: float = DEFAULT_VIDEO_WEIGHT,
-    ffmpeg_path: Optional[str] = None,
-    thumbnail_count: int = 10,
-) -> Optional[FusionPair]:
-    """Calcule la fusion pour une paire de films.
-
-    Args:
-        a, b : FilmFusionInput (row_id, video_path, duration, chromaprint).
-        audio_weight, video_weight : ponderation fusion (cf fusion_score).
-        ffmpeg_path : chemin ffmpeg (None = auto-detection).
-        thumbnail_count : N frames a comparer (default 10).
-
-    Returns:
-        FusionPair si au moins un signal est dispo, None sinon.
-        En cas d'erreur partielle (ffmpeg absent, fingerprint manquant),
-        le signal correspondant est mis a None et la fusion s'adapte.
-    """
-    # Signal 1 : Chromaprint (similarite [0, 1]).
-    audio_sim: Optional[float] = None
-    if a.chromaprint and b.chromaprint:
-        audio_sim = compare_audio_fingerprints(a.chromaprint, b.chromaprint)
-
-    # Signal 2 : videohash perceptual.
-    # Pour eviter le double calcul, on extrait les hash une seule fois par
-    # film. Dans un usage batch (N films), l'appelant doit cacher cela —
-    # ici on calcule pour la paire isole.
-    video_sim: Optional[float] = None
-    try:
-        frames_a = extract_video_thumbnails(
-            a.video_path,
-            a.duration_s,
-            n=thumbnail_count,
-            ffmpeg_path=ffmpeg_path,
-        )
-        frames_b = extract_video_thumbnails(
-            b.video_path,
-            b.duration_s,
-            n=thumbnail_count,
-            ffmpeg_path=ffmpeg_path,
-        )
-        h_a = compute_phash_per_frame(frames_a) if frames_a else b""
-        h_b = compute_phash_per_frame(frames_b) if frames_b else b""
-        if h_a and h_b:
-            dist = videohash_distance(h_a, h_b)
-            if dist is not None:
-                video_sim = 1.0 - dist
-    except OSError as exc:
-        # ffmpeg absent / fichier corrompu : signal video = None, fusion
-        # retombe sur audio uniquement.
-        logger.warning(
-            "video hash failed pour paire (%s, %s): %s",
-            a.row_id,
-            b.row_id,
-            exc,
-        )
-
-    fusion = compute_fusion(
-        audio_sim,
-        video_sim,
-        audio_weight=audio_weight,
-        video_weight=video_weight,
-    )
-    if fusion is None:
-        return None
-    return FusionPair(row_a=a.row_id, row_b=b.row_id, fusion=fusion)
+# #770 : `compute_fusion_for_pair` vivait ici. SUPPRIMEE le 2026-08-05.
+#
+# Elle cumulait deux defauts :
+#   1. AUCUN appelant dans le depot (ni cinesort/, ni web/, ni tests/) — elle
+#      etait deja inscrite dans le cliquet `tests/test_contract_dead_symbols.py`.
+#   2. Surtout : c'etait la SEULE porte d'entree du module qui ne consultait pas
+#      `is_fusion_enabled()`. Elle lancait directement ffmpeg
+#      (extract_video_thumbnails) et Chromaprint, alors que la raison d'etre du
+#      flag `CINESORT_FUSION_DOUBLONS` est la backward compat ABSOLUE annoncee en
+#      tete de module : flag OFF = zero calcul fusion. Cablee un jour par
+#      inadvertance, elle aurait fait tourner ffmpeg contre la volonte explicite
+#      de l'utilisateur.
+#
+# Elle n'a PAS ete « reparee » par ajout d'une garde : une fonction sans appelant
+# qui duplique `compute_fusion_for_groups` (lequel gere en plus le cache de hash
+# par film) est une invitation a recabler le mauvais chemin. Le contrat qui
+# remplace la garde est `tests/test_contract_fusion_flag_guard.py` : toute
+# fonction de ce module qui touche ffmpeg/Chromaprint doit consulter le flag.
 
 
 def compute_fusion_for_groups(
@@ -180,8 +128,9 @@ def compute_fusion_for_groups(
     Args:
         candidate_groups : liste de groupes, chaque groupe = liste de
             FilmFusionInput (>= 2 elements pour generer des paires).
-        audio_weight, video_weight, ffmpeg_path, thumbnail_count : cf
-            compute_fusion_for_pair.
+        audio_weight, video_weight : ponderation fusion (cf fusion_score).
+        ffmpeg_path : chemin ffmpeg (None = auto-detection).
+        thumbnail_count : N frames a comparer par film (default 10).
 
     Returns:
         Liste des FusionPair pour toutes les paires intra-groupe.

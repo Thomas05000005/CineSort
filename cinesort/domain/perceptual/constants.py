@@ -5,7 +5,17 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Version du moteur perceptuel
 # ---------------------------------------------------------------------------
-PERCEPTUAL_ENGINE_VERSION = "1.0"
+# Estampille portee par chaque PerceptualResult (`version`), persistee dans
+# metrics_json. A bumper des qu'une REGLE de verdict ou de scoring change :
+# c'est ce qui permet de distinguer un rapport calcule avec les regles
+# precedentes d'un rapport recalcule apres correctif.
+#
+# 1.1 (2026-08-03) : detection de trous spectraux AAC rendue operante
+#   (MEL_AAC_HOLE_THRESHOLD_DB, #660) -> mel_score / audio_score / global_score
+#   peuvent baisser sur un audio lossy bas debit ; confiance DRC plafonnee sur
+#   une seule metrique (#752) ; confiance fake 4K plafonnee sur un seul signal
+#   (#804) ; verdict croise "Faux 4K" plus leve sur bit depth non mesure (#813).
+PERCEPTUAL_ENGINE_VERSION = "1.1"
 
 # ---------------------------------------------------------------------------
 # Selection de frames
@@ -282,6 +292,10 @@ DRC_CREST_CINEMA = 15.0  # dB : pleine dynamique cinema
 DRC_CREST_STANDARD = 10.0  # dB : dynamique standard
 DRC_LRA_CINEMA = 18.0  # LU : loudness range cinema
 DRC_LRA_STANDARD = 10.0  # LU : loudness range standard
+# Confiance quand UNE SEULE des deux metriques a pu etre mesuree : la categorie
+# reste indicative, mais elle ne repose sur aucun recoupement. Strictement
+# inferieure a toutes les confiances rendues sur deux mesures (0.75 mini).
+DRC_CONFIDENCE_SINGLE_METRIC = 0.45
 
 # ---------------------------------------------------------------------------
 # HDR metadata (§5 v7.5.0) — classification + scoring qualite HDR
@@ -343,10 +357,23 @@ DV_QUALITY_SCORE = {
 FAKE_4K_FFT_HF_CUTOFF_RATIO = 0.25  # dernier quart de Nyquist spatial
 FAKE_4K_FFT_THRESHOLD_NATIVE = 0.18  # >= : 4K native
 FAKE_4K_FFT_THRESHOLD_AMBIGUOUS = 0.08  # < : fake 4K bicubique
-FAKE_4K_FFT_MIN_Y_AVG = 20.0  # skip frames trop sombres
-FAKE_4K_FFT_MIN_VARIANCE = 200.0  # skip frames uniformes
+FAKE_4K_FFT_MIN_Y_AVG = 20.0  # skip frames trop sombres (echelle 8 bits, 0-255)
+FAKE_4K_FFT_MIN_VARIANCE = 200.0  # skip frames uniformes (echelle 8 bits)
+# Equivalents 10 bits : parse_raw_frame rend des Y sur 0-1023, donc y_avg x4 et
+# variance x16 a contenu identique. Sans ces deux seuils, les deux gardes
+# ci-dessus etaient quasi inoperantes sur le 10 bits — c'est-a-dire sur la
+# quasi-totalite des UHD, exactement la population que §7 doit juger (#823).
+FAKE_4K_FFT_MIN_Y_AVG_10BIT = 80.0
+FAKE_4K_FFT_MIN_VARIANCE_10BIT = 3200.0
 FAKE_4K_MIN_HEIGHT = 1800  # skip si pas 4K
 FAKE_4K_VERDICT_MIN_HEIGHT = 2100  # seuil verdict cross-metrique (UHD confirme)
+# Confiance du verdict combine quand UN SEUL des deux signaux (§7 FFT / §13 SSIM)
+# est disponible : au-dessus de "aucun signal" (0.30), en-dessous du desaccord
+# a deux signaux (0.70). Un detecteur seul ne peut etre corrobore par personne.
+# 0.60 est la valeur deja retenue sur main pour le cas "4k_native" mono-signal
+# (audit-bot:2026-07-25-A1) ; elle est ici NOMMEE et etendue au cas
+# "fake_4k_probable" mono-signal (#804), qui gardait 0.70 par omission.
+FAKE_4K_CONFIDENCE_SINGLE_SIGNAL = 0.60
 
 # ---------------------------------------------------------------------------
 # §8 v7.5.0 — Interlacing / Crop / Judder / IMAX
@@ -388,6 +415,16 @@ GRAIN_ERA_V2 = {
     "digital_modern": 2021,
     "digital_hdr_era": 9999,
 }
+
+# Eres "master pellicule vintage" au sens de la regle 9 du score composite V2
+# (tolerance : le grain y est attendu, on ne le compte donc pas deux fois).
+# Le set est celui de la spec (docs/internal/plans/NOTES_RECHERCHE_v7_5_0.md,
+# "Regle 9 — Vintage master").
+# INVARIANT : sous-ensemble strict des cles de GRAIN_ERA_V2. L'audit #444 avait
+# trouve la regle ecrite sur "35mm_golden"/"early_color", deux valeurs qui
+# n'existent nulle part -> regle morte pour toute ere autre que 16mm_era.
+# `test_vintage_eras_all_exist_in_grain_era_v2` verrouille cet invariant.
+GRAIN_VINTAGE_ERAS_V2 = ("16mm_era", "35mm_classic")
 
 # Profils attendus par ere
 GRAIN_PROFILE_BY_ERA_V2 = {
@@ -532,8 +569,17 @@ MEL_SOFT_CLIP_HARMONICS_SEVERE_PCT = 30.0
 MEL_MP3_SHELF_DROP_DB = 20.0  # drop minimum pour detecter shelf
 MEL_MP3_SHELF_MIN_FRAMES_PCT = 70.0  # % frames avec drop
 
+# Plancher de la conversion lineaire -> dB (mel_to_db). Toute valeur du
+# spectrogramme mel est clippee a [-MEL_TOP_DB, 0].
+MEL_TOP_DB = 80.0
+
 # AAC holes (trous spectraux bas bitrate)
-MEL_AAC_HOLE_THRESHOLD_DB = -80.0  # < ce seuil = bande "trouee"
+# INVARIANT (issue #660) : le seuil doit rester STRICTEMENT SUPERIEUR au plancher
+# -MEL_TOP_DB. A -80.0 il etait EGAL au plancher, donc `band_means < seuil` etait
+# mathematiquement impossible et la detection ne pouvait rien rendre d'autre que
+# "normal". Marge choisie : 10 dB au-dessus du plancher, soit ~40 dB sous la bande
+# de contenu reel la plus faible mesuree sur signaux synthetiques (-31 dB).
+MEL_AAC_HOLE_THRESHOLD_DB = -70.0  # < ce seuil = bande "trouee"
 MEL_AAC_HOLE_RATIO_WARN = 0.05  # 5% bandes avec trous
 MEL_AAC_HOLE_RATIO_SEVERE = 0.10  # 10% bandes
 MEL_AAC_SYNTHETIC_VARIANCE_THRESHOLD = 0.05  # variance bandes synthetiques

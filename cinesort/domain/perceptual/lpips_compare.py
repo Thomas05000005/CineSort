@@ -11,6 +11,7 @@ desactivee, pas de plantage).
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,8 +107,6 @@ def _is_ort_available() -> bool:
 def _resolve_model_path(model_path: str = LPIPS_MODEL_PATH) -> Optional[Path]:
     """Resolve LPIPS ONNX model (bundle ou source), None si absent."""
     candidates = [Path(model_path)]
-    import sys
-
     if getattr(sys, "frozen", False):
         candidates.insert(0, Path(sys._MEIPASS) / model_path)  # type: ignore[attr-defined]
     for p in candidates:
@@ -308,10 +307,14 @@ def compute_lpips_distance_pair(
         logger.warning("LPIPS inference erreur : %s", exc)
         return None
 
-    raw = outputs[0]
     try:
+        # outputs peut etre [] (run partiel) -> IndexError
+        # outputs[0] peut etre None (legacy onnxruntime sur certaines versions)
+        # -> np.asarray(None) renvoie array(None, dtype=object), reshape OK,
+        # mais float(None) -> TypeError. Couvrir les 3 cas.
+        raw = outputs[0]
         return float(np.asarray(raw).reshape(-1)[0])
-    except (IndexError, ValueError):
+    except (IndexError, ValueError, TypeError):
         return None
 
 

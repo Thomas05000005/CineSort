@@ -14,7 +14,9 @@ Persistance :
   additif, aucun chemin d'annulation) n'est plus ecrit : les marques deja sur
   disque sont migrees a la lecture (migrate_legacy_deletion_marks) puis le
   fichier est supprime.
-- Les exports sont ecrits dans `%LOCALAPPDATA%/CineSort/exports/`.
+- Les exports sont ecrits dans `<state_dir>/exports/` — le `state_dir` des
+  settings, pas le dossier par defaut (issue #522). Sans `state_dir` configure,
+  cela reste `%LOCALAPPDATA%/CineSort/exports/`.
 - Les rescans sont lances via JobRunner (job background).
 """
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import io
 import json
 import logging
 import os
@@ -34,6 +37,7 @@ from cinesort.app.merge_metadata import merge_metadata
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
+from cinesort.ui.api import run_flow_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -476,8 +480,6 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
       5. Met a jour le plan.jsonl : remplace l'ancienne row par la nouvelle
          (avec nouveau score / confidence / proposed_title / candidates).
     """
-    from cinesort.ui.api import run_flow_support  # noqa: PLC0415
-
     base_result = run_flow_support.rescan_row(api, run_id, row_id)
     if not isinstance(base_result, dict) or not base_result.get("ok"):
         return (
@@ -801,19 +803,26 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     _carry_over_scan_only_fields(target, new_row_json)
 
     all_rows[target_idx] = new_row_json
-    tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as fp:
-        for r in all_rows:
-            fp.write(json.dumps(r, ensure_ascii=False) + "\n")
-    tmp_path.replace(plan_jsonl)
+    # Le `.tmp` etait NOMME EN DUR (`plan_jsonl.suffix + ".tmp"`) ici ET dans
+    # `tmdb_support.enrich_tmdb_ids_by_title` : deux ecrivains reellement
+    # concurrents sur le MEME chemin intermediaire (#732), sans fsync, sur le
+    # fichier que l'apply relit pour renommer les dossiers. Cf write_plan_jsonl.
+    # Un SEUL import differe de `run_data_support` pour les deux symboles : le
+    # cliquet `test_lazy_imports_bounded` (main, #83) compte les *statements*,
+    # et en ajouter un second a quatre lignes du premier faisait passer la
+    # couche ui de 110 a 112 sans rien differer de plus.
+    from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
+        resync_run_state_rows,
+        write_plan_jsonl,
+    )
+
+    write_plan_jsonl(plan_jsonl, all_rows)
 
     # AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : plan.jsonl vient de changer, mais le
     # snapshot memoire RunState.rows (prefere par get_plan ET par l'apply) date
     # toujours de la fin du scan -> sans cette resynchronisation, l'UI reaffiche
     # l'ancien match et l'apply renomme le dossier avec l'ANCIEN titre/annee/
     # edition (le re-scan parait sans effet jusqu'au redemarrage de l'app).
-    from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
-
     resync_run_state_rows(api, run_id)
 
     if tmdb is not None:
@@ -958,8 +967,6 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
     """
 
     def job_fn(should_cancel, should_pause=None) -> Dict[str, Any]:
-        import time as _time
-
         processed = 0
         skipped = 0
         for rid in row_ids:
@@ -969,7 +976,7 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
                     while bool(should_pause()):
                         if should_cancel():
                             break
-                        _time.sleep(0.5)
+                        time.sleep(0.5)
                 except Exception:  # noqa: BLE001
                     pass
             if should_cancel():
@@ -1086,26 +1093,50 @@ def rescan_row(
 # ---------------------------------------------------------------------------
 
 
+# Colonnes de l'export, dans l'ordre — SOURCE UNIQUE.
+# Cette constante existait mais n'etait lue nulle part : la liste etait re-ecrite
+# a la main 3 fois (entete CSV, ordre des valeurs CSV, cles de
+# `_row_to_export_dict`), et la copie morte avait deja DERIVE (elle annoncait
+# `tier_v2` / `audio_languages` / `subtitle_languages` la ou l'export emet
+# `tier` / `audio_langs` / `subs_langs`). Les 3 sites en derivent desormais, et
+# `test_export_fields_single_source` verrouille l'alignement.
 _EXPORT_FIELDS = (
     "row_id",
     "title",
     "year",
     "score_v2",
-    "tier_v2",
+    "tier",
     "path",
     "size_bytes",
     "duration_min",
     "codec",
     "resolution",
-    "audio_languages",
-    "subtitle_languages",
+    "audio_langs",
+    "subs_langs",
     "warnings",
 )
 
 
-def _exports_dir() -> Path:
-    """Repertoire des exports : `%LOCALAPPDATA%/CineSort/exports/`."""
-    base = state.default_state_dir() / "exports"
+def _exports_dir(api: Any) -> Path:
+    """Repertoire des exports : `<state_dir>/exports/`.
+
+    Issue #522 : cette fonction ecrivait toujours dans
+    `state.default_state_dir()/exports` (= `%LOCALAPPDATA%/CineSort/exports/`),
+    en ignorant le `state_dir` configure par l'utilisateur. Un user-data
+    deplace (NAS, 2e disque) laissait donc l'export dans l'ancien emplacement,
+    hors de la zone que le reste du produit lit et purge.
+
+    La zone d'ecriture reste BORNEE au dossier d'etat : on ne prend pas un
+    chemin quelconque, seulement `settings["state_dir"]`, resolu par le meme
+    `normalize_user_path` que les 5 autres sites du module. `state_dir` absent
+    ou vide retombe sur `state.default_state_dir()` : comportement actuel
+    inchange pour une configuration par defaut.
+    """
+    settings = api.settings.get_settings()
+    state_dir = normalize_user_path(
+        settings.get("state_dir") if isinstance(settings, dict) else None, state.default_state_dir()
+    )
+    base = state_dir / "exports"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -1186,7 +1217,7 @@ def export_films(
     count = len(export_rows)
 
     try:
-        exports_dir = _exports_dir()
+        exports_dir = _exports_dir(api)
         ts = time.strftime("%Y%m%d_%H%M%S")
         fname = f"library_export_{resolved}_{ts}.{fmt_norm}"
         file_path = exports_dir / fname
@@ -1197,47 +1228,20 @@ def export_films(
             # (dashboard_support.write_run_report_file / report_to_csv_text) :
             # BOM UTF-8 (`utf-8-sig`) + separateur ";". Sans BOM Excel FR casse
             # les accents ; avec le "," par defaut il ouvre tout en une colonne.
-            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
-                writer = csv.writer(fp, delimiter=";")
-                writer.writerow(
-                    [
-                        "row_id",
-                        "title",
-                        "year",
-                        "score_v2",
-                        "tier",
-                        "path",
-                        "size_bytes",
-                        "duration_min",
-                        "codec",
-                        "resolution",
-                        "audio_langs",
-                        "subs_langs",
-                        "warnings",
-                    ]
-                )
-                for row in export_rows:
-                    writer.writerow(
-                        [
-                            _serialize_for_csv(row.get(k))
-                            for k in [
-                                "row_id",
-                                "title",
-                                "year",
-                                "score_v2",
-                                "tier",
-                                "path",
-                                "size_bytes",
-                                "duration_min",
-                                "codec",
-                                "resolution",
-                                "audio_langs",
-                                "subs_langs",
-                                "warnings",
-                            ]
-                        ]
-                    )
+            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01)
+            # et se transpose ici en `io.StringIO(newline="")` : aucune
+            # traduction de fin de ligne, donc exactement les memes octets.
+            #
+            # Issue #479 site 2 : c'etait la DERNIERE branche non atomique de
+            # cette fonction — JSON passait deja par `state.atomic_write_json`,
+            # NDJSON par `state.atomic_write_text`. L'export CSV ecrivait en
+            # place, donc Excel/LibreOffice pouvait ouvrir un fichier tronque.
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer, delimiter=";")
+            writer.writerow(list(_EXPORT_FIELDS))
+            for row in export_rows:
+                writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            state.atomic_write_text(file_path, buffer.getvalue(), encoding="utf-8-sig")
             return {
                 "ok": True,
                 "file_path": str(file_path),
@@ -1267,11 +1271,15 @@ def export_films(
             }
 
         # NDJSON : 1 ligne JSON par film (newline-delimited JSON), streamable.
-        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8", newline="\n") as fp:
-            for row in export_rows:
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
-        tmp_path.replace(file_path)
+        # Meme `.tmp` en dur que le reste de la famille #732 : deux exports
+        # concurrents (ThreadingHTTPServer) visaient le meme intermediaire, et
+        # aucun fsync ne protegeait la promotion d'un fichier tronque. Le
+        # helper fait les deux. `newline="\n"` etait deja explicite : l'ecriture
+        # binaire du helper produit exactement les memes octets.
+        state.atomic_write_text(
+            file_path,
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in export_rows),
+        )
         return {
             "ok": True,
             "file_path": str(file_path),

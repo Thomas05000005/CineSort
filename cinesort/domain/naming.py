@@ -104,6 +104,36 @@ _CLEANUP_PATTERNS = [
     (re.compile(r"\s{2,}"), " "),  # espaces multiples
 ]
 
+# --- Anti-mutilation : garde sur la deduplication d'annee de queue ---------
+#
+# Regle inviolable n2 : une heuristique qui PEUT amputer un titre doit etre
+# ABANDONNEE, pas rafistolee.
+#
+# `title_helpers.strip_trailing_year_if_equal` retire l'annee de QUEUE d'un titre
+# quand elle egale {year}, pour eviter "Le Havre 2011 (2011)". Sur un titre qui
+# porte une PLAGE d'annees, la borne HAUTE de la plage est, textuellement, une
+# annee de queue. Mesure sur un scan reel (dossier `Le.Parrain.Trilogie.1972-1990/`
+# contenant 3 .mkv), avant ce garde-fou :
+#     Le Parrain Trilogie 1972-1990 (1972)
+#     Le Parrain Trilogie 1972-1990 (1974)
+#     Le Parrain Trilogie 1972      (1990)   <- ampute, et INCOHERENT avec ses soeurs
+# et l'apply DEPLACE : les 3 films de la meme trilogie finissaient dans 3 dossiers
+# de noms differents, dont un FAUX ("Trilogie 1972"), avec errors=0.
+#
+# On ne cherche PAS a reconnaitre une plage : chaque separateur oublie rouvrirait
+# le trou ('-', ' - ', en-dash, '/', parentheses...) — c'est exactement l'iteration
+# que la regle interdit. On exige la preuve INVERSE, qui ne depend d'aucun
+# separateur : le strip n'est autorise que si le titre ne contient qu'UN SEUL
+# jeton d'annee (celui de queue), donc que sa suppression ne peut rien detruire
+# d'autre que la redondance visee. Deux jetons ou plus -> ABSTENTION totale, le
+# titre passe intact. Une redondance cosmetique ("Titre 1999 2001 (2001)") reste
+# toujours preferable a une amputation.
+#
+# Effet de bord voulu : la garde ne depend que du TITRE, jamais de l'annee de la
+# ligne. Deux lignes soeurs issues du meme dossier source, qui partagent donc le
+# meme titre, sont desormais tranchees a l'identique.
+_YEAR_TOKEN_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+
 # Seuil de warning pour la longueur du path (preventif, ~20 chars de marge avant MAX_PATH)
 _PATH_LENGTH_WARNING = 240
 
@@ -363,6 +393,32 @@ def format_tv_series_folder(template: str, context: Dict[str, str]) -> str:
     return _apply_template(tpl, context)
 
 
+def _dedupe_trailing_year(value: str, year: int) -> str:
+    """Retire l'annee de queue redondante de *value*, mais SEULEMENT si c'est prouvablement sur.
+
+    Garde anti-mutilation (cf. `_YEAR_TOKEN_RE`) : si *value* contient plus d'un
+    jeton d'annee (`19xx`/`20xx`), l'annee de queue n'est plus prouvablement
+    redondante — elle peut etre la borne haute d'une plage ("1972-1990",
+    "1977 - 2019") ou une seconde annee signifiante. Dans ce cas on ABSTIENT :
+    *value* est retourne intact, quitte a laisser une redondance cosmetique.
+
+    Args:
+        value: Titre/serie a dedupliquer (jamais un nom de fichier video).
+        year: Annee que le template va reinjecter via `{year}`.
+
+    Returns:
+        *value* prive de son annee de queue si et seulement si cette annee est
+        l'unique jeton d'annee du titre ET qu'elle egale *year* ; *value* intact
+        dans tous les autres cas.
+    """
+    if len(_YEAR_TOKEN_RE.findall(value)) != 1:
+        return value
+    # Import tardif : casse le cycle domain<->domain (title_helpers <- core <- naming).
+    from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
+    return strip_trailing_year_if_equal(value, year)
+
+
 def _apply_template(template: str, context: Dict[str, str]) -> str:
     """Substitue les variables, nettoie les separateurs orphelins, sanitise pour Windows."""
 
@@ -371,16 +427,16 @@ def _apply_template(template: str, context: Dict[str, str]) -> str:
     # l'année, ex. "Le Havre 2011"). Sinon "{title} ({year})" produirait "Le Havre 2011 (2011)".
     # CONDITIONNÉ à "{year}" dans le template -> un template SANS {year} conserve l'année du titre
     # (pas de perte d'info). "Blade Runner 2049" (≠ année de sortie) et un titre-année nu ("1984")
-    # sont préservés par le helper. Copie locale : ne mute pas le contexte de l'appelant.
+    # sont préservés par le helper. Les titres portant une PLAGE d'années sont préservés par la
+    # garde anti-mutilation de `_dedupe_trailing_year`. Copie locale : ne mute pas le contexte
+    # de l'appelant.
     if "{year}" in (template or "") and context.get("year"):
         try:
-            from cinesort.domain.title_helpers import strip_trailing_year_if_equal
-
             _yr = int(context["year"])
             context = dict(context)
             for _key in ("title", "series", "original_title"):
                 if context.get(_key):
-                    context[_key] = strip_trailing_year_if_equal(context[_key], _yr)
+                    context[_key] = _dedupe_trailing_year(context[_key], _yr)
         except (TypeError, ValueError):
             pass
 
@@ -590,17 +646,43 @@ def folder_matches_template(
     template: str,
     title: str,
     year: int,
+    *,
+    edition: str = "",
+    separator: Optional[str] = None,
 ) -> bool:
     """Verifie si un nom de dossier correspond au resultat attendu du template.
 
-    Compare le nom normalise du dossier avec le resultat formate du template.
-    Le template est applique avec un contexte minimal (title + year) puis
-    compare au dossier via normalisation tokens.
+    Le contrat est : « ce dossier porte-t-il DEJA le nom que le renommage
+    ecrirait ? ». La reponse doit donc etre calculee avec **exactement** la
+    meme chaine de rendu que les ecrivains reels (`apply_core.apply_single` et
+    son miroir `duplicate_support.planned_target_folder`), sinon la conformance
+    diverge de l'apply et on propose des renommages sans effet.
+
+    Ces ecrivains appellent `build_naming_context(title=, year=, edition=,
+    separator=)` — ni probe, ni qualite, ni tmdb_id. Les placeholders
+    `{resolution}`, `{video_codec}`, `{tmdb_tag}`, `{quality}`, `{score}`... ne
+    sont donc JAMAIS alimentes sur le chemin de renommage (seul l'apercu des
+    reglages, `cinesort_api`, leur passe un probe). Un dossier qui porte un de
+    ces segments n'est pas conforme : l'apply lui retirerait. Les elargir ici
+    (regex `.*` sur placeholder variable) rendrait la conformance PLUS permissive
+    que l'ecrivain et casserait l'invariant « planned == apply par construction »
+    (cf. `duplicate_support.planned_target_folder`). Cf. #469.
+
+    `edition` et `separator`, eux, SONT alimentes par les ecrivains : sans eux un
+    dossier « Titre (Annee) {edition-Director's Cut} » produit par l'apply etait
+    juge non conforme a son propre template.
+
+    Args:
+        folder_name: nom de dossier existant sur disque.
+        template: `cfg.naming_movie_template`.
+        title / year: identite retenue pour ce film.
+        edition: edition detectee (`row.edition`), telle que passee a l'apply.
+        separator: `cfg.separator`, tel que passe a l'apply (None -> defaut " ").
     """
     if not folder_name or not title:
         return False
 
-    ctx = build_naming_context(title=title, year=year)
+    ctx = build_naming_context(title=title, year=year, edition=edition or "", separator=separator)
     expected = format_movie_folder(template, ctx)
 
     # Comparaison normalisee (ignorer casse, espaces multiples)

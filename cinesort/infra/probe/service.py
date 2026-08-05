@@ -3,12 +3,15 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import sqlite3
 import subprocess
+import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.probe_models import NormalizedProbe
 from cinesort.infra.db import SQLiteStore
@@ -31,6 +34,93 @@ from .normalize import normalize_probe
 from .tooling import RunnerFn, ToolStatus, WhichFn, default_runner, get_tools_status
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# PERF-N1 (2026-08-03) : cache `get_tools_status` au niveau PROCESSUS.
+#
+# Le cache porte par `self` (PERF-1, v7.8.0) ne servait JAMAIS : chaque appelant
+# de production construit un `ProbeService` NEUF (quality_report_support.py:88,
+# perceptual_support.py, probe_support.py, quality_support.py,
+# runtime_probe_check.py), donc l'instance meurt avant son second probe.
+# Mesure en conditions reelles (10 rapports qualite, bac a sable 12 films) :
+# 40 `CreateProcess`, soit 4 sous-processus `--version` par rapport, ALORS QUE
+# `probe_backend` valait `none`.
+#
+# Le cache processus est volontairement BORNE DANS LE TEMPS (TTL). Sans TTL, un
+# ffprobe installe pendant que l'app tourne resterait invisible pour toute la
+# duree du processus -- regression par rapport au cache d'instance actuel, qui
+# repartait de zero a chaque rapport. Le TTL de 90 s est celui deja retenu par
+# `probe_support.probe_tools_status_payload` pour le meme genre de detection :
+# on garde une seule borne de fraicheur dans l'application.
+#
+# L'entree memorise AUSSI le `runner` et le `which_fn` qui l'ont produite, et la
+# reutilise seulement s'ils sont IDENTIQUES (comparaison d'identite). Sans cette
+# garde, deux `ProbeService` construits avec des doublures differentes mais la
+# meme signature de chemins (cas courant dans la batterie : `runner=spy`,
+# `which_fn=lambda name: str(name)`) se partageraient un resultat etranger.
+_TOOLS_STATUS_CACHE_TTL_S = 90.0
+_TOOLS_STATUS_CACHE_MAX_ENTRIES = 8
+_tools_status_cache_lock = threading.Lock()
+_tools_status_cache: "OrderedDict[str, Tuple[Any, Any, float, Dict[str, ToolStatus]]]" = OrderedDict()
+
+# Message porte par les ToolStatus quand la sonde est desactivee : on ne pretend
+# PAS que le binaire est absent, on dit qu'il n'a pas ete sonde (memoire user :
+# une degradation n'est jamais silencieuse, et un echec n'est jamais un succes).
+PROBE_DISABLED_TOOL_MESSAGE = "Probe desactivee (probe_backend=none) : binaire non sonde."
+
+
+def reset_tools_status_cache() -> None:
+    """Vide le cache processus de `get_tools_status`.
+
+    Utilise par `ProbeService.invalidate_tools_status_cache` et par les tests
+    qui veulent repartir d'un etat propre.
+    """
+    with _tools_status_cache_lock:
+        _tools_status_cache.clear()
+
+
+def _tools_status_probe_disabled() -> Dict[str, ToolStatus]:
+    """ToolStatus rendus quand `probe_backend == none` : aucun binaire sonde.
+
+    `probe_file` n'utilise les ToolStatus que dans les branches
+    mediainfo/ffprobe/auto -- jamais dans la branche `none`
+    (`_is_tool_unavailable_failure` et `_is_tool_definitely_unavailable`
+    retournent False d'entree pour ce backend). Les sonder coutait donc
+    2 `CreateProcess` par appel pour une valeur que personne ne lit.
+    """
+    return {
+        name: ToolStatus(
+            name=name,
+            available=False,
+            path="",
+            version="",
+            message=PROBE_DISABLED_TOOL_MESSAGE,
+        )
+        for name in ("mediainfo", "ffprobe")
+    }
+
+
+def _tools_status_cache_get(sig: str, runner: Any, which_fn: Any, now: float) -> Optional[Dict[str, ToolStatus]]:
+    with _tools_status_cache_lock:
+        entry = _tools_status_cache.get(sig)
+        if entry is None:
+            return None
+        cached_runner, cached_which, ts, tools = entry
+        if cached_runner is not runner or cached_which is not which_fn:
+            return None
+        if (now - ts) >= _TOOLS_STATUS_CACHE_TTL_S:
+            _tools_status_cache.pop(sig, None)
+            return None
+        _tools_status_cache.move_to_end(sig)
+        return tools
+
+
+def _tools_status_cache_put(sig: str, runner: Any, which_fn: Any, now: float, tools: Dict[str, ToolStatus]) -> None:
+    with _tools_status_cache_lock:
+        _tools_status_cache[sig] = (runner, which_fn, now, tools)
+        _tools_status_cache.move_to_end(sig)
+        while len(_tools_status_cache) > _TOOLS_STATUS_CACHE_MAX_ENTRIES:
+            _tools_status_cache.popitem(last=False)
 
 
 def _normalize_backend(value: Any) -> str:
@@ -96,9 +186,7 @@ class ProbeService:
         self.store = store
         self.runner = runner
         if which_fn is None:
-            from shutil import which as default_which
-
-            self.which_fn = default_which
+            self.which_fn = shutil.which
         else:
             self.which_fn = which_fn
         # PERF-1 (Phase 2 v7.8.0) : cache `get_tools_status` par signature
@@ -121,26 +209,48 @@ class ProbeService:
 
         A appeler depuis save_settings() apres changement des paths probe.
         Idempotent : peut etre appele a vide sans effet.
+
+        PERF-N1 : vide AUSSI le cache processus, sinon l'invalidation ne
+        porterait que sur cette instance et le prochain `ProbeService` (neuf a
+        chaque rapport) resservirait l'entree perimee.
         """
         self._tools_status_cache = None
         self._tools_status_cache_sig = ""
+        reset_tools_status_cache()
 
     def _get_tools_cached(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """Variante cachee de la fonction module get_tools_status().
 
         Retourne le dict ToolStatus indexes par nom (cf appel ligne 145).
+
+        Trois etages, du moins cher au plus cher :
+
+        1. `probe_backend == none` -> aucun binaire n'est sonde du tout
+           (cf `_tools_status_probe_disabled`). C'est le cas mesure ou l'on
+           payait 2 `CreateProcess` par appel pour une sonde DESACTIVEE.
+        2. Cache d'instance (comportement historique, sans verrou).
+        3. Cache processus partage, borne par TTL et par identite du couple
+           (runner, which_fn) -- c'est lui qui rend le cache utile, l'instance
+           etant jetee apres un unique probe par tous les appelants reels.
+
         Cache lookup par (mediainfo_path, ffprobe_path) — si l'un change,
         on relance les 2 subprocess pour rester coherent.
         """
+        if str(cfg.get("probe_backend") or "") == "none":
+            return _tools_status_probe_disabled()
         sig = f"{cfg.get('mediainfo_path', '')}|{cfg.get('ffprobe_path', '')}"
         if self._tools_status_cache is not None and self._tools_status_cache_sig == sig:
             return self._tools_status_cache
-        tools = get_tools_status(
-            mediainfo_path=cfg["mediainfo_path"],
-            ffprobe_path=cfg["ffprobe_path"],
-            runner=self.runner,
-            which_fn=self.which_fn,
-        )
+        now = time.monotonic()
+        tools = _tools_status_cache_get(sig, self.runner, self.which_fn, now)
+        if tools is None:
+            tools = get_tools_status(
+                mediainfo_path=cfg["mediainfo_path"],
+                ffprobe_path=cfg["ffprobe_path"],
+                runner=self.runner,
+                which_fn=self.which_fn,
+            )
+            _tools_status_cache_put(sig, self.runner, self.which_fn, now, tools)
         self._tools_status_cache = tools
         self._tools_status_cache_sig = sig
         return tools

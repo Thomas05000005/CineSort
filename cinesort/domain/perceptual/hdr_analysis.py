@@ -148,14 +148,32 @@ def detect_hdr_type(
     """Classifie le type HDR selon priorite stricte.
 
     Priorite :
-      1. HLG (arib-std-b67 transfer) — utilise pour broadcast
-      2. Dolby Vision (DOVI config record)
-      3. HDR10+ (SMPTE ST 2094-40 dynamic metadata)
-      4. HDR10 (smpte2084 + bt2020)
-      5. SDR (default)
+      1. Dolby Vision **atteste par un DOVI configuration record structure**
+         (side_data_type == "DOVI configuration record")
+      2. HLG (arib-std-b67 transfer) — utilise pour broadcast
+      3. Dolby Vision par simple marqueur textuel dans les side_data
+      4. HDR10+ (SMPTE ST 2094-40 dynamic metadata)
+      5. HDR10 (smpte2084 + bt2020)
+      6. SDR (default)
+
+    #470 — pourquoi un signal DISTINCTIF et pas une simple inversion HLG/DV :
+    le profil Dolby Vision 8.4 a une couche de base HLG, donc `transfer ==
+    arib-std-b67` ET un RPU DV ; l'ordre historique (HLG teste en premier) le
+    classait `hlg` (score 75) au lieu de `dolby_vision` (100). Mais inverser
+    les deux branches telles quelles aurait DEPLACE le faux positif :
+    `_side_data_contains(..., _SIDE_DATA_DV_MARKERS)` concatene *toutes* les
+    valeurs de chaque side_data et cherche la sous-chaine "dovi" / "dolby
+    vision" — un vrai HLG dont un champ libre mentionne "dovi_tool" serait
+    alors promu `dolby_vision`. On teste donc d'abord le signal STRUCTURE
+    (`extract_dv_configuration`, qui exige `side_data_type` == DOVI config
+    record), strictement plus etroit que le marqueur textuel : aucun cas
+    aujourd'hui classe autrement que `hlg` ne change de verdict.
     """
     transfer = (color_transfer or "").strip().lower()
     primaries = (color_primaries or "").strip().lower()
+
+    if extract_dv_configuration(side_data_list) is not None:
+        return "dolby_vision"
 
     if "arib-std-b67" in transfer or "hlg" in transfer:
         return "hlg"

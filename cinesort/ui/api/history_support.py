@@ -11,8 +11,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cinesort.infra.state as state
+from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
+from cinesort.domain.subtitle_helpers import _normalize_iso639
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
+# Imports MODULE-STYLE (pas `from X import f`) pour les modules `ui/api` :
+# `tests/test_get_plan_ignored_alerts_v77.py` patche
+# `cinesort.ui.api.library_support._get_store` ; un import de symbole figerait
+# le binding au chargement et le patch deviendrait inoperant EN SILENCE (le
+# test continuerait de passer en testant autre chose).
+from cinesort.ui.api import library_support, run_data_support, run_read_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -30,9 +40,7 @@ def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> Lis
     store indisponible, les flags bruts sont conserves.
     """
     try:
-        from cinesort.ui.api.library_support import _get_store
-
-        store = _get_store(api)
+        store = library_support._get_store(api)
         if store is None or not hasattr(store, "film_modal"):
             return payload_rows
         row_ids = [str(r.get("row_id") or "") for r in payload_rows if isinstance(r, dict)]
@@ -60,8 +68,6 @@ def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[st
     """Langues sous-titres présentes (externe ∪ embarqué) pour une row de PAYLOAD (dict).
     Même union externe∪embarqué que librarian.py:132-158 / library_support, mais lisant
     le DICT payload sérialisé (source unique de la réconciliation côté écran Traitement)."""
-    from cinesort.domain.subtitle_helpers import _normalize_iso639
-
     present: set = set()
     for lang in row.get("subtitle_languages") or []:
         norm = _normalize_iso639(lang) or str(lang).strip().lower()
@@ -81,38 +87,67 @@ def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[st
     return present
 
 
+def _full_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, Any]]) -> set:
+    """Langues avec une piste EMBARQUÉE complète (non forcée), pour une row de PAYLOAD.
+
+    F12 : réconcilie `subtitle_forced_only_<lang>` quand le film a en réalité une piste
+    complète MUXÉE que le scan n'a pas vue. On ne lit PAS `row["subtitle_languages"]` :
+    ce champ ne distingue pas une piste forcée d'une piste complète (cf. la garde de
+    `reconcile_subtitle_flags`)."""
+    qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
+    metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+    return run_read_support.full_langs_from_embedded(metrics.get("subtitles_embedded"))
+
+
 def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """[écran Traitement/Vérification] Enrichit chaque row du payload :
       - ``display_title`` : titre sans l'année dupliquée (colonne ANNÉE séparée),
       - ``warning_flags`` : réconciliés — retire les faux ``subtitle_missing_<lang>``
-        dont la langue est en fait présente (FR muxé ignoré au scan),
+        dont la langue est en fait présente (FR muxé ignoré au scan) et les faux
+        ``subtitle_forced_only_<lang>`` démentis par une piste muxée COMPLÈTE,
       - ``auto_approvable`` : bool (le frontend filtre « à examiner » sur NON auto_approvable
         et affiche « Cas à vérifier » = nombre de NON auto_approvable, cohérent backend).
     Best-effort : toute erreur (store/settings/quality indisponible) laisse le payload intact.
     """
     try:
-        from cinesort.domain.conversions import to_int
-        from cinesort.domain.title_helpers import strip_trailing_year_if_equal
-        from cinesort.ui.api.film_support import overlay_tmdb_override
-        from cinesort.ui.api.library_support import _get_store
-        from cinesort.ui.api.run_read_support import (
-            _AUTO_CRITICAL_WARNINGS,
-            _AUTO_INTEGRITY_WARNINGS,
-            _CONFLICT_FLAGS,
-            build_qr_by_id,
-            reconcile_subtitle_flags,
+        from cinesort.ui.api.film_support import (
+            apply_tmdb_overrides_bulk,
+            list_tmdb_overrides_bulk,
+            overlay_tmdb_override,
         )
 
-        store = _get_store(api)
+        store = library_support._get_store(api)
         qr_by_id: Dict[str, Dict[str, Any]] = {}
         if store is not None and hasattr(store, "quality"):
             with contextlib.suppress(Exception):
-                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+                qr_by_id = run_read_support.build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
         try:
             threshold = to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
         except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
             threshold = 85
-        blocking = _CONFLICT_FLAGS | _AUTO_CRITICAL_WARNINGS | _AUTO_INTEGRITY_WARNINGS
+        blocking = (
+            run_read_support._CONFLICT_FLAGS
+            | run_read_support._AUTO_CRITICAL_WARNINGS
+            | run_read_support._AUTO_INTEGRITY_WARNINGS
+        )
+        # PERF (ultra-audit 2026-08, CRITICAL) : les overrides TMDb du run sont
+        # lus en UNE requete au lieu de 2 connexions SQLite PAR ROW (2N pour un
+        # plan de N films : 40 s / 2002 connexions mesurees a N=1000, meme table
+        # vide). `None` = lecture bulk indisponible OU partielle -> on retombe
+        # sur le chemin par row (dans la boucle), lent mais correct : jamais un
+        # plan silencieusement privé de ses overrides. `{}` = run réellement
+        # sans override -> rien à appliquer, mais les rows sont bien marquées.
+        #
+        # `apply_tmdb_overrides_bulk` pose `TMDB_OVERLAY_DONE_KEY` lui-même sur
+        # les rows traitées (PR #849) : sans cela, `library_support` — qui est
+        # fail-closed sur ce marqueur — reprendrait la relecture par row et le
+        # N+1 supprimé ici reviendrait par la vue Bibliothèque. Il est appelé
+        # AVANT la boucle : l'overlay doit précéder le calcul de
+        # `display_title`, qui lit `proposed_title`/`proposed_year`.
+        overrides = list_tmdb_overrides_bulk(store, run_id)
+        if overrides is not None:
+            with contextlib.suppress(Exception):
+                apply_tmdb_overrides_bulk(payload_rows, overrides)
 
         for row in payload_rows:
             if not isinstance(row, dict):
@@ -121,8 +156,11 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
             # calcul, pour que la Validation pré-cochée seede le bon titre/année/
             # confiance (traitement.js lit r.proposed_year) et que l'apply voie le
             # même titre que le modal fiche film / que l'overlay _validate_apply.
-            with contextlib.suppress(Exception):
-                overlay_tmdb_override(store, run_id, row)
+            # Chemin de repli uniquement : le lot a déjà été appliqué ci-dessus
+            # quand la lecture groupée a abouti.
+            if overrides is None:
+                with contextlib.suppress(Exception):
+                    overlay_tmdb_override(store, run_id, row)
             try:
                 # 1) titre d'affichage sans année dupliquée (helper testé, protège "Blade Runner 2049")
                 with contextlib.suppress(Exception):
@@ -134,7 +172,9 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
                 flags = row.get("warning_flags")
                 if isinstance(flags, list) and qr_by_id:
                     present = _present_langs_from_payload(row, qr_by_id)
-                    row["warning_flags"] = reconcile_subtitle_flags(flags, present)
+                    row["warning_flags"] = run_read_support.reconcile_subtitle_flags(
+                        flags, present, _full_langs_from_payload(row, qr_by_id)
+                    )
                 # 3) auto_approvable (sur les flags réconciliés). to_int : robuste à un
                 #    proposed_year/confidence non numérique (n'abandonne pas la boucle).
                 cur = {str(f) for f in (row.get("warning_flags") or [])}
@@ -167,13 +207,17 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
         }
 
 
-def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
-    logger.debug("api: get_plan run_id=%s", run_id)
+def _load_plan_rows(api: Any, run_id: str, *, normalize_user_path: Any) -> Tuple[Any, Dict[str, Any] | None]:
+    """Charge les PlanRow d'un run : memoire d'abord, puis plan.jsonl.
+
+    Retourne ``(rows, None)`` ou ``(None, reponse_erreur)``. Extrait de
+    ``_get_plan_impl`` pour que ``get_plan_row`` (fiche film) partage EXACTEMENT
+    les memes regles de resolution et les memes messages d'erreur.
+    """
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+            return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
         rows = rs.rows
         if not rows:
             try:
@@ -183,42 +227,80 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
                 # legitime (run cleanup orphelin, run FAILED dont le plan.jsonl
                 # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
                 # eviter la pollution des logs.
-                return _err_response(str(exc), category="state", level="debug", log_module=__name__)
-        return {
-            "ok": True,
-            "rows": _enrich_plan_payload(
-                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
-            ),
-        }
+                return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+        return rows, None
 
     found = api._find_run_row(run_id)
     if not found:
-        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
+        return None, _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     row, _store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+        return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir), run_id, ensure_exists=False
     )
     try:
-        rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {
-            "ok": True,
-            "rows": _enrich_plan_payload(
-                api, run_id, _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))
-            ),
-        }
+        return api._load_rows_from_plan_jsonl(run_paths), None
     except (OSError, KeyError, TypeError, ValueError) as exc:
         # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
+        return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+
+
+def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
+    logger.debug("api: get_plan run_id=%s", run_id)
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None:
+        return err
+    try:
+        payload = api._serialize_rows_for_payload(rows)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="state", level="debug", log_module=__name__)
+    return {"ok": True, "rows": _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))}
+
+
+def _row_id_of(row: Any) -> str:
+    """row_id d'une PlanRow (dataclass) ou d'une row deja serialisee (dict)."""
+    if isinstance(row, dict):
+        return str(row.get("row_id") or "")
+    return str(getattr(row, "row_id", "") or "")
+
+
+def get_plan_row(api: Any, run_id: str, row_id: str, *, normalize_user_path: Any) -> Dict[str, Any] | None:
+    """UNE row de plan enrichie, sans serialiser NI enrichir tout le plan.
+
+    PERF (ultra-audit 2026-08, HIGH) : la fiche film passait par
+    ``run/get_plan``, qui serialise les N rows du run et les enrichit toutes
+    (2 connexions SQLite par row pour l'override TMDb), pour ensuite jeter les
+    N-1 autres : 9,2 s et ~2000 connexions mesurees a N=1000 pour renvoyer une
+    seule ligne. On filtre desormais la PlanRow AVANT la serialisation et on ne
+    fait passer qu'elle dans la MEME chaine (alertes ignorees, override TMDb,
+    reconciliation des sous-titres, display_title, auto_approvable) : memes
+    champs en sortie, cout independant de la taille du plan.
+
+    Retourne ``None`` si le run, le plan ou la row sont introuvables — c'est le
+    contrat attendu par les appelants (fiche film), qui rendent alors leur
+    propre erreur "Film introuvable".
+    """
+    wanted = str(row_id or "")
+    if not wanted:
+        return None
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None or not rows:
+        return None
+    match = next((r for r in rows if _row_id_of(r) == wanted), None)
+    if match is None:
+        return None
+    payload = api._serialize_rows_for_payload([match])
+    if not payload:
+        return None
+    enriched = _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))
+    return enriched[0] if enriched else None
 
 
 @requires_valid_run_id
 def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    from cinesort.domain.conversions import to_bool
-    from cinesort.ui.api.run_read_support import seed_auto_approve_decisions
-
     rs = api._get_run(run_id)
     if rs:
         path = rs.paths.validation_json
@@ -235,7 +317,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
             if not _auto_on:
                 return {"ok": True, "decisions": {}}
             rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
-            seeded = seed_auto_approve_decisions(api, rows, {})
+            seeded = run_read_support.seed_auto_approve_decisions(api, rows, {})
             return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -244,7 +326,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
                 if not rows:
                     rows = api._load_rows_from_plan_jsonl(rs.paths)
                 # [auto-approve] Overlay read-only ; no-op si le flag est off.
-                seeded = seed_auto_approve_decisions(api, rows, data)
+                seeded = run_read_support.seed_auto_approve_decisions(api, rows, data)
                 return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
             return {"ok": True, "decisions": {}}
         except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -267,7 +349,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
         # [auto-approve] Overlay read-only ; no-op si le flag est off.
-        seeded = seed_auto_approve_decisions(api, rows, data)
+        seeded = run_read_support.seed_auto_approve_decisions(api, rows, data)
         return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         api._debug_log(
@@ -408,25 +490,18 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # compute_total_fallback() pour aligner avec dashboard/run_flow (avant
     # cet helper, history priorisait row.total puis stats.planned_rows,
     # dashboard l'inverse, run_flow ne lisait que row.total).
-    from cinesort.ui.api.run_data_support import (
-        compute_total_fallback as _compute_total_fallback,
-    )
-    from cinesort.ui.api.run_data_support import (
-        count_plan_rows as _count_plan_rows,
-    )
-
     try:
         _hist_run_paths = api._run_paths_for(
             normalize_user_path(row.get("state_dir"), api._state_dir),
             run_id,
             ensure_exists=False,
         )
-        total_rows = _count_plan_rows(
+        total_rows = run_data_support.count_plan_rows(
             _hist_run_paths,
-            fallback=_compute_total_fallback(row, stats_obj),
+            fallback=run_data_support.compute_total_fallback(row, stats_obj),
         )
     except (AttributeError, OSError, TypeError, ValueError):
-        total_rows = _compute_total_fallback(row, stats_obj)
+        total_rows = run_data_support.compute_total_fallback(row, stats_obj)
     # AUDIT 2026-07-13 (HIGH-7) : applied_count vit dans apply_batches.summary_json
     # (ecrit par l'apply), PAS dans runs.stats_json (cle jamais ecrite) -> lecture
     # de la source reelle (repare retroactivement les runs deja en base). Le
@@ -720,6 +795,40 @@ def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
     }
 
 
+def _real_path(value: Path) -> Path:
+    """Chemin REEL canonise, pour comparer des chemins et non des chaines.
+
+    ``os.path.realpath`` resout jonctions NTFS, points de montage, noms courts
+    8.3 et liens ; ``os.path.normcase`` neutralise la casse (NTFS est
+    insensible a la casse). Les DEUX cotes d'une comparaison de zone doivent
+    passer par ici : sinon deux ecritures du meme chemin reel paraissent
+    differentes et un dossier legitime est refuse.
+    """
+    return Path(os.path.normcase(os.path.realpath(str(value))))
+
+
+def _configured_roots(settings: Dict[str, Any]) -> List[str]:
+    """Racines de bibliotheque configurees, sous forme de chaines NON VIDES.
+
+    `settings["roots"]` (pluriel) est la source de verite depuis le multi-root ;
+    `settings["root"]` n'en est que le premier element, conserve pour la
+    retro-compat (cf `settings_support._migrate_root_to_roots`). Un settings
+    ancien ou tronque peut n'avoir que `root` : on retombe dessus.
+
+    Les entrees vides sont ECARTEES : elles ne doivent jamais atteindre
+    `normalize_user_path`, qui rendrait alors le `default` (= la racine par
+    defaut du produit) et elargirait la zone autorisee a un dossier que
+    l'utilisateur n'a pas configure.
+    """
+    raw = settings.get("roots") if isinstance(settings, dict) else None
+    values = raw if isinstance(raw, list) else []
+    out = [str(r).strip() for r in values if str(r or "").strip()]
+    if out:
+        return out
+    single = str(settings.get("root") or "").strip() if isinstance(settings, dict) else ""
+    return [single] if single else []
+
+
 def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: Any) -> Dict[str, Any]:
     try:
         raw_path = str(path or "").strip()
@@ -745,25 +854,28 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
             )
 
         settings = api.settings.get_settings()
-        root_raw = str(settings.get("root") or "").strip()
+        roots_raw = _configured_roots(settings)
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
-        # contient un symlink dans son chemin (ex: parent symlink).
-        if str(resolved_path) != str(candidate.absolute()):
-            logger.warning(
-                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
-                candidate,
-                resolved_path,
-            )
-            return _err_response(
-                "Les liens symboliques ne sont pas autorises.",
-                category="permission",
-                level="warning",
-                log_module=__name__,
-            )
-
+        # Fix 2026-08-03 : ici vivait une 2e garde qui comparait des CHAINES
+        # (``str(resolved_path) != str(candidate.absolute())``) pour deviner un
+        # symlink parent. Or ``resolve()`` reecrit la chaine sans qu'aucun lien
+        # n'existe des que le chemin traverse une jonction NTFS, un point de
+        # montage, un nom court 8.3 ou une casse differente (NTFS est
+        # insensible a la casse) : une bibliotheque placee derriere une
+        # jonction se voyait refuser un dossier parfaitement normal.
+        # La protection anti path-traversal de la Vague H (2026-05-25) reste
+        # entiere, portee par trois faits INDEPENDANTS de l'ecriture du chemin :
+        #  1. les liens symboliques sont refuses explicitement ci-dessus
+        #     (``candidate.is_symlink()``) ;
+        #  2. un lien situe dans le chemin PARENT est neutralise par le controle
+        #     de zone ci-dessous, qui compare des chemins REELS des deux cotes
+        #     (``_real_path``) : la cible du lien sort de la zone autorisee, donc
+        #     le chemin est refuse ;
+        #  3. ``os.startfile()`` n'ouvre que le chemin RESOLU, jamais
+        #     ``candidate`` : meme autorise, un lien ne peut pas faire ouvrir
+        #     autre chose que sa cible deja validee.
         open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
@@ -776,12 +888,27 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
 
         allowed = False
         allowed_bases: List[Path] = [state_dir]
-        if root_raw:
+        # Issue #471 : la zone autorisee est l'UNION des racines configurees.
+        # Elle se construisait sur `settings["root"]` seul, qui n'est qu'un alias
+        # retro-compatible de `roots[0]` (`settings_support._migrate_root_to_roots`).
+        # Une bibliotheque sur un 2e disque etait donc refusee « Chemin non
+        # autorise » alors que l'apply, lui, travaille bien sur `roots`.
+        # La garde n'est pas desarmee : chaque base reste confinee par le meme
+        # controle de zone sur chemins REELS ci-dessous, et une entree vide est
+        # ecartee par `_configured_roots` (sinon `normalize_user_path` retomberait
+        # sur `default_root`, autorisant une racine que l'utilisateur n'a pas
+        # configuree).
+        for root_raw in roots_raw:
             allowed_bases.append(normalize_user_path(root_raw, Path(default_root)))
 
+        # Comparaison de chemins REELS (et non de chaines) des deux cotes :
+        # c'est ce controle qui porte desormais seul le refus d'une traversee
+        # par un lien parent. ``relative_to`` compare composant par composant :
+        # C:\lib2 n'est donc pas vu comme inclus dans C:\lib.
+        real_target = _real_path(resolved_to_check)
         for base in allowed_bases:
             try:
-                resolved_to_check.relative_to(base.resolve())
+                real_target.relative_to(_real_path(base))
                 allowed = True
                 break
             except (OSError, ValueError):

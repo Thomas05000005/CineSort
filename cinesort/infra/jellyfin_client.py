@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _JELLYFIN_CLIENT_NAME = "CineSort"
@@ -45,7 +45,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise JellyfinError(f"URL Jellyfin refusee : {reason}")
     return url
@@ -126,11 +136,17 @@ class JellyfinClient:
     # ------------------------------------------------------------------
 
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
-        """GET avec gestion d'erreurs standardisée."""
+        """GET avec gestion d'erreurs standardisée.
+
+        La borne anti-OOM du corps est appliquee ICI, au transport (cf
+        `request_bounded`) : aucun appelant ne peut plus l'oublier, et elle
+        s'applique A LA LECTURE et non apres materialisation du corps entier
+        (issue #425).
+        """
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -150,7 +166,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.post(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "POST", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: POST %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -170,7 +186,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.delete(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "DELETE", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: DELETE %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -210,9 +226,6 @@ class JellyfinClient:
         # requests.get directement ici sinon hang infini si le serveur freeze.
         try:
             resp = self._get("/System/Info/Public")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             server_info = resp.json()
         except JellyfinError as exc:
             return {"ok": False, "error": str(exc)}
@@ -227,9 +240,6 @@ class JellyfinClient:
         # utilisateur. GET /Users fonctionne avec une API key admin.
         try:
             resp = self._get("/Users")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             users = resp.json()
         except JellyfinError as exc:
             return {
@@ -281,9 +291,6 @@ class JellyfinClient:
         """
         try:
             resp = self._get(f"/Users/{user_id}/Views")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -307,9 +314,6 @@ class JellyfinClient:
                 f"/Users/{user_id}/Items",
                 params={"IncludeItemTypes": "Movie", "Limit": "0", "Recursive": "true"},
             )
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -370,9 +374,6 @@ class JellyfinClient:
                 params["ParentId"] = str(library_id)
             try:
                 resp = self._get(f"/Users/{user_id}/Items", params=params)
-                _body = getattr(resp, "content", b"")
-                if _body and len(_body) > 10_000_000:
-                    raise ValueError("Response too large")
                 data = resp.json()
             except JellyfinError:
                 raise
@@ -536,6 +537,46 @@ class JellyfinClient:
             return True
         except JellyfinError as exc:
             _log.warning("Jellyfin : échec mark_played(%s) — %s", item_id, exc)
+            return False
+
+    def update_played_state(
+        self,
+        user_id: str,
+        item_id: str,
+        *,
+        play_count: int,
+        last_played_date: str,
+    ) -> bool:
+        """Ré-émet le compteur de lectures et la date de dernière lecture (#535).
+
+        `mark_played` ne sait affirmer QUE `Played=true` : le serveur repart
+        alors sur son propre compteur et sa propre date. Après un apply qui a
+        déplacé le fichier, Jellyfin ré-indexe un item NEUF (les items sont
+        clés par chemin) : un film vu 17 fois le 15/01 redescend à 1 vu
+        « à l'instant ». Seul l'endpoint UserData accepte `PlayCount` et
+        `LastPlayedDate`.
+
+        Corps volontairement MINIMAL : uniquement les trois champs que l'on
+        restaure. On n'invente aucune valeur pour `IsFavorite` / `Rating` —
+        l'appelant, lui, ne déclenche cet appel que s'il a la preuve que
+        l'historique a été perdu (cf `jellyfin_sync._counters_are_lost`).
+
+        `last_played_date` est renvoyée TELLE QUELLE, sans reformatage : c'est
+        la chaîne que le serveur a lui-même produite au snapshot. Vide, la clé
+        n'est pas émise (une date vide serait un rejet 400 ou un écrasement).
+
+        Retourne False sur échec (l'endpoint n'existe pas sur les serveurs
+        anciens) : l'appelant retombe alors sur le seul `mark_played` et le
+        signale, il ne fait jamais passer l'échec pour un succès.
+        """
+        payload: dict[str, Any] = {"Played": True, "PlayCount": int(play_count or 0)}
+        if last_played_date:
+            payload["LastPlayedDate"] = str(last_played_date)
+        try:
+            self._post(f"/Users/{user_id}/Items/{item_id}/UserData", json=payload)
+            return True
+        except JellyfinError as exc:
+            _log.warning("Jellyfin : échec update_played_state(%s) — %s", item_id, exc)
             return False
 
     def mark_unplayed(self, user_id: str, item_id: str) -> bool:

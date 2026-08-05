@@ -20,9 +20,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .constants import (
+    FAKE_4K_CONFIDENCE_SINGLE_SIGNAL,
     FAKE_4K_FFT_HF_CUTOFF_RATIO,
     FAKE_4K_FFT_MIN_VARIANCE,
+    FAKE_4K_FFT_MIN_VARIANCE_10BIT,
     FAKE_4K_FFT_MIN_Y_AVG,
+    FAKE_4K_FFT_MIN_Y_AVG_10BIT,
     FAKE_4K_FFT_THRESHOLD_AMBIGUOUS,
     FAKE_4K_FFT_THRESHOLD_NATIVE,
     FAKE_4K_MIN_HEIGHT,
@@ -90,6 +93,7 @@ def is_frame_usable_for_fft(
     height: int,
     y_avg: float,
     variance: Optional[float] = None,
+    bit_depth: int = 8,
 ) -> bool:
     """Filtre les frames non utilisables pour l'analyse FFT.
 
@@ -97,6 +101,15 @@ def is_frame_usable_for_fft(
       - pixels tronques (len < width * height * 0.9)
       - frames trop sombres (y_avg < FAKE_4K_FFT_MIN_Y_AVG)
       - frames uniformes (variance < FAKE_4K_FFT_MIN_VARIANCE)
+
+    `variance` reste acceptee si un producteur la fournit ; sinon elle est
+    MESUREE ici. #823 : aucun producteur ne posait jamais la cle, la garde
+    « frames uniformes » annoncee par ce docstring n'a donc jamais rien exclu,
+    et les aplats (ciels, fondus, cartons) — de ratio HF quasi nul — tiraient la
+    mediane vers le bas, donc le verdict vers `fake_4k_bicubic`.
+
+    Les deux seuils sont exprimes sur l'echelle 8 bits ; `bit_depth >= 10`
+    bascule sur les equivalents 0-1023.
 
     Accepte ``np.ndarray`` ou ``List[int]``.
     """
@@ -106,9 +119,17 @@ def is_frame_usable_for_fft(
     expected = w * h
     if pixels is None or len(pixels) < int(expected * 0.9):
         return False
-    if float(y_avg) < FAKE_4K_FFT_MIN_Y_AVG:
+    deep = int(bit_depth) >= 10
+    min_y_avg = FAKE_4K_FFT_MIN_Y_AVG_10BIT if deep else FAKE_4K_FFT_MIN_Y_AVG
+    if float(y_avg) < min_y_avg:
         return False
-    if variance is not None and float(variance) < FAKE_4K_FFT_MIN_VARIANCE:
+    if variance is None:
+        try:
+            variance = float(np.asarray(pixels[:expected], dtype=np.float64).var())
+        except (ValueError, TypeError):
+            return False
+    min_variance = FAKE_4K_FFT_MIN_VARIANCE_10BIT if deep else FAKE_4K_FFT_MIN_VARIANCE
+    if float(variance) < min_variance:
         return False
     return True
 
@@ -117,12 +138,14 @@ def compute_fft_hf_ratio_median(
     frames_data: List[Dict[str, Any]],
     video_width: int,
     video_height: int,
+    bit_depth: int = 8,
 ) -> Optional[float]:
     """Calcule le ratio HF/Total median sur les frames utilisables.
 
     Args:
         frames_data: frames extraites (dicts avec pixels, width, height, y_avg).
         video_width, video_height: resolution native (reference).
+        bit_depth: profondeur des pixels (8 ou 10+), pour les seuils de filtrage.
 
     Returns:
         Mediane des ratios (0.0-1.0), ou None si < 2 frames utilisables.
@@ -145,7 +168,7 @@ def compute_fft_hf_ratio_median(
         fh = int(frame.get("height") or video_height or 0)
         y_avg = float(frame.get("y_avg") or 0.0)
         variance = frame.get("variance")
-        if not is_frame_usable_for_fft(pixels, fw, fh, y_avg, variance):
+        if not is_frame_usable_for_fft(pixels, fw, fh, y_avg, variance, bit_depth):
             continue
         ratio = compute_fft_hf_ratio(pixels, fw, fh)
         if ratio > 0:
@@ -198,10 +221,17 @@ def combine_fake_4k_verdicts(
         ssim_self_ref: score SSIM Y 0.0-1.0, None ou -1 si non calcule.
 
     Returns:
-        "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
-        "fake_4k_probable"  : un seul conclut fake (conf 0.70)
-        "4k_native"         : aucun ne conclut fake (conf 0.90)
-        "ambiguous"         : les 2 sont indisponibles (conf 0.30)
+        Les DEUX signaux consultes :
+          "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
+          "fake_4k_probable"  : un seul des 2 conclut fake (conf 0.70)
+          "4k_native"         : aucun des 2 ne conclut fake (conf 0.90)
+        UN SEUL signal disponible (#804, audit-bot:2026-07-25-A1) : meme verdict,
+        mais confiance rabaissee a FAKE_4K_CONFIDENCE_SINGLE_SIGNAL. Un verdict
+        rendu sur un signal unique n'est corrobore par personne — ni dans le sens
+        "natif" (le signal absent aurait pu conclure fake) ni dans le sens "fake"
+        (il aurait pu conclure natif) — et ne peut pas porter la confiance d'un
+        consensus.
+        "ambiguous" : les 2 sont indisponibles (conf 0.30)
     """
     # Normalise : SSIM peut etre None ou -1 (flag "non calcule")
     ssim_available = ssim_self_ref is not None and ssim_self_ref >= 0
@@ -213,6 +243,18 @@ def combine_fake_4k_verdicts(
     fft_says_fake = fft_available and fft_ratio < FAKE_4K_FFT_THRESHOLD_AMBIGUOUS
     ssim_says_fake = ssim_available and ssim_self_ref >= SSIM_SELF_REF_FAKE_THRESHOLD
 
+    # Un seul signal consulte : aucune corroboration possible, ni dans un sens
+    # ni dans l'autre. La categorie reste celle du signal disponible, mais la
+    # confiance ne peut pas etre celle d'un consensus. Cette branche couvre les
+    # DEUX categories : "4k_native" mono-signal (audit-bot:2026-07-25-A1, deja
+    # traite sur main) ET "fake_4k_probable" mono-signal (#804), qui portait
+    # sinon 0.70 — exactement la confiance d'un DESACCORD entre deux signaux.
+    if not (fft_available and ssim_available):
+        verdict = "fake_4k_probable" if (fft_says_fake or ssim_says_fake) else "4k_native"
+        return (verdict, FAKE_4K_CONFIDENCE_SINGLE_SIGNAL)
+
+    # A partir d'ici les deux signaux ont parle : les confiances sont celles du
+    # consensus (ou du desaccord) a deux signaux.
     if fft_says_fake and ssim_says_fake:
         return ("fake_4k_confirmed", 0.95)
     if fft_says_fake or ssim_says_fake:

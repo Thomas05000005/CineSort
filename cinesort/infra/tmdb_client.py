@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import get_bounded, make_session_with_retry
+from cinesort.infra.state import AtomicWriteError, atomic_write_json, atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,12 @@ class TmdbClient:
         self._dirty = False
         self._last_save_ts = 0.0
 
+        # Issue #413 : trace des replis sur cache EXPIRE (cf `_note_stale_fallback`).
+        self._stale_fallbacks = 0
+        self._last_stale_key: Optional[str] = None
+        self._last_stale_cached_at: Optional[float] = None
+        self._last_stale_ts: Optional[float] = None
+
         # V2-09 (audit ID-ROB-001) : Session avec retry automatique sur 5xx + 429
         # et backoff exponentiel. Respecte Retry-After (rate-limiting TMDb).
         self._session = make_session_with_retry(
@@ -182,10 +189,16 @@ class TmdbClient:
         statuts serveur-down (5xx/429) afin que le breaker les voie ; les 4xx
         (401 cle invalide, 404...) passent intacts pour ne pas casser les callers
         qui les gerent gracieusement (ex validate_connection).
+
+        Issue #798 : la borne anti-OOM du corps est appliquee ICI, une fois,
+        au lieu des 8 copies post-materialisation qui ne protegeaient rien.
+        `ResponseTooLargeError` derive de `ValueError` : le breaker la laisse
+        passer SANS compter d'echec (cf `CircuitBreaker.call`) — une reponse
+        aberrante n'est pas un signal « serveur en panne ».
         """
 
         def _do_get() -> requests.Response:
-            resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            resp = get_bounded(self._session, url, params=params, timeout=self.timeout_s)
             if resp.status_code >= 500 or resp.status_code == 429:
                 resp.raise_for_status()
             return resp
@@ -272,6 +285,18 @@ class TmdbClient:
         (mieux qu'aucun resultat). Relit depuis disque car _cache_get a
         peut-etre deja retire l'entree de la memoire.
         """
+        return self._cache_get_stale_with_ts(key)[0]
+
+    def _cache_get_stale_with_ts(self, key: str) -> Tuple[Any, Optional[float]]:
+        """Comme `_cache_get_stale`, mais rend aussi la DATE de mise en cache.
+
+        Issue #413 : servir une donnee de secours sans dire de quand elle date
+        rend le repli indistinguable d'une reponse fraiche. L'age est la seule
+        information qui permette a l'appelant (et donc a l'utilisateur) de
+        trancher. `None` pour les entrees en ancien format, qui n'ont pas de
+        `_cached_at` — l'absence de date est alors dite telle quelle, pas
+        remplacee par une valeur plausible.
+        """
         with self._lock:
             entry = self._cache.get(key)
         # Si l'entree a ete purgee de la memoire par _cache_get, on tente de
@@ -282,12 +307,50 @@ class TmdbClient:
                     raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
                     entry = raw.get(key)
             except (OSError, PermissionError, json.JSONDecodeError, ValueError):
-                return None
+                return None, None
         if entry is None:
-            return None
+            return None, None
         if isinstance(entry, dict) and "_cached_at" in entry and "value" in entry:
-            return entry.get("value")
-        return entry
+            try:
+                cached_at: Optional[float] = float(entry.get("_cached_at") or 0.0) or None
+            except (TypeError, ValueError):
+                cached_at = None
+            return entry.get("value"), cached_at
+        return entry, None
+
+    def _note_stale_fallback(self, key: str, cached_at: Optional[float]) -> None:
+        """Enregistre qu'une reponse a ete servie depuis du cache EXPIRE (#413).
+
+        Le repli sur cache expire est un bon comportement offline-first, mais il
+        etait invisible : l'appelant recevait une valeur ordinaire et ne pouvait
+        pas savoir que TMDb etait injoignable ni de quand datait la donnee. Un
+        echec presente comme un succes est proscrit dans ce depot ; on garde
+        donc trace du repli, consultable via `stale_fallback_report()`.
+        """
+        with self._lock:
+            self._stale_fallbacks += 1
+            self._last_stale_key = key
+            self._last_stale_cached_at = cached_at
+            self._last_stale_ts = time.time()
+
+    def stale_fallback_report(self) -> Dict[str, Any]:
+        """Etat des replis sur cache expire depuis la creation de ce client (#413).
+
+        `count` = nombre de reponses servies depuis du cache expire.
+        `last_cached_at` = date de mise en cache de la derniere de ces reponses
+        (epoch), ou None si l'entree n'en portait pas.
+
+        Portee : l'instance. Le depot construit un `TmdbClient` par usage, donc
+        un rapport ne couvre que les appels de l'appelant courant — c'est
+        precisement ce qu'il faut pour qualifier UNE reponse rendue a l'UI.
+        """
+        with self._lock:
+            return {
+                "count": int(self._stale_fallbacks),
+                "last_key": self._last_stale_key,
+                "last_cached_at": self._last_stale_cached_at,
+                "last_ts": self._last_stale_ts,
+            }
 
     def _cache_set(self, key: str, value: Any) -> None:
         """Ecrit une entree avec timestamp pour le TTL (H1).
@@ -316,33 +379,23 @@ class TmdbClient:
                 return
             self._last_save_ts = now
 
-            tmp = self.cache_path.with_suffix(".tmp")
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
-            # Fix audit Vague H (parite OmdbClient._save_cache_atomic) : write +
-            # flush + fsync avant rename pour eviter qu'un crash systeme entre
-            # write et os.replace ne promeuve un .tmp partiel en cache officiel
-            # (cache 50-100MB -> JSON corrompu -> re-fetch API sur tous les films).
+            # Fix #732 : le `.tmp` etait NOMME EN DUR (`cache_path.with_suffix('.tmp')`),
+            # exactement comme celui de `purge_expired_tmdb_cache` -> les deux
+            # ecrivains (cet appel + le thread daemon de purge au boot) visaient
+            # le MEME fichier intermediaire et pouvaient promouvoir le JSON
+            # partiel de l'autre (CWE-362). `atomic_write_text` fait le nom
+            # unique ET le fsync + controle de taille.
             try:
                 payload = json.dumps(self._cache, ensure_ascii=False, separators=(",", ":"))
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(payload)
-                    f.flush()
-                    os.fsync(f.fileno())  # force write to disk avant rename
-                if tmp.exists() and tmp.stat().st_size > 0:
-                    os.replace(tmp, self.cache_path)
-                    self._dirty = False
-                else:
-                    logger.warning("tmdb cache tmp write failed, keeping previous cache")
-                    if tmp.exists():
-                        with contextlib.suppress(OSError):
-                            tmp.unlink()
+                atomic_write_text(self.cache_path, payload)
+                self._dirty = False
+            except AtomicWriteError as exc:
+                logger.warning("tmdb cache tmp write failed, keeping previous cache (%s)", exc)
             except (OSError, PermissionError, ValueError) as exc:
                 logger.debug("tmdb cache save warning: %s", exc)
-                if tmp.exists():
-                    with contextlib.suppress(OSError):
-                        tmp.unlink()
 
     def flush(self) -> None:
         try:
@@ -415,9 +468,6 @@ class TmdbClient:
             return False, f"Erreur reseau: {type(e).__name__} ({host})"
 
         try:
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
         except (KeyError, TypeError, ValueError):
             data = {}
@@ -468,9 +518,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug(
                 "TMDb: search '%s' (%s) -> %d resultats (%.1fs)",
@@ -483,11 +530,12 @@ class TmdbClient:
             logger.debug("TMDb: echec search '%s' (%s) — %s", q_norm, year or "?", exc)
             self._debug(f"search_movie warning query={q_norm} year={year} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
-            stale = self._cache_get_stale(cache_key)
+            stale, stale_at = self._cache_get_stale_with_ts(cache_key)
             if isinstance(stale, list):
                 logger.info(
                     "TMDb: search '%s' (%s) — fallback cache expire (%d items)", q_norm, year or "?", len(stale)
                 )
+                self._note_stale_fallback(cache_key, stale_at)
                 return [TmdbResult(**x) for x in stale]
             return []
         if not isinstance(data, dict):
@@ -572,18 +620,16 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: GET /movie/%d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
             logger.debug("TMDb: echec /movie/%d — %s", mid, exc)
             self._debug(f"_get_movie_detail_cached warning movie_id={mid} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
-            stale = self._cache_get_stale(cache_key)
+            stale, stale_at = self._cache_get_stale_with_ts(cache_key)
             if isinstance(stale, dict):
                 logger.info("TMDb: /movie/%d — fallback cache expire", mid)
+                self._note_stale_fallback(cache_key, stale_at)
                 return stale
             return None
         if not isinstance(data, dict):
@@ -666,6 +712,80 @@ class TmdbClient:
             return None
         return value if value > 0 else None
 
+    def get_movie_extras(self, movie_id: int) -> Optional[Dict[str, Any]]:
+        """Issue #599 — runtime + realisateur + synopsis pour la fiche film.
+
+        `/movie/{id}?append_to_response=credits`. Ces trois champs ne sont dans
+        AUCUN champ de `_get_movie_detail_cached` (qui ne demande meme pas les
+        credits), d'ou un endpoint distinct et une cle de cache distincte.
+
+        Cet appel vivait dans `ui/api/film_support.py` sous forme d'un
+        `requests` direct : hors du circuit breaker, hors de la session a retry
+        (donc sans respect du `Retry-After` que TMDb renvoie sur 429, alors que
+        la fiche film est justement ouverte en rafale par la vue Doublons), et
+        hors de l'inventaire des lectures HTTP bornees — c'est ainsi qu'il avait
+        echappe a l'audit par client de #798/#824.
+
+        Retourne `None` quand TMDb ne repond pas, quand le circuit est ouvert ou
+        quand la reponse n'est pas exploitable. Un echec n'est jamais memorise :
+        seules les reponses 200 vont au cache, pour qu'un 401 ou un 5xx soit
+        reessaye au prochain appel au lieu d'etre fige pour la duree du TTL.
+        """
+        try:
+            mid = int(movie_id or 0)
+        except (TypeError, ValueError):
+            return None
+        if mid <= 0:
+            return None
+
+        cache_key = f"movie_extras|{mid}"
+        cached = self._cache_get(cache_key)
+        if isinstance(cached, dict):
+            return dict(cached)
+
+        url = f"{TMDB_API_BASE}/movie/{mid}"
+        params = {
+            "api_key": self.api_key,
+            "language": "fr-FR",
+            "append_to_response": "credits",
+        }
+        try:
+            r = self._http_get(url, params=params)
+            if r.status_code != 200:
+                self._debug(f"get_movie_extras warning movie_id={mid} status={r.status_code}")
+                return None
+            data = r.json()
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("TMDb: echec extras /movie/%d — %s", mid, exc)
+            self._debug(f"get_movie_extras warning movie_id={mid} error={exc}")
+            return None
+        if not isinstance(data, dict):
+            self._debug(f"get_movie_extras warning movie_id={mid} error=payload_non_dict")
+            return None
+
+        director: Optional[str] = None
+        credits = data.get("credits")
+        crew = credits.get("crew") if isinstance(credits, dict) else None
+        for member in crew or []:
+            if not isinstance(member, dict):
+                continue
+            if str(member.get("job") or "").lower() == "director":
+                director = str(member.get("name") or "").strip() or None
+                break
+        try:
+            runtime_min: Optional[int] = int(data.get("runtime") or 0) or None
+        except (TypeError, ValueError):
+            runtime_min = None
+        entry: Dict[str, Any] = {
+            "director": director,
+            "overview": str(data.get("overview") or "").strip() or None,
+            "runtime": runtime_min,
+        }
+        self._cache_set(cache_key, entry)
+        with contextlib.suppress(OSError, PermissionError):
+            self._save_cache_atomic()
+        return dict(entry)
+
     def get_movie_poster_thumb_url(
         self, movie_id: int, size: str = "w92", force_refresh: bool = False
     ) -> Optional[str]:
@@ -723,9 +843,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_tmdb_id %d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -806,9 +923,6 @@ class TmdbClient:
             try:
                 r = self._http_get(url, params=params)
                 r.raise_for_status()
-                _body = getattr(r, "content", b"")
-                if _body and len(_body) > 10_000_000:
-                    raise ValueError("Response too large")
                 data = r.json()
                 logger.debug(
                     "TMDb: GET /movie/%d/alternative_titles -> %d (%.1fs)",
@@ -819,9 +933,10 @@ class TmdbClient:
             except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
                 logger.debug("TMDb: echec alternative_titles /movie/%d — %s", mid, exc)
                 self._debug(f"get_alternative_titles warning movie_id={mid} error={exc}")
-                stale = self._cache_get_stale(cache_key)
+                stale, stale_at = self._cache_get_stale_with_ts(cache_key)
                 if isinstance(stale, list):
                     logger.info("TMDb: alternative_titles /movie/%d — fallback cache expire", mid)
+                    self._note_stale_fallback(cache_key, stale_at)
                     titles = stale
                 else:
                     return []
@@ -886,9 +1001,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_imdb_id %s -> %d (%.1fs)", iid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -965,9 +1077,6 @@ class TmdbClient:
                 params["first_air_date_year"] = int(year)
             resp = self._http_get(f"{TMDB_API_BASE}/search/tv", params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return []
@@ -1030,9 +1139,6 @@ class TmdbClient:
             url = f"{TMDB_API_BASE}/tv/{series_id}/season/{season_number}/episode/{episode_number}"
             resp = self._http_get(url, params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return None
@@ -1134,11 +1240,19 @@ def purge_expired_tmdb_cache(
         # Rien a faire : pas d'ecriture inutile
         return result
 
-    # Reecriture atomique (tmp -> rename)
+    # Reecriture atomique ET durable (#622 fsync manquant, #732 tmp partage).
+    # Cette fonction tourne dans un thread daemon au BOOT, en concurrence avec
+    # `TmdbClient._save_cache_atomic` : les deux utilisaient le meme
+    # `cache_path.with_suffix('.tmp')` et n'avaient donc aucune isolation.
+    #
+    # `indent=None` : MEME forme compacte que `TmdbClient._save_cache_atomic`
+    # (separators serres, cf PERF-6 quinze lignes plus haut). Le defaut
+    # `indent=2` d'`atomic_write_json` doublait le fichier a chaque purge —
+    # un cache de 18 Mo repassait a ~36 Mo, relu tel quel par `_load_cache` au
+    # demarrage suivant et desormais fsynce en entier. Le `indent=2` est
+    # anterieur a cette PR, mais elle reecrit cette ligne et fsync son resultat.
     try:
-        tmp = cache_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(new_cache, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, cache_path)
+        atomic_write_json(cache_path, new_cache, indent=None)
     except (OSError, PermissionError) as exc:
         result["error"] = f"write_error: {exc}"
         return result

@@ -9,6 +9,7 @@ serialisation viennent de `plan_support_core.py`.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 from pathlib import Path
@@ -23,6 +24,7 @@ from cinesort.app.plan_support_core import (
     plan_row_to_jsonable,
     resolve_incremental_quick_hash,
 )
+from cinesort.domain.confidence_thresholds import confidence_label
 from cinesort.domain.edition_helpers import extract_edition
 from cinesort.domain.integrity_check import check_header
 from cinesort.domain.runtime_matching import score_runtime_delta
@@ -85,10 +87,13 @@ def _try_lookup_row_cache(
         video_stat = video.stat()
         v_size = int(video_stat.st_size)
         v_mtime = int(video_stat.st_mtime_ns)
+        # Issue #637 : ce `stat()` suit les liens, exactement comme celui que
+        # `resolve_incremental_quick_hash` refaisait — on le lui transmet.
         v_hash = resolve_incremental_quick_hash(
             video,
             scan_index=scan_index,
             run_hash_cache=run_hash_cache or {},
+            known_stat=(v_size, v_mtime),
         )
         nfo_path_for_sig = core_mod.find_best_nfo_for_video(folder, video)
         nfo_sig = _nfo_signature(nfo_path_for_sig)
@@ -277,8 +282,6 @@ def _resolve_tmdb_collection(
     nom du dossier source OU avec le titre du candidat. Sinon le collection
     boost est toxique (ex: 'Ca' -> Pirates des Caraibes).
     """
-    import contextlib
-
     if not (tmdb is not None and chosen.tmdb_id):
         return None, None
     coll_id: Optional[int] = None
@@ -345,11 +348,18 @@ def _build_resolved_row(
     is_already_conform = False
     if not is_collection and chosen.year:
         try:
+            # #469 : `edition` + `separator` sont les deux entrees de contexte
+            # que l'apply passe a build_naming_context en plus de title/year
+            # (apply_core.apply_single). Sans elles, un dossier deja ecrit par
+            # l'apply sous un template a edition/separateur etait juge non
+            # conforme et perdait le rehaussement de confiance.
             is_already_conform = core_mod._single_folder_is_conform(
                 folder_name,
                 chosen.title,
                 int(chosen.year),
                 naming_template=str(getattr(cfg, "naming_movie_template", "") or ""),
+                edition=str(detected_edition or ""),
+                separator=getattr(cfg, "separator", " "),
             )
         except (TypeError, ValueError, AttributeError):
             is_already_conform = False
@@ -377,10 +387,22 @@ def _build_resolved_row(
                 edition_label=detected_edition,
             )
             confidence = max(0, min(100, confidence + bonus))
-            if bonus >= 10:
-                label = "high" if confidence >= 85 else label
-            elif bonus < 0:
-                label = "low" if confidence < 60 else label
+            if bonus:
+                # `label` et la 1re phrase de `notes` (construite juste apres par
+                # build_plan_note) sont des champs STOCKES, jamais recalcules en
+                # aval : le front recalcule son bucket depuis la valeur NUMERIQUE
+                # et n'utilise jamais `confidence_label`, qui part tel quel dans
+                # plan.jsonl, l'export HTML/CSV/JSON et le resume de run.
+                # Les deux gardes precedentes ("high" si >= 85, "low" si < 60) ne
+                # couvraient QUE les sauts vers les extremes et laissaient la zone
+                # med (60..84) perimee : une row 97/'high' penalisee a 72 par
+                # -25 gardait un badge 'high' mensonger sur la ligne meme qui
+                # porte runtime_mismatch_likely_wrong_film, et une row 59/'low'
+                # remontee a 79 par +20 restait 'low'. Meme resynchro que les deux
+                # autres call sites qui mutent la confiance (omdb_cross_check.
+                # resync_confidence_fields, runtime_probe_check). La faire AVANT
+                # build_plan_note aligne la note du meme coup.
+                label = confidence_label(confidence)
     note = core_mod.build_plan_note(
         confidence=confidence,
         label=label,
@@ -472,6 +494,16 @@ def _apply_subtitle_detection(
         flag = f"subtitle_missing_{missing_lang}"
         if flag not in result_row.warning_flags:
             result_row.warning_flags.append(flag)
+    # F12 / arbitrage produit tranche le 2026-08-03 : langue attendue couverte
+    # UNIQUEMENT par une piste forcee (= incrustations, pas de traduction des
+    # dialogues). Flag DISTINCT de `subtitle_missing_<lang>` : la langue est bel
+    # et bien detectee, donc un flag `missing` serait efface par les
+    # reconciliations de lecture (run_read_support / duplicate_support /
+    # library_support / dashboard_support). Voir subtitle_helpers.
+    for forced_lang in sub_report.forced_only_languages:
+        flag = f"subtitle_forced_only_{forced_lang}"
+        if flag not in result_row.warning_flags:
+            result_row.warning_flags.append(flag)
     if sub_report.orphans > 0 and "subtitle_orphan" not in result_row.warning_flags:
         result_row.warning_flags.append("subtitle_orphan")
     if sub_report.duplicate_languages and "subtitle_duplicate_lang" not in result_row.warning_flags:
@@ -497,9 +529,15 @@ _POST_SUBTITLE_FLAGS = ("not_a_movie", "integrity_header_invalid")
 
 
 def _is_subtitle_flag(flag: Any) -> bool:
-    """True pour les flags produits par `_apply_subtitle_detection`."""
+    """True pour les flags produits par `_apply_subtitle_detection`.
+
+    `subtitle_forced_only_*` (F12, 2026-08-03) DOIT y figurer : sans lui, un
+    flag perime resterait colle a une row servie par le cache row v2 exactement
+    comme le `subtitle_missing_*` de F09 (l'utilisateur remplace son
+    '.fr.forced.srt' par un '.fr.srt' complet, l'alerte ne part jamais).
+    """
     text = str(flag)
-    return text.startswith("subtitle_missing_") or text in _SUBTITLE_DERIVED_FLAGS
+    return text.startswith(("subtitle_missing_", "subtitle_forced_only_")) or text in _SUBTITLE_DERIVED_FLAGS
 
 
 def _refresh_subtitle_detection(
@@ -626,10 +664,13 @@ def _store_row_cache(
         return
     try:
         v_stat = video.stat()
+        # Issue #637 : meme `stat()` (suivant les liens) que celui refait dans
+        # `resolve_incremental_quick_hash` — on le lui transmet.
         v_hash = resolve_incremental_quick_hash(
             video,
             scan_index=scan_index,
             run_hash_cache=run_hash_cache or {},
+            known_stat=(int(v_stat.st_size), int(v_stat.st_mtime_ns)),
         )
         scan_index.upsert_incremental_row_cache(
             root_path=str(cfg.root),
@@ -1035,7 +1076,30 @@ def _plan_tv_episode(
     *,
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> List["PlanRow"]:
-    """Build a PlanRow for a TV episode (kind='tv_episode')."""
+    """Build a PlanRow for a TV episode (kind='tv_episode').
+
+    Pipeline DISTINCT de `_plan_item` (film) : ni NFO, ni OMDb, ni cross-check
+    runtime, ni edition, ni cache row v2. Sur les quatre enrichissements que
+    `_plan_item` applique, deux seulement sont transposables (#792) :
+
+    * `_apply_year_missing_flag` et `_apply_integrity_check` sont AGNOSTIQUES du
+      kind — l'annee alimente le dossier de serie (`naming_tv_template` vaut
+      `{series} ({year})` par defaut) et un en-tete video invalide l'est quel que
+      soit le contenu. Ils sont appliques ci-dessous.
+    * `_apply_subtitle_detection` est DELIBEREMENT omis. Son comptage d'orphelins
+      (`build_subtitle_report`) qualifie d'orphelin tout sous-titre du dossier ne
+      matchant pas le stem de CETTE video ; or un dossier de saison contient N
+      episodes. Mesure sur un dossier de 3 episodes ayant CHACUN son `.fr.srt`
+      correct : `orphans=2` pour les trois -> `subtitle_orphan` sur 100 % des
+      rows. L'appeler ici n'ajouterait pas un signal, il ajouterait un faux
+      positif systematique.
+    * `_apply_not_a_movie_detection` est DELIBEREMENT omis : `not_a_movie` est un
+      flag de CONFLIT (`run_read_support._CONFLICT_FLAGS`) dont l'heuristique est
+      calibree pour des films (petite taille, titre court, absence de match
+      TMDb). Un episode est par construction « pas un film » ; poser le flag sur
+      la foi de ces criteres transformerait un fait de structure (kind =
+      tv_episode, deja porte par la row) en incoherence a arbitrer.
+    """
 
     tv = parse_tv_info(folder, video)
     if tv is None:
@@ -1094,26 +1158,43 @@ def _plan_tv_episode(
         note_parts.append(f'"{episode_title}"')
     note_parts.append(f"source={source}")
 
-    return [
-        core_mod.PlanRow(
-            row_id=row_id,
-            kind="tv_episode",
-            folder=str(folder),
-            video=video.name,
-            proposed_title=proposed_title,
-            proposed_year=int(year or 0),
-            proposed_source=source,
-            confidence=confidence,
-            confidence_label=label,
-            candidates=[],
-            notes=" | ".join(note_parts),
-            detected_year=int(year or 0),
-            detected_year_reason="tv_first_air_date" if source == "tmdb_tv" else "folder",
-            warning_flags=[],
-            tv_series_name=series_name,
-            tv_season=season,
-            tv_episode=episode,
-            tv_episode_title=episode_title,
-            tv_tmdb_series_id=tmdb_series_id,
-        )
-    ]
+    # #792 : `year_missing` est pose au BUILD (comme dans _build_resolved_row /
+    # _build_unresolved_row) pour que plan.jsonl soit deterministe. Sans annee,
+    # `is_auto_approvable_flags` refusait deja la row (has_year >= 1900) mais
+    # AUCUN flag n'expliquait pourquoi : la chip d'alerte manquait a l'UI.
+    warning_flags: List[str] = []
+    _apply_year_missing_flag(warning_flags, int(year or 0))
+    # #613 : signal EN AMONT de l'apply. `apply_tv_episode` refuse desormais un
+    # episode dont la saison est indeterminee (il aurait ete range dans
+    # `Saison 00`, le dossier des specials). Sans ce flag, l'utilisateur ne
+    # decouvrait le refus qu'apres avoir lance l'application. `season is None`
+    # (indetermine) et non `not season` : la saison 0 est une saison legitime.
+    if season is None:
+        warning_flags.append("tv_season_unknown")
+
+    result_row = core_mod.PlanRow(
+        row_id=row_id,
+        kind="tv_episode",
+        folder=str(folder),
+        video=video.name,
+        proposed_title=proposed_title,
+        proposed_year=int(year or 0),
+        proposed_source=source,
+        confidence=confidence,
+        confidence_label=label,
+        candidates=[],
+        notes=" | ".join(note_parts),
+        detected_year=int(year or 0),
+        detected_year_reason="tv_first_air_date" if source == "tmdb_tv" else "folder",
+        warning_flags=warning_flags,
+        tv_series_name=series_name,
+        tv_season=season,
+        tv_episode=episode,
+        tv_episode_title=episode_title,
+        tv_tmdb_series_id=tmdb_series_id,
+    )
+    # #792 : dernier enrichissement applique, comme sur le chemin film — un
+    # en-tete video invalide doit bloquer l'auto-approbation d'un episode
+    # (`_AUTO_INTEGRITY_WARNINGS`) exactement comme celle d'un film.
+    _apply_integrity_check(video, result_row)
+    return [result_row]

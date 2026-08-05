@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import datetime
+import io
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
 import traceback
+import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -33,12 +38,11 @@ from cinesort.domain.calibration import analyze_feedback_bias, compute_tier_delt
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.custom_rules import ACTIONS, FIELD_PATHS, OPERATORS, validate_rules
 from cinesort.domain.custom_rules_templates import list_templates
-from cinesort.domain.film_history import _load_plan_rows_from_jsonl
+from cinesort.domain.film_history import _load_plan_rows_from_jsonl, _resolve_run_dir
 from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_locale, t
 from cinesort.domain.naming import (
     PRESETS,
     PREVIEW_MOCK_CONTEXT,
-    build_naming_context,
     format_movie_folder,
     validate_template,
 )
@@ -585,8 +589,10 @@ class CineSortApi:
     def _state_dir_key(self, state_dir: Path) -> str:
         return runtime_support.state_dir_key(state_dir)
 
-    def _run_paths_for(self, state_dir: Path, run_id: str, *, ensure_exists: bool) -> state.RunPaths:
-        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists)
+    def _run_paths_for(
+        self, state_dir: Path, run_id: str, *, ensure_exists: bool, exclusive: bool = False
+    ) -> state.RunPaths:
+        return runtime_support.run_paths_for(state_dir, run_id, ensure_exists=ensure_exists, exclusive=exclusive)
 
     def _get_or_create_infra(self, state_dir: Path) -> Tuple[SQLiteStore, JobRunner]:
         return runtime_support.get_or_create_infra(self, state_dir, env_truthy_fn=_env_truthy)
@@ -602,6 +608,11 @@ class CineSortApi:
 
     def _generate_unique_run_id(self, store: SQLiteStore) -> str:
         return runtime_support.generate_unique_run_id(self, store)
+
+    def _reserve_unique_run(self, store: SQLiteStore, state_dir: Path) -> Tuple[str, state.RunPaths]:
+        """Reserve un run_id ET son dossier de run d'un seul tenant (cf.
+        runtime_support.reserve_unique_run)."""
+        return runtime_support.reserve_unique_run(self, store, state_dir)
 
     def _build_cfg_from_settings(self, settings: Dict[str, Any], root: Path) -> core.Config:
         # PRAGMA-02 fix : passer state_dir pour que mode "auto" resolve la
@@ -955,8 +966,6 @@ class CineSortApi:
 
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
-        import io
-
         _log = logging.getLogger(__name__)
 
         info = self._get_server_info_impl()
@@ -975,7 +984,12 @@ class CineSortApi:
 
             qr = segno.make(url)
             buf = io.BytesIO()
-            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=False)
+            # Cf issue #555 : `svgns=True` (namespace SVG present). Le frontend
+            # ne colle plus ce markup dans innerHTML, il le rend via
+            # <img src="data:image/svg+xml,...">. Un SVG charge en contexte
+            # IMAGE doit etre un document autonome : sans le xmlns, le
+            # navigateur refuse de l'afficher.
+            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=True)
             svg_str = buf.getvalue().decode("utf-8")
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             _log.warning("api: echec generation QR — %s", exc)
@@ -1284,7 +1298,8 @@ class CineSortApi:
         url = str(data.get("jellyfin_url") or "").strip()
         api_key = str(data.get("jellyfin_api_key") or "").strip()
         user_id = str(data.get("jellyfin_user_id") or "").strip()
-        timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+        # Cf issue #434 : clamp_timeout coherent avec les endpoints de test ci-dessus.
+        timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
         if not url or not api_key:
             return _err_response("Jellyfin non configuré.", category="state", level="info", log_module=__name__)
 
@@ -1319,6 +1334,22 @@ class CineSortApi:
                 level="info",
                 log_module=__name__,
             )
+        # Cf issue #563 : le refus cleartext vit dans send_email_report (garde
+        # de securite, elle doit tenir quel que soit l'appelant). On le rejoue
+        # ici uniquement pour REMONTER LE MOTIF a l'utilisateur : sinon le
+        # bouton "Tester l'envoi" affichait "Echec de l'envoi. Verifiez les
+        # parametres SMTP." sans dire lequel.
+        if str(settings.get("email_smtp_user") or "").strip() and str(settings.get("email_smtp_password") or ""):
+            if not _email_report_mod.smtp_session_will_be_encrypted(
+                settings.get("email_smtp_port") or 587,
+                settings.get("email_smtp_tls", True),
+            ):
+                return _err_response(
+                    _email_report_mod.CLEARTEXT_REFUSAL_MESSAGE,
+                    category="permission",
+                    level="error",
+                    log_module=__name__,
+                )
         mock_data = {
             "run_id": "test",
             "ts": time.time(),
@@ -1363,7 +1394,12 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : le vrai dossier de run est `runs/tri_films_{run_id}`
+        # (cf state.new_run, runtime_support.run_paths_for, job_runner). Le chemin
+        # etait construit sans le prefixe -> plan.jsonl jamais trouve -> "Aucun
+        # film dans ce run" silencieux en prod. _resolve_run_dir applique la
+        # convention canonique tout en tolerant les runs anterieurs (dossier nu).
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1371,7 +1407,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("jellyfin_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("jellyfin_timeout_s"), default=10.0)
             # NB : module-style pour permettre patch("cinesort.infra.jellyfin_client.JellyfinClient").
             client = _jellyfin_mod.JellyfinClient(jf_url, jf_key, timeout_s=timeout_s)
             if not jf_user_id:
@@ -1436,7 +1473,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1510,7 +1548,8 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
@@ -1518,7 +1557,8 @@ class CineSortApi:
             return _err_response("Aucun film dans ce run.", category="state", level="info", log_module=__name__)
 
         try:
-            timeout_s = float(settings.get("plex_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
             client = _plex_mod.PlexClient(purl, ptok, timeout_s=timeout_s)
             plex_movies = client.get_movies(plib)
         except _plex_mod.PlexError as exc:
@@ -1589,13 +1629,15 @@ class CineSortApi:
                 log_module=__name__,
             )
 
-        plan_path = state_dir / "runs" / target_run_id / "plan.jsonl"
+        # Audit 2026-06-02 : meme bug que jellyfin_sync — cf commentaire la-bas.
+        plan_path = _resolve_run_dir(state_dir, target_run_id) / "plan.jsonl"
         raw_rows = _load_plan_rows_from_jsonl(plan_path)
         local_rows = [plan_row_from_jsonable(d) for d in raw_rows]
         local_rows = [r for r in local_rows if r is not None]
 
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             radarr_movies = client.get_movies()
             profiles = client.get_quality_profiles()
@@ -1626,7 +1668,8 @@ class CineSortApi:
         if mid <= 0:
             return _err_response("radarr_movie_id invalide.", category="validation", level="info", log_module=__name__)
         try:
-            timeout_s = float(settings.get("radarr_timeout_s") or 10)
+            # Cf issue #434 : clamp_timeout coherent avec les endpoints de test.
+            timeout_s = clamp_timeout(settings.get("radarr_timeout_s"), default=10.0)
             client = _radarr_mod.RadarrClient(rurl, rkey, timeout_s=timeout_s)
             client.search_movie(mid)
             return {"ok": True, "message": f"Recherche lancee pour le film Radarr #{mid}."}
@@ -1688,32 +1731,32 @@ class CineSortApi:
                 errors=errors,
             )
 
-        # Essayer de charger un vrai film depuis la BDD
-        context = None
-        rid = str(sample_row_id or "").strip()
-        if rid:
-            try:
-                state_dir = self._get_state_dir()
-                settings = _read_settings(state_dir)
-                store, _ = self._get_or_create_infra(state_dir, settings)
-                # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
-                probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
-                quality_data = store.quality.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
-                context = build_naming_context(
-                    title="Film",
-                    year=2020,
-                    probe_data=probe_data,
-                    quality_data=quality_data,
-                )
-            except (OSError, PermissionError, TypeError, ValueError):
-                context = None
-
-        # Fallback : mock hardcode (Inception)
-        if context is None:
-            context = dict(PREVIEW_MOCK_CONTEXT)
-
+        # #460 : la branche « charger un vrai film depuis la BDD » qui vivait ici
+        # etait morte depuis sa premiere ligne. `self._get_or_create_infra(state_dir,
+        # settings)` passait DEUX arguments a une methode qui n'en accepte qu'UN
+        # (cinesort_api.py:588) -> TypeError systematique, avale par un
+        # `except (OSError, PermissionError, TypeError, ValueError)` -> context=None
+        # -> repli sur le mock. Les deux appels suivants etaient casses eux aussi
+        # (`get_probe_cache` est keyword-only, et le `hasattr` testait `store` au
+        # lieu de `store.quality`).
+        #
+        # Supprimee plutot que reparee : meme reparee elle n'aurait PAS affiche le
+        # film demande (title="Film", year=2020 etaient codes en dur) et
+        # `get_quality_report` exige un `run_id` dont cet endpoint ne dispose pas.
+        # Un apercu de template sur un vrai film est une FEATURE a specifier, pas
+        # une reparation de ligne.
+        #
+        # `sample_row_id` reste dans la signature (compat de l'API REST), mais la
+        # reponse DIT desormais qu'il n'est pas honore au lieu de l'ignorer en
+        # silence.
+        context = dict(PREVIEW_MOCK_CONTEXT)
         result = format_movie_folder(tpl, context)
-        return {"ok": True, "result": result, "variables": context}
+        return {
+            "ok": True,
+            "result": result,
+            "variables": context,
+            "sample_row_id_applied": False,
+        }
 
     def _validate_dropped_path_impl(self, path: str = "") -> Dict[str, Any]:
         r"""Valide qu'un chemin droppe est un dossier existant.
@@ -2861,6 +2904,34 @@ class CineSortApi:
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
+        """Ouvre un dossier dans l'explorateur — caller LOCAL uniquement.
+
+        Cf issue #509. `history_support.open_path` finit par `os.startfile()`
+        sur la machine qui HEBERGE CineSort. Ses deux voisins immediats
+        (`_open_logs_folder_impl`, `_open_external_url_impl`) refusent deja les
+        requetes REST distantes ; celle-ci ne le faisait pas. Les protections
+        existantes (refus des symlinks, confinement dans `state_dir` + `root`)
+        valident le CHEMIN, jamais l'ORIGINE de l'appel.
+
+        Portee honnete : `open_path` est aujourd'hui hors d'atteinte du
+        dispatcher REST (`rest_server._EXCLUDED_METHODS`), verifie en
+        construisant le dispatcher — y compris avec la passe legacy forcee.
+        Le garde est donc de la defense en profondeur, pas la fermeture d'une
+        porte ouverte. Il n'est pas decoratif pour autant : `open_logs_folder`
+        a precisement ete RETIREE de cette liste d'exclusion (V2-09) pour
+        debloquer un bouton du dashboard, et c'est son garde local-only qui a
+        rattrape l'exposition. `open_path` a maintenant le sien.
+
+        `is_remote_request()` vaut False hors REST et pour 127.0.0.1/::1 : le
+        bridge pywebview natif et le dashboard local ne sont pas affectes.
+        """
+        if is_remote_request():
+            return _err_response(
+                "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
         return history_support.open_path(
             self,
             path,
@@ -2948,9 +3019,7 @@ class CineSortApi:
                 log_module=__name__,
             )
         try:
-            import webbrowser as _webbrowser
-
-            _webbrowser.open(u)
+            webbrowser.open(u)
             return {"ok": True, "opened": u}
         except (OSError, RuntimeError) as exc:
             return _err_response(str(exc), category="runtime", level="warning", log_module=__name__)
@@ -2997,12 +3066,6 @@ class CineSortApi:
         Returns:
             {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
         """
-        # Imports locaux : evite de polluer le top-level pour un endpoint
-        # ponctuel (subprocess lourd, sys/datetime non utilises au module-level).
-        import datetime as _dt  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-        import sys  # noqa: PLC0415
-
         version = str(getattr(self, "_app_version", "") or "unknown")
 
         # build_date : mtime du fichier VERSION (date ISO UTC). Best-effort.
@@ -3011,7 +3074,7 @@ class CineSortApi:
             version_file = Path(__file__).resolve().parents[3] / "VERSION"
             if version_file.is_file():
                 mtime = version_file.stat().st_mtime
-                build_date = _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
+                build_date = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).date().isoformat()
         except (OSError, ValueError):
             pass
 

@@ -33,9 +33,29 @@ _MAGIC_AVI_OFFSET = 8
 # WMV / ASF : 16 octets d'en-tete
 _MAGIC_WMV = bytes([0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11])
 
-# MPEG-TS : sync byte 0x47 repete a intervalles de 188 octets
+# MPEG-TS : sync byte 0x47 repete a intervalle regulier.
+#
+# #784 (main) avait fige DEUX layouts en dur — (offset 0, 188) et (offset 4,
+# 192) — ce qui suffisait a rattraper le defaut M2TS. On generalise ici :
+# ni la taille de paquet ni le decalage initial ne sont garantis.
+#  - 188 : MPEG-2 TS nu (ISO/IEC 13818-1), sync a l'offset 0 ;
+#  - 192 : source packet BDAV/M2TS = TP_extra_header de 4 octets (2 bits de
+#          copy permission + horodatage d'arrivee 30 bits a 27 MHz) SUIVI du
+#          paquet TS de 188 octets. C'est le conteneur des Blu-ray et des
+#          camescopes AVCHD, donc de TOUT `.m2ts` / `.mts` : le sync y est a
+#          l'offset 4, pas 0 ;
+#  - 204 : TS + 16 octets de parite Reed-Solomon (captures DVB).
+# Ce sont exactement les trois tailles que FFmpeg sonde dans
+# libavformat/mpegts.c (TS_PACKET_SIZE / TS_DVHS_PACKET_SIZE /
+# TS_FEC_PACKET_SIZE) ; son `analyze()` totalise les sync par offset
+# `i % packet_size`, c.-a-d. cherche lui aussi le decalage initial. La table
+# `_TS_LAYOUTS` de #784 disparait donc au profit du balayage : elle etait
+# strictement incluse dedans (offset 0/188 et offset 4/192 en font partie).
 _TS_SYNC_BYTE = 0x47
 _TS_PACKET_SIZE = 188
+_TS_M2TS_PACKET_SIZE = 192  # 188 + les 4 octets du TP_extra_header
+_TS_FEC_PACKET_SIZE = 204
+_TS_PACKET_SIZES = (_TS_PACKET_SIZE, _TS_M2TS_PACKET_SIZE, _TS_FEC_PACKET_SIZE)
 _TS_SYNC_COUNT = 3  # verifier 3 sync bytes
 
 # Extensions supportees par la verification
@@ -129,14 +149,41 @@ def _check_avi(data: bytes) -> Tuple[bool, str]:
 
 
 def _check_ts(data: bytes) -> Tuple[bool, str]:
-    """Verifie 3 sync bytes 0x47 a intervalles de 188 octets."""
-    needed = (_TS_SYNC_COUNT - 1) * _TS_PACKET_SIZE + 1
-    if len(data) < needed:
+    """Verifie `_TS_SYNC_COUNT` sync bytes 0x47 alignes sur un layout TS connu.
+
+    Un layout est un couple (decalage initial, taille de paquet). On essaie
+    chaque taille de `_TS_PACKET_SIZES` et, pour chacune, chaque decalage de
+    0 a taille-1 : un flux qui commence au milieu d'un paquet (capture coupee)
+    a forcement sa premiere frontiere de paquet a moins d'une taille de paquet
+    du debut, donc cette plage est exhaustive. C'est ce qui rattrape le M2TS
+    (sync a l'offset 4) sans coder ce 4 en dur.
+
+    Le prix de cette recherche est un risque de faux positif sur des octets
+    aleatoires : ~584 couples testes a 2**-24 chacun, soit ~5e-5. Negligeable
+    devant le defaut corrige, qui declarait corrompu 100 % des `.m2ts`/`.mts`
+    valides.
+
+    On ne rend `header_mismatch` que si TOUS les layouts ont pu etre testes :
+    si l'en-tete lu est trop court pour en eliminer un, le verdict honnete est
+    `file_too_small`, pas une accusation de corruption.
+    """
+    all_layouts_tested = True
+    for size in _TS_PACKET_SIZES:
+        span = (_TS_SYNC_COUNT - 1) * size
+        for base in range(size):
+            if len(data) < base + span + 1:
+                # `needed` croit avec `base` : les decalages suivants de cette
+                # taille sont hors de portee eux aussi.
+                all_layouts_tested = False
+                break
+            if all(data[base + i * size] == _TS_SYNC_BYTE for i in range(_TS_SYNC_COUNT)):
+                return True, "ok"
+    # Aucun layout ne correspond. Distinguer "trop petit pour verifier" de
+    # "octets presents mais invalides" (garde deja portee par #784) : n'affirmer
+    # header_mismatch que si le buffer permettait de tester TOUS les layouts.
+    if not all_layouts_tested:
         return False, "file_too_small"
-    for i in range(_TS_SYNC_COUNT):
-        if data[i * _TS_PACKET_SIZE] != _TS_SYNC_BYTE:
-            return False, "header_mismatch"
-    return True, "ok"
+    return False, "header_mismatch"
 
 
 def _check_wmv(data: bytes) -> Tuple[bool, str]:

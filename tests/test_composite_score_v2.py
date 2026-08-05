@@ -27,11 +27,13 @@ from cinesort.domain.perceptual.constants import (
     GLOBAL_WEIGHT_AUDIO_V2,
     GLOBAL_WEIGHT_COHERENCE_V2,
     GLOBAL_WEIGHT_VIDEO_V2,
+    GRAIN_VINTAGE_ERAS_V2,
     VIDEO_WEIGHT_HDR,
     VIDEO_WEIGHT_LPIPS,
     VIDEO_WEIGHT_PERCEPTUAL,
     VIDEO_WEIGHT_RESOLUTION,
 )
+from cinesort.domain.perceptual.grain_signatures import classify_film_era_v2
 from cinesort.domain.perceptual.models import (
     AudioPerceptual,
     CategoryScore,
@@ -502,6 +504,35 @@ class TestContextualAdjustments(unittest.TestCase):
         self.assertEqual(vs.value, 77.0)
         self.assertTrue(any("vintage_master_tolerance" in t for t in trace))
 
+    def _rule9_value_for_era(self, era: str) -> float:
+        grain = GrainAnalysis(grain_nature="film_grain", is_animation=False, film_era_v2=era)
+        v, _, _ = apply_contextual_adjustments(_v_subs(70), _a_subs(70), grain, None, None, None, [], False, era)
+        return next(s for s in v if s.name == "perceptual_visual").value
+
+    def test_rule9_applies_to_every_declared_vintage_era(self):
+        """#444 : la regle testait "35mm_golden"/"early_color", inexistants.
+
+        Consequence : seule `16mm_era` declenchait la tolerance, `35mm_classic`
+        — la deuxieme ere pellicule de la spec — recevait le bonus grain PLEIN.
+        """
+        for era in GRAIN_VINTAGE_ERAS_V2:
+            with self.subTest(era=era):
+                self.assertEqual(self._rule9_value_for_era(era), 77.0)
+        # Contre-exemple : une ere numerique garde le bonus plein.
+        self.assertEqual(self._rule9_value_for_era("digital_modern"), 80.0)
+
+    def test_vintage_eras_all_exist_in_grain_era_v2(self):
+        """Verrou anti-valeur fantome : chaque ere listee doit etre PRODUCTIBLE.
+
+        C'est exactement ce qui manquait : "35mm_golden" et "early_color"
+        n'etaient la sortie de `classify_film_era_v2` pour aucune entree, donc
+        les deux branches correspondantes etaient mortes.
+        """
+        producible = {classify_film_era_v2(y) for y in range(1890, 2036)}
+        producible.add(classify_film_era_v2(2023, film_format="70mm"))
+        for era in GRAIN_VINTAGE_ERAS_V2:
+            self.assertIn(era, producible, f"{era} n'est produit par aucune annee ni format")
+
 
 # ---------------------------------------------------------------------------
 # compute_category + orchestrator
@@ -609,16 +640,19 @@ class TestCollectWarnings(unittest.TestCase):
         ]
 
     def test_runtime_mismatch_warning(self):
+        # duration_s est au TOP-LEVEL de NormalizedProbe, pas dans video subdict.
         warns = collect_warnings(
             self._cats(),
             0.9,
             7200,
             [],
             "mismatch",
-            {"video": {"duration_s": 8700}},
+            {"duration_s": 8700, "video": {"codec": "hevc"}},
             False,
         )
         self.assertTrue(any("Theatrical" in w or "Extended" in w for w in warns))
+        # La duree affichee doit refleter 8700s = 145 min, pas 0 min.
+        self.assertTrue(any("145 min" in w for w in warns))
 
     def test_dv_profile_5_warning(self):
         warns = collect_warnings(self._cats(), 0.9, 7200, ["dv_profile_5"], None, None, False)

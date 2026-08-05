@@ -87,8 +87,10 @@ class DetectLanguageBeforeFlagTokens(unittest.TestCase):
         self.assertEqual(detect_language_from_suffix("Movie.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.forced.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.sdh.srt"), "")
-        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.cc.srt"), "")
+        # #679 : 'hi' seul vaut desormais HINDI (le tag malentendant du projet
+        # est 'sdh'). Contrat detaille dans tests/test_subtitle_lang_vocab.py.
+        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "hi")
         self.assertEqual(detect_language_from_suffix("Movie.xyz123.srt"), "")
 
 
@@ -104,10 +106,17 @@ class SubtitleReportWithFlagTokens(unittest.TestCase):
                 (folder / sub_name).write_text("", encoding="utf-8")
             return build_subtitle_report(folder, video, expected)
 
-    def test_forced_seul_compte_comme_langue_presente(self) -> None:
+    def test_forced_seul_est_une_langue_presente_mais_incomplete(self) -> None:
+        """ARBITRAGE F12 tranche le 2026-08-03 (cf. tests/test_subtitle_forced_only_f12.py).
+
+        La langue reste DETECTEE (le fichier est bien un sous-titre 'fr', et un
+        `subtitle_missing_fr` serait de toute facon efface par les reconciliations
+        de lecture) ; l'absence de piste complete passe par un signal ORTHOGONAL.
+        """
         report = self._report("Inception (2010).mkv", ["Inception (2010).fr.forced.srt"], ["fr"])
         self.assertEqual(report.languages, ["fr"])
         self.assertEqual(report.missing_languages, [])
+        self.assertEqual(report.forced_only_languages, ["fr"])
         self.assertEqual(report.count, 1)
 
     def test_forced_plus_full_ne_sont_pas_un_doublon(self) -> None:
@@ -119,6 +128,7 @@ class SubtitleReportWithFlagTokens(unittest.TestCase):
         self.assertEqual(report.languages, ["fr"])
         self.assertEqual(report.missing_languages, [])
         self.assertEqual(report.duplicate_languages, [])
+        self.assertEqual(report.forced_only_languages, [])
         self.assertEqual(report.count, 2)
 
     def test_titre_termine_par_un_code_langue_n_invente_pas_de_langue(self) -> None:

@@ -359,11 +359,15 @@ Structure cible créée par apply :
 ```
 Breaking Bad (2008)/
   Saison 01/
-    S01E01 - Pilot.mkv
-    S01E02 - Cat's in the Bag.mkv
+    Breaking.Bad.S01E01.1080p.BluRay.x264-GROUP.mkv
+    Breaking.Bad.S01E02.1080p.BluRay.x264-GROUP.mkv
   Saison 02/
-    S02E01 - Seven Thirty-Seven.mkv
+    Breaking.Bad.S02E01.1080p.BluRay.x264-GROUP.mkv
 ```
+
+Les épisodes sont **rangés, jamais renommés** : seuls les dossiers `Série (année)`
+et `Saison NN` sont créés par CineSort. Le nom du fichier reste celui de la source,
+sinon il se désynchronise de son torrent et le seeding casse.
 
 Métadonnées TMDb TV (titre épisode, etc.) récupérées si match exact série + saison + épisode.
 

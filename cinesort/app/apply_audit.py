@@ -40,9 +40,36 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from cinesort.infra.log_scrubber import scrub_secrets
+
 _log = logging.getLogger(__name__)
 
 AUDIT_FILENAME = "apply_audit.jsonl"
+
+# Issue #414 : le journal JSONL est exportable (`export_apply_audit`, formats
+# json/jsonl/csv) et archive longue duree — il doit passer par le meme scrubbing
+# de secrets que les logs UI, qui eux ont un SecretsScrubFilter.
+#
+# EXCEPTION ASSUMEE — ces champs sont ecrits VERBATIM :
+#   `scrub_secrets` est un scrubber de forme `cle=valeur` dont la capture ne
+#   s'arrete qu'au blanc, au `&` ou au guillemet. Applique a un chemin, il avale
+#   la fin du chemin :
+#       C:/lib/Film [api_key=X]/film.mkv  ->  C:/lib/Film [api_key=[REDACTED]
+#   Un `src`/`dst` tronque dans un journal d'apply est pire qu'un secret non
+#   redige : il MENT sur ce qui a ete deplace sur le disque, au moment precis ou
+#   l'on relit le journal pour comprendre une operation destructive. Meme
+#   raisonnement pour `title` (regle projet : ne jamais mutiler un titre).
+#   Les champs de diagnostic (`message`, `detail`, `context`, `reason`...), eux,
+#   sont du texte machine ou un secret peut reellement transiter (chaine d'une
+#   exception contenant une URL `...?api_key=`) : ils SONT scrubbes.
+_VERBATIM_FIELDS = frozenset({"src", "dst", "path", "resolved_path", "title"})
+
+
+def _scrub_field(key: str, value: Any) -> Any:
+    """Retire les secrets d'une valeur d'evenement d'audit (cf `_VERBATIM_FIELDS`)."""
+    if key in _VERBATIM_FIELDS or not isinstance(value, str):
+        return value
+    return scrub_secrets(value)
 
 
 def audit_path_for_run(run_dir: Path) -> Path:
@@ -93,7 +120,7 @@ class ApplyAuditLogger:
             "run_id": self._run_id,
             "batch_id": self._batch_id,
             "event": str(event),
-            **{k: v for k, v in data.items() if v is not None},
+            **{k: _scrub_field(k, v) for k, v in data.items() if v is not None},
         }
         try:
             line = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)

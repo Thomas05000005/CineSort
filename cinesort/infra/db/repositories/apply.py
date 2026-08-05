@@ -13,8 +13,9 @@ Methodes exposees :
     insert_apply_batch, append_apply_operation, close_apply_batch,
     get_last_reversible_apply_batch, list_apply_operations,
     mark_apply_operation_undo_status, mark_apply_batch_undo_status,
-    list_apply_batches_for_run, get_batch_rows_summary,
-    list_apply_operations_by_row, insert_pending_move, delete_pending_move,
+    list_apply_batches_for_run, list_apply_batches_for_runs,
+    get_batch_rows_summary, list_apply_operations_by_row,
+    list_apply_operations_for_rows, insert_pending_move, delete_pending_move,
     list_pending_moves, count_pending_moves
 """
 
@@ -22,10 +23,65 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+
+# Taille de paquet pour les clauses `IN (...)` construites dynamiquement.
+# SQLite borne le nombre de parametres lies (SQLITE_MAX_VARIABLE_NUMBER) ET la
+# profondeur de l'arbre d'expression ; 200 laisse une marge confortable sous les
+# deux, tout en tenant en UNE requete les tailles reelles (<= 100 runs).
+_SQL_CHUNK = 200
+
+
+def _chunked(values: Sequence[str], size: Optional[int] = None) -> Iterator[List[str]]:
+    """Decoupe une sequence en paquets de `size` (jamais de paquet vide).
+
+    `size=None` lit `_SQL_CHUNK` A L'APPEL, pas a la definition : une valeur par
+    defaut liee a la definition aurait rendu la taille de paquet intestable
+    (le chemin multi-paquet ne serait jamais exerce).
+    """
+    step = max(1, int(_SQL_CHUNK if size is None else size))
+    for start in range(0, len(values), step):
+        yield list(values[start : start + step])
+
+
+def _dedup_str(values: Optional[Iterable[Any]]) -> List[str]:
+    """Normalise en `str`, retire les vides et les doublons, ordre d'apparition."""
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        text = str(value)
+        if not text.strip() or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _apply_operation_row_to_dict(r: Any) -> Dict[str, Any]:
+    """Projection commune d'une ligne `apply_operations` (source unique).
+
+    Partagee par `list_apply_operations_by_row` et sa version groupee : deux
+    projections divergentes auraient fait retourner des dicts de formes
+    differentes selon le chemin emprunte.
+    """
+    return {
+        "id": int(r["id"]),
+        "batch_id": str(r["batch_id"]),
+        "op_index": int(r["op_index"]),
+        "op_type": str(r["op_type"]),
+        "src_path": str(r["src_path"]),
+        "dst_path": str(r["dst_path"]),
+        "reversible": int(r["reversible"] or 0),
+        "undo_status": str(r["undo_status"] or "PENDING"),
+        "error_message": str(r["error_message"] or ""),
+        "ts": float(r["ts"] or 0.0),
+        "row_id": str(r["row_id"] or ""),
+        "src_sha1": str(r["src_sha1"] or "") or None,
+        "src_size": int(r["src_size"]) if r["src_size"] is not None else None,
+    }
 
 
 class ApplyBatchStateError(RuntimeError):
@@ -84,6 +140,30 @@ _ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
     "FAILED": frozenset(
         {
             "ROLLED_BACK_BY_ATOMIC",
+        }
+    ),
+    # Nuance N06 (ultra-audit 2026-08-03) : les deux statuts poses par le
+    # boot-cleanup (cf cinesort/app/apply_batches_reconciliation.py:59-60)
+    # n'avaient aucune entree ici. Consequence mesuree : apres un crash
+    # mid-apply suivi d'un reboot, un undo selectif restaurait bien les fichiers
+    # sur disque, puis `close_apply_batch` levait ApplyBatchStateError
+    # ("transition invalide vers 'UNDONE_DONE'") — que
+    # `apply_support._finalize_batch_undo_status` ne rattrape pas (il ne catche
+    # que sqlite3.Error / OSError) -> HTTP 500 sur une operation REUSSIE, et le
+    # statut du batch restait fige sur le libelle du boot-cleanup.
+    # On n'ouvre que la famille UNDONE_* : aucun retour vers DONE/PENDING, donc
+    # l'invariant H14 (pas de reintroduction dans
+    # get_last_reversible_apply_batch) est preserve.
+    "COMPLETED_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
+    "ROLLED_BACK_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
         }
     ),
 }
@@ -405,23 +485,68 @@ class ApplyRepository(_BaseRepository):
             else:
                 cur = conn.execute(base_sql + " LIMIT ?", (str(run_id), lim))
             rows = cur.fetchall()
-        out: List[Dict[str, Any]] = []
-        for row in rows:
-            summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
-            out.append(
-                {
-                    "batch_id": str(row["batch_id"]),
-                    "run_id": str(row["run_id"]),
-                    "started_ts": float(row["started_ts"] or 0.0),
-                    "ended_ts": float(row["ended_ts"] or 0.0) if row["ended_ts"] is not None else None,
-                    "dry_run": int(row["dry_run"] or 0),
-                    "quarantine_unapproved": int(row["quarantine_unapproved"] or 0),
-                    "status": str(row["status"] or ""),
-                    "summary": summary,
-                    "app_version": str(row["app_version"] or ""),
-                }
-            )
+        return [self._apply_batch_row_to_dict(row) for row in rows]
+
+    def list_apply_batches_for_runs(
+        self,
+        *,
+        run_ids: Sequence[str],
+        limit_per_run: int = 10,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Version groupee de `list_apply_batches_for_run` : {run_id: [batches]}.
+
+        Issue #577 : la timeline d'un film appelait `list_apply_batches_for_run`
+        une fois par run (jusqu'a 100), et chaque appel ouvre sa propre connexion
+        SQLite. Ici, une requete par paquet de `_SQL_CHUNK` runs.
+
+        Contrat identique a la version unitaire : ordre `started_ts DESC`,
+        `limit_per_run <= 0` = aucune borne. Les runs sans aucun batch sont
+        ABSENTS du dict (l'appelant utilise `.get(run_id, [])`).
+        """
+        self._ensure_apply_journal_tables()
+        ids = _dedup_str(run_ids)
+        if not ids:
+            return {}
+        lim = int(limit_per_run)
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        with self._managed_conn() as conn:
+            for chunk in _chunked(ids):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT batch_id, run_id, started_ts, ended_ts, dry_run,
+                           quarantine_unapproved, status, summary_json, app_version
+                    FROM apply_batches
+                    WHERE run_id IN ({placeholders})
+                    ORDER BY started_ts DESC
+                    """,
+                    tuple(chunk),
+                )
+                for row in cur.fetchall():
+                    bucket = out.setdefault(str(row["run_id"]), [])
+                    # La troncature se fait ICI, apres le tri global : le paquet
+                    # contient TOUS les batches des runs demandes, donc chaque
+                    # bucket voit ses batches dans le meme ordre que la version
+                    # unitaire avant d'etre coupe.
+                    if lim > 0 and len(bucket) >= lim:
+                        continue
+                    bucket.append(self._apply_batch_row_to_dict(row))
         return out
+
+    def _apply_batch_row_to_dict(self, row: Any) -> Dict[str, Any]:
+        """Projection commune d'une ligne `apply_batches` (source unique)."""
+        summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
+        return {
+            "batch_id": str(row["batch_id"]),
+            "run_id": str(row["run_id"]),
+            "started_ts": float(row["started_ts"] or 0.0),
+            "ended_ts": float(row["ended_ts"] or 0.0) if row["ended_ts"] is not None else None,
+            "dry_run": int(row["dry_run"] or 0),
+            "quarantine_unapproved": int(row["quarantine_unapproved"] or 0),
+            "status": str(row["status"] or ""),
+            "summary": summary,
+            "app_version": str(row["app_version"] or ""),
+        }
 
     def get_batch_rows_summary(self, *, batch_id: str) -> List[Dict[str, Any]]:
         """Per-row summary of a batch: for each row_id, count total/reversible/undone/pending ops."""
@@ -487,24 +612,65 @@ class ApplyRepository(_BaseRepository):
                     (str(batch_id), effective_row_id),
                 )
             rows = cur.fetchall()
-        return [
-            {
-                "id": int(r["id"]),
-                "batch_id": str(r["batch_id"]),
-                "op_index": int(r["op_index"]),
-                "op_type": str(r["op_type"]),
-                "src_path": str(r["src_path"]),
-                "dst_path": str(r["dst_path"]),
-                "reversible": int(r["reversible"] or 0),
-                "undo_status": str(r["undo_status"] or "PENDING"),
-                "error_message": str(r["error_message"] or ""),
-                "ts": float(r["ts"] or 0.0),
-                "row_id": str(r["row_id"] or ""),
-                "src_sha1": str(r["src_sha1"] or "") or None,
-                "src_size": int(r["src_size"]) if r["src_size"] is not None else None,
-            }
-            for r in rows
-        ]
+        return [_apply_operation_row_to_dict(r) for r in rows]
+
+    def list_apply_operations_for_rows(
+        self,
+        *,
+        batch_ids: Sequence[str],
+        row_ids: Sequence[str],
+    ) -> Dict[Tuple[str, str], List[Dict[str, Any]]]:
+        """Version groupee de `list_apply_operations_by_row` : {(batch_id, row_id): [ops]}.
+
+        Issue #577 : la timeline d'un film faisait UNE requete par couple
+        (batch, row) — jusqu'a `runs x batches` allers-retours, chacun avec sa
+        propre connexion SQLite. Ici, une requete par paquet de batches.
+
+        Le sentinelle `"__legacy__"` garde exactement le sens de la version
+        unitaire : il designe les operations dont `row_id` est NULL en base, et
+        c'est sous cette clef qu'elles ressortent.
+
+        Les couples sans aucune operation sont ABSENTS du dict.
+        """
+        self._ensure_apply_journal_tables()
+        batches = _dedup_str(batch_ids)
+        rows_wanted = _dedup_str(row_ids)
+        if not batches or not rows_wanted:
+            return {}
+        want_legacy = "__legacy__" in rows_wanted
+        concrete_rows = [value for value in rows_wanted if value != "__legacy__"]
+        if not concrete_rows and not want_legacy:
+            return {}
+
+        row_clauses: List[str] = []
+        row_params: List[str] = []
+        if concrete_rows:
+            row_clauses.append(f"row_id IN ({','.join('?' for _ in concrete_rows)})")
+            row_params.extend(concrete_rows)
+        if want_legacy:
+            row_clauses.append("row_id IS NULL")
+        row_predicate = " OR ".join(row_clauses)
+
+        out: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        with self._managed_conn() as conn:
+            for chunk in _chunked(batches):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT id, batch_id, op_index, op_type, src_path, dst_path,
+                           reversible, undo_status, error_message, ts, row_id,
+                           src_sha1, src_size
+                    FROM apply_operations
+                    WHERE batch_id IN ({placeholders}) AND ({row_predicate})
+                    ORDER BY op_index ASC, id ASC
+                    """,
+                    tuple(chunk) + tuple(row_params),
+                )
+                for r in cur.fetchall():
+                    raw_row_id = r["row_id"]
+                    key = (str(r["batch_id"]), "__legacy__" if raw_row_id is None else str(raw_row_id))
+                    out.setdefault(key, []).append(_apply_operation_row_to_dict(r))
+        return out
 
     # =====================================================================
     # CR-1 audit QA 20260429 : journal write-ahead pour atomicite shutil.move

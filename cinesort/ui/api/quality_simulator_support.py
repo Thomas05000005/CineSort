@@ -20,7 +20,9 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.tiers_helpers import normalize_tier_string
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.library_support import _get_store, _resolve_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +201,26 @@ def _get_active_profile(api: Any) -> Dict[str, Any]:
 
 def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str, Any]]:
     """Retourne une liste de quality_reports (chaque dict contient metrics.subscores)."""
-    store = getattr(api, "_store", None)
+    # AUDIT 2026-08-03 (#441 / #729) : ce site lisait `getattr(api, "_store", None)`.
+    # CineSortApi n'a JAMAIS eu d'attribut `_store` — les stores vivent dans
+    # `_infra_by_state_dir` et ne s'obtiennent que par `_get_or_create_infra`
+    # (cf runtime_support.get_or_create_infra). Le `getattr(..., None)` masquait
+    # le contrat rompu : store=None -> `return []` -> `run_simulation` repondait
+    # eternellement « Aucun rapport qualite disponible dans ce scope ». Zero
+    # exception, zero log : le simulateur de preset (ecran G5) etait mort en
+    # production et ne « marchait » que sous les mocks des tests, qui CREENT
+    # l'attribut absent (`api._store = MagicMock()`).
+    # On passe par le helper PARTAGE `library_support._get_store` — 6 sites
+    # dans library_support, plus history_support (x2) et run_read_support (x2)
+    # — au lieu de re-deriver un enieme acces au store.
+    #
+    # Portee EXACTE de cette phrase (revue adversaire 2026-08-03) : c'est
+    # `_get_store` — et lui seul — qui attrape `sqlite3.Error` (qui n'herite
+    # PAS d'OSError) en plus d'OSError/AttributeError/KeyError/RuntimeError/
+    # TypeError/ValueError, cf library_support.py:1539. L'AUTRE helper adopte
+    # par ce correctif, `_resolve_run_id`, ne l'attrape pas — voir la reserve
+    # documentee sur `_resolve_latest_run_id` ci-dessous.
+    store = _get_store(api)
     if store is None:
         return []
 
@@ -227,11 +248,43 @@ def _load_reports_for_scope(api: Any, run_id: str, scope: str) -> List[Dict[str,
 
 
 def _resolve_latest_run_id(api: Any) -> Optional[str]:
-    try:
-        latest = api._store.run.get_latest_run()
-        return latest.get("run_id") if isinstance(latest, dict) else None
-    except (AttributeError, KeyError):
-        return None
+    """Delegue au resolveur PARTAGE `library_support._resolve_run_id`.
+
+    AUDIT 2026-08-03 (#441 / #729) : ce corps faisait
+    `api._store.run.get_latest_run()`. `api._store` n'existe pas sur
+    CineSortApi -> `AttributeError`, avalee par le
+    `except (AttributeError, KeyError)` -> `None` : le scope "run" ne
+    resolvait jamais de run et le simulateur restait vide, meme apres un
+    scan reussi.
+
+    Pourquoi `_resolve_run_id` plutot que `store.run.get_latest_run()`, qui
+    existe bel et bien et exclut deja les runs utilitaires de re-scan (fix
+    HIGH-8 du 2026-07-13) : `_resolve_run_id` est le resolveur de la vue
+    Bibliotheque, et celui vers lequel `library_audit_support` delegue deja.
+    Le simulateur compare des rapports qualite a ce que l'utilisateur a sous
+    les yeux — les deux doivent resoudre "latest" sur le MEME run, sinon
+    l'ecart se recreera a la premiere divergence entre les deux
+    implementations.
+
+    Reserve (revue adversaire 2026-08-03) : `_resolve_run_id` attrape
+    `(OSError, AttributeError, KeyError, TypeError, ValueError)` —
+    library_support.py:1028 — SANS `sqlite3.Error`. Sur une base corrompue ce
+    site propage donc `sqlite3.DatabaseError` la ou l'ancien corps rendait
+    `None`. Trois raisons de ne pas l'elargir ici :
+      - ce n'est PAS une regression : l'ancien corps ne rendait `None` que
+        parce que `api._store` levait `AttributeError` avant tout acces DB —
+        `sqlite3.Error` n'y etait jamais atteignable non plus ;
+      - le chemin est de toute facon deja mort en amont : `run_simulation`
+        appelle `_get_active_profile` (donc
+        `api._active_quality_profile_payload()`, qui touche la meme base)
+        AVANT `_load_reports_for_scope`, et son `except` ne couvre pas
+        `sqlite3.Error` — la base corrompue leve la, a l'identique sur la
+        merge-base ;
+      - surtout : avaler `sqlite3.Error` ici transformerait une base corrompue
+        en « aucun run disponible », c'est-a-dire exactement la disparition
+        silencieuse que ce correctif combat.
+    """
+    return _resolve_run_id(api, None)
 
 
 def _recompute_in_memory(
@@ -254,7 +307,10 @@ def _recompute_in_memory(
         extras = float(subs.get("extras") or 0)
 
         score_before = int(rep.get("score") or 0)
-        tier_before = rep.get("tier") or _tier_for(score_before, base_tiers)
+        # Normalise le tier stocke (peut etre un ancien nom FR: Premium/Bon/...)
+        # vers le nom canonique anglais, sinon la distribution before/after et la
+        # matrice de shift produisent des cles fantomes ("Premium>Platinum").
+        tier_before = normalize_tier_string(rep.get("tier")) or _tier_for(score_before, base_tiers)
 
         score_after = _apply_weights(video, audio, extras, target_weights)
         tier_after = _tier_for(score_after, target_tiers)

@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 import cinesort.ui.api.cinesort_api as backend
+from cinesort.infra.run_id import RUN_ID_PATTERN
 from cinesort.ui.api import demo_support
 
 
@@ -108,7 +109,12 @@ class DemoModeBackendCycleTests(unittest.TestCase):
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(result.get("count"), 15)
         run_id = result["run_id"]
-        self.assertTrue(run_id.startswith("demo_"))
+        # Contrat RENFORCE, pas assoupli : ce test exigeait le prefixe `demo_`,
+        # c'est-a-dire le CINQUIEME producteur de run_id hors format canonique.
+        # Un run demo est identifie par `config_json['is_demo']` (verifie plus
+        # bas), jamais par son prefixe : exiger le prefixe verrouillait le
+        # defaut de retention corrige ici (cf `DemoRunIdProducerTests`).
+        self.assertTrue(RUN_ID_PATTERN.match(run_id), f"run_id demo hors format canonique : {run_id!r}")
 
         # is_active doit refléter l'état
         self.assertTrue(self.api.runtime.is_demo_mode_active().get("active"))

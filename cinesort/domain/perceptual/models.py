@@ -46,6 +46,11 @@ class VideoPerceptual:
     effective_bits_mean: float = 0.0
     variance_mean: float = 0.0
     flat_ratio: float = 0.0
+    # #830 : variabilite inter-frames COMBINEE (blockiness + blur normalise),
+    # cf. `compute_temporal_consistency` -> `combined_stddev`. C'est la grandeur
+    # que `composite_score._score_temporal` compare a TEMPORAL_CONSISTENCY_*.
+    # Ne PAS y remettre le seul ecart-type de blockiness : `blockiness_stddev`
+    # le porte deja, et le score temporel redeviendrait un doublon de celui-ci.
     temporal_stddev: float = 0.0
 
     y_avg_mean: float = 0.0

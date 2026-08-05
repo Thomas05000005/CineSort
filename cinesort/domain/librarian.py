@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Set
 # ignorait les embedded -> divergence de comptage entre les 2 vues (BUG 2 Vague I
 # faussement corrige).
 from cinesort.domain.confidence_thresholds import CONF_MEDIUM
-from cinesort.domain.subtitle_helpers import _normalize_iso639
+from cinesort.domain.subtitle_helpers import _normalize_expected_language, _normalize_iso639
 
 # Codecs video consideres comme obsoletes
 _OBSOLETE_CODECS = frozenset({"mpeg4", "xvid", "divx", "wmv", "mpeg2", "mpeg1"})
@@ -130,8 +130,8 @@ def resolve_tmdb_id(row: Any) -> Optional[int]:
     return best
 
 
-# 164L : analyse de 6 categories de suggestions — lineaire, chaque
-# bloc est independant. Proche du seuil 150L, pipeline de detection.
+# 266L commentaires compris : analyse de 6 categories de suggestions —
+# lineaire, chaque bloc est independant. Pipeline de detection.
 def generate_suggestions(
     rows: List[Any],
     quality_reports: List[Dict[str, Any]],
@@ -151,13 +151,19 @@ def generate_suggestions(
     if isinstance(expected_langs, str):
         expected_langs = [l.strip() for l in expected_langs.split(",") if l.strip()]
     # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-3) : normaliser les langues
-    # ATTENDUES via _LANG_MAP avant comparaison (symetrie). Une saisie
+    # ATTENDUES avant comparaison (symetrie). Une saisie
     # 'french'/'francais'/'fra'/'fre' doit matcher 'fr'. On garde une version
     # brute (pour l'affichage du libelle) et une version normalisee (pour la
     # comparaison). Les tags non resolvables retombent sur leur forme lower().
+    #
+    # `_normalize_expected_language` et NON `_normalize_iso639` : c'est de la
+    # saisie utilisateur (champ « Langues attendues », texte libre), donc `vf`
+    # et `vostfr` doivent y valoir 'fr'. Ce site est le plus expose des deux :
+    # il normalise A LA LECTURE, donc une regression ici repeint la
+    # bibliotheque en rouge sans le moindre re-scan.
     expected_norm: List[str] = []
     for raw in expected_langs:
-        norm = _normalize_iso639(raw) or str(raw).strip().lower()
+        norm = _normalize_expected_language(raw) or str(raw).strip().lower()
         if norm and norm not in expected_norm:
             expected_norm.append(norm)
 
@@ -167,6 +173,25 @@ def generate_suggestions(
         rid = str(qr.get("row_id") or "")
         if rid:
             qr_by_id[rid] = qr
+
+    # Index row_id -> titre propose, construit depuis les PlanRows.
+    #
+    # Fix issue #617 : les sections A (codecs obsoletes) et E (basse resolution)
+    # iterent sur les quality_reports, ou AUCUN titre n'existe. Le dict
+    # `metrics.detected` produit par quality_score._build_quality_metrics_helper
+    # ne porte que des metriques TECHNIQUES (resolution / width / height /
+    # bitrate / codec / hdr / audio / langues / duree / taille) et la table
+    # `quality_reports` (infra/db/repositories/quality.py) n'a pas de colonne
+    # titre : `detected.get("title")` valait donc TOUJOURS None et les deux
+    # sections retombaient sur le row_id technique, affiche tel quel en UI.
+    # Le titre se lit ICI, cote `rows`, comme le font deja les blocs B/C/D.
+    #
+    # Fix issue #662 : les CLES de cet index sont aussi l'ensemble des row_id
+    # reellement presents dans `rows` ; le health score s'y restreint (cf. bas
+    # de fonction).
+    title_by_rid: Dict[str, str] = {}
+    for row in rows:
+        title_by_rid[str(getattr(row, "row_id", "") or "")] = str(getattr(row, "proposed_title", "") or "")
 
     # Ensembles de row_ids par probleme (pour le health score)
     problem_ids: Set[str] = set()
@@ -181,7 +206,9 @@ def generate_suggestions(
         codec = str(detected.get("video_codec") or "").strip().lower()
         if codec in _OBSOLETE_CODECS:
             rid = str(qr.get("row_id") or "")
-            title = str(detected.get("title") or rid)
+            # Issue #617 : titre resolu depuis les rows (le quality_report n'en
+            # porte aucun) ; row_id en dernier recours (rapport orphelin).
+            title = title_by_rid.get(rid) or rid
             obsolete_films.append(title)
             obsolete_codecs_seen.add(codec)
             problem_ids.add(rid)
@@ -319,7 +346,8 @@ def generate_suggestions(
             height = int(detected.get("height") or 0)
             if 0 < height < 680:
                 rid = str(qr.get("row_id") or "")
-                title = str(detected.get("title") or rid)
+                # Issue #617 : idem section A, le titre vient des rows.
+                title = title_by_rid.get(rid) or rid
                 low_res_films.append(title)
                 problem_ids.add(rid)
     if low_res_films:
@@ -360,8 +388,19 @@ def generate_suggestions(
     suggestions.sort(key=lambda x: (_PRIORITY_ORDER.get(x["priority"], 9), -x["count"]))
 
     # --- Health score ---
+    # Fix issue #662 : `problem_ids` est l'UNION de deux sources — les `rows`
+    # (blocs B/C/D/F) et les `quality_reports` (blocs A/E) — alors que
+    # `total_rows` ne compte que les rows. Un rapport qualite ORPHELIN (row_id
+    # absent de `rows` : replan, rapport residuel d'un ancien run, desynchro
+    # rows<->reports) gonflait `problem_ids` sans gonfler `total_rows` :
+    # `healthy` devenait negatif et le score sortait de [0, 100] (mesure : -200
+    # pour 1 row saine + 3 rapports orphelins), affiche tel quel par l'insight
+    # "Sante bibliotheque : -200/100" (dashboard_support, section 3c).
+    # On ne compte donc comme "malades" que les row_id qui existent vraiment
+    # dans `rows` : un film absent du plan ne peut pas rendre le plan malade.
+    # Intersection et non clamp : on corrige la cause, pas le symptome.
     total_rows = len(rows)
-    healthy = total_rows - len(problem_ids)
+    healthy = total_rows - len(problem_ids.intersection(title_by_rid))
     health_score = round(100 * healthy / total_rows) if total_rows > 0 else 100
 
     return {"suggestions": suggestions, "health_score": health_score}

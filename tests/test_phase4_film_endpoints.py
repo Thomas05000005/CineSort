@@ -10,10 +10,12 @@ Couvre :
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cinesort.infra.db.sqlite_store import SQLiteStore
@@ -25,6 +27,20 @@ def _make_real_store() -> tuple[SQLiteStore, Path]:
     store = SQLiteStore(tmp / "test.sqlite", busy_timeout_ms=5000)
     store.initialize()
     return store, tmp
+
+
+def _wire_plan(api: MagicMock, rows: list) -> None:
+    """Cable le plan du run sur le chemin de lecture reellement emprunte.
+
+    PERF (ultra-audit 2026-08) : `film_support._find_plan_row` ne demande plus
+    le plan ENTIER via `api.run.get_plan` (qui serialisait et enrichissait les N
+    rows pour n'en garder qu'une) ; il passe par `history_support.get_plan_row`,
+    donc par `api._get_run` + `api._serialize_rows_for_payload`. On cable les
+    deux pour que le stub reste valable quel que soit le consommateur.
+    """
+    api.run.get_plan.return_value = {"ok": True, "rows": rows}
+    api._get_run.return_value = SimpleNamespace(done=True, rows=rows, paths=None)
+    api._serialize_rows_for_payload = lambda rs: [dict(r) for r in rs]
 
 
 def _make_api_with_store(store: SQLiteStore) -> MagicMock:
@@ -39,17 +55,24 @@ def _make_api_with_store(store: SQLiteStore) -> MagicMock:
     api._get_or_create_infra.return_value = (store, None)
     api._normalize_user_path = lambda p, default: default
     # Plan par defaut (peut etre override dans chaque test)
-    api.run.get_plan.return_value = {
-        "ok": True,
-        "rows": [
+    _wire_plan(
+        api,
+        [
             {
                 "row_id": "r1",
                 "proposed_title": "Inception",
                 "proposed_year": 2010,
                 "confidence": 80,
                 "confidence_label": "med",
-                "source_path": "D:/Films/Inception (2010).mkv",
+                # AUDIT 2026-08-03 (#447 / #730) : cette fixture posait
+                # `source_path`, une clef que `PlanRow` ne declare PAS et que
+                # `run_data_support.serialize_rows_for_payload` (asdict) ne
+                # peut donc pas produire. Le mock CREAIT la clef que la
+                # production n'a jamais eue : `mark_for_deletion` semblait
+                # persister le chemin du fichier alors qu'en vrai il tombait
+                # sur `folder`. On revient au contrat reel (folder + video).
                 "folder": "D:/Films/Inception (2010)",
+                "video": "Inception.2010.1080p.BluRay.x264.mkv",
                 "candidates": [
                     {"tmdb_id": 27205, "title": "Inception", "year": 2010, "score": 0.95},
                     {"tmdb_id": 999, "title": "Inception (Alt)", "year": 2011, "score": 0.55},
@@ -57,7 +80,7 @@ def _make_api_with_store(store: SQLiteStore) -> MagicMock:
                 "edition": None,
             }
         ],
-    }
+    )
     # Note : on utilise le vrai store SQLite (.run / .film_modal etc.), inutile
     # de mocker store.run.list_runs().
     return api
@@ -224,13 +247,22 @@ class MarkForDeletionTests(unittest.TestCase):
         self.assertTrue(self.store.film_modal.is_marked_for_deletion(run_id="run_test", row_id="r1"))
 
     def test_source_path_persisted(self) -> None:
+        """Le chemin persiste designe le MEDIA, derive de folder + video.
+
+        Avant #447/#730 l'assertion ne tenait que grace a la clef fantome
+        `source_path` posee par la fixture : en production la valeur etait
+        toujours celle de `folder`, donc la MEME pour tous les films d'un
+        dossier partage (kind collection/extra).
+        """
         from cinesort.ui.api import library_support
 
+        expected = os.path.join("D:/Films/Inception (2010)", "Inception.2010.1080p.BluRay.x264.mkv")
         res = library_support.mark_for_deletion(self.api, "run_test", "r1")
-        self.assertEqual(res["source_path"], "D:/Films/Inception (2010).mkv")
+        self.assertEqual(res["source_path"], expected)
         listed = self.store.film_modal.list_marked_for_deletion(run_id="run_test")
         self.assertEqual(len(listed), 1)
-        self.assertEqual(listed[0]["source_path"], "D:/Films/Inception (2010).mkv")
+        self.assertEqual(listed[0]["source_path"], expected)
+        self.assertNotEqual(listed[0]["source_path"], "D:/Films/Inception (2010)")
 
     def test_unknown_row_returns_error(self) -> None:
         from cinesort.ui.api import library_support
@@ -393,9 +425,9 @@ class GetFilmFullEnrichedTests(unittest.TestCase):
         from cinesort.ui.api import film_support
 
         # Plan sans candidat -> tmdb_id=0 -> pas d'enrichissement
-        self.api.run.get_plan.return_value = {
-            "ok": True,
-            "rows": [
+        _wire_plan(
+            self.api,
+            [
                 {
                     "row_id": "r1",
                     "proposed_title": "Mystery Movie",
@@ -403,7 +435,7 @@ class GetFilmFullEnrichedTests(unittest.TestCase):
                     "candidates": [],
                 }
             ],
-        }
+        )
         res = film_support.get_film_full(self.api, "run_test", "r1")
         self.assertTrue(res["ok"])
         self.assertEqual(res["tmdb_id"], 0)

@@ -25,7 +25,7 @@ import cinesort.infra.plex_client as _plex_mod
 import cinesort.infra.state as state
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
-from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
@@ -38,7 +38,7 @@ from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._validators import clamp_timeout, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 logger = logging.getLogger(__name__)
@@ -608,7 +608,45 @@ def _execute_undo_ops(
                     continue
 
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
-                conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
+                # REGLE INVIOLABLE n1 : le nom du fichier reste INTACT. L'ancien
+                # `api._unique_path` resolvait une collision dans le bac en
+                # renommant le FICHIER (`Rocky.1976.1080p.mkv` ->
+                # `Rocky.1976.1080p_2.mkv`) — 4e site de renommage du depot,
+                # celui-ci sur le chemin de l'UNDO, donc sur le filet de secours.
+                # `unique_bucket_path` porte l'index sur un DOSSIER a la place.
+                conflict_dst = unique_bucket_path(
+                    undo_conflicts_root / current_path.name,
+                    bucket_root=undo_conflicts_root,
+                    use_dup_suffix=False,
+                )
+                if conflict_dst is None:
+                    # Aucune desambiguisation de dossier possible. On REFUSE le
+                    # deplacement plutot que d'ecraser la cible ou de renommer le
+                    # fichier : sur un chemin destructif l'erreur va dans le sens
+                    # restrictif, et le fichier source reste ou il est.
+                    _log.error(
+                        "undo: quarantaine impossible sans renommer le fichier, abandon: %s",
+                        current_path,
+                    )
+                    failed += 1
+                    _mark_undo_status(
+                        store,
+                        log_fn,
+                        op_id=op_id,
+                        undo_status="FAILED",
+                        error_message=(
+                            "Quarantaine d'undo impossible sans renommer le fichier video "
+                            f"({current_path.name}) : deplacement refuse, le fichier est laisse en place."
+                        ),
+                    )
+                    continue
+                # `unique_bucket_path` INSERE un dossier d'index quand la cible est
+                # prise ; ce dossier n'existe pas encore. Sans ce mkdir, `shutil.move`
+                # leve FileNotFoundError, que la branche ci-dessous interprete comme
+                # « fichier disparu » et compte en SKIPPED — le fichier serait reste
+                # en place sans que rien ne signale d'echec. Constate par le test du
+                # site d'appel, avec deux conflits homonymes.
+                conflict_dst.parent.mkdir(parents=True, exist_ok=True)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
@@ -912,10 +950,27 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     except (FileNotFoundError, OSError):
         pass
 
+    # Ultra-audit 2026-08 (N25) : cette boucle appelait
+    # `list_apply_operations_by_row` PAR ROW. Chaque appel repo ouvre 2
+    # connexions SQLite neuves (_ensure_apply_journal_tables -> _existing_tables,
+    # puis la requete), soit 2N connexions pour N films. Mesure sur un batch de
+    # 5000 films : 165 s, contre 88 ms pour la requete unique + regroupement
+    # Python. `list_apply_operations` selectionne les MEMES colonnes avec le
+    # MEME `ORDER BY op_index ASC, id ASC` (repositories/apply.py:314-346 vs
+    # :460-489), donc l'ordre et le contenu des `ops` sont inchanges.
+    # Seule la convention du row_id NULL differe : le repo serialise NULL en ""
+    # (:341) alors que `get_batch_rows_summary` groupe sur
+    # COALESCE(row_id, '__legacy__') (:433). On realigne donc "" -> "__legacy__".
+    # Aucune ambiguite : `record_apply_operation` ecrit `str(row_id) if row_id
+    # else None` (:176), une chaine vide est donc stockee NULL, jamais "".
+    ops_by_row: Dict[str, List[Dict[str, Any]]] = {}
+    for op in store.apply.list_apply_operations(batch_id=bid):
+        ops_by_row.setdefault(str(op.get("row_id") or "") or "__legacy__", []).append(op)
+
     rows_out: List[Dict[str, Any]] = []
     for summary in rows_summary:
         rid = str(summary["row_id"])
-        ops = store.apply.list_apply_operations_by_row(batch_id=bid, row_id=rid)
+        ops = ops_by_row.get(rid, [])
         reversible_pending = [
             op for op in ops if int(op.get("reversible") or 0) == 1 and str(op.get("undo_status")) == "PENDING"
         ]
@@ -1992,6 +2047,20 @@ def _execute_apply(
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
                 _r.proposed_year = int(_ov["proposed_year"])
+    # Ultra-audit 2026-08 (N31) — l'absence de `sqlite3.Error` dans l'except
+    # ci-dessous est DELIBEREE, contrairement au bloc duplicate_decisions
+    # juste au-dessus. Ne pas « aligner » les deux tuples.
+    #
+    # Cet overlay materialise la DERNIERE volonte explicite de l'utilisateur, et
+    # la boucle porte sur TOUTES les rows. Degrader une sqlite3.Error en WARN
+    # ferait continuer l'apply avec un overlay PARTIEL (rows 0..k-1 overridees,
+    # k..n non) et renommerait des dossiers avec le titre auto-matche, en
+    # ecrasant silencieusement le choix manuel.
+    #
+    # Laisser remonter est fail-closed et sans perte : ce bloc s'execute AVANT
+    # tout appel a `_apply_rows_fn`, et les deux appelants de `_execute_apply`
+    # l'encadrent d'un try ; la boundary d'`apply_changes` clot alors le batch
+    # en FAILED. Aucun fichier n'a bouge, rien n'est a annuler.
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
@@ -2152,7 +2221,16 @@ def _cleanup_apply(
     run_id: str,
     dry_run: bool,
     rows: List[Any],
-) -> Tuple[Dict[str, int], int, int, Dict[str, Any]]:
+) -> Tuple[Dict[str, int], int, int, Dict[str, Any], bool]:
+    """Finalise le batch et resume l'apply.
+
+    Le 5e element du tuple, `journal_finalized`, dit si `close_apply_batch(DONE)`
+    a REELLEMENT abouti. Il vaut False des que la finalisation a echoue : le
+    batch reste alors `PENDING`, donc `get_last_reversible_apply_batch`
+    (filtre `status='DONE'`) ne le verra pas et l'undo de cet apply est perdu.
+    Le caller doit le remonter dans la reponse — un apply destructif dont le
+    filet de securite a disparu ne peut pas etre annonce comme un succes muet.
+    """
     cleanup_diag = result.cleanup_residual_diagnostic if isinstance(result.cleanup_residual_diagnostic, dict) else {}
     skip_reason_order = [
         core.SKIP_REASON_NON_VALIDE,
@@ -2167,6 +2245,7 @@ def _cleanup_apply(
     skip_counts = {reason: int((result.skip_reasons or {}).get(reason, 0)) for reason in skip_reason_order}
     applied_count = int(result.applied_count or 0)
     total_rows = int(result.considered_rows or len(rows))
+    journal_finalized = True
     if apply_batch_id is not None:
         try:
             store.apply.close_apply_batch(
@@ -2183,8 +2262,22 @@ def _cleanup_apply(
                     "ops_count": int(op_index),
                 },
             )
-        except (OSError, TypeError, ValueError) as exc:
-            log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            # F11 (suite) : sqlite3.Error n'herite PAS de OSError. `close_apply_batch`
+            # est appelee APRES que tous les deplacements ont ete faits sur disque —
+            # c'est exactement le cas ou l'invariant « un echec de journal n'empeche
+            # jamais un move » s'applique (contrairement a `insert_apply_batch`
+            # ci-dessus, volontairement fail-closed). Sans cette entree, un
+            # « database is locked » (ThreadingHTTPServer du dashboard + threads de
+            # fond concurrents, disque plein, disk I/O error) s'echappait de
+            # _cleanup_apply, faisait remonter un apply REUSSI en HTTP 500 et — en
+            # mode atomique — declenchait un rollback destructif.
+            journal_finalized = False
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise ({type(exc).__name__}, batch_id={apply_batch_id}) : {exc} "
+                "— l'apply disque est termine, mais le batch reste PENDING donc l'undo peut etre indisponible.",
+            )
         except RuntimeError as exc:
             # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
             # (sous-classe de RuntimeError, definie dans
@@ -2198,6 +2291,12 @@ def _cleanup_apply(
             # public API du module repositories) et on log un WARN explicite :
             # le batch est peut-etre deja finalise ailleurs, l'apply reel a
             # reussi, on preserve la backward compat.
+            #
+            # REVUE ADVERSAIRE PR#852 : ce chemin non plus n'a pas abouti a un
+            # batch `DONE` (transition refusee = batch absent, ou deja dans un
+            # etat terminal non reversible). L'undo n'est donc pas plus arme
+            # ici que dans l'except ci-dessus -> meme drapeau.
+            journal_finalized = False
             log_fn(
                 "WARN",
                 f"Journal apply non finalise (transition d'etat refusee, batch_id={apply_batch_id}) : {exc}",
@@ -2247,7 +2346,7 @@ def _cleanup_apply(
             f"video_blocked={int(cleanup_diag.get('has_video_count') or 0)} "
             f"ambiguous={int(cleanup_diag.get('ambiguous_count') or 0)}",
         )
-    return skip_counts, applied_count, total_rows, cleanup_diag
+    return skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized
 
 
 def _summarize_apply(
@@ -2462,7 +2561,8 @@ def _make_jellyfin_client(data: Dict[str, Any]) -> Any:
     """Cree un JellyfinClient depuis les settings. Retourne None si impossible."""
     url = str(data.get("jellyfin_url") or "").strip()
     api_key = str(data.get("jellyfin_api_key") or "").strip()
-    timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+    # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+    timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
     return JellyfinClient(url, api_key, timeout_s=timeout_s)
 
 
@@ -2504,7 +2604,8 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if not plex_url or not plex_token or not plex_lib:
         return
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2565,7 +2666,8 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
             log_module=__name__,
         )
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2626,6 +2728,15 @@ def _restore_jellyfin_watched(
         result = restore_watched(client, user_id, snapshot, operations)
         if result.restored > 0:
             log_fn("INFO", f"Jellyfin sync : {result.restored} statut(s) vu restauré(s).")
+        if result.counters_lost > 0:
+            # #535 : le statut vu est revenu, mais pas le nombre de lectures ni
+            # la date. Silencieux jusqu'ici, c'etait une perte de donnees
+            # invisible pour l'utilisateur.
+            log_fn(
+                "WARN",
+                f"Jellyfin sync : {result.counters_lost} film(s) restauré(s) SANS leur historique "
+                "(nombre de lectures et date perdus — serveur trop ancien pour l'API UserData ?).",
+            )
         if result.not_found > 0:
             log_fn("WARN", f"Jellyfin sync : {result.not_found} film(s) non retrouvé(s) après re-indexation.")
         if result.errors > 0:
@@ -2738,6 +2849,12 @@ def _apply_changes_body(
     if not dry_run:
         watched_ctx = _snapshot_jellyfin_watched(api, log_fn)
 
+    # Le rollback atomique ne doit rejouer QUE l'echec d'un apply incomplet. Ce
+    # drapeau passe a True des que `_execute_apply` a rendu la main : au-dela, le
+    # disque est dans l'etat voulu et toute exception ulterieure (finalisation du
+    # journal, resume, notifications, sync Jellyfin/Plex) ne justifie plus de
+    # defaire les deplacements — cf. le garde-fou plus bas.
+    apply_execution_completed = False
     try:
         try:
             result, batch_id, ops = _execute_apply(
@@ -2765,8 +2882,9 @@ def _apply_changes_body(
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
+        apply_execution_completed = True
 
-        skip_counts, applied_count, total_rows, cleanup_diag = _cleanup_apply(
+        skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized = _cleanup_apply(
             result,
             apply_batch_id,
             op_index,
@@ -2858,7 +2976,65 @@ def _apply_changes_body(
                 rs.apply_end(error=None)
             except Exception:
                 _log.debug("apply_end OK a echoue", exc_info=True)
-        return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
+        # REVUE ADVERSAIRE PR#852 — le silence etait le vrai defaut.
+        #
+        # Rendre `close_apply_batch` tolerante aux erreurs SQLite (F11) evite de
+        # transformer un apply reussi en HTTP 500 et de declencher un rollback
+        # destructif a tort. Mais elle transforme aussi un apply DONT L'UNDO EST
+        # MORT en un `{"ok": True}` totalement muet : le batch reste `PENDING`,
+        # `get_last_reversible_apply_batch` filtre `status='DONE'`, et
+        # l'utilisateur ne l'apprend qu'en cliquant « Annuler » (message
+        # generique « aucun apply annulable », sans lien avec l'apply qu'on
+        # vient de lui annoncer comme reussi). Un WARN dans le log technique
+        # n'est ni une information utilisateur ni une donnee exploitable par
+        # l'UI. Sur le chemin destructif, perdre l'annulation de 500 films DOIT
+        # etre une donnee de la reponse.
+        #
+        # `undo_available` couvre aussi le cas ou `insert_apply_batch` a echoue
+        # (OSError/TypeError/ValueError -> apply_batch_id None, apply poursuivi
+        # sans journal) et le dry-run (rien a annuler). Il exige EN PLUS au moins
+        # une operation journalisee (`op_index`) : un batch clos DONE mais vide
+        # n'est pas plus annulable qu'un batch PENDING, et annoncer
+        # `undo_available: True` a une UI qui proposerait alors un bouton
+        # « Annuler » inoperant serait le meme mensonge dans l'autre sens.
+        undo_available = bool(
+            not dry_run and apply_batch_id is not None and journal_finalized and int(op_index or 0) > 0
+        )
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "result": result.__dict__,
+            "apply_batch_id": apply_batch_id,
+            "journal_finalized": bool(journal_finalized),
+            "undo_available": undo_available,
+        }
+        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque :
+        # `applied_count` vient du resultat (donc reste vrai quand
+        # `insert_apply_batch` a echoue et que `op_index` est reste a 0), et
+        # `op_index` couvre les operations journalisees hors rows (nettoyage
+        # residuel). Un apply qui n'a rien deplace n'a rien perdu : crier au loup
+        # sur ce cas-la userait l'alerte exactement quand elle doit porter.
+        disk_touched = int(applied_count or 0) > 0 or int(op_index or 0) > 0
+        if not dry_run and disk_touched and not undo_available:
+            warning = t("errors.undo_unavailable_after_apply")
+            payload["journal_warning"] = warning
+            log_fn("WARN", warning)
+            # Un champ de payload que personne n'affiche serait un troisieme
+            # silence. Le centre de notifications (la cloche) est le seul canal
+            # qui SURVIT a la fermeture de l'ecran d'apply, et le miroir vers lui
+            # est inconditionnel (NotifyService.notify) : il ne depend d'aucun
+            # reglage de toasts desktop.
+            try:
+                api._notify.notify(
+                    "error",
+                    t("notifications.title_undo_unavailable"),
+                    warning,
+                    level="error",
+                )
+            except Exception:
+                # Un echec de notification ne doit pas transformer un apply
+                # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
+                _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
+        return payload
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
@@ -2875,7 +3051,11 @@ def _apply_changes_body(
                         "ops_count": int(op_index),
                     },
                 )
-            except (OSError, RuntimeError, TypeError, ValueError) as close_exc:
+            except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as close_exc:
+                # F11 (suite) : sans sqlite3.Error, un lock DB ici relevait une
+                # exception DEPUIS le handler d'erreur — elle sortait de
+                # _apply_changes_body avant meme le log « Echec application » et
+                # avant le rollback, ne laissant qu'un HTTP 500 generique.
                 log_fn(
                     "WARN",
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
@@ -2888,7 +3068,19 @@ def _apply_changes_body(
         # dict synthese qu'on logge sans propager (le caller recoit l'erreur
         # initiale via _err_response).
         atomic_rollback_summary: Optional[Dict[str, Any]] = None
-        if bool(apply_atomic) and apply_batch_id is not None:
+        if bool(apply_atomic) and apply_batch_id is not None and apply_execution_completed:
+            # L'apply lui-meme est alle au bout : le disque est dans l'etat
+            # demande et defaire 500 deplacements reussis a cause d'un echec de
+            # finalisation (journal verrouille, ecriture du resume, notification)
+            # serait la pire issue possible. On le dit explicitement dans le log
+            # d'apply pour que l'utilisateur sache pourquoi le badge « rollback
+            # atomique » n'apparait pas.
+            log_fn(
+                "WARN",
+                f"Mode atomique : rollback NON declenche batch={apply_batch_id} — l'apply s'est "
+                f"execute jusqu'au bout, l'echec est posterieur aux deplacements ({exc}).",
+            )
+        elif bool(apply_atomic) and apply_batch_id is not None:
             try:
                 atomic_rollback_summary = _atomic_rollback_forward(
                     store,
@@ -2932,7 +3124,10 @@ def _apply_changes_body(
                             "rollback_counts": atomic_rollback_summary.get("counts"),
                         },
                     )
-                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    # F11 (suite) : meme raison qu'aux deux except ci-dessus — le FS
+                    # est deja restaure, un lock DB ne doit pas transformer ce simple
+                    # marquage de statut en exception non rattrapee.
                     log_fn(
                         "WARN",
                         f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "
