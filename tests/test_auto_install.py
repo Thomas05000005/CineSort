@@ -12,10 +12,11 @@ import hashlib
 import io
 import os
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import cinesort.infra.probe.auto_install as auto_install
@@ -94,6 +95,50 @@ def _transport(payload: bytes) -> Callable[..., _FakeHttpResponse]:
         return _FakeHttpResponse(payload)
 
     return _open
+
+
+class _PacedSource:
+    """Flux de membre ZIP dont chaque `read` peut etre instrumente.
+
+    Seule la DECOMPRESSION est remplacee : `_extract_member` execute son vrai
+    code (fichier de travail, boucle de chunks, budget, `os.replace`, nettoyage).
+    Le hook permet de suspendre un ecrivain a un point precis de la copie, donc
+    de rendre un entrelacement REPRODUCTIBLE plutot qu'espere.
+    """
+
+    def __init__(self, payload: bytes, on_read: Optional[Callable[[int], None]] = None) -> None:
+        self._buf = io.BytesIO(payload)
+        self._on_read = on_read
+        self._reads = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if self._on_read is not None:
+            self._on_read(self._reads)
+        self._reads += 1
+        return self._buf.read(size)
+
+    def __enter__(self) -> "_PacedSource":
+        return self
+
+    def __exit__(self, *exc_info: object) -> bool:
+        return False
+
+
+class _FakeZip:
+    """`ZipFile` minimal : juste ce que `_extract_member` consomme."""
+
+    def __init__(self, payload: bytes, chunk: int, on_read: Optional[Callable[[int], None]] = None) -> None:
+        self._payload = payload
+        self._chunk = chunk
+        self._on_read = on_read
+
+    def getinfo(self, name: str) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(name)
+        info.file_size = len(self._payload)
+        return info
+
+    def open(self, name: str) -> _PacedSource:
+        return _PacedSource(self._payload, self._on_read)
 
 
 class TestGetToolsDir(unittest.TestCase):
@@ -565,7 +610,15 @@ class TestExtractBounds(unittest.TestCase):
                     _extract_member(zf, "b.exe", second, budget=budget, label="x.zip")
             self.assertIn("Decompression abandonnee", str(ctx.exception))
             self.assertFalse(second.exists(), "aucun binaire tronque au chemin final")
-            self.assertFalse((Path(tmp) / "b.exe.part").exists(), "aucun residu .part")
+            # Assertion volontairement portee sur le CONTENU du repertoire et non
+            # sur un nom de fichier de travail : celui-ci est desormais unique
+            # par appel, donc un `assertFalse(... "b.exe.part")` serait vrai sans
+            # rien prouver.
+            self.assertEqual(
+                sorted(p.name for p in Path(tmp).iterdir()),
+                ["a.exe"],
+                "aucun residu de fichier de travail",
+            )
 
     def test_aborts_when_zip_header_lies_about_size(self):
         """En-tete mensonger (annonce 1 Ko, flux de 8 Mio) : rien n'est ecrit.
@@ -605,6 +658,94 @@ class TestExtractBounds(unittest.TestCase):
         budget.consume(10, label="x.zip")  # pile au plafond : accepte
         with self.assertRaises(IntegrityError):
             budget.consume(1, label="x.zip")
+
+
+class TestConcurrentExtraction(unittest.TestCase):
+    """Deux extractions concurrentes vers la MEME destination (#734, CWE-362).
+
+    `auto_install_probe_tools` est un endpoint REST servi par
+    `ThreadingHTTPServer` (`infra/rest_server.py`) : deux appels concurrents
+    (double-clic, deux onglets) lancent deux `install_all()` en parallele. Les
+    deux voient `tools/ffprobe.exe` absent, telechargent chacun leur archive,
+    puis extraient vers la MEME `dest` — donc, si le fichier de travail porte un
+    nom deduit de `dest`, vers le MEME temporaire.
+
+    Ce qui se joue ici n'est pas un simple echec : le fichier final est un
+    EXECUTABLE que `tools_manager` lance ensuite en subprocess. Un contenu
+    entrelace entre deux ecrivains est un binaire corrompu qui sera EXECUTE.
+    Meme famille que #712/#718 (poster_proxy), meme correctif : un nom de
+    fichier de travail unique par ecrivain.
+    """
+
+    def test_concurrent_extractions_never_interleave(self):
+        """Le contenu final doit etre l'archive d'UN ecrivain, jamais un melange.
+
+        L'entrelacement est FORCE, pas espere : un simple depart simultane est
+        trop dependant de l'ordonnanceur pour prouver quoi que ce soit (mesure :
+        vert une fois sur deux sur le meme code fautif). Le lent est donc bloque
+        apres son premier chunk, le rapide fait tout son travail, puis le lent
+        reprend. Cet ordre est celui que produit naturellement un second appel
+        REST arrivant pendant l'extraction du premier.
+        """
+        chunk = 64 * 1024
+        slow_payload = b"S" * (chunk * 3)
+        fast_payload = b"F" * (chunk * 3)
+        paused = threading.Event()
+        resume = threading.Event()
+
+        def _pause_after_first_chunk(reads_done: int) -> None:
+            if reads_done == 1:  # le chunk 1 est ecrit, les suivants non
+                paused.set()
+                self.assertTrue(resume.wait(timeout=30), "le rapide n'a jamais rendu la main")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "ffprobe.exe"
+            errors: List[BaseException] = []
+
+            def _run(payload: bytes, on_read=None) -> None:
+                try:
+                    with patch.object(auto_install, "_EXTRACT_CHUNK_BYTES", chunk):
+                        _extract_member(
+                            _FakeZip(payload, chunk, on_read=on_read),
+                            "bin/ffprobe.exe",
+                            dest,
+                            budget=_ExtractBudget(10**9),
+                            label="ffmpeg.zip",
+                        )
+                except BaseException as exc:  # noqa: BLE001 - collecte pour le rapport
+                    errors.append(exc)
+
+            slow = threading.Thread(target=_run, args=(slow_payload, _pause_after_first_chunk))
+            slow.start()
+            self.assertTrue(paused.wait(timeout=30), "le lent n'a jamais atteint son point d'arret")
+
+            fast = threading.Thread(target=_run, args=(fast_payload,))
+            fast.start()
+            fast.join(timeout=30)
+
+            resume.set()
+            slow.join(timeout=30)
+            self.assertFalse(slow.is_alive() or fast.is_alive(), "extraction bloquee")
+
+            # Un `os.replace` refuse par contention Windows reste tolere : il
+            # signale l'echec, il ne fabrique pas de binaire corrompu. Ce que le
+            # test interdit, c'est un `dest` qui n'est l'archive de PERSONNE.
+            self.assertTrue(dest.exists(), f"aucun ecrivain n'a abouti : {errors!r}")
+            # Empreintes plutot qu'octets : un assert sur plusieurs Mio rendrait
+            # le rapport d'echec illisible (27 Mio mesures).
+            expected = {hashlib.sha256(p).hexdigest() for p in (slow_payload, fast_payload)}
+            final = hashlib.sha256(dest.read_bytes()).hexdigest()
+            self.assertIn(
+                final,
+                expected,
+                "contenu final entrelace : le binaire installe n'est celui d'aucun "
+                "ecrivain, et il sera EXECUTE par tools_manager",
+            )
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()],
+                ["ffprobe.exe"],
+                "aucun fichier de travail ne doit survivre a l'extraction",
+            )
 
 
 if __name__ == "__main__":

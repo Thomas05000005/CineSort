@@ -168,6 +168,9 @@ class CallSiteDeProductionTests(unittest.TestCase):
         store = _StoreFactice(delete_raises=KeyError(_PANNE_SCHEMA))
         ops: List[Dict[str, Any]] = []
         record_op = RecordOpWithJournal(ops.append, store=store, batch_id="b1")
+        # PR#852 : `_move_dirs_to_bucket` incremente desormais `res` dossier par
+        # dossier au lieu d'un `+=` du caller, `res` est donc obligatoire.
+        res = core.ApplyResult()
 
         with tempfile.TemporaryDirectory() as tmp_name:
             tmp = Path(tmp_name)
@@ -183,10 +186,14 @@ class CallSiteDeProductionTests(unittest.TestCase):
                     dry_run=False,
                     log=lambda _level, _message: None,
                     log_prefix="TEST",
+                    res=res,
+                    counter_attr="cleanup_residual_folders_moved_count",
                     record_op=record_op,
                 )
 
             self.assertEqual(moved, 1)
+            self.assertEqual(res.cleanup_residual_folders_moved_count, 1)
+            self.assertEqual(res.errors, 0, f"le nettoyage du journal n'est pas une erreur : {res.error_messages}")
             self.assertFalse(residuel.exists(), "le dossier a bien bouge sur le disque")
             self.assertTrue((bucket / "Residual.Noise").exists())
 
