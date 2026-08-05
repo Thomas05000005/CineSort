@@ -771,18 +771,37 @@ def _merge_stats(target: "Stats", source: "Stats") -> None:
 
 
 def _detect_cross_root_duplicates(rows: List["PlanRow"]) -> int:
-    """Detecte les doublons cross-root et ajoute un warning_flag. Retourne le nombre de doublons."""
+    """Flague les doublons cross-root et retourne le nombre de FILMS concernes.
+
+    #686 — la valeur retournee est la grandeur que le seul appelant annonce a
+    l'utilisateur (« N film(s) », `plan_multi_roots` ci-dessous). Elle comptait
+    en fait les RANGEES qu'elle venait de flaguer : un meme film present dans
+    deux racines en flague deux, donc le scan annoncait « 2 film(s) » pour un
+    seul film — et le facteur grandit avec le nombre de racines. Pire, le
+    compteur etait a l'interieur du `if flag pas deja pose` : sur un re-scan qui
+    repart d'un plan deja flague, le meme etat de disque pouvait annoncer 2, 1
+    ou 0. Un film est desormais compte UNE fois, des que ses rangees couvrent au
+    moins deux racines ; le nombre de dossiers concernes est une SECONDE
+    grandeur, que l'appelant lit sur les `warning_flags` poses ici.
+
+    L'ordre des racines citees dans `notes` est desormais TRIE : `roots_seen`
+    etait un `set` de chaines, donc « Aussi dans: D:\\Films, E:\\Films » et
+    « Aussi dans: E:\\Films, D:\\Films » alternaient d'une execution a l'autre
+    (le hachage des chaines est randomise par processus). Le meme disque
+    produisait deux plans differents.
+    """
     by_key: Dict[Tuple[str, int], List["PlanRow"]] = defaultdict(list)
     for row in rows:
         key = (str(row.proposed_title or "").strip().lower(), int(row.proposed_year or 0))
         if key[0]:
             by_key[key].append(row)
 
-    dup_count = 0
-    for key, group in by_key.items():
-        roots_seen = {r.source_root for r in group if r.source_root}
+    dup_films = 0
+    for group in by_key.values():
+        roots_seen = sorted({r.source_root for r in group if r.source_root})
         if len(roots_seen) < 2:
             continue
+        dup_films += 1
         for row in group:
             if "duplicate_cross_root" not in (row.warning_flags or []):
                 if row.warning_flags is None:
@@ -791,8 +810,7 @@ def _detect_cross_root_duplicates(rows: List["PlanRow"]) -> int:
                 other_roots = [r for r in roots_seen if r != row.source_root]
                 if other_roots:
                     row.notes = (row.notes or "") + f" | Aussi dans: {', '.join(other_roots)}"
-                dup_count += 1
-    return dup_count
+    return dup_films
 
 
 def plan_multi_roots(
@@ -874,9 +892,16 @@ def plan_multi_roots(
         _merge_stats(all_stats, stats_i)
 
     if len(roots) > 1:
-        dup_count = _detect_cross_root_duplicates(all_rows)
-        if dup_count > 0:
-            log("INFO", f"Doublons cross-root detectes : {dup_count} film(s)")
+        dup_films = _detect_cross_root_duplicates(all_rows)
+        if dup_films > 0:
+            # #686 : deux grandeurs DISTINCTES, chacune nommee par ce qu'elle
+            # compte. Le message annoncait des rangees sous le nom de films.
+            dup_rows = sum(1 for r in all_rows if "duplicate_cross_root" in (r.warning_flags or []))
+            log(
+                "INFO",
+                f"Doublons cross-root detectes : {dup_films} film(s) present(s) dans "
+                f"plusieurs racines ({dup_rows} dossier(s) concerne(s))",
+            )
         if skipped_roots:
             log("WARN", f"{len(skipped_roots)}/{len(roots)} root(s) inaccessible(s) : {', '.join(skipped_roots)}")
         log("INFO", f"Multi-root : {accessible_count}/{len(roots)} root(s) scannes, {len(all_rows)} film(s) total")
