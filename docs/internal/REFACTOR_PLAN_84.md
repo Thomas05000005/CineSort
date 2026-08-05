@@ -696,3 +696,4 @@ découplage réel, pas de la conversion mécanique — extraire
 par l'issue) casserait à lui seul le cluster n°2 (`run_read_support` ×2,
 `history_support` ×2), et arbitrer le couple `film_support`/`history_support` en
 réglerait un de plus.
+| 2026-08-05 | — | inchangées | Issue #923 (« mesure a 0 » vs « non mesure », perceptuel vidéo). **Aucune borne touchée** : le lot n'ajoute ni ne convertit d'import différé — les cinq fichiers modifiés (`domain/perceptual/{models,video_analysis,composite_score,composite_score_v2,comparison}.py`) n'utilisent que des symboles déjà importés en tête. Mesure de contrôle **refaite après fusion** avec le lot #554/#595/#779, pas recopiée : `__root__` 3, `app` 19, `domain` 15, `infra` 11, `ui` 66, `data` 0 — total **114**, chaque couche exactement sur sa borne. La valeur annoncée avant fusion (172) était juste à son moment et périmée à l'arrivée : c'est la raison même pour laquelle ce journal exige une mesure, pas un report. |
