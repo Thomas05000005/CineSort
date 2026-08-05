@@ -326,7 +326,58 @@ def _dedup_ids_preserving_order(ids: List[int]) -> List[int]:
     return out
 
 
-def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> List[Dict[str, Any]]:
+# Issue #894 — clef PRIVEE posee sur une row construite en mode `defer_row_io`.
+# Elle decrit l'I/O restant a payer. Elle ne doit JAMAIS atteindre le frontend :
+# `_hydrate_deferred_row_io` la RETIRE (pop) de chaque row qu'elle traite, et
+# `_get_library_filtered_impl` n'expose que des rows passees par l'hydratation.
+# Le prefixe `_` la range avec `TMDB_OVERLAY_DONE_KEY` (film_support), meme
+# convention de marqueur interne.
+_DEFERRED_IO_KEY = "_deferred_io"
+
+
+def _fetch_posters_batch(api: Any, tmdb_ids: List[int]) -> Dict[str, str]:
+    """Resout les jaquettes d'un lot d'ids TMDb. `{}` en cas d'echec.
+
+    Source UNIQUE du batch jaquettes des rows Library : `_build_library_rows`
+    (lot = bibliotheque entiere) et `_hydrate_deferred_row_io` (lot = page
+    rendue) doivent resoudre les jaquettes exactement de la meme facon, sinon
+    la page differee et la page complete afficheraient des vignettes
+    differentes pour le meme film.
+    """
+    # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
+    # `if tid not in tmdb_ids` etait quadratique.
+    # Revue Sourcery PR#849 : la dedup ne sert QU'a l'argument du batch, donc
+    # elle est faite DANS la garde. Les deux appelants `with_posters=False`
+    # (`get_library_rollup`:1206 et le compteur de chips :1384) sont les plus
+    # chauds — le second est rejoue a chaque clic de chip / tri / filtre — et
+    # ne payent plus une passe sur toute la bibliotheque pour rien. La garde
+    # elle-meme est insensible a la dedup : une liste non vide le reste.
+    ids = _dedup_ids_preserving_order(list(tmdb_ids))
+    if not ids:
+        return {}
+    # Perimetre du `try` conserve a l'IDENTIQUE : il couvre la lecture de la
+    # reponse, pas seulement l'appel. Une reponse mal formee degradait en
+    # `{}` (jaquettes absentes, vue affichable) ; la retrecir au seul appel
+    # transformerait ce cas en exception remontee jusqu'a l'appelant.
+    try:
+        poster_res = api.integrations.get_tmdb_posters(ids, "w342")
+        if poster_res and poster_res.get("ok"):
+            raw_map = poster_res.get("posters") or {}
+            # Normaliser cles en str (l'API retourne str(int) deja, mais on
+            # protege contre les eventuels int).
+            return {str(k): v for k, v in raw_map.items() if v}
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("library_support poster batch fetch error: %s", exc)
+    return {}
+
+
+def _build_library_rows(
+    api: Any,
+    run_id: str,
+    *,
+    with_posters: bool = True,
+    defer_row_io: bool = False,
+) -> List[Dict[str, Any]]:
     """Construit la liste des rows Library enrichies (probe + perceptual V2).
 
     Args:
@@ -336,6 +387,20 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
             (compteurs de chips, rollup scoring) : ce batch reconstruit un
             TmdbClient et rejoue tout `tmdb_cache.json` a chaque appel, et
             frappe TMDb en HTTP pour les ids pas encore en cache.
+        defer_row_io: si True, l'I/O qui se paie PAR ROW — le `scandir` de
+            `plan_row_fs_facts` et le batch jaquettes — n'est pas payee ici.
+            Chaque row porte alors la clef PRIVEE `_DEFERRED_IO_KEY` decrivant
+            ce qu'il reste a payer, et `_hydrate_deferred_row_io` la consomme
+            sur le seul sous-ensemble de rows que l'appelant rend vraiment
+            (issue #894 : une page de 50 lignes payait N `scandir` et N
+            resolutions de jaquette, N = bibliotheque entiere).
+
+            Une row non hydratee porte `added_ts=0.0`, `size_bytes` reduit a
+            l'estimation bitrate x duree et `poster_url` reduit au repli
+            candidat — soit EXACTEMENT les valeurs que le mode complet produit
+            deja quand le root est debranche. Aucun appelant ne doit donc lire
+            ces trois champs sur une row non hydratee ; c'est la raison d'etre
+            de `_needs_full_fs_facts`.
     """
     # Charger le plan
     try:
@@ -486,25 +551,8 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
             resolved_tmdb_by_row[rid] = tid
             tmdb_ids.append(tid)
     posters_by_tmdb: Dict[str, str] = {}
-    if with_posters and tmdb_ids:
-        # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
-        # `if tid not in tmdb_ids` etait quadratique.
-        # Revue Sourcery PR#849 : la dedup ne sert QU'a l'argument du batch, donc
-        # elle est faite DANS la garde. Les deux appelants `with_posters=False`
-        # (`get_library_rollup`:1206 et le compteur de chips :1384) sont les plus
-        # chauds — le second est rejoue a chaque clic de chip / tri / filtre — et
-        # ne payent plus une passe sur toute la bibliotheque pour rien. La garde
-        # elle-meme est insensible a la dedup : une liste non vide le reste.
-        tmdb_ids = _dedup_ids_preserving_order(tmdb_ids)
-        try:
-            poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
-            if poster_res and poster_res.get("ok"):
-                raw_map = poster_res.get("posters") or {}
-                # Normaliser cles en str (l'API retourne str(int) deja, mais on
-                # protege contre les eventuels int).
-                posters_by_tmdb = {str(k): v for k, v in raw_map.items() if v}
-        except (AttributeError, KeyError, TypeError, ValueError) as exc:
-            logger.debug("library_support poster batch fetch error: %s", exc)
+    if with_posters and not defer_row_io and tmdb_ids:
+        posters_by_tmdb = _fetch_posters_batch(api, tmdb_ids)
 
     # AUDIT 2026-08-03 (#447 / #730) : index {dossier: {fichier: (mtime, size)}}
     # partage par toutes les rows du run -> un seul `os.scandir` par dossier
@@ -627,7 +675,9 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
         # module). Avant : r.get("mtime") / r.get("source_path") /
         # r.get("size_bytes"), trois clefs absentes de PlanRow.
         media_path = plan_row_media_path(r)
-        fs_mtime, fs_size = plan_row_fs_facts(r, fs_cache)
+        # `plan_row_media_path` est une pure concatenation (aucune I/O) : il est
+        # calcule dans les DEUX modes. Seuls les faits filesystem sont differes.
+        fs_mtime, fs_size = (0.0, 0) if defer_row_io else plan_row_fs_facts(r, fs_cache)
 
         row = {
             "row_id": row_id,
@@ -721,11 +771,83 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
         # AUDIT 2026-06-13 (R5-B) : exposer l'etat d'identification (source unique
         # = _row_unidentified) pour que la carte UI n'affiche "Identifier" QUE sur
         # les vrais non-identifies, pas sur les films NFO/nom sans tmdb_id.
+        # `_row_unidentified` ne lit que tmdb_id / proposed_source / confidence /
+        # year : aucun champ differe, la valeur est donc la meme dans les 2 modes.
         row["identified"] = not _row_unidentified(row)
+
+        if defer_row_io:
+            # Tout ce qu'il faut pour payer plus tard exactement la meme I/O.
+            # `folder`/`video` sont les 2 seules clefs lues par
+            # `plan_row_fs_facts` ; `poster_tmdb_id` reste None quand
+            # `with_posters=False`, ce qui neutralise le batch a l'hydratation.
+            row[_DEFERRED_IO_KEY] = {
+                "folder": r.get("folder"),
+                "video": r.get("video"),
+                "size_estimate": detected.get("file_size_bytes"),
+                "poster_tmdb_id": resolved_tid if with_posters else None,
+            }
 
         out.append(row)
 
     return out
+
+
+def _hydrate_deferred_row_io(api: Any, rows: List[Dict[str, Any]]) -> None:
+    """Paie, SUR PLACE, l'I/O par row differee par `defer_row_io=True`.
+
+    Issue #894 : `get_library_filtered(page_size=50)` construisait la
+    bibliotheque ENTIERE avant de trancher une page de 50 lignes, et payait
+    donc `N` `scandir` (un par dossier distinct, PR #862) et `N` resolutions de
+    jaquette pour 50 lignes affichees. Loi mesuree sur le banc de l'issue :
+    exactement 1 `scandir` + 1 resolution par film, identique a N=200 et
+    N=600. L'appelant construit toujours les N rows — `total` et les compteurs
+    par tier portent sur la bibliotheque entiere, c'est le contrat de
+    l'endpoint — mais il ne paie plus l'I/O que sur les rows qu'il rend.
+
+    Ce n'est PAS un retrait de la donnee apportee par #862 (date d'ajout /
+    taille reelles, cf `plan_row_fs_facts`) : c'est le meme `scandir`, au meme
+    endroit, restreint aux rows qui vont reellement etre affichees.
+
+    Idempotente et sans effet sur une row deja hydratee (ou jamais differee) :
+    la clef privee est retiree au passage.
+    """
+    # La clef privee est retiree AVANT tout calcul, sur toutes les rows du lot :
+    # une exception a mi-parcours ne doit pas laisser la moitie des rows la
+    # porter jusqu'au frontend.
+    pending: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        src = row.get(_DEFERRED_IO_KEY)
+        if isinstance(src, dict):
+            del row[_DEFERRED_IO_KEY]
+            pending.append((row, src))
+    if not pending:
+        return
+
+    # 1) Jaquettes : UN batch pour le lot, exactement comme le mode complet.
+    poster_ids: List[int] = []
+    for _row, src in pending:
+        tid = src.get("poster_tmdb_id")
+        if tid:
+            poster_ids.append(int(tid))
+    posters_by_tmdb = _fetch_posters_batch(api, poster_ids) if poster_ids else {}
+
+    # 2) Faits filesystem : meme cache par dossier distinct que le mode complet,
+    #    donc les rows d'un dossier PARTAGE (collection / extra) presentes dans
+    #    le lot continuent de se partager un seul aller-retour.
+    fs_cache: Dict[str, Dict[str, Tuple[float, int]]] = {}
+    for row, src in pending:
+        fs_mtime, fs_size = plan_row_fs_facts(src, fs_cache)
+        row["added_ts"] = fs_mtime
+        # Expression IDENTIQUE au mode complet : la taille reelle si le media
+        # est lisible, sinon l'estimation bitrate x duree, sinon 0.
+        row["size_bytes"] = int(fs_size or src.get("size_estimate") or 0)
+        tid = src.get("poster_tmdb_id")
+        if tid:
+            # Meme precedence que le mode complet : le batch d'abord, le repli
+            # candidat (deja pose a la construction) ensuite.
+            row["poster_url"] = posters_by_tmdb.get(str(tid)) or row.get("poster_url")
 
 
 # ---------------------------------------------------------------------------
@@ -1049,6 +1171,46 @@ def _apply_sort(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
         return rows
 
 
+# ---------------------------------------------------------------------------
+# Issue #894 — qui a besoin des faits filesystem sur TOUTE la bibliotheque ?
+# ---------------------------------------------------------------------------
+# Les deux seuls champs d'une row Library qui viennent du disque (helper
+# `plan_row_fs_facts`) sont `added_ts` et `size_bytes`. Le nom de chaque tri /
+# filtre ci-dessous est celui sous lequel il LIT l'un de ces deux champs :
+#   - `_SORT_KEY["added_*"]` lit `added_ts`, `_SORT_KEY["size_*"]` lit `size_bytes` ;
+#   - `_row_matches` lit `size_bytes` sous size_min/size_max, `added_ts` sous
+#     added_after/added_before et sous le chip `recently_modified`
+#     (`_row_recently_modified`).
+# Ces trois listes doivent donc bouger EN MEME TEMPS que `_SORT_KEY` et
+# `_row_matches`. Tout ajout d'un tri ou d'un filtre qui lit `added_ts` ou
+# `size_bytes` sans etre inscrit ici rendrait un resultat calcule sur des
+# valeurs non hydratees — c'est-a-dire un tri ou un filtre FAUX en silence.
+_FS_DEPENDENT_SORTS = frozenset({"added_asc", "added_desc", "size_asc", "size_desc"})
+_FS_DEPENDENT_FILTER_KEYS = ("size_min", "size_max", "added_after", "added_before")
+_FS_DEPENDENT_CHIPS = frozenset({"recently_modified"})
+
+
+def _needs_full_fs_facts(filters: Any, sort: Any) -> bool:
+    """True si la requete lit `added_ts`/`size_bytes` AILLEURS que sur la page.
+
+    Sens RESTRICTIF assume : la simple PRESENCE d'une clef de filtre sensible
+    suffit, meme a une valeur falsy que `_row_matches` ignorerait. Se tromper
+    dans ce sens coute une passe d'I/O qu'on payait de toute facon avant ce
+    correctif ; se tromper dans l'autre rendrait un resultat faux. Idem pour un
+    `filters` qui n'est pas un dict ou un `sort` inattendu.
+    """
+    if str(sort or "title") in _FS_DEPENDENT_SORTS:
+        return True
+    if not isinstance(filters, dict):
+        return True
+    if any(key in filters for key in _FS_DEPENDENT_FILTER_KEYS):
+        return True
+    chips = filters.get("chips") or []
+    if not isinstance(chips, (list, tuple, set, frozenset)):
+        return True
+    return any(str(c).strip().lower() in _FS_DEPENDENT_CHIPS for c in chips if c)
+
+
 def _rescan_target_run_id(run: Dict[str, Any]) -> Optional[str]:
     """LOTC-B1 : run utilitaire de bulk re-scan -> run_id cible, sinon None."""
     raw = run.get("config_json")
@@ -1175,7 +1337,15 @@ def _get_library_filtered_impl(
             "stats": {"by_tier": {}},
         }
 
-    all_rows = _build_library_rows(api, resolved_rid)
+    # Issue #894 : l'endpoint rend `page_size` lignes mais doit connaitre la
+    # bibliotheque entiere (`total`, compteurs par tier, tri global). Les N rows
+    # sont donc toujours construites — en revanche l'I/O par row (`scandir` de
+    # #862 + batch jaquettes) n'a aucune raison d'etre payee sur les rows qui ne
+    # sortiront pas. On la differe, SAUF quand un tri ou un filtre lit
+    # `added_ts`/`size_bytes` : dans ce cas la valeur doit etre reelle sur TOUTE
+    # la bibliotheque, et on retombe sur le comportement complet d'avant.
+    defer_row_io = not _needs_full_fs_facts(filters, sort)
+    all_rows = _build_library_rows(api, resolved_rid, defer_row_io=defer_row_io)
     filtered = [r for r in all_rows if _row_matches(r, filters)]
 
     # Phase 5 spec 07 : chip "in_duplicates" — necessite une evaluation cross-row.
@@ -1209,6 +1379,12 @@ def _get_library_filtered_impl(
     pages = max(1, (total + page_size - 1) // page_size)
     start = (page - 1) * page_size
     rows_page = sorted_rows[start : start + page_size]
+
+    # Issue #894 : l'I/O differee se paie ICI, sur la seule page rendue, et
+    # APRES le tri/la pagination — c'est tout l'interet. L'appel retire aussi la
+    # clef privee `_DEFERRED_IO_KEY`, qui ne doit pas partir au frontend.
+    # No-op quand `defer_row_io` est False (aucune row ne porte la clef).
+    _hydrate_deferred_row_io(api, rows_page)
 
     return {
         "ok": True,
