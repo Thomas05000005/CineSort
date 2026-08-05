@@ -479,13 +479,13 @@ def _descendre_sans_franchir_les_jonctions(racine: Path) -> "Iterator[Path]":
         courant = a_visiter.pop()
         try:
             entrees = list(courant.iterdir())
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _log.warning("purge: iterdir %s echec : %s", courant, exc)
             continue
         for entree in entrees:
             try:
                 est_dossier = entree.is_dir()
-            except (OSError, PermissionError):
+            except OSError:
                 continue
             if est_dossier:
                 if is_reparse_point(entree):
