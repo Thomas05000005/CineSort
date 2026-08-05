@@ -58,6 +58,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # `sec` et `rel` ont ete ajoutes le 2026-08-03 : `sec` = correctif de
+          # securite (CWE identifie), `rel` = fiabilite (ecriture atomique,
+          # fsync, course entre ecrivains). Le bot d'audit produit ces deux
+          # types depuis des mois et ils portent une information que `fix`
+          # dilue.
+          #
+          # ATTENTION — les commentaires doivent rester AU-DESSUS de `types:`.
+          # Dans un bloc litteral YAML (`|`), `#` n'ouvre PAS un commentaire :
+          # ces neuf lignes etaient DANS la valeur, donc traitees comme des
+          # types. MESURE du 2026-08-05 : 6 PR sur 6 titrees `sec(...)` ou
+          # `rel(...)` ont echoue a ce check depuis le 2026-08-03 (« Invalid
+          # regular expression [...] Unterminated group », sur la parenthese de
+          # « (CWE identifie) »), alors que `fix(...)` et `test(...)` passaient.
+          # L'ajout de 2026-08-03 n'a donc jamais produit son effet.
           types: |
             feat
             fix
@@ -71,15 +85,6 @@ jobs:
             style
             revert
             deps
-            # Ajoutes le 2026-08-03. Le bot d'audit produit ces deux types depuis
-            # des mois et ils portent une information que `fix` dilue : `sec` =
-            # correctif de securite (CWE identifie), `rel` = fiabilite (ecriture
-            # atomique, fsync, course entre ecrivains). Ils n'etaient pas dans la
-            # liste, donc le check OBLIGATOIRE « Validate PR title » recalait ces
-            # PR quelle que soit la qualite du code : 11 PR ouvertes bloquees pour
-            # cette seule raison, dont 3 correctifs de securite. Les autoriser vaut
-            # mieux que renommer au cas par cas — la convention existe deja dans
-            # les faits, et le renommage effacerait le signal.
             sec
             rel
           requireScope: false
