@@ -40,8 +40,9 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
 
+from cinesort.app._dir_utils import is_reparse_point
 from cinesort.infra import state
 
 _log = logging.getLogger(__name__)
@@ -284,7 +285,11 @@ def _iter_review_files(root: Path) -> List[Path]:
     if not root.exists() or not root.is_dir():
         return out
     try:
-        for item in root.rglob("*"):
+        # Le listage aussi : il alimente le manifeste TTL — donc ce que la purge
+        # considerera — ET le total « N fichiers, X Go » affiche AVANT
+        # « Vider maintenant ». Traverser une jonction gonflerait le decompte
+        # presente a l'utilisateur juste avant une suppression.
+        for item in _descendre_sans_franchir_les_jonctions(root):
             try:
                 if item.is_file() and not _is_ttl_manifest_file(item.name):
                     out.append(item)
@@ -448,6 +453,51 @@ def _purge_target_roots(cfg: "Config") -> List[Path]:
     return [root / sub for sub in TTL_SUBDIRS]
 
 
+def _descendre_sans_franchir_les_jonctions(racine: Path) -> "Iterator[Path]":
+    """Parcourt `racine` recursivement SANS JAMAIS franchir un point d'analyse.
+
+    `Path.rglob` suit les jonctions NTFS et les points de montage de volume.
+    Sur le SEUL chemin de suppression recursive automatique du depot (cron 24 h
+    + bouton « Vider maintenant »), cela signifiait supprimer les fichiers de la
+    CIBLE d'une jonction placee sous `_review/` — donc hors du bucket de
+    quarantaine, dans la bibliotheque de l'utilisateur.
+
+    `cleanup.py` (6 appels) et `apply_core.py` (5 appels) portent cette garde
+    depuis longtemps ; ce module ne l'avait pas et n'importait meme pas le
+    helper.
+
+    Une jonction rencontree est SIGNALEE et laissee INTACTE — on ne la supprime
+    pas non plus. Sur un chemin destructif, l'erreur va dans le sens
+    RESTRICTIF : le role de cette garde est de ne rien detruire hors du bucket,
+    pas de decider du sort d'un lien que l'utilisateur a pose lui-meme.
+
+    `Path.is_symlink()` ne suffit PAS : il rend False pour une jonction Windows.
+    C'est la raison d'etre de `is_reparse_point`.
+    """
+    a_visiter = [racine]
+    while a_visiter:
+        courant = a_visiter.pop()
+        try:
+            entrees = list(courant.iterdir())
+        except OSError as exc:
+            _log.warning("purge: iterdir %s echec : %s", courant, exc)
+            continue
+        for entree in entrees:
+            try:
+                est_dossier = entree.is_dir()
+            except OSError:
+                continue
+            if est_dossier:
+                if is_reparse_point(entree):
+                    _log.warning(
+                        "purge: %s est une jonction/lien — NON parcourue, sa cible est hors du bucket",
+                        entree,
+                    )
+                    continue
+                a_visiter.append(entree)
+            yield entree
+
+
 def _purge_dir_recursive(
     target: Path,
     *,
@@ -469,7 +519,7 @@ def _purge_dir_recursive(
         return stats
 
     # 1) Suppression des fichiers
-    for item in target.rglob("*"):
+    for item in _descendre_sans_franchir_les_jonctions(target):
         try:
             if not item.is_file():
                 continue
@@ -499,7 +549,7 @@ def _purge_dir_recursive(
     if not dry_run:
         try:
             all_dirs = sorted(
-                (p for p in target.rglob("*") if p.is_dir()),
+                (p for p in _descendre_sans_franchir_les_jonctions(target) if p.is_dir()),
                 key=lambda p: len(p.parts),
                 reverse=True,
             )
