@@ -314,10 +314,8 @@ def _close_batch(
 
         # Annoter le summary avec la trace du cleanup (best-effort, on
         # n'echoue pas si JSON casse).
-        import json as _json
-
         try:
-            data = _json.loads(current_summary) if current_summary else {}
+            data = json.loads(current_summary) if current_summary else {}
             if not isinstance(data, dict):
                 data = {"_original": current_summary}
         except (TypeError, ValueError):
@@ -328,7 +326,7 @@ def _close_batch(
         }
         if extra:
             data["_boot_cleanup"].update(extra)
-        new_summary = _json.dumps(data, ensure_ascii=False, sort_keys=True)
+        new_summary = json.dumps(data, ensure_ascii=False, sort_keys=True)
 
         conn.execute(
             """

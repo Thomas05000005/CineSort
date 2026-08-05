@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import datetime
+import io
 import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 import traceback
+import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -957,8 +962,6 @@ class CineSortApi:
 
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
-        import io
-
         _log = logging.getLogger(__name__)
 
         info = self._get_server_info_impl()
@@ -3012,9 +3015,7 @@ class CineSortApi:
                 log_module=__name__,
             )
         try:
-            import webbrowser as _webbrowser
-
-            _webbrowser.open(u)
+            webbrowser.open(u)
             return {"ok": True, "opened": u}
         except (OSError, RuntimeError) as exc:
             return _err_response(str(exc), category="runtime", level="warning", log_module=__name__)
@@ -3061,12 +3062,6 @@ class CineSortApi:
         Returns:
             {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
         """
-        # Imports locaux : evite de polluer le top-level pour un endpoint
-        # ponctuel (subprocess lourd, sys/datetime non utilises au module-level).
-        import datetime as _dt  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-        import sys  # noqa: PLC0415
-
         version = str(getattr(self, "_app_version", "") or "unknown")
 
         # build_date : mtime du fichier VERSION (date ISO UTC). Best-effort.
@@ -3075,7 +3070,7 @@ class CineSortApi:
             version_file = Path(__file__).resolve().parents[3] / "VERSION"
             if version_file.is_file():
                 mtime = version_file.stat().st_mtime
-                build_date = _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
+                build_date = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).date().isoformat()
         except (OSError, ValueError):
             pass
 

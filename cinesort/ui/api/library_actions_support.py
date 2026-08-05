@@ -35,6 +35,7 @@ from cinesort.app.merge_metadata import merge_metadata
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
+from cinesort.ui.api import run_flow_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -477,8 +478,6 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
       5. Met a jour le plan.jsonl : remplace l'ancienne row par la nouvelle
          (avec nouveau score / confidence / proposed_title / candidates).
     """
-    from cinesort.ui.api import run_flow_support  # noqa: PLC0415
-
     base_result = run_flow_support.rescan_row(api, run_id, row_id)
     if not isinstance(base_result, dict) or not base_result.get("ok"):
         return (
@@ -966,8 +965,6 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
     """
 
     def job_fn(should_cancel, should_pause=None) -> Dict[str, Any]:
-        import time as _time
-
         processed = 0
         skipped = 0
         for rid in row_ids:
@@ -977,7 +974,7 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
                     while bool(should_pause()):
                         if should_cancel():
                             break
-                        _time.sleep(0.5)
+                        time.sleep(0.5)
                 except Exception:  # noqa: BLE001
                     pass
             if should_cancel():

@@ -11,8 +11,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cinesort.infra.state as state
+from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
+from cinesort.domain.subtitle_helpers import _normalize_iso639
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
+# Imports MODULE-STYLE (pas `from X import f`) pour les modules `ui/api` :
+# `tests/test_get_plan_ignored_alerts_v77.py` patche
+# `cinesort.ui.api.library_support._get_store` ; un import de symbole figerait
+# le binding au chargement et le patch deviendrait inoperant EN SILENCE (le
+# test continuerait de passer en testant autre chose).
+from cinesort.ui.api import library_support, run_data_support, run_read_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -30,9 +40,7 @@ def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> Lis
     store indisponible, les flags bruts sont conserves.
     """
     try:
-        from cinesort.ui.api.library_support import _get_store
-
-        store = _get_store(api)
+        store = library_support._get_store(api)
         if store is None or not hasattr(store, "film_modal"):
             return payload_rows
         row_ids = [str(r.get("row_id") or "") for r in payload_rows if isinstance(r, dict)]
@@ -60,8 +68,6 @@ def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[st
     """Langues sous-titres présentes (externe ∪ embarqué) pour une row de PAYLOAD (dict).
     Même union externe∪embarqué que librarian.py:132-158 / library_support, mais lisant
     le DICT payload sérialisé (source unique de la réconciliation côté écran Traitement)."""
-    from cinesort.domain.subtitle_helpers import _normalize_iso639
-
     present: set = set()
     for lang in row.get("subtitle_languages") or []:
         norm = _normalize_iso639(lang) or str(lang).strip().lower()
@@ -88,11 +94,9 @@ def _full_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, 
     complète MUXÉE que le scan n'a pas vue. On ne lit PAS `row["subtitle_languages"]` :
     ce champ ne distingue pas une piste forcée d'une piste complète (cf. la garde de
     `reconcile_subtitle_flags`)."""
-    from cinesort.ui.api.run_read_support import full_langs_from_embedded
-
     qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
     metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
-    return full_langs_from_embedded(metrics.get("subtitles_embedded"))
+    return run_read_support.full_langs_from_embedded(metrics.get("subtitles_embedded"))
 
 
 def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -106,32 +110,26 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
     Best-effort : toute erreur (store/settings/quality indisponible) laisse le payload intact.
     """
     try:
-        from cinesort.domain.conversions import to_int
-        from cinesort.domain.title_helpers import strip_trailing_year_if_equal
         from cinesort.ui.api.film_support import (
             apply_tmdb_overrides_bulk,
             list_tmdb_overrides_bulk,
             overlay_tmdb_override,
         )
-        from cinesort.ui.api.library_support import _get_store
-        from cinesort.ui.api.run_read_support import (
-            _AUTO_CRITICAL_WARNINGS,
-            _AUTO_INTEGRITY_WARNINGS,
-            _CONFLICT_FLAGS,
-            build_qr_by_id,
-            reconcile_subtitle_flags,
-        )
 
-        store = _get_store(api)
+        store = library_support._get_store(api)
         qr_by_id: Dict[str, Dict[str, Any]] = {}
         if store is not None and hasattr(store, "quality"):
             with contextlib.suppress(Exception):
-                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+                qr_by_id = run_read_support.build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
         try:
             threshold = to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
         except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
             threshold = 85
-        blocking = _CONFLICT_FLAGS | _AUTO_CRITICAL_WARNINGS | _AUTO_INTEGRITY_WARNINGS
+        blocking = (
+            run_read_support._CONFLICT_FLAGS
+            | run_read_support._AUTO_CRITICAL_WARNINGS
+            | run_read_support._AUTO_INTEGRITY_WARNINGS
+        )
         # PERF (ultra-audit 2026-08, CRITICAL) : les overrides TMDb du run sont
         # lus en UNE requete au lieu de 2 connexions SQLite PAR ROW (2N pour un
         # plan de N films : 40 s / 2002 connexions mesurees a N=1000, meme table
@@ -174,7 +172,7 @@ def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any
                 flags = row.get("warning_flags")
                 if isinstance(flags, list) and qr_by_id:
                     present = _present_langs_from_payload(row, qr_by_id)
-                    row["warning_flags"] = reconcile_subtitle_flags(
+                    row["warning_flags"] = run_read_support.reconcile_subtitle_flags(
                         flags, present, _full_langs_from_payload(row, qr_by_id)
                     )
                 # 3) auto_approvable (sur les flags réconciliés). to_int : robuste à un
@@ -303,9 +301,6 @@ def get_plan_row(api: Any, run_id: str, row_id: str, *, normalize_user_path: Any
 
 @requires_valid_run_id
 def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    from cinesort.domain.conversions import to_bool
-    from cinesort.ui.api.run_read_support import seed_auto_approve_decisions
-
     rs = api._get_run(run_id)
     if rs:
         path = rs.paths.validation_json
@@ -322,7 +317,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
             if not _auto_on:
                 return {"ok": True, "decisions": {}}
             rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
-            seeded = seed_auto_approve_decisions(api, rows, {})
+            seeded = run_read_support.seed_auto_approve_decisions(api, rows, {})
             return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -331,7 +326,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
                 if not rows:
                     rows = api._load_rows_from_plan_jsonl(rs.paths)
                 # [auto-approve] Overlay read-only ; no-op si le flag est off.
-                seeded = seed_auto_approve_decisions(api, rows, data)
+                seeded = run_read_support.seed_auto_approve_decisions(api, rows, data)
                 return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
             return {"ok": True, "decisions": {}}
         except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -354,7 +349,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
         # [auto-approve] Overlay read-only ; no-op si le flag est off.
-        seeded = seed_auto_approve_decisions(api, rows, data)
+        seeded = run_read_support.seed_auto_approve_decisions(api, rows, data)
         return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         api._debug_log(
@@ -495,25 +490,18 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # compute_total_fallback() pour aligner avec dashboard/run_flow (avant
     # cet helper, history priorisait row.total puis stats.planned_rows,
     # dashboard l'inverse, run_flow ne lisait que row.total).
-    from cinesort.ui.api.run_data_support import (
-        compute_total_fallback as _compute_total_fallback,
-    )
-    from cinesort.ui.api.run_data_support import (
-        count_plan_rows as _count_plan_rows,
-    )
-
     try:
         _hist_run_paths = api._run_paths_for(
             normalize_user_path(row.get("state_dir"), api._state_dir),
             run_id,
             ensure_exists=False,
         )
-        total_rows = _count_plan_rows(
+        total_rows = run_data_support.count_plan_rows(
             _hist_run_paths,
-            fallback=_compute_total_fallback(row, stats_obj),
+            fallback=run_data_support.compute_total_fallback(row, stats_obj),
         )
     except (AttributeError, OSError, TypeError, ValueError):
-        total_rows = _compute_total_fallback(row, stats_obj)
+        total_rows = run_data_support.compute_total_fallback(row, stats_obj)
     # AUDIT 2026-07-13 (HIGH-7) : applied_count vit dans apply_batches.summary_json
     # (ecrit par l'apply), PAS dans runs.stats_json (cle jamais ecrite) -> lecture
     # de la source reelle (repare retroactivement les runs deja en base). Le
