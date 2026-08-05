@@ -211,6 +211,23 @@ def _purge_tmdb_cache_in_background(api: CineSortApi, settings: dict | None = No
             if state_dir is None:
                 _log.debug("V5-03 : state_dir indisponible, purge skip")
                 return
+            # Balayage des `.tmp` d'ecriture atomique orphelins, AVANT la purge
+            # (et avant tout `return` d'erreur de celle-ci : c'est ce balayage
+            # qui rend le disque, il ne doit pas dependre du succes du reste).
+            #
+            # Un `.tmp` de nom UNIQUE n'est jamais reecrase : chaque crash en
+            # laisse un DEFINITIF, la ou l'ancien `.tmp` fixe etait recycle et
+            # bornait donc le residu a un seul. `<state_dir>/tmdb_cache.json`
+            # pese 20 a 100 Mo et est reecrit toutes les 2 s pendant un scan :
+            # sans ce balayage, chaque kill coute un fichier de cette taille, a
+            # vie. Recursif : `cache/posters/` (aucun pruner) et `runs/` sont
+            # sous `state_dir`.
+            from cinesort.infra.state import sweep_atomic_tmp_orphans
+
+            swept = sweep_atomic_tmp_orphans(Path(state_dir), recursive=True)
+            if swept:
+                _log.info("V5-03 : %d fichier(s) .tmp orphelin(s) balaye(s) sous %s", swept, state_dir)
+
             cache_path = Path(state_dir) / "tmdb_cache.json"
             result = purge_expired_tmdb_cache(cache_path, ttl_days=ttl_days)
             if result.get("error"):
@@ -315,6 +332,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     # Garde-fou defensif : ne JAMAIS demarrer avec le masque (contournerait la
     # protection MIN_LAN_TOKEN_LENGTH avec un secret public de 8 puces).
     from cinesort.ui.api.settings_support import _SECRET_MASK as _MASK
+
     if token == _MASK:
         token = ""
     if not token:
@@ -351,6 +369,7 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
         # R5-finding-1 : OSError = port deja utilise (WinError 10048 / EADDRINUSE).
         # M1 : RuntimeError = HTTPS demande mais cert/key invalide.
         import errno
+
         if isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.EADDRINUSE, 10048):
             msg = (
                 f"Le port REST {port} est deja utilise par un autre processus. "
@@ -567,8 +586,7 @@ def _configure_webview2_runtime() -> None:
     # Sanity-check : msedgewebview2.exe doit etre present a la racine du bundle.
     if not (bundle_root / "msedgewebview2.exe").is_file():
         print(
-            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - "
-            "fallback Evergreen.",
+            "[WEBVIEW2] Bundle present mais msedgewebview2.exe manquant - fallback Evergreen.",
             file=sys.stderr,
         )
         return
@@ -627,6 +645,7 @@ def main() -> None:
     # evite que l'enfant ne re-execute main() en boucle infinie (fork-bomb classique
     # sur Windows). Doit etre appele au TOUT debut, avant toute init lourde.
     import multiprocessing
+
     multiprocessing.freeze_support()
 
     # H-3 audit QA 20260428 : installer le scrubber AVANT toute creation
@@ -639,7 +658,6 @@ def main() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
-        install_repeated_exception_dedup,
         resolve_log_level,
     )
     from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
@@ -801,14 +819,19 @@ def main() -> None:
             # DEBUG VERBOSE 2026-06-08 : dump codepoints du token tel quel
             # APRES recuperation depuis rest_server._token + strip. Permet de
             # detecter une corruption survenue entre _start_rest_server et ici.
-            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
+            _DEBUG_NB = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+                "debug",
+            }
             if _DEBUG_NB:
                 try:
                     cps = [f"U+{ord(c):04X}" for c in _desktop_dashboard_token]
                     non_ascii = [(i, c, ord(c)) for i, c in enumerate(_desktop_dashboard_token) if ord(c) > 0x7F]
                     print(
-                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} "
-                        f"codepoints={cps}",
+                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} codepoints={cps}",
                         file=sys.stderr,
                     )
                     for i, c, o in non_ascii:
@@ -854,6 +877,7 @@ def main() -> None:
                 # port, native, type) pour faciliter le tri post-mortem.
                 # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
                 import logging as _logging_nb
+
                 _logger_nb = _logging_nb.getLogger("cinesort.app.native_boot")
                 _token_type = type(_desktop_dashboard_token).__name__
                 _logger_nb.error(

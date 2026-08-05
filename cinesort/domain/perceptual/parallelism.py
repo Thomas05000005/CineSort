@@ -103,8 +103,12 @@ def run_parallel_tasks(
     workers = max(1, int(max_workers))
     results: dict[str, tuple[bool, Any]] = {}
 
-    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool)
-    if workers <= 1 or len(tasks) == 1:
+    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool).
+    # Exception : si un timeout par tache est demande, on route TOUJOURS via le
+    # pool, car seul `fut.result(timeout=...)` peut borner une tache qui hang.
+    # Sinon le garde-fou anti-hang serait silencieusement desactive des qu'il
+    # n'y a qu'une tache (ou 1 worker sur machine <MIN_CPU_CORES).
+    if timeout_per_task_s is None and (workers <= 1 or len(tasks) == 1):
         for name, fn in tasks.items():
             if cancel_event is not None and cancel_event.is_set():
                 results[name] = (False, _CancelledError("cancelled"))
@@ -138,7 +142,7 @@ def run_parallel_tasks(
                 # Bug 1 fix: annuler le future en timeout pour ne pas bloquer le shutdown(wait=True).
                 # Si le worker ne respecte pas la cancellation (subprocess deja lance), shutdown
                 # passera en wait=False + cancel_futures=True via timeout_hit -> pas de hang.
-                try:
+                try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                     fut.cancel()
                 except Exception:  # noqa: BLE001 - cancel best-effort
                     pass
@@ -152,10 +156,7 @@ def run_parallel_tasks(
     finally:
         # Bug 1 fix: si un timeout a ete detecte, shutdown non bloquant avec cancel_futures
         # pour eviter que le pool reste bloque a attendre un worker qui ne rendra jamais la main.
-        force_cancel = (
-            (cancel_event is not None and cancel_event.is_set())
-            or timeout_hit
-        )
+        force_cancel = (cancel_event is not None and cancel_event.is_set()) or timeout_hit
         executor.shutdown(wait=not force_cancel, cancel_futures=force_cancel)
 
     return results

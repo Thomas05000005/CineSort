@@ -13,6 +13,7 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Dict
 from unittest.mock import MagicMock, patch
 
 from cinesort.infra import state

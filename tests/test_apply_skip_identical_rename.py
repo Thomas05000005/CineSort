@@ -26,7 +26,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import cinesort.app.apply_core as apply_core
 import cinesort.domain.core as core
 from cinesort.app.apply_core import apply_single
 from cinesort.ui.api.cinesort_api import CineSortApi
@@ -134,9 +133,7 @@ class ApplySkipIdenticalRenameTests(unittest.TestCase):
         # Forme NFC : "colere" avec e accentue precompose (U+00E8)
         title_nfc = unicodedata.normalize("NFC", "12 Hommes en colère")
         # Forme NFD : e + combining grave (U+0065 U+0300)
-        folder_name_nfd = unicodedata.normalize(
-            "NFD", "12 Hommes en colère (1957)"
-        )
+        folder_name_nfd = unicodedata.normalize("NFD", "12 Hommes en colère (1957)")
         # Verifications de pre-condition : les deux formes sont bien differentes
         # byte-a-byte mais equivalentes apres NFC.
         self.assertNotEqual(folder_name_nfd, "12 Hommes en colère (1957)")
@@ -235,9 +232,7 @@ class BuildPreviewSkipIdenticalRenameTests(unittest.TestCase):
 
         # Decisions : on remappe chaque row sur son title/year cible pour
         # forcer la detection conform sur les 2 deja bien nommes.
-        title_year_by_folder = {
-            folder_name: (t, y) for folder_name, t, y in (*conformes, to_rename)
-        }
+        title_year_by_folder = {folder_name: (t, y) for folder_name, t, y in (*conformes, to_rename)}
         decisions = {}
         for r in rows:
             folder_name = Path(r["folder"]).name
@@ -279,10 +274,7 @@ class BuildPreviewSkipIdenticalRenameTests(unittest.TestCase):
         _wait_done(api, run_id)
         rows = api.run.get_plan(run_id).get("rows", [])
         self.assertTrue(rows)
-        decisions = {
-            r["row_id"]: {"ok": True, "title": "Inception", "year": 2010}
-            for r in rows
-        }
+        decisions = {r["row_id"]: {"ok": True, "title": "Inception", "year": 2010} for r in rows}
         preview = api.run.build_apply_preview(run_id, decisions)
         self.assertTrue(preview.get("ok"))
         self.assertEqual(

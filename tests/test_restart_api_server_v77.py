@@ -25,12 +25,14 @@ class RestartApiServerTests(unittest.TestCase):
         self.state_dir = Path(self._tmp) / "state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / "settings.json").write_text(
-            json.dumps({
-                "rest_api_enabled": True,
-                "rest_api_token": "REAL_secret_token_32chars_abcdefgh",
-                "rest_api_port": 8642,
-                "rest_api_cors_origin": "http://192.168.1.50:8642",
-            }),
+            json.dumps(
+                {
+                    "rest_api_enabled": True,
+                    "rest_api_token": "REAL_secret_token_32chars_abcdefgh",
+                    "rest_api_port": 8642,
+                    "rest_api_cors_origin": "http://192.168.1.50:8642",
+                }
+            ),
             encoding="utf-8",
         )
         self.api = backend.CineSortApi()

@@ -7,11 +7,12 @@ import threading
 import time
 import traceback
 from collections import Counter
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 _logger = logging.getLogger(__name__)
+
+import contextlib
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
@@ -19,7 +20,7 @@ from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
 from cinesort.app.plan_support import find_duplicate_targets as _find_dups
 from cinesort.app.plan_support import plan_multi_roots
 from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
-from cinesort.domain.conversions import to_bool, to_float
+from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.duplicate_compare import compare_duplicates
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
@@ -27,6 +28,7 @@ from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
+from cinesort.ui.api.run_data_support import serialize_rows_for_payload, write_plan_jsonl
 from cinesort.ui.api.settings_support import (
     _SECRET_FIELDS,
     _SECRET_MASK,
@@ -201,8 +203,11 @@ def _init_tmdb_client(
     tmdb_timeout_s = to_float(settings.get("tmdb_timeout_s"), 10.0)
     api_key = (settings.get("tmdb_api_key") or "").strip()
     # V5-03 polish v7.7.0 (R5-STRESS-4) : propager le TTL configurable.
+    # Le `or 30` est sans danger ici (contrairement au seuil OMDb plus bas) :
+    # tmdb_cache_ttl_days est clampe [1, 365] au save (settings_support.py:1415)
+    # et l'UI impose min:1 (parametres.js:168), donc 0 n'est pas persistable.
     try:
-        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)  # sentinel-ok: 0 non persistable, cf supra
     except (TypeError, ValueError):
         cache_ttl_days = 30
     if tmdb_enabled and api_key:
@@ -311,8 +316,24 @@ def _validate_and_init_plan_context(
         message=f"start_plan infra ready db_path={store.db_path}",
     )
 
-    run_id = api._generate_unique_run_id(store)
-    run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
+    # RESERVATION ATOMIQUE : le run_id et son dossier `tri_films_<run_id>` sont
+    # pris d'un seul tenant, AVANT toute creation de RunState et avant
+    # start_job. Auparavant l'unicite n'etait verifiee que cote base alors que
+    # le dossier etait deja cree (mkdir exist_ok=True) : deux runs de meme id
+    # partageaient le meme dossier et le second ecrasait le plan.jsonl du
+    # premier sans rien signaler.
+    try:
+        run_id, run_paths = api._reserve_unique_run(store, state_dir)
+    except (OSError, RuntimeError) as exc:
+        return (
+            _err_response(
+                str(exc),
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            ),
+            None,
+        )
     api._debug_log(
         state_dir=state_dir,
         run_id=run_id,
@@ -490,7 +511,11 @@ def _build_plan_job_fn(
                         cache_path=omdb_cache_path,
                         timeout_s=10.0,
                     )
-                    threshold = int(settings.get("omdb_min_confidence_for_call") or 90)
+                    # settings_support.py:1555 persiste deja ce seuil via
+                    # to_int (donc 0 est stocke tel quel, l'UI clampe [0, 100]) :
+                    # un `... or 90` ici le ressusciterait a 90 et appellerait
+                    # OMDb alors que l'utilisateur l'a desactive (#791).
+                    threshold = to_int(settings.get("omdb_min_confidence_for_call"), 90)
                     n_checked = cross_check_rows_with_omdb(
                         rows,
                         omdb_client,
@@ -575,9 +600,7 @@ def _build_plan_job_fn(
                             if str(getattr(r, "row_id", "") or "").strip()
                         ]
                         if row_ids:
-                            dlog(
-                                f"job_fn launching auto perceptual batch ({len(row_ids)} films)"
-                            )
+                            dlog(f"job_fn launching auto perceptual batch ({len(row_ids)} films)")
                             # R8-037 (F4) : câbler le cancel_event du run sur l'api
                             # AVANT le batch -> _resolve_cancel_event(api) le lit ->
                             # request_cancel (qui pose rt.cancel_event) arrête bien
@@ -594,10 +617,7 @@ def _build_plan_job_fn(
                                 if _perc_cancel is not None:
                                     api._perceptual_cancel_event = None
                             if isinstance(perc_result, dict) and perc_result.get("ok"):
-                                dlog(
-                                    "job_fn auto perceptual started success_count="
-                                    f"{perc_result.get('success_count')}"
-                                )
+                                dlog(f"job_fn auto perceptual started success_count={perc_result.get('success_count')}")
                             else:
                                 dlog(f"job_fn auto perceptual skipped: {perc_result}")
                         else:
@@ -619,9 +639,7 @@ def _build_plan_job_fn(
             try:
                 if to_bool(settings.get("tmdb_enabled"), False) and rows:
                     enrich_ids = [
-                        str(getattr(r, "row_id", "") or "")
-                        for r in rows
-                        if str(getattr(r, "row_id", "") or "").strip()
+                        str(getattr(r, "row_id", "") or "") for r in rows if str(getattr(r, "row_id", "") or "").strip()
                     ]
                     if enrich_ids:
                         import threading as _threading
@@ -636,9 +654,7 @@ def _build_plan_job_fn(
                             except Exception as _exc:  # noqa: BLE001 - daemon best-effort
                                 dlog(f"job_fn post-scan tmdb enrich warning: {_exc}")
 
-                        _threading.Thread(
-                            target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True
-                        ).start()
+                        _threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
                         dlog(f"job_fn post-scan tmdb enrich launched ({len(enrich_ids)} films)")
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")
@@ -686,11 +702,15 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     """Sauvegarde plan.jsonl et summary.txt apres un scan reussi."""
     dlog("job_fn writing plan.jsonl")
     try:
-        with open(rs.paths.plan_jsonl, "w", encoding="utf-8") as file_obj:
-            for row in rows:
-                data = asdict(row)
-                data["candidates"] = [asdict(c) for c in row.candidates]
-                file_obj.write(json.dumps(data, ensure_ascii=False) + "\n")
+        # Issue #479 site 1 : c'etait un `open(..., "w")` en place, donc une
+        # ecriture NON atomique du fichier que l'APPLY relit pour renommer et
+        # DEPLACER des dossiers. Une interruption (disque plein, kill, AV) y
+        # laissait un JSONL tronque ; `load_rows_from_plan_jsonl` saute les
+        # lignes invalides SANS le dire, donc des films disparaissaient en
+        # silence d'un plan destructif. Le helper canonique (nom de .tmp unique
+        # + fsync avant os.replace) laisse au contraire la cible INCHANGEE : au
+        # pire le plan est absent, jamais ampute.
+        write_plan_jsonl(rs.paths.plan_jsonl, serialize_rows_for_payload(rows))
     except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
         rs.log("WARN", f"Plan save failed: {exc}")
         dlog(f"job_fn writing plan.jsonl failed: {exc}")
@@ -698,7 +718,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     dlog("job_fn writing summary.txt")
     try:
         summary_text = _build_analysis_summary(rows, stats, root, state_dir, rs.paths)
-        rs.paths.summary_txt.write_text(summary_text, encoding="utf-8")
+        state.atomic_write_text(rs.paths.summary_txt, summary_text, mkdir=False)
     except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
         dlog(f"job_fn writing summary.txt failed: {exc}")
 
@@ -717,9 +737,7 @@ def start_plan(api: Any, settings: Dict[str, Any], *, run_state_cls: Type[Any]) 
             "ok": False,
             "error": "start_plan_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de lancer le scan. Verifie les sources et reessaie."
-            ),
+            "user_message": ("Impossible de lancer le scan. Verifie les sources et reessaie."),
         }
 
 
@@ -805,8 +823,7 @@ def scrub_historical_run_configs(store: Any) -> Dict[str, int]:
     with store._managed_conn() as conn:  # type: ignore[attr-defined]
         try:
             rows = conn.execute(
-                "SELECT run_id, config_json FROM runs "
-                "WHERE config_json IS NOT NULL AND config_json != ''"
+                "SELECT run_id, config_json FROM runs WHERE config_json IS NOT NULL AND config_json != ''"
             ).fetchall()
         except sqlite3.OperationalError:
             return report
@@ -971,10 +988,7 @@ def get_status(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str, Any]
             "ok": False,
             "error": "run_status_unavailable",
             "message": str(exc),
-            "user_message": (
-                "Impossible de recuperer l'etat du run. Relance un scan ou "
-                "redemarre l'app."
-            ),
+            "user_message": ("Impossible de recuperer l'etat du run. Relance un scan ou redemarre l'app."),
         }
 
 
@@ -994,6 +1008,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         compute_total_fallback,
         count_plan_rows,
     )
+
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -1056,7 +1071,28 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         }
 
     with rs.lock:
-        logs = rs.logs[last_log_index:]
+        # F19 : les index de pagination sont ABSOLUS depuis le debut du run,
+        # alors que rs.logs ne conserve que les MAX_RUN_LOG_ITEMS derniers
+        # items. rs.logs_offset = nombre d'items deja evinces -> on convertit
+        # l'index client en index de liste.
+        #
+        # F19 (revue R1) : le repli doit tester le TYPE, pas la verite. Sur un
+        # rs mocke (unittest.mock.MagicMock) `getattr` ne leve pas et ne rend
+        # pas le defaut — il rend un MagicMock truthy dont `int()` vaut 1, soit
+        # un decalage silencieux de 1 (une ligne re-emise a chaque poll,
+        # next_log_index off-by-one a vie) la ou l'intention etait de
+        # NEUTRALISER l'offset.
+        _raw_offset = getattr(rs, "logs_offset", 0)
+        logs_offset = int(_raw_offset) if isinstance(_raw_offset, int) and not isinstance(_raw_offset, bool) else 0
+        start = last_log_index - logs_offset
+        if start < 0:
+            # Client en retard sur la fenetre de retention : il reprend au plus
+            # ancien encore disponible (les evinces restent dans ui_log.txt).
+            start = 0
+        logs = rs.logs[start:] if start < len(rs.logs) else []
+        # Index incoherent (client en avance / nouveau run) : next_log_index
+        # resynchronise sur la fin reelle du buffer -> auto-guerison.
+        next_log_index = logs_offset + len(rs.logs)
         idx = rs.idx
         total = rs.total
         cur = rs.current_folder
@@ -1110,10 +1146,8 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # une fois le scan done. Pendant le scan (running), on garde rs.total =
     # discover_total comme cible attendue de la barre de progression.
     if done and not running:
-        try:
+        with contextlib.suppress(OSError, AttributeError, KeyError, TypeError, ValueError):
             total = count_plan_rows(paths_snapshot, fallback=total)
-        except (OSError, AttributeError, KeyError, TypeError, ValueError):
-            pass
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 
@@ -1150,7 +1184,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
         "speed": speed,
         "eta_s": eta,
         "logs": logs,
-        "next_log_index": last_log_index + len(logs),
+        "next_log_index": next_log_index,
         "status": status_text,
         "cancel_requested": cancel_requested,
         "apply": apply_payload,
@@ -1397,19 +1431,39 @@ def _mirror_decisions_to_sql(
                 reason=str(payload.get("reason") or ""),
             )
         except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
-            _logger.debug(
-                "save_validation: mirror SQL ignore pour row %s : %s", rid, exc
-            )
+            _logger.debug("save_validation: mirror SQL ignore pour row %s : %s", rid, exc)
             # On force malgre tout decision=DECISION_REJECTED pour eviter
             # le silence complet (ce code branch est defensif).
             _ = DECISION_REJECTED
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:
-    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report."""
+    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report.
+
+    Fix revue adversaire PR#854. Cette fonction est le SEUL producteur de probes
+    du comparateur de doublons, et elle ne propageait que la HAUTEUR. Or la
+    hauteur ffprobe est celle du flux encode, bandes noires deja retirees : un
+    2160p scope 2.39:1 (`3840x1600`, la geometrie de la majorite des UHD
+    Blu-ray) tombait dans la classe 1080p et se retrouvait a EGALITE avec un
+    vrai 1080p flat -- le critere Resolution perdait ses 30 points, ce qui
+    suffisait a retourner le verdict global vers « Garder B, archiver A » sur le
+    fichier 5x plus gros. Le verdict etant applicable en masse (« Auto-decider
+    tous », perdants deplaces en _review/_duplicates_user_decided/ a l'apply),
+    la classe se decide desormais sur la LARGEUR comme partout ailleurs.
+
+    L'etiquette canonique n'est propagee que si elle vient d'une MESURE
+    (`resolution_source == "probe"`) : `_resolution_label` retombe sinon sur le
+    nom de release, et un fichier mesure 700x400 nomme `.1080p.` imposerait sa
+    classe au comparateur. Meme regle que `quality_score._effective_resolution_height`.
+    """
+    measured_label = ""
+    if str(detected.get("resolution_source") or "") == "probe":
+        measured_label = str(detected.get("resolution") or "")
     return {
         "video": {
             "height": detected.get("height") or detected.get("resolution_height") or 0,
+            "width": detected.get("width") or 0,
+            "resolution": measured_label,
             "codec": detected.get("video_codec") or "",
             "bitrate": detected.get("bitrate_bps") or (int(detected.get("bitrate_kbps") or 0) * 1000),
             "hdr10": detected.get("hdr10", False),
@@ -1545,7 +1599,13 @@ def _enrich_one_group(group: Dict[str, Any], run_id: str, store: Any) -> None:
     except (OSError, KeyError, TypeError, ValueError):
         return
     group["comparison"] = _build_comparison_payload(
-        result, rows[0], rows[1], store, run_id, probes[0], probes[1]  # R8-059 : probes -> codec/résolution/audio
+        result,
+        rows[0],
+        rows[1],
+        store,
+        run_id,
+        probes[0],
+        probes[1],  # R8-059 : probes -> codec/résolution/audio
     )
 
 
@@ -1656,18 +1716,90 @@ def mark_duplicate_winner(
     _run_row, store = found
 
     # Recharge le groupe pour deduire les losers a partir du run (source de verite).
+    #
+    # F28 : cette recharge peut legitimement NE PAS retrouver le groupe. La
+    # recharge `check_duplicates(api, run_id, {})` refusionne les decisions du
+    # DISQUE (validation.json) et `_browse_all_if_none_approved` cesse
+    # d'elargir des qu'UN row a ok=True -> find_duplicate_targets ne groupe plus
+    # que les rows approuves, et le groupe affiche depuis le cache UI
+    # (_groupsCache de doublons.js, qui survit aux navigations) disparait.
+    # AVANT : on persistait alors loser_row_ids=[] avec ok=True -> a l'apply,
+    # apply_support consomme les losers persistes SANS recompute et apply_core
+    # early-return si vide : AUCUN fichier deplace, zero erreur, toast
+    # « Decide » mensonger. On rend donc la persistance FAIL-CLOSED.
     losers: List[str] = []
+    group_row_ids: List[str] = []
+    group_found = False
+    # F28 (revue R1) : nombre de groupes du reload qui portent CETTE cle. Deux
+    # groupes DISTINCTS peuvent legitimement la partager — find_duplicate_targets
+    # groupe sur movie_key(title, year, edition) (H11) alors que _group_key_for
+    # retombe sur title|year (l'edition n'est pas dans le dict de groupe).
+    matching_groups = 0
     try:
         check_resp = check_duplicates(api, str(run_id), {})
         if isinstance(check_resp, dict) and check_resp.get("ok"):
             for g in check_resp.get("groups") or []:
                 if _group_key_for(g) != str(group_key):
                     continue
+                matching_groups += 1
                 row_ids = [str(r.get("row_id") or "") for r in (g.get("rows") or []) if isinstance(r, dict)]
-                losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
-                break
-    except (KeyError, OSError, TypeError, ValueError) as exc:
-        _logger.warning("mark_duplicate_winner: recharge groupes a echoue (%s) — losers vide", exc)
+                if str(winner_row_id) not in row_ids:
+                    # Winner etranger a CE groupe : sans ce garde TOUS ses
+                    # membres deviendraient losers et le film entier partirait au
+                    # bucket _review. On NE s'arrete PAS : un autre groupe de
+                    # meme cle peut etre le bon. S'arreter ici rendait le 2e
+                    # groupe INDECIDABLE A VIE, avec un message trompeur
+                    # (« Actualiser » reproduit exactement la meme collision).
+                    continue
+                if not group_found:
+                    group_found = True
+                    group_row_ids = row_ids
+                    losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
+    except (KeyError, OSError, TypeError, ValueError, sqlite3.Error) as exc:
+        # sqlite3.Error n'herite PAS de OSError : sans lui, une DB verrouillee
+        # remontait jusqu'au boundary REST (500 generique).
+        _logger.warning("mark_duplicate_winner: recharge groupes a echoue (%s) — decision refusee", exc)
+
+    if not group_found:
+        return _err_response(
+            "Ce groupe de doublons n'est plus present dans le run (liste perimee) : "
+            "clique sur Actualiser puis redecide.",
+            category="state",
+            level="info",
+            log_module=__name__,
+            group_key=str(group_key),
+            stale=True,
+        )
+
+    # F28 (revue R1) : la PK de duplicate_decisions est (run_id, group_key). Quand
+    # deux groupes REELS partagent la cle, persister le second ECRASE
+    # silencieusement la decision prise sur le premier (upsert DO UPDATE) : ses
+    # perdants ne sont plus deplaces a l'apply, sans aucun signal cote UI. On
+    # refuse explicitement plutot que de detruire une decision utilisateur.
+    # Garde volontairement borne au SEUL cas de collision (matching_groups > 1) :
+    # le chemin nominal, y compris la re-decision d'un meme groupe, est inchange.
+    if matching_groups > 1:
+        previous: Optional[Dict[str, Any]] = None
+        try:
+            previous = store.apply.get_duplicate_decision(run_id=str(run_id), group_key=str(group_key))
+        except (sqlite3.Error, OSError, AttributeError, TypeError, ValueError) as exc:
+            # Lecture best-effort : si elle echoue, l'upsert ci-dessous echouera
+            # de la meme facon et renverra une erreur explicite.
+            _logger.warning("mark_duplicate_winner: lecture decision existante impossible (%s)", exc)
+        prev_winner = str((previous or {}).get("winner_row_id") or "")
+        if prev_winner and prev_winner != str(winner_row_id) and prev_winner not in group_row_ids:
+            return _err_response(
+                "Deux groupes de doublons distincts portent la meme cle "
+                f"« {group_key} » (meme titre et meme annee, editions differentes). "
+                "Enregistrer cette decision effacerait celle deja prise sur l'autre "
+                "groupe : applique d'abord la decision en cours, ou differencie les "
+                "titres/annees des deux editions.",
+                category="state",
+                level="warning",
+                log_module=__name__,
+                group_key=str(group_key),
+                ambiguous_group_key=True,
+            )
 
     try:
         decision = store.apply.upsert_duplicate_decision(
@@ -1685,11 +1817,19 @@ def mark_duplicate_winner(
             log_module=__name__,
         )
 
+    persisted_losers = list(decision.get("loser_row_ids") or [])
     return {
         "ok": True,
         "group_key": str(decision.get("group_key", group_key)),
         "winner_row_id": str(decision.get("winner_row_id", winner_row_id)),
-        "losers": list(decision.get("loser_row_ids") or []),
+        "losers": persisted_losers,
+        # F28 (revue R1) : un groupe a UN SEUL row (cible deja existante sur
+        # disque, cf existing_paths de find_duplicate_targets) n'a AUCUN perdant.
+        # La decision est enregistree — elle vaut arbitrage — mais elle ne
+        # deplacera RIEN a l'apply (apply_core early-return sur losers vide).
+        # On l'annonce explicitement pour que l'UI cesse d'afficher un
+        # « ✓ Decide » mensonger ; l'edit doublons.js est hors de ce fichier.
+        "no_op": not persisted_losers,
         "decided_ts": float(decision.get("decided_ts") or 0.0),
     }
 
@@ -1904,13 +2044,86 @@ def _row_field(row: Any, *keys: str, default: Any = None) -> Any:
     return default
 
 
-def _build_fusion_inputs_from_groups(groups: List[Any], rows: List[Any]) -> List[List[Any]]:
+def _fusion_video_path_for(row: Any, item: Any) -> str:
+    """Chemin video absolu d'un membre de groupe doublons.
+
+    F35 : les items produits par find_duplicate_targets (duplicate_support.py)
+    n'exposent QUE row_id/kind/title/year/target/source_folder/source_root/
+    warning_flags — aucune cle 'src'/'source_path'/'path'. On tente d'abord les
+    cles explicites (formes tolerees / appelants historiques) puis on retombe
+    sur les champs canoniques du PlanRow (folder + video).
+    """
+    explicit = _row_field(item, "src", "source_path", "path", "video_path") or _row_field(
+        row, "src", "source_path", "path"
+    )
+    if explicit:
+        return str(explicit)
+    folder = _row_field(row, "folder", default="") or _row_field(item, "source_folder", default="")
+    video = _row_field(row, "video", default="")
+    if folder and video:
+        return str(Path(str(folder)) / str(video))
+    return ""
+
+
+def _fusion_signals_from_store(store: Any, run_id: str, row_id: str) -> Tuple[float, Optional[str]]:
+    """(duree, empreinte Chromaprint) lues depuis les artefacts deja persistes.
+
+    F35 : PlanRow ne porte NI duration_s NI audio_fingerprint. La duree vient du
+    quality_report (meme source que _build_pseudo_probe) et l'empreinte du
+    perceptual_report (colonne audio_fingerprint, migration 015).
+
+    Best-effort strict : ces deux lectures passent par _managed_conn, et
+    sqlite3.Error n'herite PAS de OSError -> sans capture explicite, une DB
+    verrouillee ferait tomber TOUT l'endpoint. Defauts 0.0 / None.
+    """
+    duration_s = 0.0
+    chromaprint: Optional[str] = None
+    if store is None or not row_id:
+        return duration_s, chromaprint
+    _swallowed = (sqlite3.Error, OSError, AttributeError, KeyError, TypeError, ValueError)
+    try:
+        report = store.quality.get_quality_report(run_id=str(run_id), row_id=str(row_id))
+        if isinstance(report, dict) and isinstance(report.get("metrics"), dict):
+            detected = report["metrics"].get("detected") or {}
+            duration_s = float(detected.get("duration_s") or 0.0)
+    except _swallowed:
+        duration_s = 0.0
+    try:
+        perceptual = store.perceptual.get_perceptual_report(run_id=str(run_id), row_id=str(row_id))
+        if isinstance(perceptual, dict):
+            fingerprint = perceptual.get("audio_fingerprint")
+            chromaprint = str(fingerprint) if fingerprint else None
+    except _swallowed:
+        chromaprint = None
+    return duration_s, chromaprint
+
+
+def _build_fusion_inputs_from_groups(
+    groups: List[Any],
+    rows: List[Any],
+    *,
+    store: Any = None,
+    run_id: str = "",
+) -> List[List[Any]]:
     """Convertit les groupes doublons legacy en groupes de FilmFusionInput.
 
     Strategie : on lit les rows referencees par chaque groupe et on cree un
     FilmFusionInput par film (chemin video, duree, fingerprint Chromaprint
     deja calcule si dispo). Le pipeline app gerera le calcul videohash et
     la fusion.
+
+    F35 : les groupes de check_duplicates portent leurs membres sous la cle
+    'rows' (duplicate_support.py, cf _enrich_one_group / _group_key_for), PAS
+    'members' — la lecture historique rendait donc systematiquement 0 bucket et
+    check_duplicates_fusion repondait toujours pairs=[]. 'members' reste tolere.
+
+    `store` / `run_id` sont OPTIONNELS (retro-compat des appelants existants) :
+    sans eux, duree et empreinte valent 0.0 / None et seul le signal video est
+    exploitable.
+
+    ATTENTION cout : avec le flag CINESORT_FUSION_DOUBLONS actif, chaque film
+    retourne ici declenche une extraction ffmpeg en aval, et les paires sont en
+    O(n^2) par groupe.
     """
     from cinesort.app.duplicate_pipeline import FilmFusionInput
 
@@ -1923,7 +2136,10 @@ def _build_fusion_inputs_from_groups(groups: List[Any], rows: List[Any]) -> List
 
     out: List[List[FilmFusionInput]] = []
     for grp in groups or []:
-        members = grp.get("members") if isinstance(grp, dict) else getattr(grp, "members", None)
+        if isinstance(grp, dict):
+            members = grp.get("rows") or grp.get("members")
+        else:
+            members = getattr(grp, "rows", None) or getattr(grp, "members", None)
         if not members or not isinstance(members, list):
             continue
         bucket: List[FilmFusionInput] = []
@@ -1932,15 +2148,17 @@ def _build_fusion_inputs_from_groups(groups: List[Any], rows: List[Any]) -> List
             if not rid:
                 continue
             row = row_by_id.get(rid)
-            video_path = (
-                _row_field(m, "src", "source_path", "path")
-                if isinstance(m, dict)
-                else _row_field(row, "src", "source_path", "path")
-            )
-            duration_s = _row_field(row, "duration_s", "duration", default=0.0)
-            chromaprint = _row_field(row, "audio_fingerprint", "chromaprint", default=None)
+            video_path = _fusion_video_path_for(row, m)
             if not video_path:
                 continue
+            duration_s = _row_field(row, "duration_s", "duration", default=None)
+            chromaprint = _row_field(row, "audio_fingerprint", "chromaprint", default=None)
+            if duration_s is None or chromaprint is None:
+                store_duration, store_fingerprint = _fusion_signals_from_store(store, run_id, rid)
+                if duration_s is None:
+                    duration_s = store_duration
+                if chromaprint is None:
+                    chromaprint = store_fingerprint
             bucket.append(
                 FilmFusionInput(
                     row_id=rid,
@@ -1952,6 +2170,44 @@ def _build_fusion_inputs_from_groups(groups: List[Any], rows: List[Any]) -> List
         if len(bucket) >= 2:
             out.append(bucket)
     return out
+
+
+def _drop_unpositionable_films(fusion_groups: List[List[Any]]) -> List[List[Any]]:
+    """Ecarte les films dont la duree est INCONNUE (<= 0) avant tout calcul video.
+
+    F35 (revue R1) : `extract_video_thumbnails` (domain/video_hash.py) repartit
+    ses N frames entre `start` et `end` ; avec `duration_s <= 0` la fenetre
+    retombe sur [0.0, 1.0] et les 10 frames comparees tombent TOUTES dans la
+    PREMIERE SECONDE du film — la zone ou quasiment tous les films sont noirs
+    (logo studio / fondu d'ouverture). Deux films DIFFERENTS rendent alors une
+    distance pHash nulle -> video_sim = 1.0 -> verdict 'confirmed'.
+
+    Or duration_s vaut 0.0 des qu'il n'y a pas de quality_report : le recalcul
+    qualite est un job de FOND lance apres le scan, desactivable
+    (auto_recompute_quality_on_scan), et le probe peut echouer (SMB, fichier
+    corrompu). Le cas nominal « scan tout juste termine » produit donc un
+    « doublon confirme » sur deux films sans aucun rapport.
+
+    Choix : degrader en MANQUE DE DETECTION (aucune paire) plutot qu'en FAUX
+    POSITIF. Le prix est la perte de la comparaison audio-seule pour ces films
+    — la neutralisation fine du seul signal video vit dans
+    `cinesort/app/duplicate_pipeline.py::_videohash_for` (`return b''` si
+    duree <= 0), hors du perimetre de fichiers de ce correctif.
+    """
+    kept: List[List[Any]] = []
+    dropped = 0
+    for bucket in fusion_groups or []:
+        usable = [film for film in bucket if float(getattr(film, "duration_s", 0.0) or 0.0) > 0.0]
+        dropped += len(bucket) - len(usable)
+        if len(usable) >= 2:
+            kept.append(usable)
+    if dropped:
+        _logger.warning(
+            "fusion doublons : %d film(s) ecarte(s) — duree inconnue, le hash video "
+            "serait calcule sur la seule 1re seconde (faux 'doublon confirme')",
+            dropped,
+        )
+    return kept
 
 
 @requires_valid_run_id
@@ -2009,14 +2265,19 @@ def check_duplicates_fusion(
     groups = legacy.get("groups") or legacy.get("duplicates") or []
 
     # Reconstruit les rows pour avoir acces a duration et fingerprint.
+    # F35 : le store est indispensable — duree et empreinte Chromaprint ne sont
+    # PAS des champs de PlanRow, elles vivent dans quality_reports /
+    # perceptual_reports.
     rs = api._get_run(run_id)
     rows: List[Any] = []
+    store: Any = None
     if rs:
         rows = rs.rows or api._load_rows_from_plan_jsonl(rs.paths) or []
+        store = getattr(rs, "store", None)
     else:
         found = api._find_run_row(run_id)
         if found:
-            row, _ = found
+            row, store = found
             run_paths = api._run_paths_for(
                 normalize_user_path(row.get("state_dir"), api._state_dir),
                 run_id,
@@ -2025,7 +2286,10 @@ def check_duplicates_fusion(
             rows = api._load_rows_from_plan_jsonl(run_paths) or []
 
     try:
-        fusion_groups = _build_fusion_inputs_from_groups(groups, rows)
+        fusion_groups = _build_fusion_inputs_from_groups(groups, rows, store=store, run_id=run_id)
+        # F35 (revue R1) : garde OBLIGATOIRE avant le premier appel ffmpeg — une
+        # duree inconnue rend le hash video systematiquement « identique ».
+        fusion_groups = _drop_unpositionable_films(fusion_groups)
         pairs = compute_fusion_for_groups(
             fusion_groups,
             audio_weight=a_w,

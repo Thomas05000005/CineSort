@@ -22,6 +22,7 @@ Note a part (PAS un finding) : 032-vector-search-tables.sql est nommee avec
 des TIRETS -> ne matche pas _MIGRATION_FILE_RE (^\\d+_.*\\.sql$) du
 migration_manager, donc jamais appliquee = decision produit D3 (differee).
 """
+
 from __future__ import annotations
 
 import ast
@@ -116,16 +117,28 @@ def extract_tables():
         for name in created:
             if name in renames:  # table temporaire de rebuild (xxx_new -> xxx)
                 target = renames[name]
-                tbl = tables.setdefault(target, {
-                    "origin_migration": mig.name, "migrations": [], "rebuilds": [], "applied_by_manager": applied,
-                })
+                tbl = tables.setdefault(
+                    target,
+                    {
+                        "origin_migration": mig.name,
+                        "migrations": [],
+                        "rebuilds": [],
+                        "applied_by_manager": applied,
+                    },
+                )
                 tbl["rebuilds"].append(mig.name)
                 if mig.name not in tbl["migrations"]:
                     tbl["migrations"].append(mig.name)
                 continue
-            tbl = tables.setdefault(name, {
-                "origin_migration": mig.name, "migrations": [], "rebuilds": [], "applied_by_manager": applied,
-            })
+            tbl = tables.setdefault(
+                name,
+                {
+                    "origin_migration": mig.name,
+                    "migrations": [],
+                    "rebuilds": [],
+                    "applied_by_manager": applied,
+                },
+            )
             if mig.name not in tbl["migrations"]:
                 tbl["migrations"].append(mig.name)
         if not applied:
@@ -155,8 +168,7 @@ def sql_site_patterns(table: str):
     return re.compile(kw + r"\s+" + re.escape(table) + b, re.I)
 
 
-WRITE_KW = {"INSERT INTO", "INSERT OR REPLACE INTO", "INSERT OR IGNORE INTO",
-            "REPLACE INTO", "DELETE FROM", "UPDATE"}
+WRITE_KW = {"INSERT INTO", "INSERT OR REPLACE INTO", "INSERT OR IGNORE INTO", "REPLACE INTO", "DELETE FROM", "UPDATE"}
 
 
 def scan_sites(tables: dict):
@@ -184,8 +196,7 @@ def scan_sites(tables: dict):
 def store_attr_map():
     """sqlite_store.py : self.<attr> = <Class>(self) -> {class: attr}."""
     text = read_text(STORE_PY)
-    return {m.group(2): m.group(1)
-            for m in re.finditer(r"self\.(\w+)\s*=\s*(\w+Repository)\(self\)", text)}
+    return {m.group(2): m.group(1) for m in re.finditer(r"self\.(\w+)\s*=\s*(\w+Repository)\(self\)", text)}
 
 
 def repo_methods_by_table(tables: dict):
@@ -336,15 +347,18 @@ def main():
     # Check dedie : perceptual_reports vs quality_reports restent distinctes
     def repo_set(t):
         return set(matrix[t]["repositories"]) if t in matrix else set()
+
     pr, qr = repo_set("perceptual_reports"), repo_set("quality_reports")
     distinct_check = {
         "both_tables_exist": "perceptual_reports" in matrix and "quality_reports" in matrix,
         "perceptual_reports_repos": sorted(pr),
         "quality_reports_repos": sorted(qr),
         "repos_overlap": sorted(pr & qr),
-        "distinct": ("perceptual_reports" in matrix and "quality_reports" in matrix
-                     and matrix["perceptual_reports"]["origin_migration"]
-                     != matrix["quality_reports"]["origin_migration"]),
+        "distinct": (
+            "perceptual_reports" in matrix
+            and "quality_reports" in matrix
+            and matrix["perceptual_reports"]["origin_migration"] != matrix["quality_reports"]["origin_migration"]
+        ),
     }
 
     stats = {}
@@ -357,13 +371,13 @@ def main():
         "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m7_db.py",
         "regles": {
             "sites": "scan cinesort/**/*.py (hors __pycache__), regex SQL ancree "
-                     "(INSERT [OR ...] INTO | REPLACE INTO | UPDATE | DELETE FROM = write ; "
-                     "FROM | JOIN = read), frontiere de mot sur le nom de table",
+            "(INSERT [OR ...] INTO | REPLACE INTO | UPDATE | DELETE FROM = write ; "
+            "FROM | JOIN = read), frontiere de mot sur le nom de table",
             "ddl_exclue": "les .sql de migrations ne comptent ni en read ni en write",
             "verdicts": "CABLEE=write+read ; WRITE_ONLY=write sans read ; "
-                        "READ_NEVER=read sans write ; MORTE=aucun site",
+            "READ_NEVER=read sans write ; MORTE=aucun site",
             "ui": "fichier cinesort/ui/** avec SQL direct OU appel .methode_repo( ; "
-                  "facade = facades/*.py ou cinesort_api.py referencant le module _support",
+            "facade = facades/*.py ou cinesort_api.py referencant le module _support",
         },
         "table_count": len(matrix),
         "stats_verdicts": stats,

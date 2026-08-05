@@ -602,9 +602,7 @@ def get_embedded_presets(api: Any) -> Dict[str, Any]:  # noqa: ARG001
                 "label": str(preset.get("label") or "TRaSH 2026"),
                 "description": str(preset.get("description") or ""),
                 "enabled_by_default": bool(preset.get("enabled_by_default")),  # FALSE
-                "upgrade_until_score": int(
-                    preset.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE
-                ),
+                "upgrade_until_score": int(preset.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE),
                 "tier_hierarchy": dict(preset.get("tier_hierarchy") or {}),
                 "trash_scoring": dict(preset.get("trash_scoring") or {}),
             }
@@ -622,9 +620,7 @@ def get_embedded_presets(api: Any) -> Dict[str, Any]:  # noqa: ARG001
                         "label": str(alt_data.get("label") or alt_id),
                         "description": str(alt_data.get("description") or ""),
                         "enabled_by_default": False,  # AC-3 : tous OFF.
-                        "upgrade_until_score": int(
-                            alt_data.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE
-                        ),
+                        "upgrade_until_score": int(alt_data.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE),
                         "tier_hierarchy": dict(alt_data.get("tier_hierarchy") or {}),
                         "trash_scoring": dict(alt_data.get("trash_scoring") or {}),
                     }
@@ -752,9 +748,7 @@ def get_breakdown_5_axes(api: Any) -> Dict[str, Any]:
 
         # Codec : profile.codec_bonuses (max) ou trash_scoring.codec.
         codec_bonuses = profile_json.get("codec_bonuses") or {}
-        codec_max_profile = max(
-            [int(v) for v in codec_bonuses.values() if isinstance(v, (int, float))] or [0]
-        )
+        codec_max_profile = max([int(v) for v in codec_bonuses.values() if isinstance(v, (int, float))] or [0])
         codec_scores = trash_scoring.get("codec") or {}
         codec_max_trash = max([int(v) for v in codec_scores.values() if isinstance(v, (int, float))] or [0])
         codec_max = max(codec_max_profile, codec_max_trash)
@@ -773,14 +767,10 @@ def get_breakdown_5_axes(api: Any) -> Dict[str, Any]:
             if isinstance(v, (int, float)):
                 audio_max_profile = max(audio_max_profile, int(v))
             elif isinstance(v, dict):
-                inner_max = max(
-                    [int(x) for x in v.values() if isinstance(x, (int, float))] or [0]
-                )
+                inner_max = max([int(x) for x in v.values() if isinstance(x, (int, float))] or [0])
                 audio_max_profile = max(audio_max_profile, inner_max)
         audio_scores = trash_scoring.get("audio") or {}
-        audio_max_trash = max(
-            [int(v) for v in audio_scores.values() if isinstance(v, (int, float))] or [0]
-        )
+        audio_max_trash = max([int(v) for v in audio_scores.values() if isinstance(v, (int, float))] or [0])
         audio_max = max(audio_max_profile, audio_max_trash)
 
         # Group : pas de champ profile dedie ; utilise tier_hierarchy.group_floors si present.
@@ -823,9 +813,7 @@ def get_breakdown_5_axes(api: Any) -> Dict[str, Any]:
         return {
             "ok": True,
             "axes": axes_out,
-            "upgrade_until_score": int(
-                profile_json.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE
-            ),
+            "upgrade_until_score": int(profile_json.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE),
             "profile_id": str(profile_json.get("id") or ""),
         }
     except (OSError, KeyError, TypeError, ValueError, AttributeError) as exc:

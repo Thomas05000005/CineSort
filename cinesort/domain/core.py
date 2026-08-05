@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
-import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +33,6 @@ from cinesort.domain.scan_helpers import (
     iter_videos,
 )
 from cinesort.domain.title_helpers import (
-    ProviderTags,
     _expand_tmdb_queries,
     _extract_trailing_sequel_num,
     _norm_for_tokens,
@@ -105,9 +102,21 @@ VIDEO_EXTS_ALL = frozenset(
         ".webm",
     }
 )
-SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
+# #874 : `.idx` est la MOITIE d'une paire atomique VobSub (`.sub` = flux bitmap,
+# `.idx` = index des timings/offsets). `.sub` etait dans la table, `.idx` non —
+# alors que les deux autres tables de sidecars (SIDECAR_METADATA_EXTS,
+# RESIDUAL_SUBTITLE_EXTS) les listent toutes les deux. Consequence sur les deux
+# sites qui DEPLACENT des fichiers (`classify_sidecars` ci-dessous et
+# `apply_core.is_managed_merge_file`) : un merge/move emportait `Film.fr.sub` et
+# laissait `Film.fr.idx` derriere. Un `.sub` prive de son `.idx` est illisible.
+# Aucune migration de reglages n'est requise : `build_cfg_from_settings`
+# (ui/api/settings_support.py) ne cable JAMAIS `side_exts`, donc le champ vaut
+# toujours None et `normalized()` retombe sur ce defaut.
+SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub", ".idx"}
 
-MIN_VIDEO_BYTES = 10 * 1024 * 1024  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
+MIN_VIDEO_BYTES = (
+    10 * 1024 * 1024
+)  # 10MB (abaisse depuis 50MB pour couvrir DivX/Xvid legacy, courts metrages, animations)
 
 GENERIC_SIDE_FILES_DEFAULT = {
     "movie.nfo",
@@ -188,6 +197,25 @@ _TMDB_BONUS_KEYWORDS = frozenset(
     }
 )
 
+# F03/F34 : le filtre bonus se faisait par SOUS-CHAINE nue ("promo" in
+# "the promotion" -> True, "trailer" in "trailer park boys" -> True), ce qui
+# eliminait TOUS les resultats TMDb corrects pour une classe de titres
+# legitimes -> aucun tmdb_id, aucune jaquette, +25 pts "pas de match TMDb".
+# On exige desormais une frontiere de MOT (le mot-cle ne doit pas etre colle a
+# une lettre ou un chiffre), les mots-cles multi-mots restant supportes tels quels.
+_TMDB_BONUS_KEYWORD_RE = re.compile(
+    r"(?<![0-9a-z])(?:" + "|".join(re.escape(kw) for kw in sorted(_TMDB_BONUS_KEYWORDS)) + r")(?![0-9a-z])"
+)
+
+# Un regex PAR mot-cle : la neutralisation liee a la requete doit etre
+# selective. Une garde tout-ou-rien desactiverait les 7 autres mots-cles des que
+# la requete en contient un seul, ce qui reactiverait le probleme d'origine dans
+# l'autre sens (un vrai bonus « Behind the Scenes » redeviendrait candidat pour
+# la requete « Trailer Park Boys »).
+_TMDB_BONUS_KEYWORD_RES = tuple(
+    re.compile(r"(?<![0-9a-z])" + re.escape(kw) + r"(?![0-9a-z])") for kw in sorted(_TMDB_BONUS_KEYWORDS)
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -239,12 +267,14 @@ class Config:
     naming_movie_template: str = "{title} ({year})"
     naming_tv_template: str = "{series} ({year})"
 
-    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)"
-    # Persiste par _save_section_naming (ui/api/settings_support.py L1608-1609)
-    # Consomme par apply_core (ext_case_for_video) pour ajuster la casse de
-    # l'extension du fichier video cible (single, collection, TV, quarantine).
-    # True = .MKV source -> .mkv cible ; False = preservation casse source.
-    lowercase_extensions: bool = True
+    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)" : SUPPRIME.
+    # Son seul effet etait de reconstruire le NOM DU FICHIER VIDEO cible avec un
+    # suffixe force en minuscules (`Film.MKV` -> `Film.mkv`), ce qui viole la
+    # regle inviolable n1 (« ne JAMAIS renommer le fichier video » : le nom doit
+    # rester synchrone avec le torrent, sinon le seeding casse). Aucun nom de
+    # DOSSIER n'en dependait. La cle peut subsister dans un settings.json
+    # existant : elle est simplement ignoree (le merge read-modify-write de
+    # save_settings_payload preserve les cles inconnues).
 
     # ITER7 etape 3 - Reglage UI "Separateur" (selecteur {".", " ", "_", "-"})
     # Persiste par _save_section_naming (ui/api/settings_support.py L1611-1613)
@@ -301,15 +331,10 @@ class Config:
             scan_max_workers=max(1, int(self.scan_max_workers or 1)),
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
-            lowercase_extensions=bool(self.lowercase_extensions),
             # ITER7 etape 3 : coerce-and-default identique a _save_section_naming
             # pour proteger les configs anciennes ou editees a la main contre une
             # valeur invalide qui sortirait du jeu {".", " ", "_", "-"}.
-            separator=(
-                str(self.separator)
-                if str(self.separator) in {".", " ", "_", "-"}
-                else " "
-            ),
+            separator=(str(self.separator) if str(self.separator) in {".", " ", "_", "-"} else " "),
         )
 
 
@@ -445,7 +470,6 @@ class PlanRow:
 # `core_mod._norm_win_path` sans aucune modification.
 from cinesort.domain.path_utils import (  # noqa: E402  (re-export volontaire)
     _norm_win_path,
-    norm_win_path,
     windows_safe,
 )
 
@@ -524,6 +548,26 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
         entries = list(folder.iterdir())
     except (OSError, PermissionError):
         return out
+    # F03 : arbitrage LONGEST-MATCH. `is_sidecar_for_video` matche par prefixe :
+    # dans un dossier PARTAGE, "Alien 2.srt" matche aussi "Alien.mkv". Sans
+    # arbitrage, le sous-titre d'un film etait revendique par le film au stem le
+    # plus court -> a l'apply (loser de doublon, marquage suppression, collection)
+    # le .srt partait avec le MAUVAIS film, voire dans un bucket de suppression.
+    # Regle retenue : le sidecar appartient a la video dont le stem est le plus
+    # specifique (le plus long) parmi celles qui le revendiquent — c'est la
+    # convention Plex/Jellyfin (le nom de base du sous-titre == celui de la video).
+    # Les videos que le SCAN rejette (sample/trailer/teaser) ne produisent aucune
+    # row : leur attribuer un sidecar le laisserait orphelin dans le dossier
+    # source au lieu de suivre le film. On ne les compte donc pas comme
+    # concurrentes. Import local : scan_helpers est un module feuille du domaine,
+    # l'importer au niveau module alourdirait le graphe pour un seul usage.
+    from cinesort.domain.scan_helpers import IGNORE_VIDEO_NAME_RE
+
+    sibling_video_stems = [
+        p.stem
+        for p in entries
+        if p.is_file() and p != video and p.suffix.lower() in cfg.video_exts and not IGNORE_VIDEO_NAME_RE.search(p.stem)
+    ]
     for p in entries:
         if not p.is_file() or p == video:
             continue
@@ -531,6 +575,10 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
             continue
         name_l = p.name.lower()
         if is_sidecar_for_video(stem, p.stem):
+            if any(len(other) > len(stem) and is_sidecar_for_video(other, p.stem) for other in sibling_video_stems):
+                # Une autre video du dossier a un stem strictement plus specifique
+                # qui revendique aussi ce sidecar : il lui appartient.
+                continue
             out.append(p)
             continue
         if (not is_collection) and (name_l in cfg.generic_side_files):
@@ -995,10 +1043,18 @@ def build_candidates_from_tmdb(
     if is_short_title:
         min_sim = max(min_sim, _TMDB_SHORT_TITLE_MIN_SIM)
 
+    # F34 : un mot-cle present dans la REQUETE elle-meme (l'utilisateur cherche
+    # bel et bien "Trailer Park Boys") ne doit plus servir a filtrer — sinon on
+    # supprime le film recherche. La neutralisation est SELECTIVE : seuls les
+    # mots-cles presents dans la requete sont desarmes, les autres continuent
+    # d'ecarter les vrais bonus.
+    query_terms_lower = f"{query_clean} {query}".lower()
+    active_bonus_res = [rx for rx in _TMDB_BONUS_KEYWORD_RES if not rx.search(query_terms_lower)]
+
     for r in results:
         # FIX 4 : filtrer les bonus/documentaires promo par mot-cle dans le titre.
         combined_title_lower = f"{r.title or ''} {r.original_title or ''}".lower()
-        if any(kw in combined_title_lower for kw in _TMDB_BONUS_KEYWORDS):
+        if any(rx.search(combined_title_lower) for rx in active_bonus_res):
             continue
 
         title_sim = _title_similarity(query_clean, r.title)
@@ -1378,6 +1434,14 @@ SKIP_REASON_AUTRE = "skip_autre"
 # un OSError cryptique "Le chemin specifie est introuvable" ou pire un
 # rename partiel laissant le FS dans un etat intermediaire.
 SKIP_REASON_PATH_TOO_LONG = "skip_path_too_long"
+# #613 : saison TV INDETERMINEE (`row.tv_season is None`). A ne pas confondre
+# avec `tv_season == 0`, qui est une saison LEGITIME (les specials Kodi/Jellyfin
+# vivent dans `Saison 00`). `int(row.tv_season or 0)` ecrasait la distinction :
+# un episode dont la saison n'avait pas ete resolue (pattern « Episode 12 » sans
+# saison, tv_helpers.parse_tv_info) etait range en silence dans `Saison 00`,
+# c'est-a-dire melange aux specials, avec un chemin de destination FABRIQUE.
+# Chemin destructif -> l'erreur va dans le sens restrictif : on refuse bruyamment.
+SKIP_REASON_TV_SAISON_INDETERMINEE = "skip_tv_saison_indeterminee"
 
 ANALYSE_IGNORE_LABELS_FR = {
     "ignore_tv_like": "Ignoré (ressemble à une série)",
@@ -1400,6 +1464,7 @@ SKIP_REASON_LABELS_FR = {
     SKIP_REASON_ERREUR_PRECEDENTE: "Erreur précédente",
     SKIP_REASON_AUTRE: "Autre",
     SKIP_REASON_PATH_TOO_LONG: "Chemin trop long (MAX_PATH Windows)",
+    SKIP_REASON_TV_SAISON_INDETERMINEE: "Saison TV indéterminée (destination non fabriquée)",
 }
 
 
@@ -1491,8 +1556,21 @@ def is_under_collection_root(cfg: Config, folder: Path) -> bool:
     )
 
 
-def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_template: str = "") -> bool:
-    """Wrapper conserve : 5 callers externes (plan_support, cleanup, tests)."""
+def _single_folder_is_conform(
+    folder_name: str,
+    title: str,
+    year: int,
+    naming_template: str = "",
+    *,
+    edition: str = "",
+    separator: Optional[str] = None,
+) -> bool:
+    """Wrapper conserve : 5 callers externes (plan_support, cleanup, tests).
+
+    `edition` / `separator` (#469) : a transmettre par tout appelant qui les
+    transmet aussi a l'ecrivain, sinon la conformance est evaluee contre un
+    nom que l'apply n'ecrit pas.
+    """
     return core_duplicate_support.single_folder_is_conform(
         folder_name,
         title,
@@ -1501,6 +1579,8 @@ def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_te
         norm_for_tokens=_norm_for_tokens,
         movie_dir_title_year=core_duplicate_support.movie_dir_title_year,
         naming_template=naming_template,
+        edition=edition,
+        separator=separator,
     )
 
 

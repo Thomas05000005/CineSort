@@ -358,6 +358,12 @@ class AtmosDtsXDetectionTests(unittest.TestCase):
         self.assertFalse(is_atmos)
         self.assertFalse(is_dts_x)
 
+    def test_ac3_atmos_tag_not_atmos(self) -> None:
+        # AC-3 ne peut pas transporter d'Atmos : un tag marketing "Atmos" sur
+        # une piste AC-3 ne doit PAS produire is_atmos=True (audit 2026-07-08).
+        is_atmos, _ = _detect_atmos_dtsx("ac3", "", "English AC3 Atmos 5.1", {})
+        self.assertFalse(is_atmos)
+
 
 class RetroCompatTests(unittest.TestCase):
     """Vague K : verifie qu'aucun ancien champ n'a disparu."""

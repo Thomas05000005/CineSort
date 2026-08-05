@@ -5,13 +5,36 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import cinesort.domain.core as core
 from cinesort.domain.conversions import to_int
+from cinesort.infra.state import atomic_write_text
 from cinesort.ui.api.settings_support import clamp_year
 
 logger = logging.getLogger(__name__)
+
+
+def write_plan_jsonl(plan_jsonl: Path, rows: List[Dict[str, Any]]) -> None:
+    """Reecrit `plan.jsonl` EN ENTIER, de facon atomique ET durable.
+
+    Ecrivain UNIQUE des reecritures de plan : `library_actions_support.
+    _rematch_tmdb_and_update_plan` et `tmdb_support.enrich_tmdb_ids_by_title`
+    derivaient tous les deux `plan_jsonl.with_suffix(suffix + ".tmp")` du meme
+    `run_id`, soit le MEME chemin au caractere pres. Ils sont concurrents pour
+    de vrai : `enrich_tmdb_ids_by_title` tourne dans le thread daemon
+    `tmdb-enrich-<run_id>` lance en fin de scan (run_flow_support.py:634)
+    pendant que le rematch est declenchable depuis l'UI sous
+    `ThreadingHTTPServer`. C'est le defaut #732, mais sur les donnees de
+    l'utilisateur : `plan.jsonl` est le fichier que l'APPLY relit pour
+    renommer les dossiers sur disque. Aucun des deux n'avait de fsync non plus.
+
+    `mkdir=False` : si le dossier du run a disparu, echouer (comme le faisait
+    l'`open()` d'avant) plutot que ressusciter un run fantome.
+    """
+    payload = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    atomic_write_text(plan_jsonl, payload, mkdir=False)
 
 
 def serialize_rows_for_payload(rows: List[core.PlanRow]) -> List[Dict[str, Any]]:
@@ -40,11 +63,7 @@ def candidate_from_json(data: Dict[str, Any]) -> core.Candidate:
     # tout candidat voyait son id+nom de collection nulles au rechargement.
     collection_id: int | None
     try:
-        collection_id = (
-            int(data["tmdb_collection_id"])
-            if data.get("tmdb_collection_id") not in (None, "", 0)
-            else None
-        )
+        collection_id = int(data["tmdb_collection_id"]) if data.get("tmdb_collection_id") not in (None, "", 0) else None
     except (OSError, KeyError, TypeError, ValueError):
         collection_id = None
     return core.Candidate(
@@ -137,6 +156,7 @@ def _parse_tv_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     memoire), apply rechargeait les rows via plan.jsonl puis apply_tv_episode
     renommait avec season=0/episode=0 -> fichiers TV 'S00E00 - .ext' (violation
     invariant renommage + perte d'info)."""
+
     def _opt_int(key: str) -> Optional[int]:
         v = data.get(key)
         return int(v) if v not in (None, "") else None

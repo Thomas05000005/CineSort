@@ -21,11 +21,20 @@ _AUTO_INTEGRITY_WARNINGS = {"integrity_header_invalid", "integrity_probe_failed"
 # auto-approuvable). Sans ça, un film en conflit pouvait être compté à la fois
 # "auto-approuvable" ET "conflit" -> 843 + 157 > total (partition impossible).
 # Source UNIQUE partagée avec dashboard_support._build_dashboard_section.
-_CONFLICT_FLAGS = frozenset({
-    "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
-    "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
-    "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
-})
+_CONFLICT_FLAGS = frozenset(
+    {
+        "year_conflict_folder_file",
+        "nfo_year_mismatch",
+        "nfo_title_mismatch",
+        "nfo_file_mismatch",
+        "runtime_mismatch",
+        "runtime_mismatch_likely_wrong_film",
+        "omdb_disagree",
+        "title_ambiguity_detected",
+        "not_a_movie",
+        "year_missing",
+    }
+)
 
 
 # Ensemble BLOQUANT complet (critique ∪ intégrité ∪ conflit).
@@ -42,12 +51,7 @@ def is_auto_approvable_flags(
     "Tous problèmes" (liste, flags ignorés-soustraits) dès qu'une alerte bloquante est ignorée."""
     has_title = bool(proposed_title and str(proposed_title).strip())
     has_year = bool(proposed_year and int(proposed_year or 0) >= 1900)
-    return (
-        int(confidence or 0) >= int(threshold)
-        and not (set(flags or ()) & _AUTO_BLOCKING)
-        and has_title
-        and has_year
-    )
+    return int(confidence or 0) >= int(threshold) and not (set(flags or ()) & _AUTO_BLOCKING) and has_title and has_year
 
 
 def is_auto_approvable(row: Any, threshold: int) -> bool:
@@ -84,25 +88,65 @@ def effective_flags(raw_flags: Any, ignored_codes: Any) -> Set[str]:
     return {str(f) for f in (raw_flags or []) if str(f) not in ignored}
 
 
-def reconcile_subtitle_flags(flags: Any, present_langs: Set[str]) -> List[str]:
-    """Retire les flags 'subtitle_missing_<lang>' PÉRIMÉS dont la langue est en fait
-    présente (embarquée/externe). Les autres flags sont conservés à l'identique.
+def full_langs_from_embedded(embedded: Any) -> Set[str]:
+    """Langues dont une piste EMBARQUÉE **complète** (non forcée) est connue.
+
+    F12 (2026-08-03) : seule source exploitable pour réconcilier un
+    `subtitle_forced_only_<lang>`. Les pistes de `quality_reports.metrics.
+    subtitles_embedded` sont la copie brute de `normalized_probe["subtitles"]`
+    (quality_report_support), donc elles portent bien la clé ``forced``.
+    Une piste sans clé ``forced`` est comptée COMPLÈTE (pas d'invention à partir
+    d'une info absente) — même convention que build_subtitle_report."""
+    from cinesort.domain.subtitle_helpers import _normalize_iso639
+
+    out: Set[str] = set()
+    if not isinstance(embedded, list):
+        return out
+    for track in embedded:
+        if not isinstance(track, dict) or track.get("forced"):
+            continue
+        norm = _normalize_iso639(str(track.get("language") or "").strip().lower())
+        if norm:
+            out.add(norm)
+    return out
+
+
+def reconcile_subtitle_flags(flags: Any, present_langs: Set[str], full_langs: Optional[Set[str]] = None) -> List[str]:
+    """Retire les flags sous-titres PÉRIMÉS. Les autres flags sont conservés à l'identique.
+
+    - ``subtitle_missing_<lang>`` : périmé si la langue est en fait présente
+      (embarquée/externe).
+    - ``subtitle_forced_only_<lang>`` (F12, 2026-08-03) : périmé si une piste
+      **complète** (non forcée) de cette langue est connue — cas du FR muxé non vu
+      au scan, symétrique du faux `subtitle_missing_fr` de la Vague F.
 
     La langue extraite du flag est normalisée ISO 639-1 (via _normalize_iso639) pour
     matcher un `present_langs` déjà normalisé — robuste aux plans anciens qui portent
     'subtitle_missing_french' / 'subtitle_missing_fra' au lieu de 'subtitle_missing_fr'.
     La détection des langues présentes vit dans history_support._present_langs_from_payload
-    (lecture du DICT payload) — source unique côté écran Traitement."""
+    (lecture du DICT payload) — source unique côté écran Traitement.
+
+    ⚠ `full_langs` se construit UNIQUEMENT via `full_langs_from_embedded` : le payload
+    sérialisé (`subtitle_languages`) ne dit PAS lesquelles de ses langues viennent d'un
+    fichier forcé, y lire 'fr' effacerait donc systématiquement le flag qu'on vient de
+    poser (l'erreur exacte que l'arbitrage F12 a écartée). `full_langs=None` (appelant
+    sans quality_report) => on CONSERVE le flag, comme pour `subtitle_missing_*`."""
     from cinesort.domain.subtitle_helpers import _normalize_iso639
 
+    known_full = full_langs or set()
     out: List[str] = []
     for flag in flags or []:
         text = str(flag)
         if text.startswith("subtitle_missing_"):
-            raw = text[len("subtitle_missing_"):].strip().lower()
+            raw = text[len("subtitle_missing_") :].strip().lower()
             lang = _normalize_iso639(raw) or raw
             if lang and lang in present_langs:
                 continue  # faux positif : la langue EST présente -> drop
+        elif text.startswith("subtitle_forced_only_"):
+            raw = text[len("subtitle_forced_only_") :].strip().lower()
+            lang = _normalize_iso639(raw) or raw
+            if lang and lang in known_full:
+                continue  # une piste COMPLÈTE existe -> le flag est périmé
         out.append(text)
     return out
 

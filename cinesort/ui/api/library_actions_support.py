@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import io
 import json
 import logging
 import os
@@ -141,9 +142,7 @@ def _mark_many(
     managed = getattr(repo, "_managed_conn", None)
     if callable(ensure) and callable(managed):
         ts = time.time()
-        params = [
-            (str(run_id), rid, ts, str(source_paths.get(rid, "") or "")) for rid in rids
-        ]
+        params = [(str(run_id), rid, ts, str(source_paths.get(rid, "") or "")) for rid in rids]
         try:
             ensure()
             with managed() as conn:
@@ -226,9 +225,7 @@ def migrate_legacy_deletion_marks(api: Any, run_id: str) -> List[str]:
     except (OSError, AttributeError, TypeError, ValueError):
         return []
 
-    row_ids = [
-        str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()
-    ]
+    row_ids = [str(r) for r in (_read_deletion_marks(path).get("row_ids") or []) if str(r).strip()]
     if not row_ids:
         # Fichier vide/corrompu : plus rien a honorer, on le retire.
         with contextlib.suppress(OSError, TypeError, ValueError):
@@ -298,9 +295,7 @@ def remove_legacy_deletion_mark(api: Any, run_id: str, row_id: str) -> bool:
         return True
 
     remaining = [r for r in row_ids if r != rid_s]
-    marked_ts = {
-        str(k): v for k, v in (data.get("marked_ts") or {}).items() if str(k) != rid_s
-    }
+    marked_ts = {str(k): v for k, v in (data.get("marked_ts") or {}).items() if str(k) != rid_s}
     try:
         if remaining:
             path.write_text(
@@ -361,10 +356,7 @@ def _mark_rows_for_deletion(api: Any, run_id: str, row_ids: List[str]) -> Dict[s
         return {"count": 0, "failed": failed}
 
     try:
-        already = {
-            str(m.get("row_id") or "")
-            for m in (repo.list_marked_for_deletion(run_id=str(run_id)) or [])
-        }
+        already = {str(m.get("row_id") or "") for m in (repo.list_marked_for_deletion(run_id=str(run_id)) or [])}
     except _DB_ERRORS as exc:
         logger.warning("list_marked_for_deletion echoue run_id=%s: %s", run_id, exc)
         already = set()
@@ -748,9 +740,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # root qui CONTIENT reellement le film, sinon None (compat pre-R3e).
     # P4 v2 : la row porte source_root (le root EXACT du scan, core.py:424) —
     # candidat autoritaire teste en premier, avant les roots reconstruits de la DB.
-    scan_root = _resolve_scan_root_for_replan(
-        api, run_id, folder_path, priority_candidates=[target.get("source_root")]
-    )
+    scan_root = _resolve_scan_root_for_replan(api, run_id, folder_path, priority_candidates=[target.get("source_root")])
 
     new_row = replan_single_row(
         cfg,
@@ -781,12 +771,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     try:
         old_film_id = compute_film_id(target)
         new_film_id = compute_film_id(new_row_json)
-        if (
-            old_film_id
-            and new_film_id
-            and old_film_id != new_film_id
-            and is_path_film_id(old_film_id)
-        ):
+        if old_film_id and new_film_id and old_film_id != new_film_id and is_path_film_id(old_film_id):
             repo = _get_field_locks_repo(api)
             if repo is not None:
                 try:
@@ -817,19 +802,26 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     _carry_over_scan_only_fields(target, new_row_json)
 
     all_rows[target_idx] = new_row_json
-    tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as fp:
-        for r in all_rows:
-            fp.write(json.dumps(r, ensure_ascii=False) + "\n")
-    tmp_path.replace(plan_jsonl)
+    # Le `.tmp` etait NOMME EN DUR (`plan_jsonl.suffix + ".tmp"`) ici ET dans
+    # `tmdb_support.enrich_tmdb_ids_by_title` : deux ecrivains reellement
+    # concurrents sur le MEME chemin intermediaire (#732), sans fsync, sur le
+    # fichier que l'apply relit pour renommer les dossiers. Cf write_plan_jsonl.
+    # Un SEUL import differe de `run_data_support` pour les deux symboles : le
+    # cliquet `test_lazy_imports_bounded` (main, #83) compte les *statements*,
+    # et en ajouter un second a quatre lignes du premier faisait passer la
+    # couche ui de 110 a 112 sans rien differer de plus.
+    from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
+        resync_run_state_rows,
+        write_plan_jsonl,
+    )
+
+    write_plan_jsonl(plan_jsonl, all_rows)
 
     # AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : plan.jsonl vient de changer, mais le
     # snapshot memoire RunState.rows (prefere par get_plan ET par l'apply) date
     # toujours de la fin du scan -> sans cette resynchronisation, l'UI reaffiche
     # l'ancien match et l'apply renomme le dossier avec l'ANCIEN titre/annee/
     # edition (le re-scan parait sans effet jusqu'au redemarrage de l'app).
-    from cinesort.ui.api.run_data_support import resync_run_state_rows  # noqa: PLC0415
-
     resync_run_state_rows(api, run_id)
 
     if tmdb is not None:
@@ -1102,19 +1094,26 @@ def rescan_row(
 # ---------------------------------------------------------------------------
 
 
+# Colonnes de l'export, dans l'ordre — SOURCE UNIQUE.
+# Cette constante existait mais n'etait lue nulle part : la liste etait re-ecrite
+# a la main 3 fois (entete CSV, ordre des valeurs CSV, cles de
+# `_row_to_export_dict`), et la copie morte avait deja DERIVE (elle annoncait
+# `tier_v2` / `audio_languages` / `subtitle_languages` la ou l'export emet
+# `tier` / `audio_langs` / `subs_langs`). Les 3 sites en derivent desormais, et
+# `test_export_fields_single_source` verrouille l'alignement.
 _EXPORT_FIELDS = (
     "row_id",
     "title",
     "year",
     "score_v2",
-    "tier_v2",
+    "tier",
     "path",
     "size_bytes",
     "duration_min",
     "codec",
     "resolution",
-    "audio_languages",
-    "subtitle_languages",
+    "audio_langs",
+    "subs_langs",
     "warnings",
 )
 
@@ -1213,47 +1212,20 @@ def export_films(
             # (dashboard_support.write_run_report_file / report_to_csv_text) :
             # BOM UTF-8 (`utf-8-sig`) + separateur ";". Sans BOM Excel FR casse
             # les accents ; avec le "," par defaut il ouvre tout en une colonne.
-            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
-                writer = csv.writer(fp, delimiter=";")
-                writer.writerow(
-                    [
-                        "row_id",
-                        "title",
-                        "year",
-                        "score_v2",
-                        "tier",
-                        "path",
-                        "size_bytes",
-                        "duration_min",
-                        "codec",
-                        "resolution",
-                        "audio_langs",
-                        "subs_langs",
-                        "warnings",
-                    ]
-                )
-                for row in export_rows:
-                    writer.writerow(
-                        [
-                            _serialize_for_csv(row.get(k))
-                            for k in [
-                                "row_id",
-                                "title",
-                                "year",
-                                "score_v2",
-                                "tier",
-                                "path",
-                                "size_bytes",
-                                "duration_min",
-                                "codec",
-                                "resolution",
-                                "audio_langs",
-                                "subs_langs",
-                                "warnings",
-                            ]
-                        ]
-                    )
+            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01)
+            # et se transpose ici en `io.StringIO(newline="")` : aucune
+            # traduction de fin de ligne, donc exactement les memes octets.
+            #
+            # Issue #479 site 2 : c'etait la DERNIERE branche non atomique de
+            # cette fonction — JSON passait deja par `state.atomic_write_json`,
+            # NDJSON par `state.atomic_write_text`. L'export CSV ecrivait en
+            # place, donc Excel/LibreOffice pouvait ouvrir un fichier tronque.
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer, delimiter=";")
+            writer.writerow(list(_EXPORT_FIELDS))
+            for row in export_rows:
+                writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            state.atomic_write_text(file_path, buffer.getvalue(), encoding="utf-8-sig")
             return {
                 "ok": True,
                 "file_path": str(file_path),
@@ -1283,11 +1255,15 @@ def export_films(
             }
 
         # NDJSON : 1 ligne JSON par film (newline-delimited JSON), streamable.
-        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8", newline="\n") as fp:
-            for row in export_rows:
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
-        tmp_path.replace(file_path)
+        # Meme `.tmp` en dur que le reste de la famille #732 : deux exports
+        # concurrents (ThreadingHTTPServer) visaient le meme intermediaire, et
+        # aucun fsync ne protegeait la promotion d'un fichier tronque. Le
+        # helper fait les deux. `newline="\n"` etait deja explicite : l'ecriture
+        # binaire du helper produit exactement les memes octets.
+        state.atomic_write_text(
+            file_path,
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in export_rows),
+        )
         return {
             "ok": True,
             "file_path": str(file_path),

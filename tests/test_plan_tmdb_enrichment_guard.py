@@ -250,57 +250,55 @@ class PlanTitreMatchablePeupleTmdbIdEtPosterUrlGuardTests(unittest.TestCase):
         # a retourne None (cle vide), preuve que l'hydration a echoue.
         total_calls = sum(len(inst.search_calls) for inst in self._fake_instances)
         self.assertGreater(
-            total_calls, 0,
+            total_calls,
+            0,
             "REGRESSION racine C : TmdbClient.search_movie n'a JAMAIS ete appele "
             "sur le pipeline reel. Cela signifie que `_init_tmdb_client` a vu "
             "`api_key=''` (settings sans tmdb_api_key) -> branche `elif "
             "tmdb_enabled` a desactive TMDb. Verifier que "
             "`_hydrate_settings_from_store` dans run_flow_support.py merge bien "
-            "le settings.json on-disk avant `_validate_and_init_plan_context`."
+            "le settings.json on-disk avant `_validate_and_init_plan_context`.",
         )
 
         # --- Assertion 2 : plan.jsonl produit, tmdb_id non-null sur Inception ---
         plan_jsonl = self._run_dir(run_id) / "plan.jsonl"
         self.assertTrue(plan_jsonl.exists(), f"plan.jsonl absent : {plan_jsonl}")
 
-        lines = [
-            line for line in plan_jsonl.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        lines = [line for line in plan_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
         self.assertEqual(len(lines), 1, f"Attendu 1 row dans plan.jsonl, vu {len(lines)}")
         row = json.loads(lines[0])
 
         # On verifie la 1re candidate (celle qui a le score max apres tri du
         # domain.core build_candidates_from_tmdb).
         candidates = row.get("candidates") or []
-        self.assertGreaterEqual(
-            len(candidates), 1,
-            "Aucune candidate dans plan.jsonl - TMDb n'a rien enrichi."
-        )
+        self.assertGreaterEqual(len(candidates), 1, "Aucune candidate dans plan.jsonl - TMDb n'a rien enrichi.")
 
         # Extrait toutes les candidates TMDb (source == "tmdb") et verifie
         # qu'au moins une porte tmdb_id + poster_url non-null sur Inception.
         tmdb_candidates = [c for c in candidates if str(c.get("source") or "") == "tmdb"]
         self.assertGreaterEqual(
-            len(tmdb_candidates), 1,
+            len(tmdb_candidates),
+            1,
             "REGRESSION : aucune candidate source='tmdb' dans plan.jsonl alors "
-            f"que TMDb a ete appele {total_calls} fois. Verifier build_candidates_from_tmdb."
+            f"que TMDb a ete appele {total_calls} fois. Verifier build_candidates_from_tmdb.",
         )
 
         chosen = tmdb_candidates[0]
         self.assertEqual(
-            int(chosen.get("tmdb_id") or 0), 27205,
-            f"Sujet guard test : candidate.tmdb_id DOIT etre 27205 (Inception). Vu : {chosen}"
+            int(chosen.get("tmdb_id") or 0),
+            27205,
+            f"Sujet guard test : candidate.tmdb_id DOIT etre 27205 (Inception). Vu : {chosen}",
         )
         poster_url = str(chosen.get("poster_url") or "")
         self.assertTrue(
             poster_url,
             "Sujet guard test : candidate.poster_url DOIT etre non-null pour "
-            "un titre matchable. Si null -> TMDb desactive en amont."
+            "un titre matchable. Si null -> TMDb desactive en amont.",
         )
         self.assertIn(
-            "image.tmdb.org", poster_url,
-            f"poster_url doit pointer sur image.tmdb.org (CSP whitelist). Vu : {poster_url}"
+            "image.tmdb.org",
+            poster_url,
+            f"poster_url doit pointer sur image.tmdb.org (CSP whitelist). Vu : {poster_url}",
         )
 
 

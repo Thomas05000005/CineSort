@@ -12,6 +12,7 @@ planifier de featurettes comme films. Ces tests verrouillent les 3 invariants :
   2. film imbrique -> retrouve (candidat = le sous-dossier release) ;
   3. featurettes/extras imbriques -> JAMAIS candidats.
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -34,9 +35,7 @@ def _build(root: Path, files: list[str]) -> None:
 def _rel_candidates(root: Path) -> list[str]:
     cfg = core.Config(root=root, enable_tmdb=False).normalized()
     cands = sh.discover_candidate_folders(cfg)
-    return sorted(
-        str(Path(c).resolve().relative_to(root.resolve())).replace("\\", "/") for c in cands
-    )
+    return sorted(str(Path(c).resolve().relative_to(root.resolve())).replace("\\", "/") for c in cands)
 
 
 class NestedYearFolderDiscoveryTests(unittest.TestCase):

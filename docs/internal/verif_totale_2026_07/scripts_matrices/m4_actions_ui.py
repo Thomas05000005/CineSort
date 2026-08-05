@@ -51,24 +51,25 @@ MAX_FOLLOW_DEPTH = 2
 # annulations/retours a l'etat par defaut, des previews ou des decisions
 # reversibles (la destruction reelle est differee et confirmee ailleurs).
 NON_DESTRUCTIVE_VALUES = {
-    "unmark-delete",      # annule un marquage pour suppression
-    "clear-override",     # retour au match TMDb automatique
-    "undo-preview",       # simple preview de l'undo
-    "keep",               # decision doublons reversible, destruction a Apply
-    "show-presets",       # lecture seule
-    "reload-plan",        # relecture
+    "unmark-delete",  # annule un marquage pour suppression
+    "clear-override",  # retour au match TMDb automatique
+    "undo-preview",  # simple preview de l'undo
+    "keep",  # decision doublons reversible, destruction a Apply
+    "show-presets",  # lecture seule
+    "reload-plan",  # relecture
 }
 DESTRUCTIVE_VALUE = re.compile(
-    r"\b(delete|remove|purge|reset|trash|wipe|apply)\b|run-apply|cancel-run|(?<!un)mark-delete",
-    re.I)
+    r"\b(delete|remove|purge|reset|trash|wipe|apply)\b|run-apply|cancel-run|(?<!un)mark-delete", re.I
+)
 DESTRUCTIVE_ENDPOINT = re.compile(
-    r"\b(delete|remove|purge|reset|apply|undo|wipe)\b|cancel_run|(?<!un)mark_for_deletion|delete_",
-    re.I)
+    r"\b(delete|remove|purge|reset|apply|undo|wipe)\b|cancel_run|(?<!un)mark_for_deletion|delete_", re.I
+)
 
 # ---------------------------------------------------------------- utilitaires
 
+
 def read_text(path):
-    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+    with open(path, encoding="utf-8-sig", errors="replace") as f:
         return f.read()
 
 
@@ -167,7 +168,9 @@ def scan_block(text, start, open_ch="{", close_ch="}"):
 # ------------------------------------------------- extraction des definitions
 
 FUNC_DECL_RX = re.compile(r"(?:^|\n)[ \t]*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(")
-FUNC_EXPR_RX = re.compile(r"(?:^|\n)[ \t]*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)\n]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)")
+FUNC_EXPR_RX = re.compile(
+    r"(?:^|\n)[ \t]*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)\n]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)"
+)
 
 
 def _skip_ws(text, i):
@@ -194,9 +197,9 @@ def extract_functions(text):
 
     for m in FUNC_EXPR_RX.finditer(text):
         name = m.group(1)
-        tail = text[m.end():m.end() + 4]
+        text[m.end() : m.end() + 4]
         j = m.end()
-        if text[m.end() - 2:m.end()] == "=>":
+        if text[m.end() - 2 : m.end()] == "=>":
             j = _skip_ws(text, m.end())
             if j < len(text) and text[j] == "{":
                 end = scan_block(text, j)
@@ -231,10 +234,30 @@ def extract_functions(text):
 
 CALL_RX = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\(")
 CALL_STOPLIST = {
-    "if", "for", "while", "switch", "catch", "return", "function", "typeof",
-    "String", "Number", "Boolean", "Array", "Object", "JSON", "parseInt",
-    "parseFloat", "setTimeout", "setInterval", "clearTimeout",
-    "encodeURIComponent", "decodeURIComponent", "fetch", "Promise", "Error",
+    "if",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "return",
+    "function",
+    "typeof",
+    "String",
+    "Number",
+    "Boolean",
+    "Array",
+    "Object",
+    "JSON",
+    "parseInt",
+    "parseFloat",
+    "setTimeout",
+    "setInterval",
+    "clearTimeout",
+    "encodeURIComponent",
+    "decodeURIComponent",
+    "fetch",
+    "Promise",
+    "Error",
 }
 # Ne pas suivre les fonctions de rendu/bind : elles re-attachent les listeners
 # de TOUTES les actions et pollueraient l'analyse avec les endpoints des autres
@@ -290,7 +313,7 @@ def _if_condition_block(text, cmp_idx):
     semi = text.find(";", j)
     eol = text.find("\n", j)
     stop = min(x for x in (semi, eol, len(text)) if x > 0)
-    return text[j:stop + 1], True
+    return text[j : stop + 1], True
 
 
 def _allowed_ranges(read_positions, spans, text_len):
@@ -299,7 +322,7 @@ def _allowed_ranges(read_positions, spans, text_len):
     ranges = []
     for rp in read_positions:
         best = None
-        for (s, e, _name) in spans:
+        for s, e, _name in spans:
             if s <= rp < e and (best is None or (e - s) < (best[1] - best[0])):
                 best = (s, e)
         ranges.append(best if best else (max(0, rp - 500), min(text_len, rp + 4000)))
@@ -336,12 +359,13 @@ def find_specific_block(text, family, value, read_positions, spans, funcs):
     # 2) bind par selecteur value : [data-fam="value"] ... addEventListener
     #    (callback inline OU reference nommee resolue via funcs)
     fam = re.escape(family)
-    for m in re.finditer(r'\[' + fam + r'\s*=\s*[\'"\\]*' + v + r'[\'"\\]*\]', text):
+    for m in re.finditer(r"\[" + fam + r'\s*=\s*[\'"\\]*' + v + r'[\'"\\]*\]', text):
         tail_idx = text.find("addEventListener(", m.end(), m.end() + 600)
         if tail_idx != -1:
             # callback = reference nommee ? (ancre sur CE addEventListener)
-            ma = re.match(r'addEventListener\(\s*["\']\w+["\']\s*,\s*([A-Za-z_$][\w$]*)\s*[,)]',
-                          text[tail_idx:tail_idx + 120])
+            ma = re.match(
+                r'addEventListener\(\s*["\']\w+["\']\s*,\s*([A-Za-z_$][\w$]*)\s*[,)]', text[tail_idx : tail_idx + 120]
+            )
             if ma and ma.group(1) not in ("async", "function") and ma.group(1) in funcs:
                 return (funcs[ma.group(1)], line_of(text, m.start()), "selector-bind-named")
             j = text.find("{", tail_idx)
@@ -373,45 +397,53 @@ def find_delegated_block(text, read_positions, spans):
     (handlers 'valeur = donnee' sans branche par valeur, ex. data-row-action)."""
     for rp in read_positions:
         best = None
-        for (s, e, name) in spans:
+        for s, e, name in spans:
             if s <= rp < e and (best is None or (e - s) < (best[1] - best[0])):
                 best = (s, e, name)
         if best:
-            return (text[best[0]:best[1]], line_of(text, rp), "delegated-read")
-        return (text[max(0, rp - 300):rp + 1500], line_of(text, rp), "read-window")
+            return (text[best[0] : best[1]], line_of(text, rp), "delegated-read")
+        return (text[max(0, rp - 300) : rp + 1500], line_of(text, rp), "read-window")
     return None
 
 
 # ------------------------------------------------------------ analyse du bloc
 
 RX_API = re.compile(r'\b(apiPost|apiGet)\(\s*(["\'`])([^"\'`\n]*)\2')
-RX_API_DYN = re.compile(r'\b(apiPost|apiGet)\(\s*`([^`\n]*)`')
+RX_API_DYN = re.compile(r"\b(apiPost|apiGet)\(\s*`([^`\n]*)`")
 RX_PENDING = re.compile(
     r'\.disabled\s*=\s*true|setAttribute\(\s*["\']disabled|aria-busy|'
-    r'classList\.(?:add|toggle)\([^)\n]*(?:load|spin|busy|pending|progress)|'
-    r'is-loading|--loading|\bskeleton|\bspinner|Skeleton|showSpinner|_setBusy|setLoading|'
-    r'en cours|In[Ff]light',
-    re.I)
-RX_TOAST = re.compile(r'\bshowToast\(|\bnotify[A-Z(]|\btoast\(|pushNotification|addNotification', re.I)
+    r"classList\.(?:add|toggle)\([^)\n]*(?:load|spin|busy|pending|progress)|"
+    r"is-loading|--loading|\bskeleton|\bspinner|Skeleton|showSpinner|_setBusy|setLoading|"
+    r"en cours|In[Ff]light",
+    re.I,
+)
+RX_TOAST = re.compile(r"\bshowToast\(|\bnotify[A-Z(]|\btoast\(|pushNotification|addNotification", re.I)
 RX_RENDER = re.compile(
-    r'\b_?render[A-Za-z_]*\(|\b_reload\(|\breload[A-Z][\w]*\(|\brefresh[A-Za-z_]*\(|'
-    r'\.innerHTML\s*=|\.textContent\s*=|_renderInPlace|_renderAll|replaceChildren|'
-    r'\.remove\(\)|_load[A-Z]\w*\(|_setStatus\(|_set\w*Message\(|_show\w*Message\(')
-RX_NAV = re.compile(r'\bnavigateTo\(|location\.hash\s*=|window\.location\s*=|\.hash\s*=|window\.open\(')
-RX_MODAL = re.compile(r'\bshowModal\(|\bopen[A-Z]\w*Modal\(|Modal\(\{|\.showModal\(|open[A-Z]\w*Drawer|openDrawer|renderFilmDetail\(')
-RX_CALLBACK = re.compile(r'\bon[A-Z]\w*\s*\(')
+    r"\b_?render[A-Za-z_]*\(|\b_reload\(|\breload[A-Z][\w]*\(|\brefresh[A-Za-z_]*\(|"
+    r"\.innerHTML\s*=|\.textContent\s*=|_renderInPlace|_renderAll|replaceChildren|"
+    r"\.remove\(\)|_load[A-Z]\w*\(|_setStatus\(|_set\w*Message\(|_show\w*Message\("
+)
+RX_NAV = re.compile(r"\bnavigateTo\(|location\.hash\s*=|window\.location\s*=|\.hash\s*=|window\.open\(")
+RX_MODAL = re.compile(
+    r"\bshowModal\(|\bopen[A-Z]\w*Modal\(|Modal\(\{|\.showModal\(|open[A-Z]\w*Drawer|openDrawer|renderFilmDetail\("
+)
+RX_CALLBACK = re.compile(r"\bon[A-Z]\w*\s*\(")
 RX_CONFIRM = re.compile(
-    r'dangerConfirmModal\(|window\.confirm\(|\bconfirm\(|confirmModal|ConfirmModal|'
+    r"dangerConfirmModal\(|window\.confirm\(|\bconfirm\(|confirmModal|ConfirmModal|"
     # modales de confirmation construites a la main :
-    r'role["\']?,?\s*["\']alertdialog|data-[\w-]*-confirm\b|CONFIRMER|irr[eé]versible')
-RX_COUNTDOWN = re.compile(r'countdown', re.I)
+    r'role["\']?,?\s*["\']alertdialog|data-[\w-]*-confirm\b|CONFIRMER|irr[eé]versible'
+)
+RX_COUNTDOWN = re.compile(r"countdown", re.I)
 RX_OK_CHECK = re.compile(
-    r'\.ok\s*[!=]==?\s*(?:true|false)|if\s*\([^)\n]*\.ok\b|\.ok\s*\?|!\s*\w+(?:\.\w+)*\.ok\b|'
-    r'&&\s*\w+(?:\.\w+)*\.ok\b|\.ok\s*&&|\.status\s*[!=]==?\s*200|\.status\s*>=\s*400')
-RX_RES_OK = re.compile(r'\b(?:res|resp|r|settingsRes\.value)\??\.ok\b(?!\s*=[^=])')
-RX_DATA_OK = re.compile(r'\bdata\??\.ok\b|\bd\.ok\b|\.data\??\.ok\b|payload\??\.ok\b')
-RX_STATE_MUT = re.compile(r"_state\.[\w.$]+(?:\[[^\]\n]*\])?\s*=|_current\w*\s*=|\.dataset\.\w+\s*=|classList\.(add|remove|toggle)|\.style\.\w+\s*=")
-RX_CATCH = re.compile(r'\bcatch\s*(?:\([^)]*\))?\s*\{')
+    r"\.ok\s*[!=]==?\s*(?:true|false)|if\s*\([^)\n]*\.ok\b|\.ok\s*\?|!\s*\w+(?:\.\w+)*\.ok\b|"
+    r"&&\s*\w+(?:\.\w+)*\.ok\b|\.ok\s*&&|\.status\s*[!=]==?\s*200|\.status\s*>=\s*400"
+)
+RX_RES_OK = re.compile(r"\b(?:res|resp|r|settingsRes\.value)\??\.ok\b(?!\s*=[^=])")
+RX_DATA_OK = re.compile(r"\bdata\??\.ok\b|\bd\.ok\b|\.data\??\.ok\b|payload\??\.ok\b")
+RX_STATE_MUT = re.compile(
+    r"_state\.[\w.$]+(?:\[[^\]\n]*\])?\s*=|_current\w*\s*=|\.dataset\.\w+\s*=|classList\.(add|remove|toggle)|\.style\.\w+\s*="
+)
+RX_CATCH = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{")
 
 
 def catch_bodies(text):
@@ -452,21 +484,23 @@ def analyze(action_value, combined, funcs, api_flavor):
 
     ok_check = bool(RX_OK_CHECK.search(combined))
     has_catch = bool(catches)
-    catch_displays = bool(RX_TOAST.search(catch_txt_exp) or RX_RENDER.search(catch_txt_exp)
-                          or RX_MODAL.search(catch_txt_exp))
+    catch_displays = bool(
+        RX_TOAST.search(catch_txt_exp) or RX_RENDER.search(catch_txt_exp) or RX_MODAL.search(catch_txt_exp)
+    )
     # res.ok mort UNIQUEMENT pour la saveur core/api.js ({status,data}).
-    dead_res_ok = (api_flavor == "core" and has_api
-                   and bool(RX_RES_OK.search(combined))
-                   and not RX_DATA_OK.search(combined))
+    dead_res_ok = (
+        api_flavor == "core" and has_api and bool(RX_RES_OK.search(combined)) and not RX_DATA_OK.search(combined)
+    )
     if api_flavor == "v5_helpers":
-        error_effective = ok_check          # le wrapper ne throw jamais
+        error_effective = ok_check  # le wrapper ne throw jamais
         dead_catch = has_catch and not ok_check
     else:
         error_effective = ok_check or catch_displays
         dead_catch = False
 
     confirm = bool(RX_CONFIRM.search(combined)) or bool(
-        RX_MODAL.search(combined) and re.search(r'actions\s*:|onConfirm|confirmLabel', combined))
+        RX_MODAL.search(combined) and re.search(r"actions\s*:|onConfirm|confirmLabel", combined)
+    )
     countdown = bool(RX_COUNTDOWN.search(combined))
 
     destructive = False
@@ -483,13 +517,20 @@ def analyze(action_value, combined, funcs, api_flavor):
         "api_flavor": api_flavor if has_api else None,
         "pending_state": pending,
         "success_feedback": {
-            "any": success_feedback, "toast": fb_toast, "render": fb_render,
-            "navigation": fb_nav, "modal_or_drawer": fb_modal, "callback": fb_callback,
+            "any": success_feedback,
+            "toast": fb_toast,
+            "render": fb_render,
+            "navigation": fb_nav,
+            "modal_or_drawer": fb_modal,
+            "callback": fb_callback,
         },
         "error_handling": {
-            "ok_check": ok_check, "has_catch": has_catch,
-            "catch_displays": catch_displays, "effective": error_effective,
-            "dead_res_ok_check": dead_res_ok, "dead_catch_v5": dead_catch,
+            "ok_check": ok_check,
+            "has_catch": has_catch,
+            "catch_displays": catch_displays,
+            "effective": error_effective,
+            "dead_res_ok_check": dead_res_ok,
+            "dead_catch_v5": dead_catch,
         },
         "confirmation": {"present": confirm, "countdown": countdown},
         "destructive": destructive,
@@ -502,7 +543,9 @@ def verdict(a):
     if not a["any_effect"]:
         return "CASSE", ["branche trouvee mais aucun effet observable (no-op)"]
     if a["error_handling"]["dead_res_ok_check"]:
-        return "CASSE", ["check res.ok mort : apiPost core/api.js retourne {status,data} sans .ok -> branche succes jamais prise"]
+        return "CASSE", [
+            "check res.ok mort : apiPost core/api.js retourne {status,data} sans .ok -> branche succes jamais prise"
+        ]
     if a["destructive"] and not a["confirmation"]["present"]:
         return "SANS_CONFIRMATION", ["action destructrice avec appel API sans confirmation"]
     if a["endpoints"]:
@@ -514,13 +557,16 @@ def verdict(a):
         if not a["success_feedback"]["any"]:
             return "MUET_SUCCES", ["aucun feedback visible en cas de succes"]
         if not a["error_handling"]["ok_check"] and a["error_handling"]["catch_displays"]:
-            flags.append("partiel : catch affiche mais pas de check data.ok===false (erreurs HTTP repondues silencieuses)")
+            flags.append(
+                "partiel : catch affiche mais pas de check data.ok===false (erreurs HTTP repondues silencieuses)"
+            )
     if a["destructive"] and a["confirmation"]["present"] and not a["confirmation"]["countdown"]:
         flags.append("confirmation presente mais sans countdown (regle projet : delai 3s si >50 elements)")
     return "OK", flags
 
 
 # ----------------------------------------------------------------------- main
+
 
 def _view_of(relfile):
     parts = relfile.split("/")
@@ -549,25 +595,31 @@ def main():
     rx_emit = re.compile(r'(?<!\[)\bdata-((?:[a-z0-9]+-)*action)\s*=\s*"([^"]*)"')
     for path, text in files.items():
         for m in rx_emit.finditer(text):
-            emissions.append({
-                "family": "data-" + m.group(1), "value": m.group(2),
-                "file": rel(path), "line": line_of(text, m.start()),
-                "dynamic": "${" in m.group(2),
-            })
+            emissions.append(
+                {
+                    "family": "data-" + m.group(1),
+                    "value": m.group(2),
+                    "file": rel(path),
+                    "line": line_of(text, m.start()),
+                    "dynamic": "${" in m.group(2),
+                }
+            )
 
     # 2) lectures par famille
     families = sorted({e["family"] for e in emissions})
     family_reads = {f: [] for f in families}
     for f in families:
-        cam = camel(f[len("data-"):])
+        cam = camel(f[len("data-") :])
         rx_read = re.compile(
-            r'dataset\.' + re.escape(cam) + r'\b|'
-            r'\[\s*' + re.escape(f) + r'\s*[\]=]|'
-            r'getAttribute\(\s*["\']' + re.escape(f) + r'["\']')
+            r"dataset\." + re.escape(cam) + r"\b|"
+            r"\[\s*" + re.escape(f) + r"\s*[\]=]|"
+            r'getAttribute\(\s*["\']' + re.escape(f) + r'["\']'
+        )
         for path, text in files.items():
             for m in rx_read.finditer(text):
-                family_reads[f].append({"file": rel(path), "line": line_of(text, m.start()),
-                                        "abs": path, "idx": m.start()})
+                family_reads[f].append(
+                    {"file": rel(path), "line": line_of(text, m.start()), "abs": path, "idx": m.start()}
+                )
 
     # 3) dedoublonnage (famille, valeur)
     seen = OrderedDict()
@@ -633,8 +685,8 @@ def main():
         # Les fichiers qui emettent l'attribut ET lisent la famille en premier :
         # le dispatch vit quasi toujours dans la vue qui rend le bouton.
         search_paths = sorted(
-            (p for p in files if rel(p) in read_files),
-            key=lambda p: (0 if rel(p) in emit_files else 1, rel(p)))
+            (p for p in files if rel(p) in read_files), key=lambda p: (0 if rel(p) in emit_files else 1, rel(p))
+        )
         # Passe A : modes cibles sur la valeur (case / selector / if-eq / includes)
         for path in search_paths:
             text = files[path]
@@ -643,8 +695,7 @@ def main():
             res = find_specific_block(text, family, value, rpos, spans, funcs)
             if res:
                 block, ln, mode = res
-                handler = {"found": True, "file": rel(path), "line": ln, "mode": mode,
-                           "confidence": "high"}
+                handler = {"found": True, "file": rel(path), "line": ln, "mode": mode, "confidence": "high"}
                 combined = expand_calls(block, funcs)
                 entry["analysis"] = analyze(value, combined, funcs, flavor_by_file[path])
                 break
@@ -657,8 +708,7 @@ def main():
                 res = find_delegated_block(text, rpos, spans)
                 if res:
                     block, ln, mode = res
-                    handler = {"found": True, "file": rel(path), "line": ln, "mode": mode,
-                               "confidence": "low"}
+                    handler = {"found": True, "file": rel(path), "line": ln, "mode": mode, "confidence": "low"}
                     combined = expand_calls(block, funcs)
                     entry["analysis"] = analyze(value, combined, funcs, flavor_by_file[path])
                     break
@@ -672,7 +722,9 @@ def main():
             entry["handler"] = handler
             v, fl = verdict(entry["analysis"])
             if handler["confidence"] == "low":
-                fl = list(fl) + ["confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"]
+                fl = list(fl) + [
+                    "confiance basse : bloc = fonction englobante du listener (valeur traitee comme donnee)"
+                ]
             entry["verdict"], entry["flags"] = v, fl
 
         actions.append(entry)

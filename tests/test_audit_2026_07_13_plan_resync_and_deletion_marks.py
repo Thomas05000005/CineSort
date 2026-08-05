@@ -109,6 +109,14 @@ class _StubApi:
     def _load_rows_from_plan_jsonl(self, run_paths: state.RunPaths) -> List[core.PlanRow]:
         return load_rows_from_plan_jsonl(run_paths)
 
+    def _serialize_rows_for_payload(self, rows: List[core.PlanRow]) -> List[Dict[str, Any]]:
+        # PERF (ultra-audit 2026-08) : la fiche film ne demande plus le plan
+        # ENTIER via api.run.get_plan mais UNE row via history_support.
+        # get_plan_row, qui s'appuie sur ce helper (present sur la vraie API).
+        from cinesort.ui.api.run_data_support import serialize_rows_for_payload
+
+        return serialize_rows_for_payload(rows)
+
     # -- infra
     def _get_or_create_infra(self, state_dir: Path):
         return self._store, None
@@ -495,9 +503,7 @@ class DeletionMarksBatchTests(unittest.TestCase):
 
             store._managed_conn = _counting_managed_conn  # type: ignore[method-assign]
             try:
-                res = library_actions_support.mark_for_deletion_bulk(
-                    api, [r["row_id"] for r in rows], run_id=RUN_ID
-                )
+                res = library_actions_support.mark_for_deletion_bulk(api, [r["row_id"] for r in rows], run_id=RUN_ID)
             finally:
                 del store._managed_conn
 
@@ -550,9 +556,7 @@ class DeletionMarksLockedDbTests(unittest.TestCase):
             api, _store = self._api(tmp)
             legacy = self._legacy(tmp)
 
-            with patch.object(
-                library_actions_support, "_film_modal_repo", return_value=_LockedRepo()
-            ):
+            with patch.object(library_actions_support, "_film_modal_repo", return_value=_LockedRepo()):
                 # Ne doit PAS lever (avant le fix : sqlite3.OperationalError).
                 ids = library_actions_support.migrate_legacy_deletion_marks(api, RUN_ID)
 
@@ -564,9 +568,7 @@ class DeletionMarksLockedDbTests(unittest.TestCase):
             tmp = Path(tmp_s)
             api, _store = self._api(tmp)
 
-            with patch.object(
-                library_actions_support, "_film_modal_repo", return_value=_LockedRepo()
-            ):
+            with patch.object(library_actions_support, "_film_modal_repo", return_value=_LockedRepo()):
                 res = library_actions_support.mark_for_deletion_bulk(api, ["f1"], run_id=RUN_ID)
 
             self.assertTrue(res["ok"], res)
@@ -699,9 +701,7 @@ class ReplanExtraRowTests(unittest.TestCase):
         l'apply aurait quarantaine le DOSSIER ENTIER au lieu du seul bonus."""
         with tempfile.TemporaryDirectory() as tmp_s:
             tmp = Path(tmp_s)
-            api, run_state, paths, films = self._setup(
-                tmp, kind="extra", warning_flags=["bonus_video"]
-            )
+            api, run_state, paths, films = self._setup(tmp, kind="extra", warning_flags=["bonus_video"])
 
             with patch(
                 "cinesort.app.plan_support.replan_single_row",
@@ -853,9 +853,7 @@ class UnmarkLegacyDrainTests(unittest.TestCase):
             legacy.write_text(json.dumps({"row_ids": ["f1"], "marked_ts": {}}), encoding="utf-8")
 
             # Drain en echec : la marque n'atteint jamais la DB, le JSON reste.
-            with patch.object(
-                library_actions_support, "_film_modal_repo", return_value=_LockedRepo()
-            ):
+            with patch.object(library_actions_support, "_film_modal_repo", return_value=_LockedRepo()):
                 out = library_support.unmark_for_deletion(api, RUN_ID, "f1")
 
             # L'utilisateur a demande le demarquage : il ne doit RESTER aucune
@@ -876,9 +874,7 @@ class UnmarkLegacyDrainTests(unittest.TestCase):
             tmp = Path(tmp_s)
             api, _store = self._api(tmp)
 
-            with patch.object(
-                library_actions_support, "remove_legacy_deletion_mark", return_value=False
-            ):
+            with patch.object(library_actions_support, "remove_legacy_deletion_mark", return_value=False):
                 out = library_support.unmark_for_deletion(api, RUN_ID, "f1")
 
             self.assertFalse(out.get("ok"), out)
@@ -963,9 +959,7 @@ class FilmModalLegacyMarkTests(unittest.TestCase):
             legacy = _run_paths(tmp).run_dir / "deletion_marks.json"
             legacy.write_text(json.dumps({"row_ids": ["f1"], "marked_ts": {}}), encoding="utf-8")
 
-            with patch.object(
-                library_actions_support, "_film_modal_repo", return_value=_LockedRepo()
-            ):
+            with patch.object(library_actions_support, "_film_modal_repo", return_value=_LockedRepo()):
                 res = film_support.get_film_full(api, RUN_ID, "f1")
 
             self.assertTrue(res.get("ok"), res)

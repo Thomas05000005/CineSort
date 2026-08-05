@@ -148,14 +148,32 @@ def detect_hdr_type(
     """Classifie le type HDR selon priorite stricte.
 
     Priorite :
-      1. HLG (arib-std-b67 transfer) — utilise pour broadcast
-      2. Dolby Vision (DOVI config record)
-      3. HDR10+ (SMPTE ST 2094-40 dynamic metadata)
-      4. HDR10 (smpte2084 + bt2020)
-      5. SDR (default)
+      1. Dolby Vision **atteste par un DOVI configuration record structure**
+         (side_data_type == "DOVI configuration record")
+      2. HLG (arib-std-b67 transfer) — utilise pour broadcast
+      3. Dolby Vision par simple marqueur textuel dans les side_data
+      4. HDR10+ (SMPTE ST 2094-40 dynamic metadata)
+      5. HDR10 (smpte2084 + bt2020)
+      6. SDR (default)
+
+    #470 — pourquoi un signal DISTINCTIF et pas une simple inversion HLG/DV :
+    le profil Dolby Vision 8.4 a une couche de base HLG, donc `transfer ==
+    arib-std-b67` ET un RPU DV ; l'ordre historique (HLG teste en premier) le
+    classait `hlg` (score 75) au lieu de `dolby_vision` (100). Mais inverser
+    les deux branches telles quelles aurait DEPLACE le faux positif :
+    `_side_data_contains(..., _SIDE_DATA_DV_MARKERS)` concatene *toutes* les
+    valeurs de chaque side_data et cherche la sous-chaine "dovi" / "dolby
+    vision" — un vrai HLG dont un champ libre mentionne "dovi_tool" serait
+    alors promu `dolby_vision`. On teste donc d'abord le signal STRUCTURE
+    (`extract_dv_configuration`, qui exige `side_data_type` == DOVI config
+    record), strictement plus etroit que le marqueur textuel : aucun cas
+    aujourd'hui classe autrement que `hlg` ne change de verdict.
     """
     transfer = (color_transfer or "").strip().lower()
     primaries = (color_primaries or "").strip().lower()
+
+    if extract_dv_configuration(side_data_list) is not None:
+        return "dolby_vision"
 
     if "arib-std-b67" in transfer or "hlg" in transfer:
         return "hlg"
@@ -188,18 +206,17 @@ def _extract_mastering_display(side_data_list: List[Dict[str, Any]]) -> Tuple[fl
 
 
 def _extract_content_light(side_data_list: List[Dict[str, Any]]) -> Tuple[float, float]:
-    """Retourne (max_cll, max_fall) en nits depuis les side_data."""
+    """Retourne (max_cll, max_fall) en nits depuis les side_data.
+
+    Note : ffprobe peut serialiser max_content / max_average en ratio "X/Y"
+    selon le container/codec, comme pour mastering_display. parse_ratio gere
+    les deux formes (ratio ou float direct), float() seul cassait sur ratio.
+    """
     item = _side_data_find(side_data_list, _SIDE_DATA_CONTENT_LIGHT)
     if not item:
         return (0.0, 0.0)
-    try:
-        max_cll = float(item.get("max_content") or item.get("MaxCLL") or 0)
-    except (ValueError, TypeError):
-        max_cll = 0.0
-    try:
-        max_fall = float(item.get("max_average") or item.get("MaxFALL") or 0)
-    except (ValueError, TypeError):
-        max_fall = 0.0
+    max_cll = parse_ratio(item.get("max_content") or item.get("MaxCLL"))
+    max_fall = parse_ratio(item.get("max_average") or item.get("MaxFALL"))
     return (max_cll, max_fall)
 
 

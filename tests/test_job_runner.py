@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from typing import Callable
+from unittest import mock
 
 from cinesort.app.job_runner import JobRunner
 from cinesort.domain.run_models import RunStatus
@@ -225,6 +227,31 @@ class JobRunnerTests(unittest.TestCase):
         snap_after_fail = self.wait_terminal(run_after_fail)
         assert snap_after_fail is not None
         self.assertEqual(snap_after_fail.status, RunStatus.DONE)
+
+    def test_crash_writer_skips_empty_state_dir(self) -> None:
+        # state_dir vide : Path("") -> Path(".") est truthy, l'ancien garde etait
+        # mort et crash.txt finissait dans le CWD. Le garde doit maintenant sortir.
+        cwd = Path(self._tmp.name) / "cwd_guard"
+        cwd.mkdir(parents=True, exist_ok=True)
+        prev = os.getcwd()
+        os.chdir(cwd)
+        try:
+            with mock.patch.object(self.store.run, "get_run", return_value={"state_dir": "  "}):
+                self.runner._write_crash_for_run("run_empty", "header", "traceback")
+        finally:
+            os.chdir(prev)
+        self.assertFalse((cwd / "runs").exists(), "Aucun dossier runs/ ne doit etre cree pour un state_dir vide")
+
+    def test_crash_writer_writes_file_for_valid_state_dir(self) -> None:
+        target = Path(self._tmp.name) / "crash_state"
+        target.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(self.store.run, "get_run", return_value={"state_dir": str(target)}):
+            self.runner._write_crash_for_run("run_ok", "Oops header", "trace lines")
+        crash = target / "runs" / "tri_films_run_ok" / "crash.txt"
+        self.assertTrue(crash.exists())
+        text = crash.read_text(encoding="utf-8")
+        self.assertIn("Oops header", text)
+        self.assertIn("trace lines", text)
 
 
 if __name__ == "__main__":

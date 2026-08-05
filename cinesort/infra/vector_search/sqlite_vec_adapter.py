@@ -107,9 +107,7 @@ class SqliteVecAdapter:
             target.load_extension(str(self._extension_path))
             target.enable_load_extension(False)
         except sqlite3.OperationalError as exc:
-            raise VectorSearchUnavailableError(
-                f"Echec chargement sqlite-vec : {exc}"
-            ) from exc
+            raise VectorSearchUnavailableError(f"Echec chargement sqlite-vec : {exc}") from exc
         except AttributeError as exc:
             # Python compile sans --enable-loadable-sqlite-extensions
             raise VectorSearchUnavailableError(
@@ -136,9 +134,7 @@ class SqliteVecAdapter:
         #     CREATE VIRTUAL TABLE IF NOT EXISTS vec_films_hash_idx
         #     USING vec0(embedding float[256])
         # Voir docs/internal/notes/sqlite_vec_setup.md section "Index HNSW".
-        raise NotImplementedError(
-            "create_vec_table : a implementer en V3.3 runtime (virtual table vec0)."
-        )
+        raise NotImplementedError("create_vec_table : a implementer en V3.3 runtime (virtual table vec0).")
 
     # ---------- CRUD embeddings ----------
 
@@ -155,16 +151,12 @@ class SqliteVecAdapter:
             VectorSearchUnavailableError: si extension non chargee.
         """
         if len(vec) != self._embedding_dim:
-            raise ValueError(
-                f"Dimension embedding invalide : {len(vec)} (attendu {self._embedding_dim})."
-            )
+            raise ValueError(f"Dimension embedding invalide : {len(vec)} (attendu {self._embedding_dim}).")
         self.load_extension()
         # SCAFFOLD : la serialisation float32 little-endian est la forme
         # attendue par sqlite-vec. Implementation runtime en V3.3.
         _blob = struct.pack(f"<{len(vec)}f", *vec)
-        raise NotImplementedError(
-            "add_embedding : a implementer en V3.3 runtime (INSERT OR REPLACE)."
-        )
+        raise NotImplementedError("add_embedding : a implementer en V3.3 runtime (INSERT OR REPLACE).")
 
     def knn_search(
         self,
@@ -186,10 +178,7 @@ class SqliteVecAdapter:
             VectorSearchUnavailableError: si extension non chargee.
         """
         if len(query_vec) != self._embedding_dim:
-            raise ValueError(
-                f"Dimension query invalide : {len(query_vec)} "
-                f"(attendu {self._embedding_dim})."
-            )
+            raise ValueError(f"Dimension query invalide : {len(query_vec)} (attendu {self._embedding_dim}).")
         if k <= 0:
             raise ValueError(f"k doit etre > 0 (recu {k}).")
         self.load_extension()
@@ -198,6 +187,4 @@ class SqliteVecAdapter:
         #     SELECT film_id, distance FROM vec_films_hash_idx
         #     WHERE embedding MATCH ? AND k = ?
         #     ORDER BY distance
-        raise NotImplementedError(
-            "knn_search : a implementer en V3.3 runtime (vec0 MATCH operator)."
-        )
+        raise NotImplementedError("knn_search : a implementer en V3.3 runtime (vec0 MATCH operator).")

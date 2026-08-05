@@ -1,7 +1,7 @@
 """Moteur de regles custom pour scoring qualite (G6).
 
 Whitelist stricte : pas d'eval, pas d'importation dynamique.
-17 fields, 11 operators, 7 actions. Max 50 regles x 10 conditions par profil.
+20 fields, 11 operators, 7 actions. Max 50 regles x 10 conditions par profil.
 """
 
 from __future__ import annotations
@@ -23,7 +23,14 @@ MAX_RULES_JSON_BYTES = 8000
 # Chaque entree mappe (section, key) dans le contexte {detected, __context__, __computed__}.
 FIELD_PATHS: Dict[str, Tuple[str, str]] = {
     "video_codec": ("detected", "video_codec"),
+    # `audio_codec` = codec de BASE rapporte par le probe ('dts', 'truehd', 'eac3').
+    # `audio_codec_canonical` = etiquette composee ('dts-hd ma', 'truehd atmos',
+    # 'dts:x', 'eac3 atmos'), cf. quality_score._canonical_audio_codec. Deux champs
+    # distincts (revue CodeRabbit PR#854) : basculer `audio_codec` sur l'etiquette
+    # canonique aurait desactive en silence toutes les regles `audio_codec = "dts"`
+    # deja enregistrees, l'operateur `=` etant une egalite stricte.
     "audio_codec": ("detected", "audio_best_codec"),
+    "audio_codec_canonical": ("detected", "audio_best_codec_canonical"),
     "resolution": ("detected", "resolution"),
     "resolution_rank": ("__computed__", "resolution_rank"),
     "year": ("__context__", "year"),
@@ -183,6 +190,24 @@ def _act_score_mult(result, value, reason):
     num = _num_strict(value)
     if num is _MISSING:
         return
+    # Bug fix issue #723 : un facteur NEGATIF (faute de saisie dans un profil
+    # custom, profil importe, profil deja persiste en base avant la validation
+    # ajoutee dans _validate_action) donnait un score negatif que _clamp
+    # ramenait a 0 -> le film tombait en Reject SANS avertissement. Or Reject
+    # oriente des decisions destructives (l'utilisateur supprime ce qui est
+    # classe Reject) : degrader en silence est le vrai defaut, pas seulement la
+    # valeur. Meme philosophie defensive que _act_force_score juste en dessous :
+    # on REFUSE la valeur, on preserve le score existant, et on le DIT — log
+    # cote technique + raison visible dans l'explication du score cote UI
+    # (les reasons custom sont propagees par
+    # quality_score._apply_custom_rules_helper).
+    if num < 0:
+        logger.warning("custom_rules: score_multiplier ignore, facteur negatif value=%r", value)
+        msg = f"Regle ignoree : multiplicateur negatif (x{num})"
+        if reason:
+            msg = f"{msg} [{reason}]"
+        result["reasons"].append(msg)
+        return
     factor = num
     # Round pour eviter truncation (mega-hotfix #2)
     new = int(round(result["score"] * factor))
@@ -197,9 +222,7 @@ def _act_force_score(result, value, reason):
     # forcer le score a 0 (ce qui ferait tomber tout film en Reject sans
     # avertissement). On preserve le score existant et on logge un warning.
     if _num_strict(value) is _MISSING:
-        logger.warning(
-            "custom_rules: force_score ignored, non-numeric value=%r", value
-        )
+        logger.warning("custom_rules: force_score ignored, non-numeric value=%r", value)
         return
     new = _clamp(value)
     result["score"] = new
@@ -318,6 +341,7 @@ def apply_custom_rules(
     if not rules or not isinstance(rules, list):
         return result
     active = [r for r in rules if isinstance(r, dict) and r.get("enabled", True)]
+
     # Tri stable: priorite numerique en cle primaire, ordre d'apparition en cle
     # secondaire. _num_strict retourne _MISSING pour non-numerique (ex: "abc")
     # -> on tombe alors sur une priorite tres grande pour deprioriser ces
@@ -326,6 +350,7 @@ def apply_custom_rules(
     def _priority_key(r):
         p = _num_strict(r.get("priority"))
         return float("inf") if p is _MISSING else p
+
     active.sort(key=_priority_key)
     for rule in active:
         try:
@@ -392,12 +417,26 @@ def _validate_action(action: Any, rule_idx: int) -> Tuple[bool, List[str], Dict[
         canonical = normalize_tier_string(value)
         if not canonical:
             errs.append(
-                f"Regle {rule_idx + 1}: force_tier value '{value}' inconnu "
-                f"(attendu Platinum/Gold/Silver/Bronze/Reject)"
+                f"Regle {rule_idx + 1}: force_tier value '{value}' inconnu (attendu Platinum/Gold/Silver/Bronze/Reject)"
             )
             return False, errs, {}
         # Stocke la forme canonique uniquement
         value = canonical
+    # Bug fix issue #723 : refus AMONT d'un score_multiplier negatif. Un score
+    # vit dans [0, 100] : un multiplicateur negatif est toujours une faute de
+    # saisie, et il ferait tomber le film en Reject (score clampe a 0), donc
+    # dans le sac des films que l'utilisateur supprime. Il est refuse ici avec
+    # un message explicite plutot que subi en silence a l'application (ou
+    # _act_score_mult l'ignore, defense en profondeur pour les profils deja
+    # persistes qui ne repassent pas par cette validation).
+    if atype == "score_multiplier":
+        mult = _num_strict(value)
+        if mult is not _MISSING and mult < 0:
+            errs.append(
+                f"Regle {rule_idx + 1}: score_multiplier value {value!r} negatif "
+                "(un multiplicateur negatif ferait tomber le film en Reject)"
+            )
+            return False, errs, {}
     reason = _truncate_str(action.get("reason"), MAX_REASON_LEN)
     return True, [], {"type": atype, "value": value, "reason": reason}
 
@@ -432,9 +471,7 @@ def _validate_single_rule(rule: Any, idx: int) -> Tuple[bool, List[str], Dict[st
     else:
         p_num = _num_strict(raw_priority)
         if p_num is _MISSING:
-            errs.append(
-                f"Regle {idx + 1}: priority doit etre numerique (recu {raw_priority!r})"
-            )
+            errs.append(f"Regle {idx + 1}: priority doit etre numerique (recu {raw_priority!r})")
             priority_val = 0
         else:
             priority_val = int(round(p_num))

@@ -22,6 +22,12 @@ from __future__ import annotations
 
 from typing import Optional, Tuple
 
+# Seuil "match parfait" : en-deca, on considere les deux durees comme
+# identiques aux arrondis pres (TMDb arrondit a la minute, NFO peut decaler
+# de quelques secondes). Distinct de _RUNTIME_TOLERANCE_THEATRICAL qui
+# couvre la zone "match acceptable" (+10 au lieu de +20).
+_RUNTIME_TOLERANCE_EXACT_MATCH = 3
+
 # Tolerance standard sans edition detectee : 5 min couvre les arrondis
 # (TMDb arrondit a la minute, NFO/probe peuvent diverger de quelques sec).
 _RUNTIME_TOLERANCE_THEATRICAL = 5
@@ -99,7 +105,7 @@ def score_runtime_delta(
     delta = abs(file_min - tmdb_min)
     tolerance = _RUNTIME_TOLERANCE_EDITION if _is_extended_edition(edition_label) else _RUNTIME_TOLERANCE_THEATRICAL
 
-    if delta < 3:
+    if delta < _RUNTIME_TOLERANCE_EXACT_MATCH:
         return _BONUS_EXACT_MATCH, None
     if delta < tolerance:
         return _BONUS_SOFT_MATCH, None
