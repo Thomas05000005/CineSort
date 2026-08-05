@@ -54,8 +54,12 @@ Limites connues, toutes MESUREES — a lire avant de croire un vert :
    boucle.
 4. **Le residu se remesure, il ne se recopie pas** : 5 entrees sur une session,
    6 sur une autre (`cinesort_report_` et `cinesort_lotd_rest_` apparaissent
-   sous charge). `tests/test_lotd_chain_rest.py` en laisse 1 de facon
-   reproductible, meme en isolation.
+   sous charge). Ce fichier a un temps affirme que
+   `tests/test_lotd_chain_rest.py` en laissait 1 « de facon reproductible, meme
+   en isolation » ; une contre-mesure ulterieure donne **0 sur 3 executions**,
+   avec temoin positif (une fuite volontaire dans le meme harnais est bien
+   comptee 1). Le residu depend donc de la CHARGE, pas du fichier : ne
+   soupconner aucun fichier nommement sans l'avoir remesure soi-meme.
 """
 
 from __future__ import annotations
