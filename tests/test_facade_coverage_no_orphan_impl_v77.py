@@ -38,6 +38,21 @@ from cinesort.ui.api.facades.settings_facade import SettingsFacade
 
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "facade_methods_v77.json"
 
+#: `_impl` DELIBEREMENT non exposes par une facade, avec la raison. Cette liste
+#: doit rester COURTE et chaque entree doit dire pourquoi : sans justification,
+#: elle deviendrait la porte de sortie qui vide ARCH-02 de son sens.
+_IMPLS_DELIBEREMENT_NON_EXPOSES: Dict[str, str] = {
+    # #944 : chemin DESTRUCTIF (remet des dossiers de films a leur emplacement
+    # d'origine). Le dispatcher REST decouvre les methodes publiques des
+    # facades, donc l'exposer la rendait joignable par toute personne ayant le
+    # jeton, sans la liste des elements, sans la consequence affichee et sans
+    # le delai de 3 s au-dela de 50 — aucune des trois garanties de la regle
+    # n3. Et aucune UI ne l'appelait. L'implementation reste disponible pour le
+    # jour ou l'ecran sera construit ; la reexposer exige de livrer la modale
+    # destructive dans le MEME lot.
+    "_undo_selected_rows_impl": "#944 — destructif, non expose tant que sa modale n'existe pas",
+}
+
 FACADES: Dict[str, Type] = {
     "library": LibraryFacade,
     "quality": QualityFacade,
@@ -161,13 +176,15 @@ class FacadeCoverageNoOrphanImplTests(unittest.TestCase):
         a la facade du bon bounded context (library / quality / run / runtime /
         settings / integrations) puis regenere le snapshot.
         """
-        orphans = self.all_impls - self.referenced_impls
+        orphans = self.all_impls - self.referenced_impls - set(_IMPLS_DELIBEREMENT_NON_EXPOSES)
         self.assertEqual(
             orphans,
             set(),
             f"_impl orphelins detectes (aucune facade ne les expose) : {sorted(orphans)}. "
             f"Ajoute la methode publique correspondante sur la facade du bounded context, "
-            f"puis regenere le snapshot via regenerate_facade_snapshot().",
+            f"puis regenere le snapshot via regenerate_facade_snapshot(). Si l'absence "
+            f"d'exposition est VOULUE, l'inscrire dans _IMPLS_DELIBEREMENT_NON_EXPOSES "
+            f"avec sa raison.",
         )
 
     # ---------- ARCH-01 : detection de regression facade ----------
