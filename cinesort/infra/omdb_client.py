@@ -36,7 +36,7 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import ResponseTooLargeError, get_bounded, make_session_with_retry
-from cinesort.infra.fs_safety import read_text_bounded
+from cinesort.infra.fs_safety import FileTooLargeError, read_text_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +291,38 @@ class OmdbClient:
                         self._cache = raw
                 else:
                     self._cache = {}
+        except FileTooLargeError as exc:
+            # Le fichier depasse la borne : on a REFUSE de le lire, donc il est
+            # mort. Le laisser en place a deux couts qui ne s'arretent jamais —
+            # l'avertissement se repete a CHAQUE demarrage, et l'espace disque
+            # n'est jamais recupere puisque la sauvegarde suivante ecrit un
+            # fichier NEUF a cote.
+            #
+            # On l'ecarte vers un emplacement UNIQUE (`.oversized`), pas vers un
+            # nom horodate : au plus UNE copie perimee existe a la fois, donc la
+            # croissance reste bornee, et il en reste une a inspecter. Une
+            # suppression pure rendrait le diagnostic impossible ; une rotation
+            # datee ferait exactement ce qu'on cherche a eviter.
+            #
+            # Traite A PART des autres OSError, a dessein : un refus de
+            # permission ou un disque plein ne doit surtout PAS declencher de
+            # deplacement de fichier.
+            self._cache = {}
+            ecarte = self.cache_path.with_suffix(self.cache_path.suffix + ".oversized")
+            try:
+                taille = self.cache_path.stat().st_size
+                os.replace(str(self.cache_path), str(ecarte))
+                logger.warning(
+                    "omdb cache: %d octets > borne %d, fichier ecarte vers %s (cache reparti a vide)",
+                    taille,
+                    _CACHE_MAX_BYTES,
+                    ecarte.name,
+                )
+            except OSError as err:
+                # L'ecarter est un CONFORT, pas une obligation : si ca echoue,
+                # on repart quand meme sur un cache vide plutot que d'echouer
+                # le chargement.
+                logger.warning("omdb cache: %s ; mise a l'ecart impossible : %s", exc, err)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             logger.debug("omdb cache load failed: %s", exc)
             self._cache = {}
