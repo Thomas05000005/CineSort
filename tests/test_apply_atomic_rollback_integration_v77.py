@@ -32,6 +32,7 @@ from cinesort.app.apply_rollback import (
     rollback_forward,
 )
 from cinesort.infra.db.sqlite_store import SQLiteStore
+from cinesort.ui.api.cinesort_api import CineSortApi
 
 
 def _make_store() -> tuple[SQLiteStore, Path]:
@@ -478,8 +479,203 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
         self.assertIsNone(result_after)
 
 
+class ApplyChangesAtomicRollbackIntegrationTests(unittest.TestCase):
+    """AC-3 BOUT-EN-BOUT : apply REEL + `apply_atomic=True` + crash injecte.
+
+    Pourquoi cette classe existe (finding N38) : les tests de signature de
+    `ApplyChangesBackwardCompatTests` ci-dessous n'exercent AUCUN
+    comportement. Mesure : en remplacant `apply_support._atomic_rollback_forward`
+    par un no-op qui MENT (`{'ok': True, 'rollback_status':
+    'ROLLED_BACK_BY_ATOMIC', counts a 0}`), les 20 tests des deux fichiers
+    apply/undo cites par l'audit restaient VERTS — le cablage
+    `apply_support.py:2891` n'etait couvert par rien.
+
+    Ici on monte une vraie bibliotheque jetable, on scanne, on applique pour de
+    vrai, et on fait exploser le 3e film APRES que les deux premiers aient ete
+    deplaces sur disque. Ce qui doit tenir :
+      - le filesystem revient STRICTEMENT au snapshot initial ;
+      - `apply_batches.status` = 'ROLLED_BACK_BY_ATOMIC' ;
+      - `apply_batch_modes.rollback_status` = 'ROLLED_BACK_BY_ATOMIC' ;
+      - la reponse porte `atomic_rollback` avec `counts.done >= 2, failed == 0`.
+
+    Le test-temoin `..._without_atomic_flag_leaves_half_moved_library` prouve
+    que l'injection deplace REELLEMENT des dossiers : sans lui, un rollback
+    fictif sur une bibliotheque jamais touchee passerait pour un succes.
+    """
+
+    _SCAN_TIMEOUT_S = 60.0
+
+    def setUp(self) -> None:
+        import cinesort.domain.core as core_mod
+
+        self._base = Path(tempfile.mkdtemp(prefix="cinesort_atomic_e2e_"))
+        self.root = self._base / "root"
+        self.state_dir = self._base / "state"
+        self.root.mkdir()
+        self.state_dir.mkdir()
+        self._patcher = patch.object(core_mod, "MIN_VIDEO_BYTES", 1)
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        # rmtree tolerant : sous Windows le store SQLite du JobRunner peut
+        # garder un handle quelques instants apres le test.
+        shutil.rmtree(self._base, ignore_errors=True)
+
+    # -- helpers ----------------------------------------------------------
+    def _settings(self) -> dict:
+        return {
+            "root": str(self.root),
+            "state_dir": str(self.state_dir),
+            "tmdb_enabled": False,
+            "probe_backend": "none",
+        }
+
+    def _snapshot(self) -> dict:
+        """{D:relpath -> '', F:relpath -> sha1[:12]} sous self.root."""
+        import hashlib
+        import os
+
+        out: dict = {}
+        for dirpath, _dirnames, filenames in os.walk(self.root):
+            d = Path(dirpath)
+            rel = d.relative_to(self.root)
+            if rel != Path("."):
+                out[f"D:{rel.as_posix()}"] = ""
+            for fn in filenames:
+                p = d / fn
+                out[f"F:{(rel / fn).as_posix()}"] = hashlib.sha1(p.read_bytes()).hexdigest()[:12]
+        return out
+
+    def _build_library(self) -> None:
+        for folder, video in (
+            ("Alpha.Film.2011.1080p", "Alpha.Film.2011.1080p.mkv"),
+            ("Beta.Film.2012.1080p", "Beta.Film.2012.1080p.mkv"),
+            ("Gamma.Film.2013.1080p", "Gamma.Film.2013.1080p.mkv"),
+        ):
+            _create_file(self.root / folder / video, size=2048)
+            (self.root / folder / "movie.nfo").write_text("<movie/>", encoding="utf-8")
+
+    def _scan_and_decide(self):
+        from tests._helpers import wait_run_done
+
+        api = CineSortApi()
+        start = api.run.start_plan(self._settings())
+        self.assertTrue(start.get("ok"), start)
+        run_id = str(start["run_id"])
+        wait_run_done(api, run_id, timeout_s=self._SCAN_TIMEOUT_S)
+        plan = api.run.get_plan(run_id)
+        self.assertTrue(plan.get("ok"), plan)
+        rows = plan.get("rows", [])
+        self.assertEqual(len(rows), 3, [r.get("folder") for r in rows])
+        decisions = {
+            str(r["row_id"]): {
+                "ok": True,
+                "title": r.get("proposed_title"),
+                "year": r.get("proposed_year"),
+            }
+            for r in rows
+        }
+        return api, run_id, decisions
+
+    def _crash_on_third_row(self):
+        """patch context : les 2 premiers films sont VRAIMENT deplaces, le 3e explose.
+
+        RuntimeError est choisi a dessein : la boucle de `apply_rows` rattrape
+        PermissionError / OSError / ValueError / TypeError par row (echec propre
+        sans interrompre le batch). Il faut une exception NON rattrapee pour
+        atteindre le `except Exception` de `apply_changes` et donc le rollback.
+        """
+        from cinesort.app import apply_core
+
+        real = apply_core.apply_single
+        calls = {"n": 0}
+
+        def _boom(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] >= 3:
+                raise RuntimeError("crash injecte (test N38) apres 2 films deplaces")
+            return real(*args, **kwargs)
+
+        return patch.object(apply_core, "apply_single", _boom), calls
+
+    # -- tests ------------------------------------------------------------
+    def test_atomic_rollback_restores_fs_and_marks_batch(self) -> None:
+        self._build_library()
+        api, run_id, decisions = self._scan_and_decide()
+        snap0 = self._snapshot()
+
+        patcher, calls = self._crash_on_third_row()
+        with patcher:
+            res = api.run.apply(run_id, decisions, False, False, apply_atomic=True)
+
+        self.assertEqual(calls["n"], 3, "l'injection n'a pas atteint le 3e film")
+        self.assertFalse(res.get("ok"), res)
+
+        # 1) Le filesystem est revenu A L'IDENTIQUE (coeur de l'AC-3).
+        snap_end = self._snapshot()
+        self.assertEqual(
+            snap_end,
+            snap0,
+            "rollback atomique incomplet : "
+            f"en trop={sorted(set(snap_end) - set(snap0))} "
+            f"manquants={sorted(set(snap0) - set(snap_end))}",
+        )
+
+        # 2) Synthese remontee au caller.
+        summary = res.get("atomic_rollback") or {}
+        self.assertEqual(summary.get("rollback_status"), ROLLBACK_DONE, summary)
+        self.assertTrue(summary.get("ok"), summary)
+        counts = summary.get("counts") or {}
+        self.assertGreaterEqual(int(counts.get("done") or 0), 2, summary)
+        self.assertEqual(int(counts.get("failed") or 0), 0, summary)
+
+        # 3) Etat DB : batch + mode atomique tous deux marques rollback.
+        store, _runner = api._get_or_create_infra(self.state_dir)
+        batch_id = str(res.get("apply_batch_id") or "")
+        self.assertTrue(batch_id, res)
+        batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=10)
+        self.assertEqual([b.get("status") for b in batches], ["ROLLED_BACK_BY_ATOMIC"], batches)
+        mode = store.apply.get_atomic_mode(batch_id) or {}
+        self.assertEqual(mode.get("rollback_status"), ROLLBACK_DONE, mode)
+
+        # 4) Le batch rollback ne doit PAS etre propose a l'undo classique.
+        self.assertIsNone(store.apply.get_last_reversible_apply_batch(run_id))
+
+    def test_without_atomic_flag_leaves_half_moved_library(self) -> None:
+        """Temoin : sans `apply_atomic`, le meme crash laisse la biblio A MOITIE
+        deplacee. C'est ce qui prouve que l'injection touche vraiment le disque
+        et que le test ci-dessus ne verifie pas un rollback sur un no-op."""
+        self._build_library()
+        api, run_id, decisions = self._scan_and_decide()
+        snap0 = self._snapshot()
+
+        patcher, calls = self._crash_on_third_row()
+        with patcher:
+            res = api.run.apply(run_id, decisions, False, False)
+
+        self.assertEqual(calls["n"], 3)
+        self.assertFalse(res.get("ok"), res)
+        self.assertNotIn("atomic_rollback", res)
+
+        snap_end = self._snapshot()
+        self.assertNotEqual(snap_end, snap0, "le crash injecte n'a deplace AUCUN dossier")
+        created = sorted(k for k in set(snap_end) - set(snap0) if k.startswith("D:") and "/" not in k[2:])
+        self.assertEqual(created, ["D:Alpha Film (2011)", "D:Beta Film (2012)"], created)
+
+        store, _runner = api._get_or_create_infra(self.state_dir)
+        batches = store.apply.list_apply_batches_for_run(run_id=run_id, limit=10)
+        self.assertEqual([b.get("status") for b in batches], ["FAILED"], batches)
+
+
 class ApplyChangesBackwardCompatTests(unittest.TestCase):
-    """AC-1 : signature `apply_changes(apply_atomic=...)` retourne {ok: bool}."""
+    """AC-1 : signature `apply_changes(apply_atomic=...)` retourne {ok: bool}.
+
+    NB (N38) : ces trois tests sont des tests de SIGNATURE, pas de
+    comportement. Le comportement du cablage est couvert par
+    `ApplyChangesAtomicRollbackIntegrationTests` ci-dessus — ne pas les
+    considerer comme une garde du rollback.
+    """
 
     def test_signature_accepts_apply_atomic_kwarg(self) -> None:
         """`apply_atomic` est un kwarg accepte par apply_changes."""

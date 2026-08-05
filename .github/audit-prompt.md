@@ -12,17 +12,25 @@ en tres grande majorite par les executions PRECEDENTES de cet audit. Il
 n'est plus lu par personne : produire davantage ne rend plus service, ca
 enterre les vrais problemes sous le bruit.
 
-Avant toute ouverture, COMPTE l'existant :
-  gh pr list --state open --limit 300 --json number,title
-  gh issue list --state open --limit 400 --json number,title
+Avant toute ouverture, COMPTE l'existant, et calcule la SOMME des deux :
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:pr+is:open&per_page=1' -q .total_count
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:issue+is:open&per_page=1' -q .total_count
 
 Puis applique ce budget, par execution :
-- au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs, petits,
-  testes et sans arbitrage produit ;
-- au plus 5 issues ouvertes, reservees aux findings de severite HIGH ou
-  superieure ;
-- 0 ouverture tant que le total ouvert depasse 150 : dans ce cas tu ne
-  fais que COMMENTER l'existant et proposer des fermetures.
+- 0 ouverture des que PR_ouvertes + issues_ouvertes depasse 150. C'est une
+  SOMME, pas un seuil par categorie : 110 PR et 195 issues font 305, donc
+  ZERO ouverture. Dans ce cas tu ne fais que COMMENTER l'existant et
+  proposer des fermetures. Cette ligne prime sur les deux suivantes ;
+- sinon, au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs,
+  petits, testes et sans arbitrage produit ;
+- sinon, au plus 5 issues ouvertes, reservees aux findings de severite HIGH
+  ou superieure.
+
+Repere mesure le 2026-08-03 : 110 PR + 195 issues ouvertes, et la file
+GitHub Actions a atteint 999 runs pour 16 creneaux d'execution, soit ~18 h
+de latence avant qu'une PR puisse fusionner. Ouvrir une PR de plus dans cet
+etat ne fait pas avancer le depot : ca retarde les correctifs deja prets.
+Le travail utile, quand le seuil est franchi, est de FERMER et de FUSIONNER.
 
 Regles de non-duplication, dans cet ordre :
 1. Le finding est-il deja CORRIGE sur main ? Verifie dans le code, pas
@@ -66,13 +74,15 @@ CONTEXTE PROJET (mis a jour le 2026-08-02) :
 CONTEXTE PROJET (structure, toujours valable) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
   * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
-  * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
-  * app ne peut PAS importer ui (contract `app_no_ui`)
+  * infra ne peut PAS importer app, ui (contract `infra_bounded`)
+  * app ne peut PAS importer ui (contract `app_bounded`)
 - Cycle historique `domain -> app` BRISE en mai 2026 (issue #83 closed).
   Toute regression sur ce point est bloquee par CI - ne pas reintroduire.
 - Repository pattern installe sur SQLiteStore : store.probe, store.scan,
-  store.quality, store.run, store.apply, store.perceptual, store.anomaly.
-  Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
+  store.quality, store.run, store.apply, store.perceptual, store.anomaly
+  (7 Repository agreges par composition, cf infra/db/repositories/).
+  Phase B8 CLOSE : les `_XxxMixin` legacy et l'heritage MRO ont ete SUPPRIMES
+  (verifie le 2026-08-03 : 0 occurrence). Ne pas reintroduire de mixin SQL.
 - Strangler Fig + Facade pattern : CineSortApi expose 6 facades
   (api.run, api.settings, api.quality, api.integrations, api.library,
   api.runtime). Les anciennes methodes directes sont privatisees en
@@ -87,8 +97,10 @@ CONTEXTE PROJET (structure, toujours valable) :
 
 Analyse transverse (si target=transverse) :
 1) Liste les fonctions > 100L restantes par ROI de refactor (complexite vs gain).
-2) Liste les composants JS dupliques desktop/dashboard (web/dashboard/views/*.js
-   vs web/views/*.js post-V6 ESM migration) et propose strategie de mutualisation.
+2) [OBSOLETE — cf issue #484] La duplication desktop/dashboard N'EXISTE PLUS :
+   il ne reste qu'un arbre JS unique sous web/dashboard/ (views/, components/,
+   core/). Ni web/views/ ni web/components/ de premier niveau (verifie le
+   2026-08-03). Ne cherche PAS de doublons desktop/dashboard : il n'y en a pas.
 3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
    depuis le dernier audit (cross-check avec `lint-imports`).
 4) Audit du Repository pattern : usages residuels de la couche mixin
@@ -1465,6 +1477,14 @@ REGLES :
 - Constante amelioration : meme sur des modules deja audites,
   cherche si quelque chose a evolue ou pourrait etre mieux.
 
-Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune. (si target=transverse)
+Pour la couche transverse (si target=transverse) — les inventaires ci-dessous sont
+DEJA SUIVIS par des issues OUVERTES : ENRICHIS-les, ne recree PAS d'issue.
+Les chiffres du prompt d'origine (49 fonctions / 22 composants JS / 161 imports
+lazy) sont PERIMES — cf issue #484.
+1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue OUVERTE #215.
+2) Duplication JS desktop/dashboard : SANS OBJET, elle n'existe plus (cf ci-dessus).
+3) Imports lazy et decouplage -> issue OUVERTE #779. Le cycle domain<->app est
+   BRISE (issue #83 close) ; le reliquat est INTRA-ui/api (cycles entre modules
+   *_support), pas un cycle inter-couches.
 
 ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.

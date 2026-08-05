@@ -8,24 +8,37 @@ lookup helpers that bind runtime runs back to persisted rows.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import os
 import platform
 import re
+import sqlite3
 import sys
 import threading
 import time
-import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.app import JobRunner
 from cinesort.app.apply_batches_reconciliation import reconcile_batches_at_boot
 from cinesort.app.move_reconciliation import reconcile_at_boot
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
+
+# FACTORISATION : la generation du run_id vivait ici ET dans app/job_runner.py,
+# a l'identique. Deux copies divergent : il n'y a plus qu'UN producteur, dans
+# infra (couche importable par app comme par ui). `generate_run_id` reste
+# re-exporte ici car il appartient au domaine public du module (`__all__`) et
+# est expose par `CineSortApi._generate_run_id`.
+from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
 from cinesort.ui.api.notifications_support import add_notification
+
+# Import de TETE (pas differe) : `run_data_support` ne reference pas
+# `runtime_support`, il n'y a donc pas de cycle a contourner, et le cliquet
+# `test_refactor_84_progress_v77` borne les imports differes a zero marge.
+from cinesort.ui.api.run_data_support import compute_total_fallback, count_plan_rows
 
 _logger = logging.getLogger(__name__)
 
@@ -71,10 +84,23 @@ def state_dir_key(state_dir: Path) -> str:
         return str(state_dir).lower()
 
 
-def run_paths_for(state_dir: Path, run_id: str, *, ensure_exists: bool) -> state.RunPaths:
+def run_paths_for(
+    state_dir: Path,
+    run_id: str,
+    *,
+    ensure_exists: bool,
+    exclusive: bool = False,
+) -> state.RunPaths:
+    """Resout les chemins d'un run.
+
+    `exclusive=True` (avec `ensure_exists=True`) demande une RESERVATION
+    ATOMIQUE du dossier : `state.RunDirectoryConflictError` si le dossier
+    existe deja. Le defaut `False` preserve la semantique des appelants qui
+    rouvrent un run EXISTANT (apply, diagnostics, historique, dashboard).
+    """
     run_dir = state_dir / "runs" / f"tri_films_{run_id}"
     if ensure_exists:
-        run_dir.mkdir(parents=True, exist_ok=True)
+        state.create_run_dir(run_dir, exclusive=exclusive)
     return state.RunPaths(
         run_id=run_id,
         run_dir=run_dir,
@@ -442,6 +468,25 @@ def get_run(api: Any, run_id: str) -> Optional[Any]:
 
 
 def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
+    safe_max_keep = max(1, int(max_keep or 1))
+
+    # PERF (scans successifs qui ralentissent) : garde AVANT la boucle.
+    # `terminal` est toujours un sous-ensemble de `api._runs` (les runs
+    # actifs sont sautes), donc `len(api._runs) <= safe_max_keep` implique
+    # `len(terminal) <= safe_max_keep` : le `return` d'en dessous serait pris
+    # de toute facon. La boucle etait donc un pur no-op fonctionnel — mais un
+    # no-op TRES cher : elle appelle `rs.runner.get_status(rid)` par entree,
+    # et ce get_status retombe en BDD des que le JobRunner a evince le run
+    # (cleanup H6 : il ne conserve que les 5 derniers runs termines). Chaque
+    # retombee BDD = `RunRepository.get_run` = 3 connexions SQLite neuves
+    # (verif du groupe de schema + user_version + la requete), chacune avec
+    # son cycle PRAGMA + INSERT pragma_history + COMMIT.
+    # Comme `get_run()` declenche cette purge a CHAQUE lecture d'etat, le
+    # polling de progression d'un scan payait O(runs en memoire) ouvertures
+    # de connexion par sondage -> cout total O(n^2) sur une serie de scans.
+    if len(api._runs) <= safe_max_keep:
+        return
+
     terminal: List[Tuple[float, str]] = []
     for rid, rs in api._runs.items():
         if rs.running:
@@ -452,7 +497,6 @@ def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
         ts = float((snap.ended_ts if snap else None) or rs.started_ts or 0.0)
         terminal.append((ts, rid))
 
-    safe_max_keep = max(1, int(max_keep or 1))
     if len(terminal) <= safe_max_keep:
         return
 
@@ -463,21 +507,84 @@ def purge_terminal_runs_locked(api: Any, *, max_keep: int) -> None:
             api._runs.pop(rid, None)
 
 
-def generate_run_id() -> str:
-    return time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
+# Nombre de candidats essayes avant de rendre les armes. Chaque candidat est
+# deja unique pour le processus (cf. cinesort.infra.run_id) : la boucle ne sert
+# donc plus qu'a ecarter un identifiant deja present en base ou sur disque,
+# c'est-a-dire pose par une session ANTERIEURE.
+_RUN_ID_RESERVATION_ATTEMPTS = 100
 
 
-def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
-    for _ in range(100):
+def _iter_free_run_ids(api: Any, store: SQLiteStore) -> Iterator[str]:
+    """Enumere des run_id absents du registre memoire ET de la table `runs`.
+
+    `sqlite3.Error` est convertie en `RuntimeError` : elle N'HERITE PAS
+    d'`OSError`, donc sans cette conversion une base verrouillee ou corrompue
+    traversait le filtre `except (OSError, RuntimeError)` de
+    `run_flow_support._validate_and_init_plan_context` et remontait au boundary
+    generique — sans message metier et sans passer par `err()`. Le contrat
+    annonce par `reserve_unique_run` (RuntimeError) redevient exact.
+    """
+    for _ in range(_RUN_ID_RESERVATION_ATTEMPTS):
         run_id = generate_run_id()
         with api._runs_lock:
             if run_id in api._runs:
                 continue
-        if store.run.get_run(run_id) is not None:
+        try:
+            already_used = store.run.get_run(run_id) is not None
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"Verification d'unicite du run_id impossible : {exc}") from exc
+        if already_used:
             continue
+        yield run_id
+
+
+def generate_unique_run_id(api: Any, store: SQLiteStore) -> str:
+    """Renvoie un run_id libre en memoire et en base.
+
+    Le repli d'origine `f"{generate_run_id()}-{uuid4().hex[:8]}"` etait un
+    BUG LATENT : ce format a tiret ne matchait pas `RUN_ID_PATTERN`, donc
+    `job_runner.normalize_or_generate_run_id` le remplacait aussitot par un
+    uuid — l'identifiant soigneusement rendu unique etait jete, et l'id rendu
+    par `start_job` divergeait de celui deja utilise pour creer le dossier.
+    Le repli est desormais un identifiant au format canonique, journalise en
+    WARNING pour qu'une saturation ne passe jamais inapercue.
+    """
+    for run_id in _iter_free_run_ids(api, store):
         return run_id
-    # fallback ultime : uuid4 pour eviter blocage definitif
-    return f"{generate_run_id()}-{uuid.uuid4().hex[:8]}"
+    fallback = generate_run_id()
+    _logger.warning(
+        "run_id: %d candidats consecutifs deja pris en base, repli sur %s",
+        _RUN_ID_RESERVATION_ATTEMPTS,
+        fallback,
+    )
+    return fallback
+
+
+def reserve_unique_run(api: Any, store: SQLiteStore, state_dir: Path) -> Tuple[str, state.RunPaths]:
+    """Reserve un run_id ET son dossier `tri_films_<run_id>` d'un seul tenant.
+
+    Pourquoi les deux ensemble : le dossier de run est cree AVANT l'insertion
+    en base (et avant `start_job`). Resoudre l'unicite uniquement cote base
+    laissait donc le DISQUE decouvert — deux runs de meme id partageaient le
+    meme dossier et le second ecrasait le `plan.jsonl` du premier sans rien
+    signaler. Ici, le `mkdir` sans `exist_ok` sert de reservation atomique :
+    si le dossier est deja pris, on passe simplement au candidat suivant.
+
+    Corollaire de conception : l'identifiant rendu ici est deja verifie libre,
+    donc `start_job` le conservera tel quel et l'id retourne ne divergera pas
+    de celui utilise pour le dossier et le `RunState`.
+    """
+    for run_id in _iter_free_run_ids(api, store):
+        try:
+            run_paths = run_paths_for(state_dir, run_id, ensure_exists=True, exclusive=True)
+        except FileExistsError:
+            _logger.warning("run_id: dossier de run deja present pour %s, nouveau candidat", run_id)
+            continue
+        return run_id, run_paths
+    raise RuntimeError(
+        f"Impossible de reserver un run_id libre apres {_RUN_ID_RESERVATION_ATTEMPTS} tentatives "
+        "(base ou dossier runs/ deja occupes)"
+    )
 
 
 def find_run_row(api: Any, run_id: str) -> Optional[Tuple[Dict[str, Any], SQLiteStore]]:
@@ -623,7 +730,21 @@ def _read_build_date() -> str:
 def _library_counts(api: Any) -> Tuple[int, int]:
     """Retourne (total_films, total_scored) ou (0, 0) si indispo.
 
-    Cf spec 12-aide.md : `lib_total` et `lib_scored` pour la section diagnostic.
+    Cf spec 12-aide.md : `lib_total` et `lib_scored` pour la section diagnostic
+    (« Lib total : 901 films · 853 classes »).
+
+    Issue #446 : les deux compteurs interrogeaient une table `library_items` et
+    une colonne `quality_reports.library_item_id` qui n'ont jamais existe dans
+    le schema. Le `sqlite3.OperationalError` etait avale par le `except` global
+    et le diagnostic COPIE POUR LE SUPPORT annoncait « 0 film · 0 classe » sur
+    toutes les bibliotheques, y compris entierement scorees.
+
+    Il n'y a pas de table de films : la bibliotheque, c'est le plan du dernier
+    run. On lit donc les memes sources que le reste de l'UI --
+    `count_plan_rows(plan.jsonl)` avec le fallback commun `compute_total_fallback`
+    (cf. `run_data_support`, source unique de verite du compteur de films), et
+    `quality_reports` RESTREINT a ce run pour les films classes. Sans le filtre
+    par run, le compte cumulait les rapports de tous les runs de l'historique.
     """
     try:
         state_dir = Path(getattr(api, "_state_dir", state.default_state_dir()))
@@ -633,19 +754,34 @@ def _library_counts(api: Any) -> Tuple[int, int]:
         if not existing:
             return 0, 0
         store, _runner = existing
-        # Compter films distincts dans library_items + ceux ayant un score
-        try:
-            with store._managed_conn() as conn:  # type: ignore[attr-defined]
-                cur = conn.execute("SELECT COUNT(*) AS cnt FROM library_items")
-                row = cur.fetchone()
-                lib_total = int((row["cnt"] if row else 0) or 0)
-                cur = conn.execute("SELECT COUNT(DISTINCT library_item_id) AS cnt FROM quality_reports")
-                row = cur.fetchone()
-                lib_scored = int((row["cnt"] if row else 0) or 0)
-                return lib_total, lib_scored
-        except Exception as exc:
-            _logger.debug("diag: library_counts SQL echec ignore: %s", exc)
+        runs = store.run.list_runs(limit=1)
+        if not runs:
             return 0, 0
+        run_row = runs[0] if isinstance(runs[0], dict) else dict(runs[0])
+        run_id = str(run_row.get("run_id") or "")
+        if not run_id:
+            return 0, 0
+
+        stats_obj: Dict[str, Any] = {}
+        raw_stats = run_row.get("stats_json")
+        if raw_stats:
+            try:
+                decoded = json.loads(raw_stats)
+                if isinstance(decoded, dict):
+                    stats_obj = decoded
+            except (TypeError, ValueError):
+                stats_obj = {}
+
+        # `ensure_exists=False` : le diagnostic ne cree jamais de dossier de run.
+        run_paths = run_paths_for(state_dir, run_id, ensure_exists=False)
+        lib_total = count_plan_rows(run_paths, fallback=compute_total_fallback(run_row, stats_obj))
+        lib_scored = int(store.quality.get_quality_report_stats(run_id=run_id).get("count") or 0)
+        # Deliberement PAS de max(lib_total, lib_scored) : si le plan est
+        # illisible et le fallback vide, « 0 film · 853 classes » est une
+        # incoherence VISIBLE, qui dit au support que le compte de films a
+        # echoue. Un max() rendrait « 853 films · 853 classes », plausible et
+        # indiscernable d'une mesure reussie.
+        return lib_total, lib_scored
     except Exception as exc:
         _logger.debug("diag: library_counts echec ignore: %s", exc)
         return 0, 0
@@ -980,6 +1116,7 @@ __all__ = [
     "get_recent_logs",
     "get_run",
     "purge_terminal_runs_locked",
+    "reserve_unique_run",
     "reset_reconciliation_cache_for_tests",
     "run_paths_for",
     "search_docs",

@@ -10,7 +10,11 @@ de l'autre en plein ecriture, puis les `os.replace` s'enchainaient : promotion
 d'un JSON partiel ou echec du rename. `os.replace` est atomique mais ne protege
 pas d'un `.tmp` source partage.
 
-Ces tests echouent si l'un des deux sites revient a `with_suffix(".tmp")`.
+L'unicite est desormais fournie par `cinesort.infra.state.atomic_write_*`
+(PR #857), a qui les DEUX sites delegent : ces tests verifient la propriete
+OBSERVABLE (aucun `.tmp` partage, la purge survit a une sauvegarde client
+intercalee), pas l'implementation qui la produit. Ils echouent si l'un des deux
+sites revient a un `.tmp` a nom fixe.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from cinesort.infra.state import is_atomic_tmp_name
 from cinesort.infra.tmdb_client import TmdbClient, purge_expired_tmdb_cache
 
 
@@ -82,6 +87,17 @@ class TmdbCacheTmpUniquePerWriterTests(unittest.TestCase):
             len(sources),
             f"deux ecritures ont partage le meme tmp : {sources}",
         )
+        # Le nom unique doit rester BALAYABLE : `sweep_atomic_tmp_orphans`
+        # (app.py, au demarrage) ne reconnait un orphelin que sur la forme
+        # EXACTE `<cible>.tmp.<pid>.<thread>.<ns>.<uuid8>`. Un schema maison
+        # (ex `with_suffix(".tmp.<pid>.<ns>")`) supprimerait bien la course
+        # mais rendrait chaque residu de crash INVISIBLE au balayeur, donc
+        # definitif — sur un cache de 20 a 100 Mo reecrit toutes les 2 s.
+        for src in sources:
+            self.assertTrue(
+                is_atomic_tmp_name(src.name),
+                f"tmp non reconnu par sweep_atomic_tmp_orphans (orphelin definitif) : {src.name}",
+            )
 
     def test_purge_survives_concurrent_client_save(self) -> None:
         """Course reelle : le client sauvegarde entre le write du tmp de la purge et son rename.
@@ -89,27 +105,45 @@ class TmdbCacheTmpUniquePerWriterTests(unittest.TestCase):
         Avec un .tmp partage, le client tronquait puis consommait (os.replace) le tmp
         de la purge -> le rename de la purge levait FileNotFoundError -> write_error.
         Avec un tmp unique par writer, les deux ecritures sont independantes.
+
+        POINT D'INJECTION — il a change avec la fusion de #857. La purge
+        n'ecrit plus son tmp via `Path.write_text` mais via un `open(..., "wb")`
+        au fond d'`atomic_write_bytes` : se brancher sur `Path.write_text`
+        n'intercalait plus RIEN et le test devenait vacant (il passait en
+        n'ayant jamais declenche la course). On se branche donc sur
+        `os.replace`, primitive de bascule commune aux deux ecrivains : le spy
+        s'execute APRES l'ecriture complete + fsync du tmp de la purge et AVANT
+        sa promotion, c'est-a-dire exactement dans la fenetre visee. Les
+        assertions metier sont inchangees.
         """
         self._seed_disk_cache()
         client = TmdbClient(api_key="x", cache_path=self.cache_path)
         client._cache["movie|9"] = {"_cached_at": time.time(), "value": {"poster_path": "/c.jpg"}}
         client._dirty = True
 
-        real_write_text = Path.write_text
-        state = {"fired": False}
+        real_replace = os.replace  # capture avant patch : mock.patch remplace os.replace globalement
+        state: dict[str, object] = {"fired": False, "purge_tmp": None}
 
-        def _write_text_then_client_save(self_path, *args, **kwargs):
-            out = real_write_text(self_path, *args, **kwargs)
-            # Le tmp de la purge vient d'etre ecrit : on intercale la sauvegarde client.
-            if not state["fired"] and self_path != client.cache_path:
+        def _client_save_then_replace(src, dst):
+            # Le tmp de la purge est ecrit et fsynce, son rename n'a pas encore
+            # eu lieu : on intercale la sauvegarde client. `fired` est arme
+            # AVANT l'appel pour que le os.replace de cette sauvegarde imbriquee
+            # ne re-declenche pas l'injection.
+            if not state["fired"]:
                 state["fired"] = True
+                state["purge_tmp"] = Path(src)
                 client._save_cache_atomic(force=True)
-            return out
+            return real_replace(src, dst)
 
-        with mock.patch.object(Path, "write_text", _write_text_then_client_save):
+        with mock.patch("cinesort.infra.state.os.replace", side_effect=_client_save_then_replace):
             result = purge_expired_tmdb_cache(self.cache_path, ttl_days=30)
 
         self.assertTrue(state["fired"], "la sauvegarde client concurrente n'a pas ete declenchee")
+        self.assertNotEqual(
+            state["purge_tmp"],
+            self.fixed_tmp,
+            "la purge a promu le .tmp a nom fixe partage (CWE-362)",
+        )
         self.assertIsNone(
             result["error"],
             f"la purge a perdu son tmp au profit du writer concurrent : {result['error']}",
@@ -117,8 +151,10 @@ class TmdbCacheTmpUniquePerWriterTests(unittest.TestCase):
         # Le cache final reste un JSON complet et lisible (pas de troncature).
         on_disk = json.loads(self.cache_path.read_text(encoding="utf-8"))
         self.assertIsInstance(on_disk, dict)
-        # Aucun tmp orphelin ne subsiste dans le state dir.
-        leftovers = [p.name for p in Path(self._tmp.name).glob("tmdb_cache.tmp*")]
+        # Aucun tmp orphelin ne subsiste dans le state dir. Le motif couvre les
+        # DEUX formes possibles (`tmdb_cache.tmp*` d'avant, `tmdb_cache.json.tmp.*`
+        # produite par atomic_tmp_path) : un glob trop etroit ne verifierait rien.
+        leftovers = [p.name for p in Path(self._tmp.name).glob("tmdb_cache*tmp*")]
         self.assertEqual(leftovers, [], f"tmp orphelins : {leftovers}")
 
 

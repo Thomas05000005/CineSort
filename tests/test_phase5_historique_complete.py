@@ -287,17 +287,27 @@ class InfiniteScrollTests(unittest.TestCase):
 
 
 class AdvancedFiltersTests(unittest.TestCase):
-    """Filtres supplementaires : Undone, Undo, Custom date, recherche par film."""
+    """Filtres supplementaires : Custom date, recherche par film.
+
+    Revue post-merge 2026-08-03 — les deux tests « Undone » / « Undo » qui
+    vivaient ici etaient des FAUX VERTS : ils verifiaient la presence de la
+    chaine `value="undone"` dans le TEXTE SOURCE du JS, jamais son effet. Les
+    deux options etaient mortes par construction (un undo n'insere aucune ligne
+    dans la table `runs`, et le payload de run/get_dashboard ne porte ni
+    `undone`, ni `is_undo`, ni `type`), donc les filtres repondaient toujours
+    « Aucun run ne correspond aux filtres actuels ». Les options ont ete
+    retirees ; on verifie desormais qu'elles ne reviennent pas, et le
+    comportement des filtres VIVANTS est teste au runtime dans
+    tests/test_revue_20260803_historique_statuts.py.
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.js = _HISTORIQUE_JS.read_text(encoding="utf-8")
 
-    def test_status_undone_option(self) -> None:
-        self.assertIn('value="undone"', self.js)
-
-    def test_type_undo_option(self) -> None:
-        self.assertIn('value="undo"', self.js)
+    def test_pas_doption_de_filtre_morte(self) -> None:
+        self.assertNotIn('value="undone"', self.js)
+        self.assertNotIn('value="undo"', self.js)
 
     def test_custom_period_picker(self) -> None:
         self.assertIn('value="custom"', self.js)

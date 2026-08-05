@@ -21,9 +21,11 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Callable, List, Optional, Tuple
 
 from cinesort.domain.confidence_thresholds import confidence_label
+from cinesort.domain.conversions import to_int
 from cinesort.infra.omdb_client import OmdbClient, OmdbResult
 
 logger = logging.getLogger(__name__)
@@ -79,8 +81,16 @@ def resync_confidence_fields(row: Any, new_confidence: int) -> None:
         row.notes = updated
 
 
+@lru_cache(maxsize=2048)
 def _normalize_title_for_compare(title: str) -> str:
-    """Normalise un titre pour comparaison (lowercase, strip whitespace + punct)."""
+    """Normalise un titre pour comparaison (lowercase, strip whitespace + punct).
+
+    Cf #542 audit 2026-06-06 : la fonction execute 3 re.sub + 2
+    unicodedata.normalize a chaque appel. Sur 5000 rows + multiple comparisons
+    par row, c'est ~20k appels avec haute redondance (memes titres TMDb / OMDb
+    apparaissent regulierement). lru_cache(2048) garde une emp reinte memoire
+    minime (~200 KB) pour eviter la recomputation.
+    """
     if not title:
         return ""
     s = title.lower().strip()
@@ -146,7 +156,9 @@ def cross_check_rows_with_omdb(
     Args:
         rows: liste de PlanRow (modifie en place)
         omdb_client: instance OmdbClient
-        min_confidence_for_call: seuil sous lequel on appelle OMDb (default 90)
+        min_confidence_for_call: seuil sous lequel on appelle OMDb (default 90).
+            `0` est une valeur legitime (l'UI clampe [0, 100]) et signifie
+            "ne jamais appeler OMDb" : elle ne doit PAS retomber sur 90 (#791).
         log: callback de log optionnel
         should_cancel: callback de cancellation optionnel
 
@@ -156,7 +168,10 @@ def cross_check_rows_with_omdb(
     if not rows or not omdb_client:
         return 0
 
-    threshold = max(0, min(100, int(min_confidence_for_call or 90)))
+    # `to_int` (et non `... or 90`) : un seuil regle a 0 par l'utilisateur doit
+    # rester 0 (= OMDb desactive), seul None/invalide retombe sur 90. Cf la
+    # regle de revue "sentinelle falsy" dans cinesort/domain/conversions.py.
+    threshold = max(0, min(100, to_int(min_confidence_for_call, 90)))
 
     n_checked = 0
     n_converge = 0

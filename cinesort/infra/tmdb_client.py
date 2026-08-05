@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import get_bounded, make_session_with_retry
+from cinesort.infra.state import AtomicWriteError, atomic_write_json, atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +183,16 @@ class TmdbClient:
         statuts serveur-down (5xx/429) afin que le breaker les voie ; les 4xx
         (401 cle invalide, 404...) passent intacts pour ne pas casser les callers
         qui les gerent gracieusement (ex validate_connection).
+
+        Issue #798 : la borne anti-OOM du corps est appliquee ICI, une fois,
+        au lieu des 8 copies post-materialisation qui ne protegeaient rien.
+        `ResponseTooLargeError` derive de `ValueError` : le breaker la laisse
+        passer SANS compter d'echec (cf `CircuitBreaker.call`) — une reponse
+        aberrante n'est pas un signal « serveur en panne ».
         """
 
         def _do_get() -> requests.Response:
-            resp = self._session.get(url, params=params, timeout=self.timeout_s)
+            resp = get_bounded(self._session, url, params=params, timeout=self.timeout_s)
             if resp.status_code >= 500 or resp.status_code == 429:
                 resp.raise_for_status()
             return resp
@@ -316,37 +323,23 @@ class TmdbClient:
                 return
             self._last_save_ts = now
 
-            # Suffixe tmp UNIQUE par writer (pid+ns) : la purge concurrente au boot
-            # (thread cinesort-tmdb-purge, app.py) écrit le même cache_path. Un .tmp
-            # à nom fixe partagé permettait à un writer de tronquer le .tmp de l'autre
-            # en plein json.dump, puis promotion d'un JSON partiel via os.replace (CWE-362).
-            tmp = self.cache_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
-            # Fix audit Vague H (parite OmdbClient._save_cache_atomic) : write +
-            # flush + fsync avant rename pour eviter qu'un crash systeme entre
-            # write et os.replace ne promeuve un .tmp partiel en cache officiel
-            # (cache 50-100MB -> JSON corrompu -> re-fetch API sur tous les films).
+            # Fix #732 : le `.tmp` etait NOMME EN DUR (`cache_path.with_suffix('.tmp')`),
+            # exactement comme celui de `purge_expired_tmdb_cache` -> les deux
+            # ecrivains (cet appel + le thread daemon de purge au boot) visaient
+            # le MEME fichier intermediaire et pouvaient promouvoir le JSON
+            # partiel de l'autre (CWE-362). `atomic_write_text` fait le nom
+            # unique ET le fsync + controle de taille.
             try:
                 payload = json.dumps(self._cache, ensure_ascii=False, separators=(",", ":"))
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(payload)
-                    f.flush()
-                    os.fsync(f.fileno())  # force write to disk avant rename
-                if tmp.exists() and tmp.stat().st_size > 0:
-                    os.replace(tmp, self.cache_path)
-                    self._dirty = False
-                else:
-                    logger.warning("tmdb cache tmp write failed, keeping previous cache")
-                    if tmp.exists():
-                        with contextlib.suppress(OSError):
-                            tmp.unlink()
+                atomic_write_text(self.cache_path, payload)
+                self._dirty = False
+            except AtomicWriteError as exc:
+                logger.warning("tmdb cache tmp write failed, keeping previous cache (%s)", exc)
             except (OSError, PermissionError, ValueError) as exc:
                 logger.debug("tmdb cache save warning: %s", exc)
-                if tmp.exists():
-                    with contextlib.suppress(OSError):
-                        tmp.unlink()
 
     def flush(self) -> None:
         try:
@@ -419,9 +412,6 @@ class TmdbClient:
             return False, f"Erreur reseau: {type(e).__name__} ({host})"
 
         try:
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
         except (KeyError, TypeError, ValueError):
             data = {}
@@ -472,9 +462,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug(
                 "TMDb: search '%s' (%s) -> %d resultats (%.1fs)",
@@ -576,9 +563,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: GET /movie/%d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -727,9 +711,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_tmdb_id %d -> %d (%.1fs)", mid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -810,9 +791,6 @@ class TmdbClient:
             try:
                 r = self._http_get(url, params=params)
                 r.raise_for_status()
-                _body = getattr(r, "content", b"")
-                if _body and len(_body) > 10_000_000:
-                    raise ValueError("Response too large")
                 data = r.json()
                 logger.debug(
                     "TMDb: GET /movie/%d/alternative_titles -> %d (%.1fs)",
@@ -890,9 +868,6 @@ class TmdbClient:
         try:
             r = self._http_get(url, params=params)
             r.raise_for_status()
-            _body = getattr(r, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = r.json()
             logger.debug("TMDb: find_by_imdb_id %s -> %d (%.1fs)", iid, r.status_code, time.monotonic() - _t0)
         except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
@@ -969,9 +944,6 @@ class TmdbClient:
                 params["first_air_date_year"] = int(year)
             resp = self._http_get(f"{TMDB_API_BASE}/search/tv", params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return []
@@ -1034,9 +1006,6 @@ class TmdbClient:
             url = f"{TMDB_API_BASE}/tv/{series_id}/season/{season_number}/episode/{episode_number}"
             resp = self._http_get(url, params=params)
             resp.raise_for_status()
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
             return None
@@ -1138,16 +1107,20 @@ def purge_expired_tmdb_cache(
         # Rien a faire : pas d'ecriture inutile
         return result
 
-    # Reecriture atomique (tmp -> rename). Suffixe tmp UNIQUE (pid+ns) : cette purge
-    # tourne dans un thread daemon au boot pendant qu'un TmdbClient applicatif écrit le
-    # même cache_path ; un .tmp partagé à nom fixe corrompait le cache (CWE-362).
-    tmp = cache_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
+    # Reecriture atomique ET durable (#622 fsync manquant, #732 tmp partage).
+    # Cette fonction tourne dans un thread daemon au BOOT, en concurrence avec
+    # `TmdbClient._save_cache_atomic` : les deux utilisaient le meme
+    # `cache_path.with_suffix('.tmp')` et n'avaient donc aucune isolation.
+    #
+    # `indent=None` : MEME forme compacte que `TmdbClient._save_cache_atomic`
+    # (separators serres, cf PERF-6 quinze lignes plus haut). Le defaut
+    # `indent=2` d'`atomic_write_json` doublait le fichier a chaque purge —
+    # un cache de 18 Mo repassait a ~36 Mo, relu tel quel par `_load_cache` au
+    # demarrage suivant et desormais fsynce en entier. Le `indent=2` est
+    # anterieur a cette PR, mais elle reecrit cette ligne et fsync son resultat.
     try:
-        tmp.write_text(json.dumps(new_cache, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, cache_path)
+        atomic_write_json(cache_path, new_cache, indent=None)
     except (OSError, PermissionError) as exc:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
         result["error"] = f"write_error: {exc}"
         return result
 
