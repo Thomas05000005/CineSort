@@ -33,6 +33,44 @@ class DevToolingContractsTests(unittest.TestCase):
         self.assertIn("coverage>=", self.requirements_dev)
         self.assertIn("pre-commit>=", self.requirements_dev)
 
+    def test_le_plugin_pytest_playwright_accompagne_la_bibliotheque(self) -> None:
+        """La fixture `page` vient du PLUGIN, pas de la bibliotheque `playwright`.
+
+        Ce sont deux paquets distincts, et n'installer que le second ne produit
+        pas un echec lisible : les tests marques `runtime` partent en
+        `ERROR at setup` avec « fixture 'page' not found ». Or le CLAUDE.md du
+        depot le rappelle — un `ERROR at setup` n'apparait dans AUCUN grep
+        `FAILED`.
+
+        MESURE qui motive ce garde (2026-08-05) : le quality gate `verify`
+        (`windows-ci`, qui installe depuis `requirements-dev.txt`) etait rouge
+        sur les **29 derniers runs de `main`**, et sur les 5 PR de la journee,
+        pour cette seule raison :
+
+            8417 passed, 18 skipped, 2 xfailed, 52 errors
+
+        Zero echec, 52 erreurs. `ci.yml` installait le plugin a la main de son
+        cote (`uv pip install --system pytest-playwright`), donc son propre
+        `Lint, Tests, Build` restait vert : le manque etait invisible la ou on
+        regardait, et fatal la ou on ne regardait plus.
+
+        Le test porte sur l'ENVIRONNEMENT, pas sur le texte d'un fichier : la ou
+        `playwright` est installe, le plugin doit l'etre aussi. Il aurait donc
+        nomme la cause en une ligne au lieu de 52 erreurs opaques.
+        """
+        import importlib.util
+
+        if importlib.util.find_spec("playwright") is None:
+            self.skipTest("playwright absent : environnement sans les extras dev")
+        self.assertIsNotNone(
+            importlib.util.find_spec("pytest_playwright"),
+            "`playwright` est installe mais pas `pytest-playwright` : la fixture "
+            "`page` sera introuvable et tous les tests `runtime` partiront en "
+            "ERROR at setup, sans apparaitre dans un grep FAILED. "
+            "Declarer `pytest-playwright` dans requirements-dev.txt ET dans "
+            "pyproject.toml [project.optional-dependencies].dev.",
+        )
+
     def test_ruff_version_is_identical_everywhere(self) -> None:
         """Le hook pre-commit et requirements-dev doivent viser LA MEME version.
 

@@ -3,6 +3,14 @@
 # scripts (capture_readme_screenshots, test_axe_dashboard). Etaient anciennement
 # dans requirements-preview.txt avant la suppression du mode preview (PR #257).
 playwright>=1.60.0,<2
+# La bibliotheque ci-dessus ne fournit PAS la fixture `page` : elle vient du
+# PLUGIN pytest, qui est un paquet distinct. Sans lui, les tests `runtime`
+# ne echouent pas — ils ERROR AU SETUP (« fixture 'page' not found »), ce que
+# ne montre aucun grep `FAILED`. MESURE du 2026-08-05 : le quality gate
+# `verify` (windows-ci) etait rouge sur les **29 derniers runs de main**,
+# uniquement pour cette raison — 8 417 tests verts, 0 echec, 52 erreurs.
+# `ci.yml` l'installait a la main de son cote, ce qui masquait le manque.
+pytest-playwright>=0.8.0,<0.9
 Pillow>=12.3
 # Epingle exactement : cf. justification dans pyproject.toml (une borne
 # flottante a mis la CI au rouge sur main le 2026-08-02).
