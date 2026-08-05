@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set
 
-from cinesort.app._dir_utils import is_dir_empty, is_reparse_point
+from cinesort.app._dir_utils import is_dir_empty, is_reparse_point, stat_is_reparse_point
 from cinesort.app.move_journal import atomic_move
 from cinesort.domain.core import (
     RESIDUAL_IMAGE_EXTS,
@@ -92,17 +93,35 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
     saw_file = False
     try:
         for item in path.rglob("*"):
-            if is_reparse_point(item):
+            # Issue #567 — UN SEUL `lstat()` par entree. La version precedente en
+            # faisait quatre pour un fichier (`is_reparse_point` + `is_dir` +
+            # `is_file` + `stat().st_size`), chacun etant un aller-retour reseau
+            # sur une bibliotheque SMB/NAS. Les quatre questions se repondent sur
+            # le meme `stat_result`, sans changer un seul verdict :
+            #   - le point d'analyse est ecarte EN PREMIER, donc au-dela de ce
+            #     test `lstat()` et `stat()` decrivent la meme entree (type,
+            #     taille) — d'ou l'equivalence avec `is_dir`/`is_file`/`st_size` ;
+            #   - un `lstat()` qui echoue rendait deja `is_reparse_point` True,
+            #     donc "symlink" reste la reponse au sens restrictif.
+            try:
+                st = item.lstat()
+            except (OSError, ValueError):
                 return "symlink"
-            if item.is_dir():
+            if stat_is_reparse_point(st):
+                return "symlink"
+            if stat.S_ISDIR(st.st_mode):
                 continue
-            if not item.is_file():
+            if not stat.S_ISREG(st.st_mode):
                 return "ambiguous"
             saw_file = True
             ext = item.suffix.lower()
+            # `{".iso"}` n'alloue rien : l'operande droite d'un `in` litteral est
+            # compilee en `frozenset` CONSTANT (verifie : `co_consts` contient
+            # `frozenset({'.iso'})` et le bytecode ne contient aucun `BUILD_SET`).
+            # La hisser au niveau module ne gagnerait donc rien.
             if ext in cfg.video_exts or ext in {".iso"}:
                 return "has_video"
-            if item.stat().st_size > MAX_RESIDUAL_SIDECAR_BYTES:
+            if st.st_size > MAX_RESIDUAL_SIDECAR_BYTES:
                 return "ambiguous"
             if ext not in allowed_exts:
                 return "ambiguous"
