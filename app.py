@@ -211,6 +211,23 @@ def _purge_tmdb_cache_in_background(api: CineSortApi, settings: dict | None = No
             if state_dir is None:
                 _log.debug("V5-03 : state_dir indisponible, purge skip")
                 return
+            # Balayage des `.tmp` d'ecriture atomique orphelins, AVANT la purge
+            # (et avant tout `return` d'erreur de celle-ci : c'est ce balayage
+            # qui rend le disque, il ne doit pas dependre du succes du reste).
+            #
+            # Un `.tmp` de nom UNIQUE n'est jamais reecrase : chaque crash en
+            # laisse un DEFINITIF, la ou l'ancien `.tmp` fixe etait recycle et
+            # bornait donc le residu a un seul. `<state_dir>/tmdb_cache.json`
+            # pese 20 a 100 Mo et est reecrit toutes les 2 s pendant un scan :
+            # sans ce balayage, chaque kill coute un fichier de cette taille, a
+            # vie. Recursif : `cache/posters/` (aucun pruner) et `runs/` sont
+            # sous `state_dir`.
+            from cinesort.infra.state import sweep_atomic_tmp_orphans
+
+            swept = sweep_atomic_tmp_orphans(Path(state_dir), recursive=True)
+            if swept:
+                _log.info("V5-03 : %d fichier(s) .tmp orphelin(s) balaye(s) sous %s", swept, state_dir)
+
             cache_path = Path(state_dir) / "tmdb_cache.json"
             result = purge_expired_tmdb_cache(cache_path, ttl_days=ttl_days)
             if result.get("error"):

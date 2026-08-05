@@ -340,6 +340,12 @@ def _reconciled_row_flags(row: Any) -> List[str]:
     dans find_duplicate_targets) ; un faux 'subtitle_missing_fr' du a du FR MUXE
     n'est donc pas reconciliable ici. Il l'est deja sur les ecrans Verification /
     Bibliotheque qui, eux, ont le quality_report.
+
+    F12 (2026-08-03) : `subtitle_forced_only_<lang>` traverse ici INTACT, et c'est
+    voulu. Sa reconciliation demande de savoir si une piste MUXEE COMPLETE existe
+    (clef `forced` des pistes embarquees), information absente de cette couche ;
+    `subtitle_languages` contient justement la langue du fichier FORCE, s'en servir
+    effacerait le flag a tous les coups. Sans preuve du contraire on garde l'alerte.
     """
     present: set = set()
     for lang in getattr(row, "subtitle_languages", None) or []:
