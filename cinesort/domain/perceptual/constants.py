@@ -343,8 +343,14 @@ DV_QUALITY_SCORE = {
 FAKE_4K_FFT_HF_CUTOFF_RATIO = 0.25  # dernier quart de Nyquist spatial
 FAKE_4K_FFT_THRESHOLD_NATIVE = 0.18  # >= : 4K native
 FAKE_4K_FFT_THRESHOLD_AMBIGUOUS = 0.08  # < : fake 4K bicubique
-FAKE_4K_FFT_MIN_Y_AVG = 20.0  # skip frames trop sombres
-FAKE_4K_FFT_MIN_VARIANCE = 200.0  # skip frames uniformes
+FAKE_4K_FFT_MIN_Y_AVG = 20.0  # skip frames trop sombres (echelle 8 bits, 0-255)
+FAKE_4K_FFT_MIN_VARIANCE = 200.0  # skip frames uniformes (echelle 8 bits)
+# Equivalents 10 bits : parse_raw_frame rend des Y sur 0-1023, donc y_avg x4 et
+# variance x16 a contenu identique. Sans ces deux seuils, les deux gardes
+# ci-dessus etaient quasi inoperantes sur le 10 bits — c'est-a-dire sur la
+# quasi-totalite des UHD, exactement la population que §7 doit juger (#823).
+FAKE_4K_FFT_MIN_Y_AVG_10BIT = 80.0
+FAKE_4K_FFT_MIN_VARIANCE_10BIT = 3200.0
 FAKE_4K_MIN_HEIGHT = 1800  # skip si pas 4K
 FAKE_4K_VERDICT_MIN_HEIGHT = 2100  # seuil verdict cross-metrique (UHD confirme)
 
@@ -388,6 +394,16 @@ GRAIN_ERA_V2 = {
     "digital_modern": 2021,
     "digital_hdr_era": 9999,
 }
+
+# Eres "master pellicule vintage" au sens de la regle 9 du score composite V2
+# (tolerance : le grain y est attendu, on ne le compte donc pas deux fois).
+# Le set est celui de la spec (docs/internal/plans/NOTES_RECHERCHE_v7_5_0.md,
+# "Regle 9 — Vintage master").
+# INVARIANT : sous-ensemble strict des cles de GRAIN_ERA_V2. L'audit #444 avait
+# trouve la regle ecrite sur "35mm_golden"/"early_color", deux valeurs qui
+# n'existent nulle part -> regle morte pour toute ere autre que 16mm_era.
+# `test_vintage_eras_all_exist_in_grain_era_v2` verrouille cet invariant.
+GRAIN_VINTAGE_ERAS_V2 = ("16mm_era", "35mm_classic")
 
 # Profils attendus par ere
 GRAIN_PROFILE_BY_ERA_V2 = {

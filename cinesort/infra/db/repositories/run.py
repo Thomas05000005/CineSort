@@ -33,6 +33,57 @@ from cinesort.infra.db.repositories._base import _BaseRepository
 # library_support._resolve_run_id (les deux surfaces convergent sur le run de SCAN).
 _NOT_RESCAN_TRACKING_SQL = "COALESCE(config_json, '') NOT LIKE '%\"rescan_run_id\"%'"
 
+# Marqueurs SQLite d'une violation de la PRIMARY KEY `runs.run_id`.
+_RUN_ID_CONFLICT_MARKERS = ("runs.run_id",)
+
+
+class RunIdConflictError(sqlite3.IntegrityError):
+    """Le `run_id` demande existe deja dans `runs` : AUCUNE ligne n'a ete creee.
+
+    Arbitrage explicite (defense en profondeur) : le repository ECHOUE FORT, il
+    ne re-genere PAS d'identifiant a la place de l'appelant.
+
+    Pourquoi ne pas re-generer ici : le run_id n'est pas qu'une cle de
+    journalisation, c'est aussi le nom du dossier `runs/tri_films_<run_id>`
+    deja cree sur disque, la cle du `RunState` en memoire et la valeur capturee
+    par la closure du job. Un identifiant substitue en douce par la couche
+    infra desynchroniserait la ligne `runs` du dossier et du worker — c'est
+    exactement le defaut de « run fantome » que ce lot corrige. Seul
+    l'orchestrateur (`JobRunner.start_job`) connait ces invariants et peut
+    decider de retenter ou d'abandonner.
+
+    Pourquoi ne pas non plus absorber l'erreur (`INSERT OR IGNORE` / `OR
+    REPLACE`) : ce serait transformer un echec de journalisation en succes
+    silencieux. `OR IGNORE` rendrait un run sans ligne `runs`, `OR REPLACE`
+    ECRASERAIT le run precedent et, via les trois FK `ON DELETE CASCADE` qui
+    pointent sur `runs(run_id)` — `errors`, `quality_reports` et `anomalies`,
+    posees par `migrations/021_fk_cascade.sql` — detruirait ses erreurs, ses
+    rapports qualite et ses anomalies.
+
+    Ce chiffre est MESURE, pas estime : `PRAGMA foreign_key_list` sur une base
+    reellement initialisee, verrouille par `RunsSchemaDocumentationTests`. Il
+    disait « six » — le compte des tables PORTANT une colonne `run_id`, qui
+    n'est pas la meme chose : `film_marked_for_deletion`, `film_tmdb_overrides`
+    et `film_decisions_v2` n'ont AUCUNE FK cascade. Un chiffre faux sur
+    l'argument qui porte l'arbitrage sera cite plus tard comme s'il avait ete
+    verifie.
+
+    Herite de `sqlite3.IntegrityError` : les appelants existants qui
+    l'attrapent (start_job, demo_support via `sqlite3.Error`) restent valides.
+    """
+
+    def __init__(self, run_id: str, cause: BaseException) -> None:
+        super().__init__(
+            f"run_id deja utilise : {run_id!r} — aucune ligne 'runs' creee, "
+            f"le run ne doit pas demarrer sous cet identifiant ({cause})"
+        )
+        self.run_id = run_id
+
+
+def _is_run_id_conflict(exc: sqlite3.IntegrityError) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _RUN_ID_CONFLICT_MARKERS)
+
 
 class RunRepository(_BaseRepository):
     """Repository pour les tables runs + errors."""
@@ -84,6 +135,13 @@ class RunRepository(_BaseRepository):
                     state_dir=str(state_dir),
                     config_json=payload,
                 )
+        except sqlite3.IntegrityError as exc:
+            # Defense en profondeur : la PRIMARY KEY est la seule garde ATOMIQUE
+            # cote base. On la traduit en erreur TYPEE et explicite, jamais en
+            # succes silencieux (cf. RunIdConflictError pour l'arbitrage).
+            if _is_run_id_conflict(exc):
+                raise RunIdConflictError(run_id, exc) from exc
+            raise
         except (KeyError, TypeError, ValueError, json.JSONDecodeError, sqlite3.OperationalError) as exc:
             if not (isinstance(exc, sqlite3.OperationalError) and self._is_missing_table_error(exc, "runs")):
                 raise
@@ -91,15 +149,20 @@ class RunRepository(_BaseRepository):
             # cree tous les schemas depuis migrations. Dans _BaseRepository,
             # self._store est le SQLiteStore.
             self._store.initialize()
-            with self._managed_conn() as conn:
-                self._insert_pending_run_row(
-                    conn,
-                    run_id=run_id,
-                    created_ts=now,
-                    root=str(root),
-                    state_dir=str(state_dir),
-                    config_json=payload,
-                )
+            try:
+                with self._managed_conn() as conn:
+                    self._insert_pending_run_row(
+                        conn,
+                        run_id=run_id,
+                        created_ts=now,
+                        root=str(root),
+                        state_dir=str(state_dir),
+                        config_json=payload,
+                    )
+            except sqlite3.IntegrityError as exc2:
+                if _is_run_id_conflict(exc2):
+                    raise RunIdConflictError(run_id, exc2) from exc2
+                raise
 
     def mark_run_running(self, run_id: str, *, started_ts: Optional[float] = None) -> None:
         """Bascule le run en statut RUNNING et enregistre `started_ts`."""

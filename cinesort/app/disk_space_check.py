@@ -116,11 +116,25 @@ def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     non plus quand `quarantine_unapproved` est actif : la quarantaine les
     deplace sous `<root>/_review/`, donc sur le volume que l'on mesure — les
     compter reviendrait a facturer deux fois le meme volume.
+
+    On ne somme donc QUE les rows explicitement approuvees. Une row au `row_id`
+    vide ne peut par construction jamais figurer dans `approved_keys` (les
+    cles viennent des decisions), donc elle est exclue — l'ancien garde
+    `if rid and rid not in approved_keys` la laissait passer et gonflait
+    l'estimation, jusqu'a un faux "espace disque insuffisant" qui BLOQUE
+    l'apply (#698). Cf la regle de revue "sentinelle falsy" dans
+    cinesort/domain/conversions.py.
     """
     total = 0
     for row in rows or []:
         rid = str(getattr(row, "row_id", "") or "")
-        if rid and rid not in approved_keys:
+        # Ce filtre doit rester EN AMONT de `_row_estimated_size` : depuis
+        # #796 celui-ci parcourt l'arborescence (`_dir_tree_size`). Une row
+        # ecartee ici ne declenche donc aucun `rglob` — ce qui compte pour un
+        # film pose a la racine, dont le `folder` EST la racine de la
+        # bibliotheque : la sommer reviendrait a facturer toute la
+        # bibliotheque, en plus d'un parcours complet du disque par row.
+        if rid not in approved_keys:
             continue
         total += _row_estimated_size(row)
     return total
