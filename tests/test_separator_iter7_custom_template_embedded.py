@@ -21,7 +21,11 @@ existants qui embarquent leur propre separateur litteral DOIVENT rester
 strictement invariants — c'est la garantie qui evite de casser les
 installations utilisateurs.
 
-Pattern reference : test_separator_iter7.py + test_lowercase_extensions_iter7_custom_template.py.
+Pattern reference : test_separator_iter7.py.
+
+NB : la garde jumelle `lowercase_extensions` a disparu avec le reglage lui-meme
+(il ne servait qu'a renommer le fichier video, cf. regle inviolable n1). Voir
+`test_never_rename_video_file.py` pour la garde « template custom = DOSSIER ».
 """
 
 from __future__ import annotations
