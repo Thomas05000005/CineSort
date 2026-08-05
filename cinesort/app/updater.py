@@ -67,11 +67,21 @@ def _parse_version(version: str) -> Tuple[int, ...]:
 
 
 def _compare_versions(current: str, latest: str) -> bool:
-    """True si latest > current (semver-aware, sans dependance externe)."""
+    """True si latest > current (semver-aware, sans dependance externe).
+
+    Les tuples sont normalises a la meme longueur AVANT comparaison, sinon
+    `(7, 6, 0) > (7, 6)` vaudrait True en Python alors que '7.6.0' et '7.6'
+    sont semantiquement identiques (faux positif de mise a jour disponible).
+    """
     try:
-        return _parse_version(latest) > _parse_version(current)
+        cur = _parse_version(current)
+        lat = _parse_version(latest)
     except (TypeError, AttributeError):
-        return bool(latest) and latest != current and latest > (current or "")
+        return bool(latest) and latest != current
+    width = max(len(cur), len(lat))
+    cur_padded = cur + (0,) * (width - len(cur))
+    lat_padded = lat + (0,) * (width - len(lat))
+    return lat_padded > cur_padded
 
 
 def check_for_updates(

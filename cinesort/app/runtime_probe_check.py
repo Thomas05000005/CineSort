@@ -203,6 +203,9 @@ def cross_check_rows_with_probe(
     n_soft_match = 0
     n_mismatch = 0
     n_no_data = 0
+    # Distinct de n_no_data : "pas de duree" est un cas NORMAL (probe muet),
+    # "duree illisible" est une CORRUPTION de cache qui merite d'etre vue.
+    n_bad_duration = 0
 
     for row in rows:
         if should_cancel and should_cancel():
@@ -278,15 +281,37 @@ def cross_check_rows_with_probe(
             continue
         if not probe_result or not probe_result.get("ok"):
             continue
-        normalized = probe_result.get("normalized") if isinstance(probe_result.get("normalized"), dict) else {}
+        normalized_raw = probe_result.get("normalized")
+        normalized = normalized_raw if isinstance(normalized_raw, dict) else {}
         duration_s = normalized.get("duration_s")
-        if not duration_s or float(duration_s) <= 0:
+        # Cf #541 : `_normalize_merge.py:95` n'ecrit QUE `float | None`, mais une
+        # ligne de cache probe relue telle quelle (`infra/probe/service.py:409`
+        # et `:621`, sans revalidation) peut venir d'un schema anterieur ou d'une
+        # base editee a la main, et rendre une chaine ("N/A") ou une structure.
+        # Sans garde, le ValueError remonte a `run_flow_support.py` qui l'avale
+        # dans son `except (..., ValueError)` : UNE row corrompue supprime alors
+        # la phase 6.1.b pour la bibliotheque ENTIERE, sans la moindre trace.
+        # On isole donc la row -- et on la SIGNALE : un cache corrompu qui
+        # degrade le scan en silence est indiagnosticable cote utilisateur.
+        try:
+            file_runtime_min = float(duration_s) / 60.0 if duration_s else 0.0
+        except (TypeError, ValueError):
+            # TypeError volontairement inclus : une valeur de cache non scalaire
+            # (liste/dict issus d'un JSON malforme) est truthy et fait echouer
+            # `float()` par TypeError, pas par ValueError.
+            n_bad_duration += 1
+            logger.warning(
+                "runtime_probe_check: duration_s illisible (%r) dans le cache probe de %s -- row ignoree",
+                duration_s,
+                media_path,
+            )
+            continue
+        if file_runtime_min <= 0:
             n_no_data += 1
             continue
 
         # Apply runtime matching
         edition_label = getattr(row, "edition", None)
-        file_runtime_min = float(duration_s) / 60.0
         scored = [
             score_runtime_delta(
                 file_runtime_min=file_runtime_min,
@@ -368,11 +393,15 @@ def cross_check_rows_with_probe(
             n_soft_match += 1
 
     if log:
-        log(
-            "INFO",
+        summary = (
             f"Phase 6.1.b probe cross-check : {n_checked} films verifies, "
             f"{n_full_match} match parfait, {n_soft_match} acceptable, "
-            f"{n_mismatch} mismatch detectes, {n_no_data} sans duree probable",
+            f"{n_mismatch} mismatch detectes, {n_no_data} sans duree probable"
         )
+        if n_bad_duration:
+            # Ajoute UNIQUEMENT si non nul : le cas nominal garde son message
+            # historique, et un compteur a 0 ne dilue pas le rapport.
+            summary += f", {n_bad_duration} duree de cache illisible (re-sonder ces films)"
+        log("INFO", summary)
 
     return n_checked
