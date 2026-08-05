@@ -68,12 +68,17 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     #     `apply_core.py:15` importe deja `cinesort.app.cleanup`. Un import de
     #     tete casserait l'import du paquet.
     #   - `apply_batches_reconciliation` -> `apply_audit.read_apply_audit` : PAS
-    #     de cycle (`apply_audit` n'importe que la stdlib). Le commentaire du
-    #     code dit « eviter de charger au boot », mais la vraie raison est le
-    #     `except ImportError` juste en dessous : sur un build EXE AMPUTE, un
-    #     import de tete tuerait tout le module de reconciliation, la ou l'import
-    #     local ne degrade que la lecture du marqueur. Conserve pour cette
-    #     raison-la, pas pour la raison affichee.
+    #     de cycle. MAJ a la fusion avec main : `apply_audit` n'importe plus
+    #     seulement la stdlib, il tire `infra.log_scrubber` (issue #414, scrub
+    #     des secrets du journal JSONL) qui tire `infra.log_context`. Le verdict
+    #     ne change pas — le contrat `infra_bounded` interdit a `infra` de
+    #     remonter vers `app`, donc toujours aucun cycle a contourner. Le
+    #     commentaire du code dit « eviter de charger au boot », mais la vraie
+    #     raison est le `except ImportError` juste en dessous : sur un build EXE
+    #     AMPUTE, un import de tete tuerait tout le module de reconciliation, la
+    #     ou l'import local ne degrade que la lecture du marqueur. Cette raison
+    #     se RENFORCE avec la chaine d'import allongee. Conserve pour elle, pas
+    #     pour la raison affichee.
     "app": 25,
     "data": 0,
     "domain": 16,
@@ -82,12 +87,27 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # dans `film_support` (PR#853). Ce n'est pas un choix de confort : les deux
     # modules se referencent mutuellement, un import de tete cree un cycle a
     # l'import du paquet. Justification detaillee dans REFACTOR_PLAN_84.md.
-    # Le TOTAL reste a 170 : la couche `app` rend le point que `ui` prend.
-    "ui": 111,
+    # A cette date-la le TOTAL restait a 170, `app` rendant le point que `ui`
+    # prenait. Ce n'est plus vrai : PR#847 (+2 ici) et PR#852 (+2 sur `app`)
+    # l'ont porte a 174. La compensation etait une coincidence, pas une regle —
+    # seule la borne PAR COUCHE fait foi.
+    # 111 -> 113 (PR#847, +2) : `quality_report_support` importe tardivement
+    # `run_read_support.full_langs_from_embedded` et
+    # `domain.subtitle_helpers._normalize_iso639`.
+    #
+    # Honnetement : je n'ai PAS pu etablir de cycle dur pour ces deux-la —
+    # `run_read_support` n'importe pas `quality_report_support` en retour. Ils
+    # suivent le motif deja etabli dans le module (`dashboard_support.py:300-309`
+    # importe `run_read_support` tardivement a QUATRE endroits), donc les
+    # convertir isolement n'aurait pas de sens : c'est le motif entier qui
+    # demande un nettoyage, et il depasse le perimetre de cette PR.
+    # A reprendre dans le chantier de conversion de la couche `ui`.
+    "ui": 113,
 }
 
-# Borne globale = somme des bornes par couche (170). Gardee pour que le
-# message d'erreur donne l'ordre de grandeur, jamais saisie a la main.
+# Borne globale = somme des bornes par couche (174 apres PR#847 et PR#852).
+# Gardee pour que le message d'erreur donne l'ordre de grandeur, jamais saisie
+# a la main : c'est la somme qui suit les bornes, jamais l'inverse.
 MAX_LAZY_IMPORTS = sum(MAX_LAZY_IMPORTS_BY_LAYER.values())
 
 

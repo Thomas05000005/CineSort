@@ -9,7 +9,7 @@ est fourni — fix Vague F 2026-05-25 (v1.5.3) : 853 films flagges a tort en
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -214,6 +214,13 @@ class SubtitleReport:
     missing_languages: List[str]  # langues attendues absentes
     duplicate_languages: List[str]  # langues detectees en double
     details: List[SubtitleInfo]  # liste complete
+    # ARBITRAGE F12 tranche le 2026-08-03 (cf. build_subtitle_report) : langues
+    # ATTENDUES presentes UNIQUEMENT sous forme de piste FORCEE (dialogues en
+    # langue etrangere) — donc sans piste complete. Disjoint de
+    # `missing_languages` par construction : une langue forced-only EST detectee.
+    # Champ ajoute EN DERNIER avec un defaut : `SubtitleReport(0, [], [], 0, [], [], [])`
+    # (construction positionnelle a 7 arguments) reste valide.
+    forced_only_languages: List[str] = field(default_factory=list)
 
 
 # -- Fonctions publiques -----------------------------------------------
@@ -349,6 +356,9 @@ def build_subtitle_report(
     3. Detecte les langues EXTERNES (suffixe) + EMBARQUEES (probe ffprobe/mediainfo)
     4. Verifie les langues attendues vs union(externes, embarquees)
     5. Detecte les orphelins (externes) et doublons (externes)
+    6. Detecte les langues attendues couvertes SEULEMENT par une piste FORCEE
+       (`forced_only_languages`, arbitrage F12 tranche le 2026-08-03 — voir le
+       commentaire detaille au-dessus du calcul des langues externes)
 
     Fix Vague F 2026-05-25 (v1.5.3) : `embedded_subtitles` (optionnel, default
     None pour backward-compat) est la liste `normalized_probe["subtitles"]`,
@@ -366,23 +376,43 @@ def build_subtitle_report(
 
     # Langues externes (fichiers .srt/.ass/... a cote du .mkv)
     #
-    # ARBITRAGE PRODUIT EN ATTENTE (revue adverse F12, non tranche ici) : un
-    # sous-titre FORCE (dialogues etrangers uniquement) est compte ci-dessous
-    # comme la langue PRESENTE, alors qu'il est exclu du comptage des doublons
-    # plus bas. Un film qui n'a QUE '.fr.forced.srt' perd donc le signal
-    # « sous-titre FR manquant » bien qu'il n'ait aucune piste FR complete.
-    # Le finding F08..F12 d'origine qualifiait explicitement ce flag de FAUX sur
-    # '.fr.forced.srt' : changer de convention est une decision produit, et la
-    # variante propre (flag dedie `subtitle_forced_only_<lang>`) demande de
-    # cabler un nouveau libelle cote dashboard/verification. A trancher avant de
-    # toucher a cette ligne.
-
-    external_languages: Set[str] = {s.language for s in matched if s.language}
+    # ARBITRAGE PRODUIT TRANCHE le 2026-08-03 (revue adverse F12) : un sous-titre
+    # FORCE ne traduit que les passages en langue etrangere — ce n'est PAS une
+    # piste complete. Un dossier qui ne contient QUE 'Film.fr.forced.srt' ne doit
+    # donc plus laisser croire que le FR est couvert.
+    #
+    # Option ECARTEE — « compter un .forced comme absent » (le pousser dans
+    # `missing_languages`) : elle serait INOPERANTE. Le fichier EST un sous-titre
+    # 'fr', donc 'fr' reste dans `languages`, et TOUS les consommateurs aval
+    # jettent le signal « manquant » des que la langue figure parmi les langues
+    # presentes — le FLAG (ui.api.run_read_support.reconcile_subtitle_flags,
+    # domain.duplicate_support._reconciled_row_flags, ui.api.dashboard_support
+    # ._build_row_payload) comme la LISTE (meme _build_row_payload,
+    # ui.api.library_support._build_library_rows:395). L'alerte serait posee au
+    # scan puis effacee avant d'atteindre le moindre ecran. La rendre visible
+    # imposerait de retirer AUSSI 'fr' de
+    # `languages`, c.-a-d. d'affirmer que le dossier n'a aucun sous-titre FR alors
+    # qu'il en a un : perte d'information seche (affichage Bibliotheque, compteurs
+    # « sans subs FR », doublons de langue).
+    #
+    # Option RETENUE — signal ORTHOGONAL `forced_only_languages` -> flag
+    # `subtitle_forced_only_<lang>` : `languages` et `missing_languages` restent
+    # exacts, et le nouveau prefixe traverse intact les reconciliations ci-dessus,
+    # qui ne connaissent que `subtitle_missing_`.
+    external_languages: Set[str] = set()
+    external_full_languages: Set[str] = set()  # langues avec une piste NON forcee
+    for sub in matched:
+        if not sub.language:
+            continue
+        external_languages.add(sub.language)
+        if "forced" not in _subtitle_flag_tokens(sub.filename, video_stem=video_stem):
+            external_full_languages.add(sub.language)
 
     # Langues embarquees (pistes subtitle dans le conteneur)
     # Fix audit 2026-05-25 (v1.5.3) Vague F : auparavant ignorees → faux
     # positifs "subtitle_missing_fr" sur 853 films avec FR embarque.
     embedded_languages: Set[str] = set()
+    embedded_full_languages: Set[str] = set()
     if embedded_subtitles:
         for track in embedded_subtitles:
             if not isinstance(track, dict):
@@ -394,8 +424,15 @@ def build_subtitle_report(
             normalized = _normalize_iso639(raw_lang)
             if normalized:
                 embedded_languages.add(normalized)
+                # `forced` est expose par les deux normaliseurs de probe
+                # (_normalize_ffprobe : tag OU disposition ; _normalize_mediainfo).
+                # Absent/None → piste consideree COMPLETE (on n'invente pas un
+                # defaut a partir d'une info manquante).
+                if not track.get("forced"):
+                    embedded_full_languages.add(normalized)
 
     all_languages = external_languages | embedded_languages
+    full_languages = external_full_languages | embedded_full_languages
 
     languages = sorted(all_languages)
     formats = sorted({s.ext for s in matched})
@@ -413,6 +450,12 @@ def build_subtitle_report(
         (raw, _normalize_iso639(raw)) for raw in (lang.strip() for lang in (expected_languages or []) if lang) if raw
     ]
     missing = [(norm or raw) for raw, norm in expected_pairs if (norm or raw.lower()) not in all_languages]
+
+    # Langues ATTENDUES detectees mais SANS piste complete (que du .forced).
+    # Restreint aux langues attendues, comme `missing` : un '.en.forced.srt' sur
+    # un film ou l'EN n'est pas attendu n'interesse pas l'utilisateur.
+    expected_keys = {(norm or raw.lower()) for raw, norm in expected_pairs}
+    forced_only = sorted((expected_keys & all_languages) - full_languages)
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).
@@ -439,4 +482,5 @@ def build_subtitle_report(
         missing_languages=missing,
         duplicate_languages=duplicates,
         details=matched,
+        forced_only_languages=forced_only,
     )

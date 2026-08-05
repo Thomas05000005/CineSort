@@ -41,7 +41,22 @@ def is_under_collection_root(
     except (ValueError, TypeError):
         return False
     parts = [part.lower() for part in rel.parts]
-    return len(parts) >= 1 and parts[0] == str(cfg.collection_root_name or "").lower()
+    if not parts:
+        # REVUE 2026-08-03 : `folder` EST la racine de la bibliotheque
+        # (`rel` == "."), cas des films poses EN VRAC directement a la racine
+        # (plan_support_core force alors kind='collection' avec folder == root).
+        # Les 3 appelants utilisent ce predicat comme "ce dossier doit-il etre
+        # redirige sous <root>/<collection_root_name>/ ?" et la reponse pour la
+        # racine est NON, absolument : la cible serait un DESCENDANT de la
+        # source. Repondre False ici menait a deux issues, les deux cassees :
+        # move_collection_folder -> shutil "Cannot move a directory into
+        # itself" (apply bloque a chaque relance, films jamais ranges), et
+        # merge_dir_safe quand <root>/<collection>/<nom racine> existait deja
+        # -> la bibliotheque ENTIERE videe dans _review/_leftovers avec un
+        # apply retournant errors=0. Les films de la racine sont ranges par la
+        # boucle apply normale, qui cree <root>/<Titre (Annee)>/.
+        return True
+    return parts[0] == str(cfg.collection_root_name or "").lower()
 
 
 def movie_dir_title_year(name: str) -> Optional[Tuple[str, int]]:
@@ -340,6 +355,12 @@ def _reconciled_row_flags(row: Any) -> List[str]:
     dans find_duplicate_targets) ; un faux 'subtitle_missing_fr' du a du FR MUXE
     n'est donc pas reconciliable ici. Il l'est deja sur les ecrans Verification /
     Bibliotheque qui, eux, ont le quality_report.
+
+    F12 (2026-08-03) : `subtitle_forced_only_<lang>` traverse ici INTACT, et c'est
+    voulu. Sa reconciliation demande de savoir si une piste MUXEE COMPLETE existe
+    (clef `forced` des pistes embarquees), information absente de cette couche ;
+    `subtitle_languages` contient justement la langue du fichier FORCE, s'en servir
+    effacerait le flag a tous les coups. Sans preuve du contraire on garde l'alerte.
     """
     present: set = set()
     for lang in getattr(row, "subtitle_languages", None) or []:
