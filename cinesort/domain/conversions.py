@@ -34,10 +34,24 @@ from typing import Any, Optional
 
 
 def to_int(value: Any, default: int) -> int:
-    """Convert *value* to int, returning *default* on failure."""
+    """Convert *value* to int, returning *default* on failure.
+
+    `OverflowError` fait partie du tuple, et c'est le meme piege que la regle 4
+    du CLAUDE.md (`sqlite3.Error` n'herite pas d'`OSError`) : il derive
+    d'`ArithmeticError`, PAS de `ValueError`. Le cas est ATTEIGNABLE parce que
+    `json.loads` accepte `Infinity` et `NaN` par defaut (extension non
+    standard), et que ce helper est nourri de valeurs persistees :
+
+        int(float("nan"))  -> ValueError      (attrape de longue date)
+        int(float("inf"))  -> OverflowError   (NON attrape avant ce correctif)
+
+    Sans cette entree, ce helper — 100+ sites d'appel — laissait remonter
+    l'exception au lieu de rendre `default`, ce qui contredit frontalement son
+    contrat « returning default on failure ».
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return int(default)
 
 
@@ -109,8 +123,11 @@ def to_optional_int(value: Any) -> Optional[int]:
         return value
     if isinstance(value, float):
         try:
+            # `round(inf)` leve deja OverflowError, avant meme le `int()`.
+            # Meme raison que dans `to_int` : OverflowError derive
+            # d'ArithmeticError, pas de ValueError.
             return int(round(value))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
     s = str(value)
     s_clean = s.replace(" ", " ").strip()
