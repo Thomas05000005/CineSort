@@ -37,10 +37,10 @@ from cinesort.app.merge_metadata import merge_metadata
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
-from cinesort.ui.api import run_flow_support
+from cinesort.ui.api import run_data_support, run_flow_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
-from cinesort.ui.api.settings_support import normalize_user_path
+from cinesort.ui.api.settings_support import build_cfg_from_settings, normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -807,23 +807,19 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     # `tmdb_support.enrich_tmdb_ids_by_title` : deux ecrivains reellement
     # concurrents sur le MEME chemin intermediaire (#732), sans fsync, sur le
     # fichier que l'apply relit pour renommer les dossiers. Cf write_plan_jsonl.
-    # Un SEUL import differe de `run_data_support` pour les deux symboles : le
-    # cliquet `test_lazy_imports_bounded` (main, #83) compte les *statements*,
-    # et en ajouter un second a quatre lignes du premier faisait passer la
-    # couche ui de 110 a 112 sans rien differer de plus.
-    from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
-        resync_run_state_rows,
-        write_plan_jsonl,
-    )
-
-    write_plan_jsonl(plan_jsonl, all_rows)
+    # `run_data_support` est desormais importe en TETE (#779) : mesure du graphe
+    # d'imports de tete, il ne remonte pas vers ce module, donc aucun cycle a
+    # contourner. Ecrit en MODULE-STYLE, pas par symbole : les tests posent
+    # `patch.object(run_data_support, "resync_run_state_rows")` sur le module
+    # DEFINISSANT, et un import par symbole figerait la liaison a l'import.
+    run_data_support.write_plan_jsonl(plan_jsonl, all_rows)
 
     # AUDIT 2026-07-13 (HIGH-17 / HIGH-19) : plan.jsonl vient de changer, mais le
     # snapshot memoire RunState.rows (prefere par get_plan ET par l'apply) date
     # toujours de la fin du scan -> sans cette resynchronisation, l'UI reaffiche
     # l'ancien match et l'apply renomme le dossier avec l'ANCIEN titre/annee/
     # edition (le re-scan parait sans effet jusqu'au redemarrage de l'app).
-    resync_run_state_rows(api, run_id)
+    run_data_support.resync_run_state_rows(api, run_id)
 
     if tmdb is not None:
         with contextlib.suppress(AttributeError, OSError):
@@ -922,8 +918,8 @@ def _build_cfg_for_row(api: Any, settings: Dict[str, Any], *, root: Path):
     try:
         if hasattr(api, "_build_cfg_from_settings"):
             return api._build_cfg_from_settings(settings, root)
-        from cinesort.ui.api.settings_support import build_cfg_from_settings  # noqa: PLC0415
-
+        # `settings_support` etait DEJA une dependance de tete de ce module
+        # (`normalize_user_path`) : differer ce second symbole ne differait rien (#779).
         return build_cfg_from_settings(
             settings,
             root=root,
@@ -1287,5 +1283,5 @@ def export_films(
             "format": "ndjson",
             "run_id": resolved,
         }
-    except (OSError, PermissionError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)

@@ -457,6 +457,32 @@ class _RateLimiter:
 class _CineSortHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the CineSort REST API."""
 
+    # `BaseHTTPRequestHandler` annonce HTTP/1.0 par defaut, ce qui FERME la
+    # connexion apres CHAQUE reponse : une socket neuve par requete, et une
+    # entree de plus en TIME_WAIT (4 min sur Windows).
+    #
+    # Mesure du 2026-08-05 : 24 requetes sur 6 serveurs successifs laissaient
+    # +28 sockets. Le tableau de bord, lui, interroge en boucle (compteurs de
+    # la barre laterale toutes les 30 s, notifications, badge de mise a jour) —
+    # chaque sondage brulait donc un port ephemere.
+    #
+    # C'est ce qui faisait echouer la CI (#924) : Chromium finissait par rendre
+    # `net::ERR_NO_BUFFER_SPACE` sur le chargement de `app.js`, donc aucun JS
+    # n'etait evalue et le shell restait cache. Le serveur, lui, ACCEPTAIT
+    # encore — ce qui a longtemps fait chercher au mauvais endroit.
+    #
+    # HTTP/1.1 exige un `Content-Length` exact sur chaque reponse a corps.
+    # Verifie site par site avant ce changement : 6 `send_response(...)`, tous
+    # suivis d'un `Content-Length`, sauf le `204 No Content` du preflight CORS
+    # — qui n'a PAS de corps, donc conforme.
+    protocol_version = "HTTP/1.1"
+
+    # Corollaire OBLIGATOIRE du keep-alive : sans delai d'inactivite, une
+    # connexion persistante retient son thread INDEFINIMENT (le defaut est
+    # `None`). Avec `ThreadingHTTPServer`, cela accumulerait les threads au
+    # lieu des sockets — on aurait deplace la fuite, pas supprimee.
+    timeout = 30
+
     # Set by RestApiServer before serving.
     api: Any = None
     api_methods: Dict[str, Any] = {}
@@ -781,9 +807,17 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError) as exc:
             body = json.dumps({"ok": False, "message": f"Erreur de serialisation: {exc}"}).encode("utf-8")
             status = 500
+        # `close_connection` peut avoir ete arme AVANT cet appel (corps refuse
+        # sans etre consomme, cf. les rejets 400/413). `send_header` lit ce
+        # drapeau dans l'autre sens — poser l'en-tete arme le drapeau, jamais
+        # l'inverse — donc sans cette ligne la socket se fermait SANS que le
+        # client en soit informe. Il aurait alors reutilise une connexion morte.
+        ferme = bool(getattr(self, "close_connection", False))
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if ferme:
+            self.send_header("Connection", "close")
         self._send_cors_headers()
         # V3-04 : header X-Request-ID systematique sur les reponses JSON
         # (succes ET erreurs 4xx/5xx).
@@ -866,7 +900,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                 # prealable, qui laisse une fenetre entre la mesure et la
                 # lecture et ne borne pas l'allocation par lui-meme.
                 content = handle.read(_STATIC_MAX_BYTES + 1)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("%s static read error: %s", scope, exc)
             self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
             return None
@@ -1285,9 +1319,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
         except (ValueError, TypeError):
+            # Meme raison : sans Content-Length exploitable, on ignore combien
+            # d'octets appartiennent a cette requete — impossible de savoir ou
+            # commence la suivante. On ferme.
+            self.close_connection = True
             self._respond_json(400, {"ok": False, "message": "En-tete Content-Length invalide."})
             return
         if content_length < 0 or content_length > _MAX_BODY_SIZE:
+            # On REFUSE de lire ce corps — et le drain, lui aussi, refuse au-dela
+            # de la borne (ce serait un amplificateur de DoS : vider 17 Mo pour
+            # les jeter). En HTTP/1.1 la connexion est persistante, donc ces
+            # octets non lus seraient interpretes comme la requete SUIVANTE :
+            # la connexion se desynchronise et le client attend une reponse qui
+            # ne viendra jamais.
+            #
+            # Quand on ne consomme pas le corps, la seule conduite correcte est
+            # de fermer. Mesure : sans cette ligne, le test des 17 Mo passe de
+            # « rejet propre » a TimeoutError des l'activation du keep-alive.
+            self.close_connection = True
             self._respond_json(413, {"ok": False, "message": "Corps de requete trop volumineux."})
             return
 
@@ -1538,7 +1587,7 @@ class RestApiServer:
             try:
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 ctx.load_cert_chain(certfile=self._cert_path, keyfile=self._key_path)
-            except (ssl.SSLError, OSError, PermissionError) as exc:
+            except (ssl.SSLError, OSError) as exc:
                 msg = f"HTTPS demande mais certificat invalide: {exc}. Serveur REST non demarre."
                 logger.error("REST: %s", msg, exc_info=True)
                 self._start_error = msg

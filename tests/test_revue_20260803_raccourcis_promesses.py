@@ -19,9 +19,15 @@ Trois ecarts entre ce que l'interface ANNONCE et ce que le code FAIT :
 4. Ctrl+Z dispatchait `cinesort:undo-shortcut`, dont l'unique auditeur vivait
    dans `library/lib-apply.js`, supprime a la migration ESM : la frappe ne
    faisait plus rien, et le libelle (« depuis Bibliotheque ») designait une vue
-   qui n'a aucun flux d'undo. Le raccourci a ete RETIRE plutot que rebranche :
-   `run/undo_last_apply` redeplace des fichiers sur le disque et doit rester
-   derriere une confirmation explicite.
+   qui n'a aucun flux d'undo. Le raccourci a ete RETIRE plutot que rebranche,
+   pour une raison de CIBLE : l'undo porte sur un batch precis
+   (`_runInfo.pendingUndo` cote Traitement, le run selectionne cote Historique),
+   etat qui n'existe que dans la vue montee — un raccourci GLOBAL n'aurait rien
+   a designer depuis /parametres ou /bibliotheque. (La redaction initiale
+   invoquait la regle des actions destructives ; c'etait un homme de paille,
+   corrige a la fusion de la PR #873 : brancher la touche sur `_onUndoExecute`
+   ou `_doUndoApply` aurait conserve `dangerConfirmModal`. Cf. le commentaire 4b
+   de `core/keyboard.js`.)
 
 Les tests EXECUTENT la vraie source sous Node (imports stubbes, corps des
 fonctions intact) : c'est le handler keydown reel qui tourne et le HTML

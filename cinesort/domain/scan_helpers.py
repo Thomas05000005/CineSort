@@ -97,7 +97,7 @@ def iter_videos(
     min_bytes = int(min_video_bytes)
     try:
         scandir_ctx = os.scandir(str(folder))
-    except (OSError, PermissionError, FileNotFoundError) as exc:
+    except OSError as exc:
         logger.warning("scan: scandir failed on %s: %s", folder, exc)
         _bump_stats_reject(stats, "ignore_scandir_error", path=str(folder))
         return vids
@@ -123,7 +123,7 @@ def iter_videos(
                 if st.st_size < min_bytes:
                     _bump_stats_reject(stats, "ignore_taille_min", path=entry.path)
                     continue
-            except (OSError, PermissionError, FileNotFoundError, ValueError, TypeError):
+            except (OSError, ValueError, TypeError):
                 _bump_stats_reject(stats, "ignore_scandir_error", path=entry.path)
                 continue
             vids.append(Path(entry.path))
@@ -142,7 +142,7 @@ def detect_single_with_extras(cfg: Any, videos: List[Path]) -> bool:
     for v in videos:
         try:
             sizes.append(v.stat().st_size)
-        except (OSError, PermissionError, FileNotFoundError):
+        except OSError:
             sizes.append(0)
     sizes_sorted = sorted(sizes, reverse=True)
     if len(sizes_sorted) < 2:
@@ -157,7 +157,7 @@ def collect_non_video_extensions(cfg: Any, folder: Path) -> Dict[str, int]:
     out: Dict[str, int] = {}
     try:
         entries = list(folder.iterdir())
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return out
     for p in entries:
         if not p.is_file():
@@ -281,7 +281,7 @@ def discover_candidate_folders(
         """
         try:
             sub = os.scandir(str(path))
-        except (OSError, PermissionError, FileNotFoundError) as exc:
+        except OSError as exc:
             logger.warning("scan: scandir (YYYY)-shape failed on %s: %s", path, exc)
             _reject("ignore_scandir_error", str(path))
             return (False, False)
@@ -397,7 +397,7 @@ def discover_candidate_folders(
             return
         try:
             scandir_ctx = os.scandir(str(current))
-        except (OSError, PermissionError, FileNotFoundError) as exc:
+        except OSError as exc:
             # SCAN-1 (L160-L163) : tracer l'echec scandir pour diagnostic SMB.
             logger.warning("scan: scandir failed on %s: %s", current, exc)
             _reject("ignore_scandir_error", str(current))

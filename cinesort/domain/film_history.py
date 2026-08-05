@@ -98,7 +98,7 @@ def _load_plan_rows_from_jsonl(plan_path: Path) -> List[Dict[str, Any]]:
                         rows.append(data)
                 except (json.JSONDecodeError, ValueError):
                     logger.debug("plan.jsonl ligne %d invalide dans %s", line_no, plan_path)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         logger.debug("Impossible de lire %s: %s", plan_path, exc)
     return rows
 

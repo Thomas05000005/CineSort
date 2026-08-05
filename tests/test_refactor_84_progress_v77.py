@@ -194,7 +194,78 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     #     + `run_read_support.effective_flags(...)`) et NON en import de symbole,
     #     pour que les `patch("cinesort.ui.api.<mod>.<fn>")` des tests restent
     #     operants — cf. le piege decrit dans le docstring.
-    "ui": 66,
+    #
+    # 66 -> 63 (lot perf #448/#406/#467/#593, -3) : `library_audit_support`
+    # construisait un TmdbClient DANS le corps de `_fetch_collection_parts`,
+    # avec 3 imports differes (infra.state, infra.tmdb_client.TmdbClient,
+    # settings_support.normalize_user_path). Le client est desormais construit
+    # une seule fois par appel via `_build_tmdb_client_optional`, deja present
+    # dans `library_actions_support` : les 3 imports remontent en tete, sans
+    # cycle (lint-imports : 3 contrats KEPT).
+    #
+    # 63 est MESURE sur l'arbre fusionne, pas 66-3. Les deux conversions sont
+    # arrivees en parallele et le 2026-08-05 deux PR ont deja calcule leur
+    # valeur de tete a partir d'une base commune : elles concordaient PAR
+    # CHANCE. Ici, la mesure d'abord, l'ecriture ensuite.
+    #
+    # 63 -> 56 (#779 vague 2, -7) : le reliquat intra-`ui/api` que la vague 1
+    # (PR#930) avait laisse. Re-mesure du graphe avant de coder : l'issue annonce
+    # 89 imports differes intra-`ui/api`, il en restait 31 statements. Sur ces 31,
+    # 4 seulement sont poses sur une VRAIE arete de retour de tete
+    # (`library_support` <-> `library_actions_support` x3, `reset_support` ->
+    # `cinesort_api`). Parmi les 27 restants, 7 n'avaient NI cycle NI contrat de
+    # degradation, et sont convertis ici :
+    #   - `perceptual_support._build_tmdb_client` : `normalize_user_path` etait
+    #     DEJA importe en tete du meme module — alias purement redondant ;
+    #   - `library_actions_support._build_cfg_for_row` : `settings_support` etait
+    #     deja une dependance de tete (`normalize_user_path`), differer un second
+    #     symbole du meme module ne differait rien ;
+    #   - `run_read_support` x2 (`library_support._get_store`) : le cluster n.2
+    #     nomme par #779, sa « PR pilote » ;
+    #   - `library_actions_support` + `tmdb_support` (`run_data_support`) : leur
+    #     commentaire admettait avoir FUSIONNE deux imports en un statement pour
+    #     ne pas faire monter ce cliquet — l'artefact disparait avec la cause ;
+    #   - `facades/settings_facade.get_confidence_thresholds` : aucun garde.
+    #
+    # NON convertis, avec la raison mesuree :
+    #   - `run_facade` x3 (`schemas`) et `apply_support` x2 : leur `try` attrape
+    #     `ImportError` — l'import differe y est un contrat de degradation
+    #     (pydantic absent, build EXE ampute), pas un contournement de cycle ;
+    #   - `runtime_support` x3 : `except Exception` englobant, qui attrape
+    #     `ImportError` lui aussi (dont `_safe_read_settings_for_diag`, un
+    #     diagnostic qui doit survivre a un `settings_support` casse) ;
+    #   - `film_support` <-> `history_support` et `library_support` <->
+    #     `library_actions_support` : aretes de retour REELLES, une direction au
+    #     moins doit rester differee.
+    #
+    # 56 est MESURE sur l'arbre final (walk AST, meme code que ce test), pas 63-7.
+    #
+    # 56 -> 54 (#779 vague 3, -2) : conversions, pas relevement. Le reliquat
+    # intra-`ui/api` a ete re-mesure sur l'arbre courant : 24 statements, dont 4
+    # sur une VRAIE arete de retour de tete. Deux seulement n'avaient ni cycle ni
+    # garde et sont convertis ici :
+    #   - `run_flow_support._get_status_impl` (`run_data_support`) : son
+    #     commentaire invoquait un cycle « run_flow <-> run_data » qui n'existe
+    #     pas — `run_data_support` est DEJA une dependance de tete du module
+    #     (ligne 31) et n'importe rien de `run_flow_support` en retour ;
+    #   - `reset_support._build_default_settings` (`settings_support`) : son
+    #     commentaire invoquait un « blast radius » inexistant — `cinesort_api.py`
+    #     importe DEJA les deux modules en tete (lignes 82 et 88), donc les deux
+    #     sont charges au boot quoi qu'il arrive. L'import FRERE de `cinesort_api`
+    #     dans la meme fonction reste differe : lui est un vrai cycle.
+    #
+    # NON converti apres mesure, et c'est le resultat le plus utile de la vague :
+    # `library_support` -> `film_support`. Aucun cycle ne le justifie AUJOURD'HUI,
+    # mais le remonter en tete cree l'arete `library_support -> film_support`, qui
+    # rend NECESSAIRES deux imports differes jusque-la libres (`film_support:62`
+    # vers `history_support`, `film_support:457` vers `library_actions_support`,
+    # tous deux refermes via `... -> library_support -> film_support`). Mesure
+    # avant/apres : 4 vraies aretes de retour -> 6. La conversion echangeait un
+    # import differe contre deux cycles de plus : refusee. Le site a quand meme
+    # ete reecrit en MODULE-STYLE au passage (cf. §11.2).
+    #
+    # 54 est MESURE sur l'arbre final (walk AST, meme code que ce test), pas 56-2.
+    "ui": 54,
 }
 
 # Borne globale = somme des bornes par couche (114 apres le lot #554/#595/#779).

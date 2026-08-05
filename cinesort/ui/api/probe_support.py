@@ -371,7 +371,7 @@ def auto_install_probe_tools(
         msg = "Outils installes avec succes." if ok else f"Installation partielle : {'; '.join(errors)}"
         _logger.info("auto_install_probe_tools: ok=%s installed=%s errors=%s", ok, list(installed), errors)
         return {"ok": ok, "installed": installed, "errors": errors, "message": msg, "status": status}
-    except (OSError, FileNotFoundError) as exc:
+    except OSError as exc:
         # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
         # (auto_install est optionnel : l'utilisateur peut installer manuellement les outils)
         _logger.warning("auto_install_probe_tools: %s", exc)
@@ -409,9 +409,18 @@ def _get_probe_impl(
     detect_probe_tools_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Implementation reelle de get_probe, sans wrap global (Vague G)."""
-    if not run_id or not row_id:
+    # #526 : la garde testait aussi `not run_id`, inatteignable. Son unique
+    # appelant est `get_probe`, decoree `@requires_valid_run_id` : le decorateur
+    # a deja renvoye `errors.run_invalid_id` pour toute valeur falsy
+    # (`is_valid_run_id` normalise puis exige 4 a 80 caracteres), et transmet
+    # ensuite la forme canonique. Le message, lui, nommait les DEUX identifiants
+    # alors que seul `row_id` peut encore manquer ici : il envoyait l'utilisateur
+    # verifier le mauvais champ. La garde ne couvre plus que `row_id`, et elle
+    # est ELARGIE au blanc ("   "), qui passait jusqu'ici pour aller echouer
+    # plus loin en « Film introuvable ».
+    if not row_id or not str(row_id).strip():
         return _err_response(
-            "Les identifiants run_id et row_id sont requis.", category="validation", level="info", log_module=__name__
+            "Identifiant de ligne (row_id) requis.", category="validation", level="info", log_module=__name__
         )
     try:
         found = api._find_run_row(run_id)

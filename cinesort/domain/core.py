@@ -786,7 +786,7 @@ def looks_tv_like(folder: Path, videos: List[Path]) -> bool:
         for p in folder.iterdir():
             if p.is_dir() and _TV_SEASON_RE.match(p.name.strip()):
                 return True
-    except (OSError, PermissionError):
+    except OSError:
         pass
     return False
 
@@ -800,7 +800,7 @@ def detect_single_with_extras(cfg: Config, videos: List[Path]) -> bool:
     for v in videos:
         try:
             sizes.append(v.stat().st_size)
-        except (OSError, PermissionError):
+        except OSError:
             sizes.append(0)
     sizes_sorted = sorted(sizes, reverse=True)
     if len(sizes_sorted) < 2:
@@ -824,7 +824,7 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
     out: List[Path] = []
     try:
         entries = list(folder.iterdir())
-    except (OSError, PermissionError):
+    except OSError:
         return out
     # F03 : arbitrage LONGEST-MATCH. `is_sidecar_for_video` matche par prefixe :
     # dans un dossier PARTAGE, "Alien 2.srt" matche aussi "Alien.mkv". Sans
@@ -919,7 +919,7 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
         try:
             content = nfo_path.read_text(encoding=enc)
             break
-        except (UnicodeDecodeError, FileNotFoundError, PermissionError, OSError):
+        except (UnicodeDecodeError, OSError):
             continue
     if not content:
         return None
@@ -952,7 +952,7 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
 def find_best_nfo_for_video(folder: Path, video: Path) -> Optional[Path]:
     try:
         nfos = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".nfo"]
-    except (PermissionError, OSError):
+    except OSError:
         return None
     if not nfos:
         return None
@@ -1767,6 +1767,19 @@ class ApplyResult:
     quarantined: int = 0
     skipped: int = 0
     errors: int = 0
+    #: Operations REELLEMENT effectuees sur le disque mais que le journal d'undo
+    #: n'a PAS pu enregistrer. Non nul => l'annulation sera INCOMPLETE.
+    #:
+    #: `record_apply_op` rend `False` en cas d'echec depuis toujours, mais AUCUN
+    #: de ses 14 sites d'appel ne lisait ce retour : un apply pouvait deplacer
+    #: des dossiers, ne rien journaliser, et se declarer `ok: True`. C'est le
+    #: symptome observe en #901 — batch cree, `counts.total = 0`, undo
+    #: indisponible sans qu'aucune erreur ne soit remontee.
+    #:
+    #: On ne fait PAS echouer l'apply pour autant : l'operation physique a deja
+    #: reussi, avorter laisserait un etat mixte sur le disque. On cesse
+    #: seulement de le taire.
+    journal_failures: int = 0
     merges_count: int = 0
     # AUDIT 2026-06-14 (R7-4) : compteur des films marques pour suppression
     # deplaces vers _review/_user_marked_for_deletion/ a l'apply.

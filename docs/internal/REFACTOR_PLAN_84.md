@@ -612,7 +612,14 @@ marge non reprise laisse passer une récidive gratuite.
 | 2026-08-04 | `ui` | 110 → **111** | PR#853 : `film_support` importe tardivement `history_support.get_plan_row`. Les deux modules se référencent mutuellement ; un import de tête crée un cycle à l'import du paquet. Le total global reste à 170, `app` rendant le point que `ui` prend. |
 | 2026-08-04 | `ui` | 111 → **113** | PR#847, +2 : `quality_report_support` importe tardivement `run_read_support.full_langs_from_embedded` et `domain.subtitle_helpers._normalize_iso639`. **Aucun cycle dur établi** — `run_read_support` n'importe pas `quality_report_support` en retour. Relevée quand même parce que ces deux imports suivent le motif déjà en place dans le module (`dashboard_support.py:300-309` importe `run_read_support` tardivement à quatre endroits) : les convertir isolément n'aurait pas de sens, c'est le motif entier qui demande un nettoyage. **Dette assumée, à reprendre dans le chantier de conversion de la couche `ui`.** |
 | 2026-08-04 | `app` | 23 → **25** | PR#852, +2, les deux vérifiés un par un. (a) `cleanup` → `apply_core._append_error_message` : **vrai cycle**, `apply_core.py:15` importe déjà `cleanup`. (b) `apply_batches_reconciliation` → `apply_audit.read_apply_audit` : **pas** de cycle ; conservé pour la raison que révèle le `except ImportError` en dessous — sur un build EXE **amputé**, un import de tête tuerait tout le module de réconciliation, l'import local ne dégrade que la lecture du marqueur. Le commentaire du code affichait une autre raison (« éviter de charger au boot »), corrigée. |
-| 2026-08-05 | `ui` | 113 → **111** | Issue #599, **−2 : conversion, pas relèvement**. `film_support._fetch_tmdb_extras` portait deux imports différés : `from cinesort.infra.tmdb_client import TmdbClient` et `import requests as _req`. Aucun cycle ne les justifiait — le contrat `infra_bounded` interdit à `infra` de remonter vers `ui`, donc un import de tête est sûr, et il est écrit **module-style** (`from cinesort.infra import tmdb_client as _tmdb_client`) pour que les `patch("cinesort.infra.tmdb_client.TmdbClient", …)` des tests restent opérants. Le second a purement disparu : le `requests.get` direct est rapatrié sur `TmdbClient.get_movie_extras`. Nouveau total mesuré : **172**. |
+| 2026-08-05 | `ui` | 113 → **111** | Issue #599, **−2 : conversion, pas relèvement**. `film_support._fetch_tmdb_extras` portait deux imports différés : `from cinesort.infra.tmdb_client import TmdbClient` et `import requests as _req`. Aucun cycle ne les justifiait — le contrat `infra_bounded` interdit à `infra` de remonter vers `ui`, donc un import de tête est sûr, et il est écrit **module-style** (`from cinesort.infra import tmdb_client as _tmdb_client`) pour que les `patch("cinesort.infra.tmdb_client.TmdbClient", …)` des tests restent opérants. Le second a purement disparu : le `requests.get` direct est rapatrié sur `TmdbClient.get_movie_extras`. |
+| 2026-08-05 | `ui` | 111 → **108** | Lot perf #448/#406/#467/#593, **−3** : `library_audit_support._fetch_collection_parts` construisait son `TmdbClient` dans le corps de la fonction, avec trois imports différés (`infra.state`, `infra.tmdb_client.TmdbClient`, `settings_support.normalize_user_path`). Le client est désormais construit **une fois par appel** via `_build_tmdb_client_optional`, déjà présent dans `library_actions_support` : les trois imports remontent en tête, aucun cycle (la chaîne `library_actions_support → library_support → …` ne revient jamais sur `library_audit_support`, vérifié par `lint-imports` : 3 contrats KEPT). Marge reprise immédiatement, conformément à la règle ci-dessus. |
+
+> **Note de fusion (2026-08-05).** Ces deux conversions sont arrivées **en parallèle**, chacune
+> écrivant sa propre valeur de `ui` à partir de 113. La valeur finale n'a pas été obtenue en
+> additionnant les deux réductions, mais **remesurée** après fusion — le cliquet ne vaut que
+> s'il colle à la mesure. Les deux comptes concordent ici (113 − 2 − 3 = 108), mais c'est la
+> mesure qui fait foi, pas l'arithmétique.
 | 2026-08-04 | — | 170 → **174** | Fusion PR#852 ↔ main. Rien à arbitrer côté bornes : les deux apports portent sur des couches **disjointes** (`app` +2, `ui` +2), et la mesure post-fusion retombe **exactement** sur chaque borne — aucune couche n'a pris de marge dormante. Deux affirmations sont en revanche devenues fausses et ont été corrigées : (a) « le total reste à 170 » — la compensation `app`/`ui` de PR#853 était une coïncidence, pas une règle, seule la borne **par couche** fait foi ; (b) « `apply_audit` n'importe que la stdlib » — main y a ajouté `infra.log_scrubber` (issue #414), qui tire `infra.log_context`. Le verdict de (b) tient quand même : `infra_bounded` interdit à `infra` de remonter vers `app`, donc toujours aucun cycle, et l'argument du build EXE amputé se **renforce** puisque la chaîne d'import s'allonge. |
 | 2026-08-05 | `app` | 25 → **19** | Issues #554/#595, **−6 : conversions stdlib**. Trois n'étaient que des **alias redondants** — le module était déjà importé en tête : `apply_core.sha1_quick` (`import time as _time_mod`, dont le commentaire « local pour éviter shadow du module `time` haut » décrit un shadow qui **n'existe plus** : vérifié, aucun paramètre ni variable locale nommée `time` dans la fonction), `apply_batches_reconciliation._close_batch` (`json`), `plan_support_core.wait_while_paused` (`time`). Trois vrais ajouts en tête : `os` (`plan_support_core.folder_signature`), `contextlib` (`plan_support_replan._resolve_tmdb_collection`), `concurrent.futures.ThreadPoolExecutor` (`_local_candidate`). |
 | 2026-08-05 | `domain` | 16 → **15** | Issue #595 (élargie), **−1** : `perceptual/lpips_compare._resolve_model_path` importait `sys` dans la fonction pour lire `sys.frozen`. |
@@ -696,4 +703,134 @@ découplage réel, pas de la conversion mécanique — extraire
 par l'issue) casserait à lui seul le cluster n°2 (`run_read_support` ×2,
 `history_support` ×2), et arbitrer le couple `film_support`/`history_support` en
 réglerait un de plus.
+
+### 11.3 Vague 2 de #779 (2026-08-05) — le reliquat, remesuré
+
+La vague 1 (§11.1) annonçait « 32 restants ». Remesure sur l'arbre courant, en
+comptant les **statements** `import` situés dans un corps de fonction dont la
+cible est un module `cinesort.ui.api.*` : **31**. L'écart d'une unité vient du
+mode de comptage (un `from pkg import a, b` est un statement mais deux arêtes) —
+c'est exactement pourquoi ce journal exige une mesure et refuse une soustraction.
+
+Le graphe a été reconstruit de zéro. **Correction de méthode au passage** : la
+première version du script résolvait `from cinesort.ui.api import run_data_support`
+vers le **package** `cinesort.ui.api` au lieu du module `run_data_support`, et
+concluait donc à tort que `reset_support → cinesort_api` n'était pas un cycle. La
+cible d'un `from pkg import mod` est `pkg.mod` dès que celui-ci est un module.
+Après correction, on retrouve bien les **4** arêtes de retour de §11.1.
+
+| | nb |
+|---|---:|
+| imports différés intra-`ui/api` (avant vague 2) | 31 |
+| dont sur une vraie arête de retour | 4 |
+| dont sous un `except ImportError` / `except Exception` englobant | 8 |
+| dont référence mutuelle `film_support` ↔ `history_support` | 2 |
+| **convertis par cette vague** | **7** |
+| restants après vague 2 | 24 |
+
+Les 8 sites laissés pour leur garde méritent d'être nommés, parce que la raison
+n'est pas « un cycle » mais **un contrat de dégradation** :
+
+- `facades/run_facade` ×3 (`schemas`) et `apply_support` ×2 — `except ImportError`
+  explicite : pydantic absent ou build EXE amputé doivent dégrader, pas tuer le boot.
+- `runtime_support` ×3 — `except Exception`, qui **attrape aussi `ImportError`**.
+  Le cas le plus net est `_safe_read_settings_for_diag` : un diagnostic doit
+  survivre à un `settings_support` cassé, c'est même sa seule raison d'être.
+
+**Ce qui n'a PAS été prouvé par cette vague.** Le choix module-style
+(`library_support._get_store(...)`) a été muté vers un import de symbole pour
+vérifier qu'un test le rattrapait : la suite est restée **VERTE**. Ce n'est pas un
+mutant équivalent — c'est un **test manquant**. `test_get_plan_ignored_alerts_v77`
+patche bien `library_support._get_store`, mais il exerce le chemin
+`history_support`, pas `run_read_support` ; et `test_atomic_write_durability`
+patche `run_data_support.resync_run_state_rows` sans que ses assertions dépendent
+du mock. Le module-style reste le bon choix (§11.2 documente le mode de panne
+silencieux), mais il est ici tenu par la convention, **pas par un garde-fou**.
+Poser ce garde-fou est le premier candidat pour une vague 3.
 | 2026-08-05 | — | inchangées | Issue #923 (« mesure a 0 » vs « non mesure », perceptuel vidéo). **Aucune borne touchée** : le lot n'ajoute ni ne convertit d'import différé — les cinq fichiers modifiés (`domain/perceptual/{models,video_analysis,composite_score,composite_score_v2,comparison}.py`) n'utilisent que des symboles déjà importés en tête. Mesure de contrôle **refaite après fusion** avec le lot #554/#595/#779, pas recopiée : `__root__` 3, `app` 19, `domain` 15, `infra` 11, `ui` 66, `data` 0 — total **114**, chaque couche exactement sur sa borne. La valeur annoncée avant fusion (172) était juste à son moment et périmée à l'arrivée : c'est la raison même pour laquelle ce journal exige une mesure, pas un report. |
+| 2026-08-05 | `ui` | 56 → **54** | Issue #779 **vague 3**, −2 : conversions, pas relèvement. Mesure de départ reprise sur l'arbre courant (`ui` = 56, total 104, **24 statements** intra-`ui/api` avant le lot, 22 après — l'issue en annonce 89, la vague 1 en comptait 59, la vague 2 en annonçait 24 restants). Les deux seuls sites sans cycle **ni** garde : `run_flow_support._get_status_impl` → `run_data_support` (le commentaire invoquait un cycle « run_flow ↔ run_data » qui n'existe pas : `run_data_support` est déjà une dépendance de **tête** du module, ligne 31) et `reset_support._build_default_settings` → `settings_support` (le commentaire invoquait un « blast radius » inexistant : `cinesort_api.py` importe déjà les deux modules en tête, lignes 82 et 88). L'import **frère** de `cinesort_api` dans cette même fonction reste différé — lui est un vrai cycle. Détail en §11.4. |
+| 2026-08-05 | `ui` | 63 → **56** | Issue #779 **vague 2**, −7 : conversions, pas relèvement. Mesure de départ prise sur l'arbre courant (`ui` = 63, total 111), **pas** sur les 66/114 qu'annonçait la ligne précédente — deux lots ont fusionné entre-temps. Les 7 sites convertis n'avaient **ni cycle ni contrat de dégradation** : `perceptual_support._build_tmdb_client` (`normalize_user_path` était déjà importé en tête du même module — alias purement redondant), `library_actions_support._build_cfg_for_row` (`settings_support` était déjà une dépendance de tête, différer un second symbole du même module ne différait rien), `run_read_support` ×2 (`library_support._get_store`, le cluster n°2 de l'issue), `library_actions_support` + `tmdb_support` (`run_data_support`), `facades/settings_facade.get_confidence_thresholds`. Toutes les cibles `ui/api` sont écrites **module-style**, cf. §11.2. Nouveau total mesuré : **104**. |
+
+### 11.4 Vague 3 de #779 (2026-08-05) — le reliquat mesuré, et une conversion REFUSÉE
+
+Remesure sur l'arbre courant **avant** de coder : **24 statements** `import` situés
+dans un corps de fonction et visant un module `cinesort.ui.api.*` (**22** après ce
+lot). Le chiffre de l'issue (89, daté du 2026-07-19) est périmé depuis longtemps ;
+la vague 1 en comptait 59, la vague 2 en annonçait 24 restants — et cette annonce-là
+se vérifie exactement, pour une fois.
+
+| | nb |
+|---|---:|
+| imports différés intra-`ui/api` (avant vague 3) | 24 |
+| dont sur une vraie arête de retour de tête | 4 |
+| dont sous un `except ImportError` / `except Exception` englobant | 13 |
+| dont référence mutuelle `film_support` ↔ `history_support` | 2 |
+| **convertis par cette vague** | **2** |
+| restants après vague 3 | 22 |
+
+Le décompte des sites sous garde a augmenté depuis §11.3 (8 → 13) parce que la
+vague 2 n'avait pas inventorié `run_flow_support` ×5 et `quality_audit_support`
+×1, pourtant nommés dès §11.1. Vérifiés un par un sur le code courant : tous ont
+bien `ImportError` en tête du tuple de leur `except`.
+
+#### Le résultat le plus utile de cette vague est un refus
+
+Le site `library_support` → `film_support` (`TMDB_OVERLAY_DONE_KEY`,
+`overlay_tmdb_override`) n'est protégé par **aucun** cycle aujourd'hui : la mesure
+ne trouve pas de chemin `film_support → … → library_support` par imports de tête.
+Il était donc un candidat évident. Il a été converti, **puis annulé**.
+
+Raison, mesurée et non devinée : remonter cet import crée l'arête de tête
+`library_support → film_support`. Or `library_support` est importé en tête par
+une bonne partie du paquet. Deux imports différés jusque-là **libres** deviennent
+alors **nécessaires**, chacun refermé par `… → library_support → film_support` :
+
+- `film_support:62` → `history_support.get_plan_row` ;
+- `film_support:457` → `library_actions_support.migrate_legacy_deletion_marks`.
+
+Compte des vraies arêtes de retour : **4 avant, 6 après**. La conversion échange
+un import différé contre deux cycles de plus — l'inverse du but de #779, qui vise
+l'acyclicité du graphe et non un compteur. Le cliquet aurait pourtant enregistré
+un « progrès » de −1.
+
+**Leçon pour les vagues suivantes** : avant de convertir, mesurer l'effet sur le
+NOMBRE DE CYCLES, pas seulement sur le compteur d'imports différés. Un import
+différé qu'on remonte peut en *fabriquer* d'autres, ailleurs, en silence.
+
+Le site a quand même été réécrit en **module-style**
+(`from cinesort.ui.api import film_support` + `film_support.overlay_tmdb_override(...)`),
+ce qu'il n'était pas : il importait deux symboles. Cf. §11.2.
+
+#### Le garde-fou manquant est posé
+
+§11.3 se terminait sur un aveu : le choix module-style « reste le bon choix, mais
+il est ici tenu par la convention, **pas par un garde-fou** ». C'est fait, dans
+`tests/test_architecture_invariants.py::UiApiPatchableImportTests`.
+
+Le test croise deux inventaires AST : (a) les cibles
+`patch("cinesort.ui.api.<module>.<symbole>")` présentes dans `tests/`, et (b) les
+imports `from cinesort.ui.api.<module> import <symbole>` situés en **tête** d'un
+module `ui/api`. Toute intersection est une violation : le patch du test ne peut
+pas atteindre ce consommateur.
+
+Mutation de contrôle (sur le CODE SOURCE) : passer
+`quality_audit_support` de `from cinesort.ui.api import library_support` à un
+import de symbole fait rougir le garde-fou **et** trois tests de
+`test_phase4_qualite_endpoints.py` (`0 != 3` : le `mock_build.return_value` ne
+remonte plus). C'est la démonstration directe du mode de panne de §11.2 — sauf
+que ces trois tests-là assertent sur le résultat. Un test qui n'observerait que
+l'absence d'effet serait resté vert.
+
+**4 violations pré-existantes** ont été trouvées à la pose du garde-fou et sont
+gelées dans `_KNOWN_SYMBOL_IMPORTS`, pas corrigées :
+`library_actions_support`, `library_podiums_support`, `library_timeline_support`
+(`library_support._build_library_rows`) et `quality_simulator_support`
+(`library_support._get_store`). Les corriger n'est pas neutre : les tests de ces
+modules patchent aujourd'hui la cible **locale** (par ex.
+`library_podiums_support._build_library_rows`), qui disparaît si l'import passe en
+module-style — il faudrait donc retoucher ces tests dans le même mouvement. Le
+risque reste réel et c'est pourquoi ils sont nommés : qui patcherait
+`library_support._build_library_rows` en croyant affecter le podium ou la
+timeline obtiendrait un test vert qui n'observe rien. Un second test
+(`test_known_symbol_imports_still_exist`) empêche cette liste de devenir une
+marge dormante.

@@ -29,10 +29,11 @@ from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
-from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
+from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
+from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
@@ -51,9 +52,14 @@ _log = logging.getLogger(__name__)
 # cote backend. La promesse "Annulation possible pendant 24h" (Spec 08 §3.5,
 # PR #394) etait cosmetique : la carte UI affichait un countdown mais le
 # backend acceptait toujours l'undo. On refuse desormais avec 410 Gone une
-# fois passe ce delai. Constante en miroir de dashboard_support._UNDO_DEADLINE_SECONDS
-# pour eviter une dependance circulaire entre modules ui.api.
-_UNDO_DEADLINE_SECONDS = 24 * 3600
+# fois passe ce delai.
+#
+# Issue #491 : la constante etait recopiee ici « en miroir de
+# dashboard_support », pretendument pour eviter une dependance circulaire entre
+# modules `ui.api` — mais la valeur n'a jamais eu besoin de vivre dans `ui` :
+# elle est desormais lue depuis `domain.run_models.UNDO_DEADLINE_SECONDS`, seule
+# source, ce qui supprime le miroir sans creer la moindre arete entre les deux
+# modules `ui.api`.
 
 
 class _DuplicateCheckError(Exception):
@@ -84,12 +90,12 @@ def _resolve_hashed_target(dst: Path, op_type: str) -> Optional[Path]:
                     continue
                 try:
                     size = entry.stat().st_size
-                except (OSError, PermissionError):
+                except OSError:
                     continue
                 if size > best_size:
                     best = entry
                     best_size = size
-        except (OSError, PermissionError):
+        except OSError:
             return None
         return best
     return None
@@ -146,7 +152,7 @@ def preverify_undo_operations(
 
         try:
             actual_size = hashed_target.stat().st_size
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             report["missing"].append({**op, "preverify_reason": f"stat échouée: {exc}"})
             continue
 
@@ -163,7 +169,7 @@ def preverify_undo_operations(
 
         try:
             actual_sha1 = sha1_quick_cached(hashed_target, hash_cache)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             report["missing"].append({**op, "preverify_reason": f"hash impossible: {exc}"})
             continue
 
@@ -299,7 +305,7 @@ def build_undo_preview_payload(
     # de la preview undo, pas seulement dans le dashboard. La carte UI peut
     # ainsi rejeter localement un click utilisateur tardif sans aller-retour.
     now_ts = time.time()
-    expired = bool(apply_ts > 0 and (now_ts - apply_ts) > _UNDO_DEADLINE_SECONDS)
+    expired = bool(apply_ts > 0 and (now_ts - apply_ts) > UNDO_DEADLINE_SECONDS)
 
     payload = {
         "ok": True,
@@ -333,7 +339,7 @@ def undo_last_apply_preview(api: Any, run_id: str) -> Dict[str, Any]:
     try:
         payload, _store, _run_paths, _batch, _ops = api._build_undo_preview_payload(run_id)
         return payload
-    except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception("undo_last_apply_preview", exc, run_id=run_id)
         return _err_response(t("errors.cannot_prepare_undo"), category="state", level="warning", log_module=__name__)
 
@@ -543,6 +549,19 @@ def _execute_undo_ops(
         op_id = int(op.get("id") or 0)
         current_path = Path(str(op.get("dst_path") or ""))
         target_path = Path(str(op.get("src_path") or ""))
+        # Un op_type `*_DIR` remet un DOSSIER entier en place. `shutil.move` degrade
+        # en copytree+rmtree des que `os.rename` echoue, y compris sur un banal
+        # verrou Windows d'UN fichier interne : la source ressort eventree et le
+        # contenu dedouble (mesure detaillee dans
+        # `move_journal._rename_or_cross_device_copy`). Sur l'undo — le filet de
+        # secours de l'utilisateur — l'erreur doit aller dans le sens RESTRICTIF :
+        # ne rien deplacer plutot que dedoubler, l'op est alors comptee FAILED et
+        # reste annulable. Les op_type `*_FILE` gardent `shutil.move`, dont la copie
+        # fait justement aboutir le deplacement d'un fichier verrouille en lecture
+        # partagee. Defaut `MOVE_FILE` pour une op sans type, comme
+        # `_resolve_hashed_target` : le comportement de ces lignes ne change pas.
+        _op_type_undo = str(op.get("op_type") or "MOVE_FILE").upper()
+        _undo_move = shutil.move if _op_type_undo.endswith("_FILE") else _rename_or_cross_device_copy
         try:
             if not current_path.exists():
                 skipped += 1
@@ -593,7 +612,7 @@ def _execute_undo_ops(
                             "INFO",
                             f"UNDO casse-seule {idx}/{len(reversible_ops)}: {current_path} -> {target_path}",
                         )
-                    except (OSError, PermissionError, FileExistsError) as case_exc:
+                    except OSError as case_exc:
                         failed += 1
                         _mark_undo_status(
                             store,
@@ -652,7 +671,7 @@ def _execute_undo_ops(
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
                     with journaled_move(store, src=current_path, dst=conflict_dst, op_type="UNDO_QUARANTINE"):
-                        shutil.move(str(current_path), str(conflict_dst))
+                        _undo_move(str(current_path), str(conflict_dst))
                 except FileNotFoundError:
                     _log.warning("undo: fichier disparu entre check et move (conflict): %s", current_path)
                     skipped += 1
@@ -695,7 +714,7 @@ def _execute_undo_ops(
             # CR-1 : journal write-ahead pour atomicite undo
             try:
                 with journaled_move(store, src=current_path, dst=target_path, op_type="UNDO_RESTORE"):
-                    shutil.move(str(current_path), str(target_path))
+                    _undo_move(str(current_path), str(target_path))
             except FileNotFoundError:
                 _log.warning("undo: fichier disparu entre check et move: %s", current_path)
                 skipped += 1
@@ -739,7 +758,7 @@ def _execute_undo_ops(
                 error_message=None,
             )
             log_fn("INFO", f"UNDO {idx}/{len(reversible_ops)}: {current_path} -> {target_path}")
-        except (sqlite3.Error, OSError, FileExistsError, ValueError, TypeError) as exc:
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
             # F31 : sqlite3.Error ajoutee — aucun appel DB futur dans le corps de la
             # boucle ne doit pouvoir avorter la restauration des ops suivantes.
             failed += 1
@@ -879,7 +898,7 @@ def _undo_mkdir_ops(
                 # laissait le dossier supprime, l'op PENDING, et l'exception
                 # remontait au boundary REST (500, rapport d'undo perdu).
                 _mark_undo_status(store, log_fn, op_id=int(op.get("id") or 0), undo_status="DONE")
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _log.debug("undo mkdir: rmdir %s skip: %s", path, exc)
     return removed
 
@@ -917,7 +936,7 @@ def _write_undo_summary(
             marker="=== RESUME UNDO ===",
             section_body="\n".join(summary_lines),
         )
-    except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Resume undo non ecrit: {exc}")
 
 
@@ -948,7 +967,7 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
         run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
         plan_rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
         plan_rows_by_id = {str(r.row_id): r for r in plan_rows}
-    except (FileNotFoundError, OSError):
+    except OSError:
         pass
 
     # Ultra-audit 2026-08 (N25) : cette boucle appelait
@@ -1060,9 +1079,20 @@ def undo_selected_rows(
         return _err_response(t("errors.no_reversible_batch"), category="state", level="info", log_module=__name__)
 
     bid = str(batch["batch_id"])
+    # Issue #593 : une SEULE coercition, partagee par la branche dry_run et par
+    # l'undo reel. Avant, le dry_run testait `r["row_id"] in row_ids` :
+    #   - `row_ids` etant une LISTE, chaque test etait O(M) -> O(N*M) au total ;
+    #   - et surtout SANS `str()`, alors que l'undo reel comparait
+    #     `set(str(r) for r in row_ids)`. Le corps REST est decode par
+    #     `json.loads` (rest_server.py:1267) : des row_ids envoyes en NOMBRES
+    #     JSON ne matchaient AUCUNE ligne du preview (ou `row_id` est toujours
+    #     une chaine, cf build_undo_by_row_preview:972) alors que l'undo reel,
+    #     lui, les retrouvait. L'apercu d'une action destructive annoncait donc
+    #     « 0 ligne » avant d'en annuler N.
+    target_row_ids = {str(r) for r in row_ids}
     if bool(dry_run):
         preview = build_undo_by_row_preview(api, run_id, batch_id=bid)
-        selected = [r for r in preview.get("rows", []) if r["row_id"] in row_ids]
+        selected = [r for r in preview.get("rows", []) if str(r["row_id"]) in target_row_ids]
         return {
             "ok": True,
             "batch_id": bid,
@@ -1078,7 +1108,7 @@ def undo_selected_rows(
     # _execute_undo_ops, permettant un undo reel apres expiration. La dry_run
     # au-dessus reste autorisee meme expiree (apercu UI). Miroir exact 410.
     apply_ts = float(batch.get("started_ts") or 0.0)
-    if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+    if apply_ts > 0 and (time.time() - apply_ts) > UNDO_DEADLINE_SECONDS:
         return _err_response(
             "L'annulation n'est plus possible (delai 24h depasse).",
             category="state",
@@ -1088,7 +1118,7 @@ def undo_selected_rows(
         )
 
     # Collect all reversible PENDING ops for the selected row_ids.
-    target_row_ids = set(str(r) for r in row_ids)
+    # `target_row_ids` est construit plus haut (cf #593), partage avec le dry_run.
     all_ops = store.apply.list_apply_operations(batch_id=bid)
     selected_ops = [
         op
@@ -1400,7 +1430,7 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
     _log.info("api: undo run_id=%s dry_run=%s atomic=%s", run_id, dry_run, atomic)
     try:
         preview, store, run_paths, batch, reversible_ops = api._build_undo_preview_payload(run_id)
-    except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception("undo_last_apply", exc, run_id=run_id, extra={"dry_run": bool(dry_run)})
         return _err_response(t("errors.cannot_undo_last_apply"), category="state", level="warning", log_module=__name__)
     if not preview.get("ok"):
@@ -1419,11 +1449,11 @@ def undo_last_apply(api: Any, run_id: str, dry_run: bool = True, atomic: bool = 
     uctx = _extract_undo_context(preview, batch)
 
     # Fix audit 2026-05-24 (v1.5.2) : enforcement backend du delai 24h.
-    # On refuse l'execution reelle apres _UNDO_DEADLINE_SECONDS — la dry_run
+    # On refuse l'execution reelle apres UNDO_DEADLINE_SECONDS — la dry_run
     # reste autorisee pour que l'UI puisse afficher l'apercu meme expire.
     if not bool(dry_run):
         apply_ts = float(batch.get("started_ts") or 0.0)
-        if apply_ts > 0 and (time.time() - apply_ts) > _UNDO_DEADLINE_SECONDS:
+        if apply_ts > 0 and (time.time() - apply_ts) > UNDO_DEADLINE_SECONDS:
             return _err_response(
                 "L'annulation n'est plus possible (delai 24h depasse).",
                 category="state",
@@ -1526,7 +1556,7 @@ def _validate_apply(
             level="error",
             log_module=__name__,
         )
-    except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         api.log_api_exception(
             "apply",
             exc,
@@ -1607,7 +1637,7 @@ def _validate_apply(
     }
     try:
         state.atomic_write_json(run_paths.validation_json, safe_decisions)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         log_fn("WARN", f"Validation auto-save non ecrite: {exc}")
 
     # H-2 audit QA 20260428 : pre-check espace disque (uniquement apply reel).
@@ -1906,7 +1936,7 @@ def _execute_apply(
     try:
         # NB : accede via module pour permettre le mocking par patch.object(plan_support, ...).
         _plan_support_mod.find_duplicate_targets(cfg, rows, safe_decisions)
-    except (OSError, PermissionError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
         msg = t("errors.duplicate_check_failed", detail=str(exc))
         log_fn("ERROR", msg)
         raise _DuplicateCheckError(msg) from exc
@@ -2067,8 +2097,37 @@ def _execute_apply(
             _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
             if not _ov:
                 continue
-            if int(_ov.get("tmdb_id") or 0) > 0:
-                _r.tmdb_id = int(_ov["tmdb_id"])
+            # Issue #805 : `_r.tmdb_id = int(_ov["tmdb_id"])` se trouvait ICI et
+            # ne servait a RIEN. `PlanRow` (domain/core.py:680) est un dataclass
+            # SANS champ `tmdb_id` et sans `__slots__` : l'affectation ne levait
+            # pas, elle fabriquait un attribut d'instance que personne ne relit
+            # jamais (les seuls lecteurs de `tmdb_id` visent `Candidate`, cf
+            # jellyfin_validation.py:20, radarr_sync.py:34). `apply_core` ne
+            # contient pas une seule occurrence du mot `tmdb_id` : la
+            # destination sur disque se calcule sur `proposed_title` et
+            # `proposed_year`, overlayes juste en dessous.
+            #
+            # Le retrait ne change donc AUCUN comportement observable — et c'est
+            # precisement le point : la ligne faisait croire a un mainteneur que
+            # l'identite TMDb choisie a la main voyageait jusqu'au renommage. Un
+            # attribut fantome sur un objet du chemin destructif est un piege,
+            # pas une fonctionnalite : le meme motif rend un test vert des mois
+            # durant alors que le code est mort en production.
+            #
+            # Ce que le retrait NE fait PAS : rendre l'override effectif sur
+            # l'identite. Un override qui ne change QUE le `tmdb_id` (remake au
+            # titre et a l'annee identiques) reste sans effet a l'apply. Le
+            # rendre effectif imposerait de resoudre ce `tmdb_id` en titre/annee
+            # canoniques, donc de reecrire un titre depuis le reseau au moment
+            # d'un apply : c'est un chemin de mutilation de titre, il se traite
+            # separement et sous test, pas en marge de cette suppression.
+            #
+            # Ne PAS la remettre « pour aligner sur `film_support.apply_tmdb_override` » :
+            # ce helper-la opere sur des rows DICT (payload Bibliotheque / fiche
+            # film), ou `tmdb_id` / `chosen_tmdb_id` sont des cles d'enrichissement
+            # LEGITIMES et relues (cf `_ENRICHMENT_KEYS` de
+            # tests/test_dead_field_invariants.py). Sur l'OBJET PlanRow, ce sont
+            # des attributs fantomes.
             if _ov.get("proposed_title"):
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
@@ -2564,7 +2623,7 @@ def _summarize_apply(
             final_text += "\n"
         final_text += summary_block.lstrip("\n")
         run_paths.summary_txt.write_text(final_text, encoding="utf-8")
-    except (OSError, PermissionError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Resume application non ecrit: {exc}")
 
 
@@ -2572,7 +2631,7 @@ def _read_jellyfin_settings(api: Any) -> Dict[str, Any]:
     """Lit les settings Jellyfin. Retourne {} si indisponible ou desactive."""
     try:
         data = read_settings(api._state_dir)
-    except (OSError, PermissionError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return {}
     if not _to_bool(data.get("jellyfin_enabled"), False):
         return {}
@@ -2618,7 +2677,7 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
         return
     try:
         settings = api.settings.get_settings()
-    except (OSError, PermissionError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return
     if not _to_bool(settings.get("plex_enabled"), False):
         return
@@ -2677,7 +2736,7 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
     """
     try:
         settings = api.settings.get_settings()
-    except (OSError, PermissionError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         return _err_response(f"Echec lecture settings : {exc}", category="runtime", level="error", log_module=__name__)
     if not _to_bool(settings.get("plex_enabled"), False):
         return _err_response("Plex non configure ou desactive.", category="config", level="info", log_module=__name__)
@@ -3219,7 +3278,7 @@ def export_apply_audit(
 
     try:
         events = read_apply_audit(run_paths.run_dir, batch_id=batch_id)
-    except (OSError, PermissionError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError) as exc:
         api.log_api_exception("export_apply_audit", exc, run_id=run_id, extra={"batch_id": batch_id})
         return _err_response(
             t("errors.audit_log_read_failed"), category="resource", level="warning", log_module=__name__

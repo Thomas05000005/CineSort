@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.i18n_messages import t
+from cinesort.ui.api import settings_support as _settings_support
 from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
@@ -287,13 +289,15 @@ def _build_default_settings(api: Any) -> Dict[str, Any]:
     """Construit le payload settings 100 % par defaut (sans aucune valeur user).
 
     Utilise `apply_settings_defaults({}, ...)` avec les memes constantes que
-    `_get_settings_impl`. Lazy import pour eviter d'embarquer `settings_support`
-    a chaque appel `reset_support` (et eviter un cycle import).
+    `_get_settings_impl`.
     """
-    # Lazy imports : settings_support importe pywebview/Jellyfin via state, donc
-    # on garde le import a l'interieur pour limiter le blast radius.
+    # #779 : `cinesort_api` reste differe — c'est un VRAI cycle, il importe
+    # `reset_support` en tete (cinesort_api.py:82). `settings_support`, lui, est
+    # remonte en tete : aucune arete de retour vers `reset_support`, et
+    # l'argument « blast radius » qui figurait ici etait faux — `cinesort_api.py`
+    # importe DEJA les deux modules en tete (lignes 82 et 88), donc les deux sont
+    # charges au boot quoi qu'il arrive.
     from cinesort.ui.api import cinesort_api as _api_mod
-    from cinesort.ui.api import settings_support as _settings_support
 
     state_dir = _resolve_state_dir(api) or Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
     return _settings_support.apply_settings_defaults(
@@ -448,7 +452,7 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "ok": True,
             "backup_path": "",
             "removed_db_path": str(db_path),
-            "message": "Aucune DB existante a supprimer.",
+            "message": t("danger_zone.no_database_to_delete"),
         }
 
     backup_dir = state_path / "db" / "backups"

@@ -26,6 +26,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api import run_data_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
 from cinesort.ui.api.run_data_support import serialize_rows_for_payload, write_plan_jsonl
@@ -300,7 +301,7 @@ def _validate_and_init_plan_context(
 
     try:
         state.clean_old_runs(state_dir, keep_last=20)
-    except (OSError, PermissionError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         api._debug_log(
             state_dir=state_dir, run_id=None, enabled=debug_enabled, message=f"start_plan clean_old_runs warning: {exc}"
         )
@@ -709,7 +710,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
         # + fsync avant os.replace) laisse au contraire la cible INCHANGEE : au
         # pire le plan est absent, jamais ampute.
         write_plan_jsonl(rs.paths.plan_jsonl, serialize_rows_for_payload(rows))
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         rs.log("WARN", f"Plan save failed: {exc}")
         dlog(f"job_fn writing plan.jsonl failed: {exc}")
 
@@ -717,7 +718,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     try:
         summary_text = _build_analysis_summary(rows, stats, root, state_dir, rs.paths)
         state.atomic_write_text(rs.paths.summary_txt, summary_text, mkdir=False)
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         dlog(f"job_fn writing summary.txt failed: {exc}")
 
 
@@ -764,7 +765,7 @@ def _hydrate_settings_from_store(
     try:
         state_dir, _present = api._resolve_payload_state_dir(settings)
         persisted = read_settings(state_dir)
-    except (OSError, PermissionError, KeyError, TypeError, ValueError):
+    except (OSError, KeyError, TypeError, ValueError):
         return settings
     if not isinstance(persisted, dict) or not persisted:
         return settings
@@ -996,17 +997,14 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # logs (contournement de la pagination + valeur retournee dans next_log_index incoherente).
     # clamp_non_negative_int gere aussi None / str non-numerique / NaN proprement.
     last_log_index = clamp_non_negative_int(last_log_index)
-    # Fix audit 2026-05-25 (v1.5.5) Vague J : import local pour eviter cycle
-    # run_flow <-> run_data lors du chargement du module.
-    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Import en plus de
-    # compute_total_fallback pour harmoniser le fallback total entre
-    # dashboard/history/run_flow (auparavant run_flow ne lisait que
+    # #779 : l'import differe invoquait un cycle « run_flow <-> run_data » qui
+    # n'existe pas — `run_data_support` est DEJA une dependance de tete de ce
+    # module (ligne 31) et n'importe rien de `run_flow_support` en retour.
+    # Remonte en tete, module-style (cf. REFACTOR_PLAN_84.md §11.2).
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. `count_plan_rows` est lu
+    # en plus de `compute_total_fallback` pour harmoniser le fallback total
+    # entre dashboard/history/run_flow (auparavant run_flow ne lisait que
     # run_row.total, ignorant stats.planned_rows).
-    from cinesort.ui.api.run_data_support import (
-        compute_total_fallback,
-        count_plan_rows,
-    )
-
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -1026,7 +1024,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
                     stats_obj = parsed
             except (ValueError, json.JSONDecodeError):
                 stats_obj = {}
-        total = compute_total_fallback(run_row, stats_obj)
+        total = run_data_support.compute_total_fallback(run_row, stats_obj)
         cur = str(run_row.get("current_folder") or "")
         running = status_text in {RunStatus.PENDING.value, RunStatus.RUNNING.value}
         done = status_text in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
@@ -1044,7 +1042,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
                     run_id,
                     ensure_exists=False,
                 )
-                total = count_plan_rows(run_paths, fallback=total)
+                total = run_data_support.count_plan_rows(run_paths, fallback=total)
             except (OSError, AttributeError, KeyError, TypeError, ValueError):
                 # En cas d'erreur, on garde le total DB (best-effort)
                 pass
@@ -1145,7 +1143,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # discover_total comme cible attendue de la barre de progression.
     if done and not running:
         with contextlib.suppress(OSError, AttributeError, KeyError, TypeError, ValueError):
-            total = count_plan_rows(paths_snapshot, fallback=total)
+            total = run_data_support.count_plan_rows(paths_snapshot, fallback=total)
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 
@@ -1240,7 +1238,7 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
                 state.atomic_write_json(rs.paths.validation_json, safe)
                 rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
                 return {"ok": True, "path": str(rs.paths.validation_json)}
-            except (OSError, PermissionError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError) as exc:
                 return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
         found = api._find_run_row(run_id)
@@ -1260,7 +1258,7 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
             state.atomic_write_json(run_paths.validation_json, safe)
             api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
             return {"ok": True, "path": str(run_paths.validation_json)}
-        except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
@@ -1530,6 +1528,25 @@ def _quality_info_for_row(store: Any, run_id: str, r: Any, probe: Any = None) ->
         w, h = video.get("width"), video.get("height")
         if w and h:
             info["resolution"] = f"{int(w)}x{int(h)}"
+        else:
+            # #699 (residu) : `classify_resolution` (domain/resolution_class)
+            # tranche sur la LARGEUR et ne se sert de la hauteur que « comme
+            # filet quand la largeur manque (probe partiel, rapport persiste
+            # tronque) ». Ce cas produit donc une classe MESUREE
+            # (`resolution_source == "probe"`, seule condition sous laquelle
+            # `_build_pseudo_probe` propage l'etiquette) sans geometrie
+            # complete : le comparateur classait alors le fichier en 2160p et
+            # la carte A/B restait muette sur la resolution qui venait de
+            # decider du verdict.
+            #
+            # On retombe sur l'etiquette CANONIQUE, jamais sur une valeur
+            # fabriquee : `f"{h}p"` afficherait « 1600p » pour un UHD scope
+            # 3840x1600 (cf. la docstring de `_build_pseudo_probe`), et une
+            # etiquette deduite du NOM de release n'arrive pas jusqu'ici.
+            # Meme precedence que `film-detail.js` (`det.resolution` puis WxH).
+            label = str(video.get("resolution") or "").strip()
+            if label:
+                info["resolution"] = label
         tracks = probe.get("audio_tracks") or []
         if tracks and isinstance(tracks[0], dict):
             ac = str(tracks[0].get("codec") or "")
@@ -1684,38 +1701,57 @@ def _group_key_for(group: Dict[str, Any]) -> str:
     return f"{title}|{year}".strip("|")
 
 
-def mark_duplicate_winner(
-    api: Any,
+def _reload_duplicate_groups_index(api: Any, run_id: str) -> Dict[str, List[List[str]]]:
+    """Index {group_key: [row_ids du groupe, ...]} depuis UNE recharge des doublons.
+
+    Issue #406 : `mark_duplicate_winner` appelait `check_duplicates(api, run_id, {})`
+    a CHAQUE decision. Cette recharge relit le plan complet, refusionne les
+    decisions du disque, refait `_find_dups` sur toutes les lignes, puis enrichit
+    et annote les groupes depuis la DB (run_flow_support.py:1962-2023). Auto-decider
+    N groupes revenait donc a recalculer N fois la detection de doublons ENTIERE.
+    L'index est construit une seule fois et sert a toutes les decisions d'un lot.
+
+    Reutiliser un index pour tout un lot est licite : `_find_dups` regroupe a
+    partir de `safe` (decisions de validation.json), pas de la table
+    `duplicate_decisions`. Persister une decision ne change donc PAS la
+    composition des groupes ; seul `_annotate_groups_with_decisions` pose des
+    drapeaux (`winner_decided`/`winner_side`/`winner_row_id`) que ce code
+    n'utilise pas.
+
+    Une cle peut porter PLUSIEURS groupes (cf F28 revue R1) : la valeur est une
+    liste de listes, dans l'ordre de `check_duplicates`. En cas d'echec de la
+    recharge, l'index est vide -> l'appelant est FAIL-CLOSED.
+    """
+    index: Dict[str, List[List[str]]] = {}
+    try:
+        check_resp = check_duplicates(api, str(run_id), {})
+        if isinstance(check_resp, dict) and check_resp.get("ok"):
+            for g in check_resp.get("groups") or []:
+                row_ids = [str(r.get("row_id") or "") for r in (g.get("rows") or []) if isinstance(r, dict)]
+                index.setdefault(_group_key_for(g), []).append(row_ids)
+    except (KeyError, OSError, TypeError, ValueError, sqlite3.Error) as exc:
+        # sqlite3.Error n'herite PAS de OSError : sans lui, une DB verrouillee
+        # remontait jusqu'au boundary REST (500 generique).
+        _logger.warning("duplicate_winner: recharge groupes a echoue (%s) — decision(s) refusee(s)", exc)
+    return index
+
+
+def _persist_duplicate_winner(
+    store: Any,
     run_id: str,
     group_key: str,
     winner_row_id: str,
-    notes: Optional[str] = None,
+    notes: Optional[str],
+    groups_for_key: List[List[str]],
 ) -> Dict[str, Any]:
-    """Persiste la decision utilisateur "garder ce winner" pour un groupe.
+    """Applique les gardes F28 puis persiste UNE decision de doublon.
 
-    Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md §3 :
-      - Le winner est designe par son row_id (visible dans `check_duplicates`).
-      - Les autres rows du groupe deviennent "losers". A l'apply,
-        ils seront deplaces vers `<root>/_review/_duplicates_user_decided/`.
-      - Persistance via ApplyRepository.upsert_duplicate_decision (PK = run+group).
-
-    Retour : `{ok, group_key, winner_row_id, losers}` (cf signature dans le prompt).
+    `groups_for_key` = les groupes du reload qui portent cette cle (cf
+    `_reload_duplicate_groups_index`). Extrait de `mark_duplicate_winner` pour
+    que la version unitaire et la version bulk partagent EXACTEMENT les memes
+    gardes (issue #406).
     """
-    if not run_id or not str(run_id).strip():
-        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
-    if not group_key or not str(group_key).strip():
-        return _err_response("group_key requis.", category="validation", level="info", log_module=__name__)
-    if not winner_row_id or not str(winner_row_id).strip():
-        return _err_response("winner_row_id requis.", category="validation", level="info", log_module=__name__)
-
-    found = api._find_run_row(str(run_id))
-    if not found:
-        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
-    _run_row, store = found
-
-    # Recharge le groupe pour deduire les losers a partir du run (source de verite).
-    #
-    # F28 : cette recharge peut legitimement NE PAS retrouver le groupe. La
+    # F28 : la recharge peut legitimement NE PAS retrouver le groupe. La
     # recharge `check_duplicates(api, run_id, {})` refusionne les decisions du
     # DISQUE (validation.json) et `_browse_all_if_none_approved` cesse
     # d'elargir des qu'UN row a ok=True -> find_duplicate_targets ne groupe plus
@@ -1732,31 +1768,20 @@ def mark_duplicate_winner(
     # groupes DISTINCTS peuvent legitimement la partager — find_duplicate_targets
     # groupe sur movie_key(title, year, edition) (H11) alors que _group_key_for
     # retombe sur title|year (l'edition n'est pas dans le dict de groupe).
-    matching_groups = 0
-    try:
-        check_resp = check_duplicates(api, str(run_id), {})
-        if isinstance(check_resp, dict) and check_resp.get("ok"):
-            for g in check_resp.get("groups") or []:
-                if _group_key_for(g) != str(group_key):
-                    continue
-                matching_groups += 1
-                row_ids = [str(r.get("row_id") or "") for r in (g.get("rows") or []) if isinstance(r, dict)]
-                if str(winner_row_id) not in row_ids:
-                    # Winner etranger a CE groupe : sans ce garde TOUS ses
-                    # membres deviendraient losers et le film entier partirait au
-                    # bucket _review. On NE s'arrete PAS : un autre groupe de
-                    # meme cle peut etre le bon. S'arreter ici rendait le 2e
-                    # groupe INDECIDABLE A VIE, avec un message trompeur
-                    # (« Actualiser » reproduit exactement la meme collision).
-                    continue
-                if not group_found:
-                    group_found = True
-                    group_row_ids = row_ids
-                    losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
-    except (KeyError, OSError, TypeError, ValueError, sqlite3.Error) as exc:
-        # sqlite3.Error n'herite PAS de OSError : sans lui, une DB verrouillee
-        # remontait jusqu'au boundary REST (500 generique).
-        _logger.warning("mark_duplicate_winner: recharge groupes a echoue (%s) — decision refusee", exc)
+    matching_groups = len(groups_for_key)
+    for row_ids in groups_for_key:
+        if str(winner_row_id) not in row_ids:
+            # Winner etranger a CE groupe : sans ce garde TOUS ses
+            # membres deviendraient losers et le film entier partirait au
+            # bucket _review. On NE s'arrete PAS : un autre groupe de
+            # meme cle peut etre le bon. S'arreter ici rendait le 2e
+            # groupe INDECIDABLE A VIE, avec un message trompeur
+            # (« Actualiser » reproduit exactement la meme collision).
+            continue
+        group_found = True
+        group_row_ids = row_ids
+        losers = [rid for rid in row_ids if rid and rid != str(winner_row_id)]
+        break
 
     if not group_found:
         return _err_response(
@@ -1807,7 +1832,19 @@ def mark_duplicate_winner(
             loser_row_ids=losers,
             notes=notes,
         )
-    except (OSError, TypeError, ValueError) as exc:
+    # `sqlite3.Error` n'herite PAS d'OSError : sans lui, une base VERROUILLEE
+    # (`sqlite3.OperationalError: database is locked`) traversait cette fonction.
+    # Sur le chemin UNITAIRE, une decision etait perdue. Sur le chemin BULK
+    # (`mark_duplicate_winners_bulk`), l'exception remontait au boundary REST :
+    # le lot s'arretait A MI-PARCOURS, les decisions deja ecrites restaient en
+    # base, et l'UI ne recevait NI `results` NI `decided`/`failed` — le contrat
+    # « une entree de results par decision » etait rompu, sans que rien ne dise
+    # lesquelles avaient abouti.
+    #
+    # Les 4 autres sites de ce fichier l'attrapent deja (:1433, :1717, :1793),
+    # dont `get_duplicate_decision` juste au-dessus. Celui-ci etait le seul a ne
+    # pas le faire.
+    except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
         return _err_response(
             f"Persistance decision impossible : {exc}",
             category="runtime",
@@ -1829,6 +1866,142 @@ def mark_duplicate_winner(
         # « ✓ Decide » mensonger ; l'edit doublons.js est hors de ce fichier.
         "no_op": not persisted_losers,
         "decided_ts": float(decision.get("decided_ts") or 0.0),
+    }
+
+
+def mark_duplicate_winner(
+    api: Any,
+    run_id: str,
+    group_key: str,
+    winner_row_id: str,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persiste la decision utilisateur "garder ce winner" pour un groupe.
+
+    Cf docs/internal/design/refonte_2026_05_17/screens/01-doublons.md §3 :
+      - Le winner est designe par son row_id (visible dans `check_duplicates`).
+      - Les autres rows du groupe deviennent "losers". A l'apply,
+        ils seront deplaces vers `<root>/_review/_duplicates_user_decided/`.
+      - Persistance via ApplyRepository.upsert_duplicate_decision (PK = run+group).
+
+    Retour : `{ok, group_key, winner_row_id, losers}` (cf signature dans le prompt).
+    """
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not group_key or not str(group_key).strip():
+        return _err_response("group_key requis.", category="validation", level="info", log_module=__name__)
+    if not winner_row_id or not str(winner_row_id).strip():
+        return _err_response("winner_row_id requis.", category="validation", level="info", log_module=__name__)
+
+    found = api._find_run_row(str(run_id))
+    if not found:
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+    _run_row, store = found
+
+    # Recharge le groupe pour deduire les losers a partir du run (source de verite).
+    index = _reload_duplicate_groups_index(api, str(run_id))
+    return _persist_duplicate_winner(
+        store,
+        str(run_id),
+        str(group_key),
+        str(winner_row_id),
+        notes,
+        index.get(str(group_key), []),
+    )
+
+
+def mark_duplicate_winners_bulk(
+    api: Any,
+    run_id: str,
+    decisions: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Persiste PLUSIEURS decisions de doublons en une seule recharge (issue #406).
+
+    `decisions` = `[{group_key, winner_row_id, notes?}, ...]`.
+
+    Le bouton « Auto-decider tous » de la vue Doublons postait
+    `run/mark_duplicate_winner` une fois PAR groupe. Chaque appel refaisait la
+    detection de doublons entiere (cf `_reload_duplicate_groups_index`) : sur
+    1000 groupes, 1000 recalculs complets en plus des 1000 allers-retours HTTP.
+    Ici, UNE recharge sert tout le lot.
+
+    Chaque decision passe par EXACTEMENT les memes gardes que l'appel unitaire
+    (`_persist_duplicate_winner`) : groupe perime -> refus, winner etranger au
+    groupe -> refus, collision de cle -> refus.
+
+    Retour : `{ok: True, run_id, results: [...], decided: N, failed: M}`.
+    L'enveloppe reste `ok: True` meme si des decisions ont echoue — c'est le
+    lot qui s'est deroule, pas chaque decision. `failed` et le champ `ok` de
+    chaque entree de `results` sont la source de verite ; l'UI DOIT les lire
+    (un lot entierement en echec renvoie `decided: 0, failed: N`).
+    """
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not isinstance(decisions, list):
+        return _err_response(
+            "decisions doit etre une liste de {group_key, winner_row_id}.",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
+
+    found = api._find_run_row(str(run_id))
+    if not found:
+        return _err_response(t("errors.run_not_found"), category="resource", level="info", log_module=__name__)
+    _run_row, store = found
+
+    # UNE seule recharge pour tout le lot.
+    index = _reload_duplicate_groups_index(api, str(run_id))
+
+    results: List[Dict[str, Any]] = []
+    decided = 0
+    failed = 0
+    for item in decisions:
+        if not isinstance(item, dict):
+            failed += 1
+            results.append({"group_key": "", "ok": False, "error": "entree invalide (dict attendu)."})
+            continue
+        gkey = str(item.get("group_key") or "").strip()
+        winner = str(item.get("winner_row_id") or "").strip()
+        if not gkey or not winner:
+            failed += 1
+            results.append(
+                {
+                    "group_key": gkey,
+                    "ok": False,
+                    "error": "group_key et winner_row_id requis.",
+                }
+            )
+            continue
+        res = _persist_duplicate_winner(
+            store,
+            str(run_id),
+            gkey,
+            winner,
+            item.get("notes"),
+            index.get(gkey, []),
+        )
+        entry: Dict[str, Any] = {"group_key": gkey, "ok": bool(res.get("ok"))}
+        if res.get("ok"):
+            decided += 1
+            entry["winner_row_id"] = res.get("winner_row_id")
+            entry["losers"] = res.get("losers") or []
+            entry["no_op"] = bool(res.get("no_op"))
+        else:
+            failed += 1
+            entry["error"] = str(res.get("message") or res.get("error") or "echec inconnu")
+            if res.get("stale"):
+                entry["stale"] = True
+            if res.get("ambiguous_group_key"):
+                entry["ambiguous_group_key"] = True
+        results.append(entry)
+
+    return {
+        "ok": True,
+        "run_id": str(run_id),
+        "results": results,
+        "decided": decided,
+        "failed": failed,
     }
 
 

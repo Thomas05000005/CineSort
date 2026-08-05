@@ -237,7 +237,7 @@ def send_email_report(
                 smtp.quit()
         logger.info("[email] rapport envoye a %s (%s)", to_addr, event)
         return True
-    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
+    except (smtplib.SMTPException, OSError) as exc:
         logger.warning("[email] echec envoi a %s: %s", to_addr, exc)
         return False
 

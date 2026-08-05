@@ -444,6 +444,14 @@
     "step_apply": "Apply",
     "scan_running": "Scan in progress…"
   },
+  "dashboard": {
+    "no_run_available": "No run available for the dashboard.",
+    "health_trend_no_data": "No data",
+    "health_trend_current": "Health: {{score}}%",
+    "health_trend_up": "↑ +{{delta}}% since the last run",
+    "health_trend_down": "↓ {{delta}}% since the last run",
+    "health_trend_stable": "→ No change"
+  },
   "notifications": {
     "scan_done": "Scan finished ({{count}} movies)",
     "apply_done": "Apply finished ({{count}} files)",
@@ -537,7 +545,11 @@
     "persistence_failed": "Persistence error.",
     "perceptual_disabled": "Perceptual analysis is disabled in the settings.",
     "perceptual_file_a_failed": "File A error: {{detail}}",
-    "perceptual_file_b_failed": "File B error: {{detail}}"
+    "perceptual_file_b_failed": "File B error: {{detail}}",
+    "no_rows_in_run": "No row in this run.",
+    "perceptual_no_persisted_analysis": "No perceptual analysis stored for this movie. Start the analysis from the inspector.",
+    "perceptual_no_aligned_frame": "No aligned frame extracted.",
+    "perceptual_no_valid_pair": "No valid pair. Expected format: [{run_id, row_a, row_b}, ...]"
   },
   "danger_zone": {
     "title": "Danger zone",
@@ -553,7 +565,8 @@
     "wrong_confirm": "Wrong confirmation. Reset cancelled.",
     "last_chance": "LAST CHANCE: continue the reset?\n(a backup will be created before deletion)",
     "reset_done": "Reset complete.\n\nBackup created: {{path}}\n\nThe application will refresh.",
-    "reset_error": "Error: {{msg}}"
+    "reset_error": "Error: {{msg}}",
+    "no_database_to_delete": "No existing database to delete."
   },
   "sidebar": {
     "brand_name": "CineSort",

@@ -116,6 +116,43 @@ def build_apply_context(
     )
 
 
+class _CompteurEchecsJournal:
+    """Compte les ecritures de journal qui ECHOUENT, ou qu'elles echouent.
+
+    Interpose UNE seule fois a l'entree d'`apply_rows`, avant tout autre
+    emballage. Les `RecordOpWithJournal` et les closures d'injection de row_id
+    construits en aval l'enveloppent, donc tout echec finit par remonter ICI —
+    quel que soit le nombre de couches au-dessus.
+
+    Premiere tentative : compter sur le callable recu par `record_apply_op`.
+    Elle ne marchait pas — ce callable est un emballage cree A L'INTERIEUR
+    d'`apply_rows`, jete a la fin de chaque row, alors que la finalisation lit
+    l'objet d'ORIGINE. Mesure : le compteur restait a 0 sur un vrai apply dont
+    CHAQUE ecriture echouait.
+
+    Ne modifie AUCUN comportement : l'exception est relancee telle quelle, donc
+    les tolerances existantes (record_apply_op, atomic_move) s'appliquent
+    exactement comme avant.
+    """
+
+    __slots__ = ("_fn", "journal_failures", "journal_store", "journal_batch_id")
+
+    def __init__(self, fn: Callable[[Dict[str, Any]], None]) -> None:
+        self._fn = fn
+        self.journal_failures = 0
+        # Ces deux attributs sont lus par `atomic_move` (cf move_journal) : les
+        # perdre desactiverait silencieusement le journal write-ahead.
+        self.journal_store = getattr(fn, "journal_store", None)
+        self.journal_batch_id = getattr(fn, "journal_batch_id", None)
+
+    def __call__(self, payload: Dict[str, Any]) -> None:
+        try:
+            self._fn(payload)
+        except BaseException:
+            self.journal_failures += 1
+            raise
+
+
 def record_apply_op(
     record_op: Optional[Callable[[Dict[str, Any]], None]],
     *,
@@ -158,6 +195,10 @@ def record_apply_op(
         # disque (record_apply_op est appelee apres atomic_move) -> etat mixte sur le FS,
         # rows restantes jamais traitees, et move non journalise donc non annulable.
         _logger.warning("record_apply_op: echec journalisation %s src=%s: %s", op_type, src_path, e, exc_info=True)
+        # Le compteur voyage sur le callable lui-meme — `record_op` porte deja
+        # `journal_store` et `journal_batch_id` par le meme mecanisme. C'est ce
+        # qui permet de couvrir les 14 sites d'appel SANS les modifier un par
+        # un, donc sans risquer d'en oublier un.
         return False
 
 
@@ -198,7 +239,7 @@ def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
     folder.rename(tmp)
     try:
         tmp.rename(dst)
-    except (OSError, PermissionError):
+    except OSError:
         # Rollback : restaurer le nom original si le 2e rename echoue
         try:
             tmp.rename(folder)
@@ -251,12 +292,12 @@ def find_main_video_in_folder(folder: Path, cfg: "Config") -> Optional[Path]:
                 continue
             try:
                 size = entry.stat().st_size
-            except (OSError, PermissionError):
+            except OSError:
                 continue
             if size > best_size:
                 best = entry
                 best_size = size
-    except (OSError, PermissionError):
+    except OSError:
         return None
     return best
 
@@ -298,7 +339,7 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
                 if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
-    except (OSError, TimeoutError) as exc:
+    except OSError as exc:
         _logger.warning("sha1_quick failed for %s: %s", path, exc)
         return ""
     return digest.hexdigest()
@@ -323,7 +364,7 @@ def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
     """
     try:
         stat_result = path.stat()
-    except (OSError, PermissionError):
+    except OSError:
         return None
     return quick_hash_cache_key_from_stat(path, stat_result)
 
@@ -364,7 +405,7 @@ def files_identical_quick(
         if not dst_hash:
             return False
         return src_hash == dst_hash
-    except (OSError, PermissionError):
+    except OSError:
         return False
 
 
@@ -638,13 +679,13 @@ def prune_empty_dirs(root: Path) -> bool:
             if not any(directory.iterdir()):
                 directory.rmdir()
                 removed_any = True
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _logger.debug("prune_empty_dirs: skip %s: %s", directory, exc)
     try:
         if root.exists() and root.is_dir() and (not any(root.iterdir())):
             root.rmdir()
             removed_any = True
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _logger.debug("prune_empty_dirs: skip root %s: %s", root, exc)
     return removed_any
 
@@ -895,7 +936,7 @@ def move_file_with_collision_policy(
         if is_sidecar_metadata(cfg, src_file):
             try:
                 hash8 = sha1_quick_cached(src_file, hash_cache)[:8]
-            except (OSError, PermissionError):
+            except OSError:
                 hash8 = "unknown000"
             sidecar_name = f"{src_file.stem}.incoming_{hash8}{src_file.suffix}"
             try:
@@ -954,7 +995,7 @@ def move_file_with_collision_policy(
             try:
                 src_size = src_file.stat().st_size
                 src_sha1 = sha1_quick_cached(src_file, hash_cache)
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 _logger.debug("P1.2: sha1 pre-apply echoue pour %s: %s", src_file, exc)
                 src_sha1 = None
                 src_size = None
@@ -1187,7 +1228,7 @@ def _revert_moves(
                     reversible=False,
                 )
                 log("WARN", f"ROLLBACK {label}: {dst_done} -> {src_orig}")
-        except (OSError, PermissionError) as rb_exc:
+        except OSError as rb_exc:
             log("ERROR", f"ROLLBACK {label} ECHEC {dst_done} -> {src_orig}: {rb_exc}")
 
 
@@ -1403,7 +1444,7 @@ def move_duplicate_losers_to_user_decided(
                     try:
                         matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
                         video = matches[0] if matches else video
-                    except (OSError, PermissionError):
+                    except OSError:
                         pass
                 if not video.exists():
                     log("WARN", f"DUPLICATE_LOSER video manquant pour row {rid}, skip: {video}")
@@ -1477,7 +1518,10 @@ def move_duplicate_losers_to_user_decided(
             log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Un DOSSIER entier bouge ici ; sur un verrou Windows d'UN fichier interne,
+                # `shutil.move` degrade en copytree+rmtree et laisse la source eventree.
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1487,7 +1531,7 @@ def move_duplicate_losers_to_user_decided(
                 )
                 _moved_pairs.append((target, folder))
             res.duplicates_user_decided_moved_count += 1  # R8-018 : compteur dedie
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             # Isolation : le batch N'EST PAS avorté ; on rollback le partiel de ce
             # loser puis on enregistre l'erreur et on continue (parité per-row L1650).
             log("ERROR", f"DUPLICATE_LOSER echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
@@ -1598,7 +1642,7 @@ def move_marked_for_deletion_to_bucket(
                     try:
                         matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, video_name)]
                         video = matches[0] if matches else video
-                    except (OSError, PermissionError):
+                    except OSError:
                         pass
                 if not video.exists():
                     log("WARN", f"MARKED_FOR_DELETION video manquante pour row {rid}, skip: {video}")
@@ -1664,7 +1708,9 @@ def move_marked_for_deletion_to_bucket(
             log("INFO", f"{bucket_label}: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Meme raison qu'au site DUPLICATE_LOSER ci-dessus (dossier entier).
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1674,7 +1720,7 @@ def move_marked_for_deletion_to_bucket(
                 )
                 _moved_pairs.append((target, folder))
             res.marked_for_deletion_moved_count += 1
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             log("ERROR", f"MARKED_FOR_DELETION echec row {rid} ({folder}); rollback + skip (batch non avorte): {exc}")
             _revert_moves(row_record_op, _moved_pairs, log, "MARKED_FOR_DELETION")
             res.errors += 1
@@ -1757,7 +1803,9 @@ def move_collection_folder(
     log("INFO", f"Move collection folder: {folder} -> {target}")
     if not dry_run:
         (cfg.root / cfg.collection_root_name).mkdir(parents=True, exist_ok=True)
-        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR")
+        # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+        # `target` est sous `cfg.root`, comme `folder` : meme volume, `os.rename` suffit.
+        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
         record_apply_op(
             record_op,
             op_type="MOVE_DIR",
@@ -1805,6 +1853,14 @@ def apply_rows(
     `op_conflict` (conflit detecte via delta sur compteurs de conflits),
     `error` (exception attrapee). Backward compat : si None, comportement inchange.
     """
+    # Interposition du compteur d'echecs de journal, AVANT tout autre emballage.
+    # `record_apply_op` rend `False` depuis toujours quand la journalisation
+    # echoue, mais AUCUN de ses 14 sites d'appel ne lisait ce retour : un apply
+    # pouvait deplacer des dossiers, ne rien journaliser, et se declarer
+    # reussi. C'est le symptome de #901 — batch cree, `counts.total = 0`, undo
+    # indisponible, aucune erreur remontee.
+    if record_op is not None and not isinstance(record_op, _CompteurEchecsJournal):
+        record_op = _CompteurEchecsJournal(record_op)
     _logger.info("apply: %d rows a traiter (dry_run=%s)", len(rows), dry_run)
     ctx = build_apply_context(
         cfg,
@@ -2316,7 +2372,7 @@ def apply_rows(
                 except Exception:  # noqa: BLE001
                     _logger.debug("apply: audit_logger.error failed", exc_info=True)
             continue
-        except (FileNotFoundError, FileExistsError, OSError) as exc:
+        except OSError as exc:
             # Sprint 2 audit P0 #5 : separer FS errors (attendues, log warning) des
             # state errors (bug logique, log error). Avant : tout etait swallow sans
             # contexte. Le run continue (res.errors++) car un seul film en echec
@@ -2482,6 +2538,21 @@ def apply_rows(
         res.errors += 1
         _append_error_message(res, f"NETTOYAGE DOSSIERS VIDES : {exc}")
         log("ERROR", f"apply: nettoyage dossiers vides echoue: {exc}")
+    # Un apply qui a bouge des dossiers sans pouvoir les journaliser N'EST PAS
+    # un apply reussi du point de vue de l'utilisateur : il ne pourra pas
+    # revenir en arriere. On ne le fait pas ECHOUER — le disque a deja bouge —
+    # mais on cesse de le taire.
+    res.journal_failures = int(getattr(record_op, "journal_failures", 0) or 0)
+    if res.journal_failures:
+        _append_error_message(
+            res,
+            f"{res.journal_failures} operation(s) effectuee(s) sur le disque mais NON journalisee(s) : "
+            "l'annulation de cet apply sera incomplete.",
+        )
+        log(
+            "ERROR",
+            f"apply: {res.journal_failures} operation(s) non journalisee(s) — undo incomplet pour ce batch.",
+        )
     _logger.info(
         "apply: termine — renames=%d moves=%d skipped=%d quarantined=%d errors=%d (dry_run=%s)",
         res.renames,
@@ -2560,7 +2631,7 @@ def apply_single(
         for _p in folder.iterdir():
             if _p.name and len(_p.name) > len(_longest_inner):
                 _longest_inner = _p.name
-    except (OSError, PermissionError):
+    except OSError:
         _longest_inner = ""
     _candidate_inner_path = str(dst / _longest_inner) if _longest_inner else str(dst)
     _path_err = check_path_length_killswitch(str(dst)) or check_path_length_killswitch(_candidate_inner_path)
@@ -2672,7 +2743,7 @@ def apply_single(
             try:
                 src_size = main_video.stat().st_size
                 src_sha1 = sha1_quick_cached(main_video, hash_cache)
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 _logger.debug("P1.2: sha1 pre-apply (MOVE_DIR) echoue pour %s: %s", main_video, exc)
                 src_sha1 = None
                 src_size = None
@@ -2748,7 +2819,7 @@ def apply_collection_item(
                 (path for path in folder.rglob("*") if path.is_file() and _name_eq_fs(path.name, str(video_name))),
                 None,
             )
-        except (OSError, PermissionError):
+        except OSError:
             merged_video = None
         log("WARN", f"Video missing, skip: {folder}/{video_name}")
         core_mod._mark_skip(res, core_mod.SKIP_REASON_MERGED if merged_video else core_mod.SKIP_REASON_AUTRE)
@@ -2846,7 +2917,7 @@ def apply_collection_item(
                     )
                     res.moves = max(0, res.moves - 1)
                     log("WARN", f"ROLLBACK collection (atomicite intra-row): {dst_done} -> {src_orig}")
-            except (OSError, PermissionError) as rb_exc:
+            except OSError as rb_exc:
                 log("ERROR", f"ROLLBACK collection ECHEC {dst_done} -> {src_orig}: {rb_exc}")
         # (B) un retry doit re-traiter l'item : retirer du ledger les cles ajoutees ici.
         if dedup_seen_ops is not None:
@@ -2918,7 +2989,7 @@ def apply_collection_item(
             core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         elif status in {"conflict", "sidecar_conflict"}:
             core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         # Echec mid-item : restaurer l'etat coherent (rollback), liberer le ledger,
         # puis RE-LEVER pour que la boucle per-row (apply_core.py:~1650) enregistre
         # l'erreur "FICHIER VERROUILLE" et poursuive le batch (resilience per-row).
@@ -2970,7 +3041,7 @@ def apply_tv_episode(
         try:
             matches = [p for p in folder.iterdir() if p.is_file() and _name_eq_fs(p.name, row.video)]
             video = matches[0] if matches else video
-        except (PermissionError, OSError) as exc:
+        except OSError as exc:
             # Revue PR#561 (sourcery-ai) : sans ce log, un NAS qui refuse
             # l'enumeration (permission denied, share tombe) est rapporte a
             # l'identique d'un dossier ou la video est reellement absente. Le
@@ -3076,7 +3147,7 @@ def apply_tv_episode(
             if not sc.exists():
                 continue
             sidecar_targets.append((sc, target_dir / sc.name))
-    except (PermissionError, OSError) as exc:
+    except OSError as exc:
         log("WARN", f"TV sidecar scan failed for {folder}: {exc}")
 
     # GATE 3 (TV-MAXPATH) : kill-switch MAX_PATH sur la vidéo ET chaque sidecar réaligné
@@ -3121,7 +3192,7 @@ def apply_tv_episode(
                     )
                     res.moves = max(0, res.moves - 1)
                     log("WARN", f"ROLLBACK TV (atomicite intra-row): {dst_done} -> {src_orig}")
-            except (OSError, PermissionError) as rb_exc:
+            except OSError as rb_exc:
                 log("ERROR", f"ROLLBACK TV ECHEC {dst_done} -> {src_orig}: {rb_exc}")
 
     def _move_status(src_path: Path, dst_path: Path) -> str:
@@ -3160,7 +3231,7 @@ def apply_tv_episode(
                 moved_for_rollback.append((dst_sc, sc))
             elif s_status in {"conflict", "sidecar_conflict", "duplicate_identical"}:
                 core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         log("ERROR", f"apply_tv_episode: echec move, rollback intra-row ({folder.name}): {exc}")
         _rollback_partial_tv()
         raise
@@ -3199,7 +3270,10 @@ def quarantine_row(
             return
         log("INFO", f"QUARANTINE folder: {folder} -> {target}")
         if not dry_run:
-            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR")
+            # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+            # Le dossier du film part en entier sous `_review/` : une degradation en
+            # copytree+rmtree y dedoublerait le contenu et eventrerait la source.
+            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR", allow_copy_fallback=False)
             record_apply_op(
                 record_op,
                 op_type="QUARANTINE_DIR",
@@ -3220,7 +3294,7 @@ def quarantine_row(
         # `.lower()` : sur un scan SMB macOS les noms remontent en NFD.
         try:
             matches = [path for path in folder.iterdir() if path.is_file() and _name_eq_fs(path.name, row.video)]
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             # Revue PR#561 (sourcery-ai) : ne pas rendre l'echec FS
             # indiscernable d'un « aucune video trouvee ». La suite skippe la
             # row SANS aucun log (contrairement a apply_tv_episode) : sans

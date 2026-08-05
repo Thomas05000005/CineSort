@@ -114,8 +114,8 @@ with open("cinesort_export_20260514.json", encoding="utf-8") as f:
 
 print(f"Export CineSort v{data['version']} du {data['exported_at']}")
 print(f"{data['film_count']} films au total")
-for film in data['films']:
-    if film['quality_tier'] == 'premium':
+for film in data["films"]:
+    if film["quality_tier"] == "premium":
         print(f"  * {film['title']} ({film['year']}) — score {film['quality_score']}")
 ```
 

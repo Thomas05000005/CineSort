@@ -378,7 +378,7 @@ class ProbeService:
     def _cache_key(self, media_path: Path, backend: str) -> Optional[Dict[str, Any]]:
         try:
             st = media_path.stat()
-        except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             logger.debug("Probe cache key ignoree (stat impossible) path=%s err=%s", media_path, exc)
             return None
         return {

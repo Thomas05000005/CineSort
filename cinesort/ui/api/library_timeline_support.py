@@ -91,7 +91,7 @@ def _file_mtime_to_month(path: str) -> Optional[str]:
         if not p.exists():
             return None
         ts = p.stat().st_mtime
-    except (OSError, PermissionError):
+    except OSError:
         return None
     if ts <= 0:
         return None

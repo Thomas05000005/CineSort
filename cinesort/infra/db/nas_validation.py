@@ -159,7 +159,7 @@ def _wal_size_bytes(db_path: Path) -> int:
     wal = db_path.with_name(db_path.name + "-wal")
     try:
         return int(wal.stat().st_size)
-    except (FileNotFoundError, OSError):
+    except OSError:
         return 0
 
 

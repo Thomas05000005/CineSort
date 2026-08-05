@@ -41,6 +41,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from cinesort.app.move_journal import _rename_or_cross_device_copy
+
 _logger = logging.getLogger(__name__)
 
 # Status values pour `apply_batch_modes.rollback_status`
@@ -271,8 +273,18 @@ def _revert_one_op(
                     "reason": f"backup_dup_src: {unlink_exc}",
                 }
         try:
-            shutil.move(str(dst), str(src))
-        except (OSError, PermissionError) as move_exc:
+            # Un op_type `*_DIR` remet un DOSSIER entier en place. `shutil.move`
+            # degrade en copytree+rmtree des que `os.rename` echoue, y compris sur
+            # un banal verrou Windows d'UN fichier interne : la source ressort
+            # eventree et le contenu dedouble (mesure detaillee dans
+            # `move_journal._rename_or_cross_device_copy`). Sur un rollback — le
+            # filet de secours — l'erreur doit aller dans le sens RESTRICTIF : ne
+            # rien deplacer plutot que dedoubler. Les op_type `*_FILE` gardent
+            # `shutil.move`, dont la copie fait justement aboutir le deplacement
+            # d'un fichier verrouille en lecture partagee.
+            _move_back = shutil.move if op_type.endswith("_FILE") else _rename_or_cross_device_copy
+            _move_back(str(dst), str(src))
+        except OSError as move_exc:
             # HOTFIX data-loss : restauration du backup si on en a cree un.
             # Si on a renomme src -> backup_tmp puis que shutil.move a echoue,
             # le fichier user serait perdu sans cette restauration.
@@ -317,7 +329,7 @@ def _revert_one_op(
                         f"rollback_forward: backup cleanup FAILED op_id={op_id} "
                         f"backup={backup_tmp}: {cleanup_exc} (non-fatal)",
                     )
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _audit_log(
             audit_fn,
             "ERROR",

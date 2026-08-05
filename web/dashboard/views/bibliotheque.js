@@ -579,7 +579,15 @@ function _renderGrid() {
             title: "Aucun film importé",
             message: "Votre bibliothèque est vide. Lancez un scan pour découvrir vos films.",
             ctaLabel: "Lancer un scan",
-            ctaRoute: "/processing?step=scan",
+            // Ultra-audit 2026-08-03 (N14) : etait "/processing?step=scan".
+            // /processing est une vue INTERNE (stepper 3 etapes) utilisee par
+            // traitement.js et qij.js (cf app.js) ; l'item de sidebar
+            // « Traitement » monte, lui, /traitement (workflow 5 etapes). Le
+            // CTA envoyait donc sur un ecran different de celui qu'ouvre le
+            // menu, pendant que la sidebar restait surlignee sur Traitement.
+            // Meme correctif que traitement.js:1712 (« plutot que de rediriger
+            // vers une vue tierce »). /traitement demarre sur l'etape scan.
+            ctaRoute: "/traitement",
             testId: "bibliotheque-empty-cta",
           })}
         </div>

@@ -149,7 +149,7 @@ def _read_app_version() -> str:
     try:
         version_file = Path(__file__).resolve().parents[3] / "VERSION"
         return version_file.read_text(encoding="utf-8").strip() or "unknown"
-    except (OSError, PermissionError, ValueError):
+    except (OSError, ValueError):
         return "unknown"
 
 
@@ -1805,7 +1805,7 @@ class CineSortApi:
                     level="info",
                     log_module=__name__,
                 )
-        except (OSError, PermissionError):
+        except OSError:
             return _err_response(
                 "Impossible de lire l'attribut symlink du chemin.",
                 category="runtime",
@@ -2096,6 +2096,16 @@ class CineSortApi:
         """
         return run_flow_support.mark_duplicate_winner(self, run_id, group_key, winner_row_id, notes)
 
+    def _mark_duplicate_winners_bulk_impl(
+        self, run_id: str, decisions: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Issue #406 : persiste N decisions de doublons en UNE recharge des groupes.
+
+        Memes gardes que l'appel unitaire, groupe par groupe. Retourne
+        `{ok, results, decided, failed}` : `failed` > 0 signale des refus.
+        """
+        return run_flow_support.mark_duplicate_winners_bulk(self, run_id, decisions or [])
+
     def _get_dashboard_impl(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)
@@ -2280,7 +2290,7 @@ class CineSortApi:
         report = built.get("report") if isinstance(built.get("report"), dict) else {}
         rows = report.get("rows") or []
         if not rows:
-            return _err_response("Aucune ligne dans le run.", category="state", level="info", log_module=__name__)
+            return _err_response(t("errors.no_rows_in_run"), category="state", level="info", log_module=__name__)
 
         return export_nfo_for_run(rows, overwrite=bool(overwrite), dry_run=bool(dry_run))
 

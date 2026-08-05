@@ -149,9 +149,22 @@ def export_full_library(api: Any) -> Dict[str, Any]:
             return _err_response("state_dir indisponible.", category="state", level="info", log_module=__name__)
 
         # 1. Settings sanitises
+        #
+        # #526 : `raw_settings = settings_resp.get("data", settings_resp)` vivait
+        # ici. Il deballait une enveloppe `{ok, data}` que `get_settings()` n'a
+        # JAMAIS produite — elle rend le dict de settings A PLAT
+        # (cinesort_api._get_settings_impl -> settings_support.get_settings_payload
+        # -> _mask_secrets(payload)). Ce n'etait donc pas seulement du code mort :
+        # `settings.json` n'est filtre par aucune whitelist (`apply_settings_defaults`
+        # et `write_settings` font tous deux `dict(data)`), donc une cle nommee
+        # `data` (plugin, import de config, edition manuelle) etait prise pour
+        # l'enveloppe et l'export RGPD Art. 20 (#95) partait avec le CONTENU DE
+        # CETTE CLE a la place des reglages, `ok: True` et sans le moindre
+        # avertissement. Mesure avant correctif, settings
+        # `{"tmdb_api_key": ..., "root": ..., "data": {"piege": 1}}` -> l'export
+        # rendait `settings == {"piege": 1}`.
         try:
-            settings_resp = api.settings.get_settings()
-            raw_settings = settings_resp.get("data", settings_resp) if isinstance(settings_resp, dict) else {}
+            raw_settings = api.settings.get_settings()
             settings = _sanitize_settings(raw_settings) if isinstance(raw_settings, dict) else {}
         except (AttributeError, KeyError, TypeError) as exc:
             logger.warning("export: get_settings echoue (%s)", exc)
