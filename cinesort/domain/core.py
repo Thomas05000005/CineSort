@@ -4,6 +4,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -168,7 +169,11 @@ _TV_SEASON_RE = re.compile(r"^season[ ._-]?\d{1,2}$", re.IGNORECASE)
 _TMDB_SCORE_BASE = 0.25
 _TMDB_SCORE_SIM_CAP = 0.55
 _TMDB_SCORE_YEAR_CLOSE_BONUS = 0.15
-_TMDB_SCORE_YEAR_FAR_PENALTY = 0.08
+# #451 : `_TMDB_SCORE_YEAR_FAR_PENALTY` (0.08) vivait ici. Son unique lecteur
+# etait la branche `elif year_delta >= 6` de build_candidates_from_tmdb, rendue
+# inatteignable par la branche `>= _TMDB_YEAR_FAR_THRESHOLD` (3) qui la precede.
+# Constante et branche supprimees ensemble : la penalite d'ecart d'annee est
+# desormais unique (_TMDB_YEAR_FAR_HEAVY_PENALTY).
 _TMDB_SCORE_POPULAR_BONUS = 0.05
 _TMDB_SCORE_SEQUEL_MATCH_BONUS = 0.12
 _TMDB_SCORE_SEQUEL_MISSING_PENALTY = 0.22
@@ -1082,10 +1087,15 @@ def build_candidates_from_tmdb(
         if year_is_close:
             score += _TMDB_SCORE_YEAR_CLOSE_BONUS
         elif year_delta is not None and year_delta >= _TMDB_YEAR_FAR_THRESHOLD:
-            # FIX 3 : penalite lourde si ecart annee > 2 ans.
+            # FIX 3 : penalite lourde si ecart annee > 2 ans. UNE SEULE marche :
+            # #451 avait raison, la branche `elif year_delta >= 6` qui suivait
+            # etait inatteignable (tout delta >= 6 satisfait deja `>= 3`) et sa
+            # penalite legere n'a JAMAIS ete appliquee. Elle est supprimee plutot
+            # que reordonnee : reintroduire une gradation adoucirait le score des
+            # ecarts 3-5 ans, c'est-a-dire exactement les faux positifs que FIX 3
+            # visait. Pin du comportement :
+            # tests/test_core_heuristics.py::test_tmdb_year_gap_penalty_is_flat.
             score -= _TMDB_YEAR_FAR_HEAVY_PENALTY
-        elif year_delta is not None and year_delta >= 6:
-            score -= _TMDB_SCORE_YEAR_FAR_PENALTY
         if r.vote_count and r.vote_count > 200:
             score += _TMDB_SCORE_POPULAR_BONUS
         sequel_note = ""
@@ -1311,7 +1321,13 @@ def pick_best_candidate(cands: List[Candidate]) -> Optional[Candidate]:
     if best_bonus > 0.0:
         note = str(best.note or "")
         suffix = f"consensus=+{best_bonus:.2f}"
-        best.note = f"{note}, {suffix}" if note else suffix
+        # #450 : `Candidate` n'est pas frozen et `cands` appartient a l'appelant
+        # (plan_support_replan stocke CETTE liste telle quelle dans
+        # PlanRow.candidates). Muter `best.note` en place survivrait a l'appel :
+        # une seconde evaluation de la meme liste empilerait un second suffixe
+        # "consensus=+X". On renvoie une COPIE annotee, la liste d'entree reste
+        # intacte.
+        best = dataclass_replace(best, note=f"{note}, {suffix}" if note else suffix)
     return best
 
 

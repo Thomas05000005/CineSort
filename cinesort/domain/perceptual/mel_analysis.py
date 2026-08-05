@@ -31,6 +31,7 @@ from .constants import (
     MEL_N_FILTERS,
     MEL_SOFT_CLIP_HARMONICS_SEVERE_PCT,
     MEL_SOFT_CLIP_HARMONICS_WARN_PCT,
+    MEL_TOP_DB,
     MEL_WEIGHT_AAC_HOLES,
     MEL_WEIGHT_FLATNESS,
     MEL_WEIGHT_MP3_SHELF,
@@ -144,8 +145,12 @@ def apply_mel_filters(
     return np.maximum(mel, 0.0)
 
 
-def mel_to_db(mel_spec: np.ndarray, top_db: float = 80.0, eps: float = 1e-10) -> np.ndarray:
-    """Conversion lineaire -> dB, clippe a [-top_db, 0]."""
+def mel_to_db(mel_spec: np.ndarray, top_db: float = MEL_TOP_DB, eps: float = 1e-10) -> np.ndarray:
+    """Conversion lineaire -> dB, clippe a [-top_db, 0].
+
+    Le plancher `-top_db` est le contrat que consomme `detect_aac_holes` :
+    MEL_AAC_HOLE_THRESHOLD_DB doit rester strictement au-dessus (issue #660).
+    """
     max_val = float(mel_spec.max()) if mel_spec.size > 0 else 1.0
     ref = max(max_val, eps)
     db = 20.0 * np.log10(np.maximum(mel_spec, eps) / ref)
@@ -302,7 +307,9 @@ def detect_aac_holes(
 ) -> Dict[str, Any]:
     """Detecte trous spectraux AAC bas bitrate.
 
-    - hole_ratio : fraction de bandes avec puissance moy < -80 dB
+    - hole_ratio : fraction de bandes avec puissance moyenne
+      < MEL_AAC_HOLE_THRESHOLD_DB (strictement au-dessus du plancher de
+      `mel_to_db`, sans quoi aucune bande ne peut jamais etre comptee — #660)
     - synthetic_ratio : fraction de bandes avec variance temporelle < 0.05
 
     Returns: {"hole_ratio": float, "synthetic_ratio": float, "verdict": str}

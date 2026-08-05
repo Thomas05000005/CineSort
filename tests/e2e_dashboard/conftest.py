@@ -25,6 +25,7 @@ if _e2e_dir not in sys.path:
 # Importer les donnees de test et les fonctions utilitaires
 import contextlib
 import shutil
+import socket
 import tempfile
 import time
 from http.client import HTTPConnection
@@ -129,6 +130,64 @@ _SHELL_TIMEOUT_MS = 8000
 _SHELL_TIMEOUT_LENT_MS = 30000
 
 
+def _diagnostic_shell_absent(page, e2e_server: Dict[str, Any], exc: Exception) -> str:
+    """Message d'echec ENRICHI quand le shell n'apparait jamais.
+
+    Issue #924. Le shell qui ne s'affiche pas apres 30 s en CI n'est PAS de la
+    lenteur — c'est « jamais ». Trois faits font converger vers un epuisement de
+    ressources du runner plutot que vers un defaut applicatif : un
+    `net::ERR_NO_BUFFER_SPACE` deja observe sur ce workflow, une fixture
+    `e2e_server` en portee MODULE reclamee par 11 modules (donc autant de
+    serveurs REST sur des ports ephemeres), et une CI deux fois plus lente que
+    le poste local — donc des sockets qui vivent deux fois plus longtemps.
+
+    Rien de tout cela n'est DEMONTRE. Le raisonnement par elimination a deja
+    coute trois enquetes ; ce diagnostic capture l'etat AU MOMENT DE LA PANNE
+    pour trancher a la premiere occurrence suivante, au lieu d'attendre la
+    suivante encore.
+
+    Ne leve jamais : un diagnostic qui plante masquerait l'erreur qu'il decrit.
+    """
+    lignes = [f"Le shell n'est jamais apparu ({_SHELL_TIMEOUT_LENT_MS} ms). {exc}"]
+
+    port = e2e_server.get("port")
+    lignes.append(f"  port du serveur de test : {port}")
+
+    # Le serveur repond-il ENCORE ? C'est la question qui separe « application
+    # lente » de « socket morte ».
+    if isinstance(port, int):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(3.0)
+                code = s.connect_ex(("127.0.0.1", port))
+            lignes.append(
+                f"  connect_ex(127.0.0.1:{port}) = {code}"
+                f"{'  -> le serveur ACCEPTE encore' if code == 0 else '  -> serveur INJOIGNABLE'}"
+            )
+        except OSError as err:
+            lignes.append(f"  connect_ex impossible : {err}")
+
+    # Etat de la page : le DOM est-il seulement arrive ?
+    with contextlib.suppress(Exception):
+        lignes.append(f"  page.url = {page.url}")
+    with contextlib.suppress(Exception):
+        shell = page.locator("#app-shell")
+        lignes.append(
+            f"  #app-shell present={shell.count() > 0} "
+            f"class={shell.get_attribute('class') if shell.count() else '(absent)'}"
+        )
+    with contextlib.suppress(Exception):
+        lignes.append(f"  <title> = {page.title()!r}")
+
+    # Erreurs console : c'est la que ERR_NO_BUFFER_SPACE apparaitrait.
+    with contextlib.suppress(Exception):
+        erreurs = getattr(page, "_cinesort_console_errors", None)
+        if erreurs:
+            lignes.append(f"  erreurs console ({len(erreurs)}) : {erreurs[:5]}")
+
+    return "\n".join(lignes)
+
+
 @pytest.fixture(scope="function")
 def authenticated_page(page, e2e_server: Dict[str, Any]):
     """Page Playwright connectee au dashboard.
@@ -173,7 +232,10 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
     if bypass_actif:
         # Pas de repli possible ni souhaitable : si le shell n'apparait toujours
         # pas, c'est un vrai defaut, et le message doit le dire.
-        page.wait_for_selector("#app-shell:not(.hidden)", timeout=_SHELL_TIMEOUT_LENT_MS)
+        try:
+            page.wait_for_selector("#app-shell:not(.hidden)", timeout=_SHELL_TIMEOUT_LENT_MS)
+        except PWTimeoutError as exc:
+            raise PWTimeoutError(_diagnostic_shell_absent(page, e2e_server, exc)) from exc
         return page
 
     page.wait_for_selector("#loginToken", state="visible", timeout=_SHELL_TIMEOUT_MS)
