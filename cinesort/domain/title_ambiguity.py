@@ -106,11 +106,26 @@ def _is_ambiguity_source(candidate: Any) -> bool:
 
 
 def detect_title_ambiguity(candidates: List[Any]) -> Tuple[bool, Optional[str]]:
-    """True si au moins 2 candidats TMDb ont le même titre normalisé.
+    """True si au moins 2 candidats d'IDENTITÉ ont le même titre normalisé.
 
-    Les candidats "nfo" et "name" sont ignorés (leur titre vient du nom de
-    fichier, pas d'une ambiguïté réelle). Seule l'ambiguïté côté TMDb nous
-    intéresse (2 films distincts qui partagent un titre).
+    Sont comptés les candidats dont la `source` appartient à
+    `_AMBIGUITY_SOURCES` (`tmdb`, `nfo_tmdb`, `nfo_imdb`) : ce sont les trois
+    identités issues d'une résolution provider. `nfo_tmdb`/`nfo_imdb` viennent
+    d'un NFO mais portent un id TMDb/IMDb faisant autorité — ils désignent donc
+    un film réel et participent bien à l'ambiguïté.
+
+    Sont ignorés les candidats `name` (titre dérivé du nom de fichier) et `nfo`
+    nu (titre du NFO sans id résolu) : leur titre ne prouve l'existence d'aucun
+    second film.
+
+    #493 : cette docstring affirmait l'inverse (« les candidats "nfo" et "name"
+    sont ignorés », en incluant les sous-types `nfo_tmdb`/`nfo_imdb`). C'est le
+    CODE qui a raison — cf. le commentaire de `_AMBIGUITY_SOURCES` et #762, qui
+    a justement unifié ce prédicat entre détection et application du boost.
+    Appliquer l'ancienne docstring (un `if source.startswith("nfo"): continue`)
+    ferait disparaître la détection sur les bibliothèques riches en NFO ; c'est
+    le scénario que verrouille
+    `tests/test_title_ambiguity.py::AmbiguitySourceContractTests`.
 
     Retourne (ambigu, titre_normalise) — le titre est utile pour logs/UI.
     """

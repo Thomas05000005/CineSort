@@ -18,6 +18,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
 from cinesort.domain.probe_models import probe_quality_is_failed, probe_quality_is_partial_or_failed
 from cinesort.domain.subtitle_helpers import _normalize_iso639
+from cinesort.domain.tiers_helpers import is_premium_tier
 from cinesort.infra.db import SQLiteStore
 
 # Imports MODULE-STYLE (pas `from X import f`) pour les modules `ui/api` :
@@ -326,7 +327,15 @@ def _build_dashboard_section(
             review_queue_count += 1
         if _flags & run_read_support._CONFLICT_FLAGS:
             conflicts_count += 1
-    premium_count = sum(1 for score in scores if score >= 85)
+    # #472 : SECONDE definition du meme KPI (la premiere est le `premium_count`
+    # SQL de `quality.get_quality_counts_for_runs`). Elle portait le meme
+    # litteral fossile `score >= 85` — seuil Platinum de l'echelle PRE-v1.5.5,
+    # abandonnee pour 70/66/55/40. Les deux passent desormais par la MEME bande
+    # de tiers (`domain.tiers_helpers`), donc `score_premium_pct` (stats du run)
+    # et `premium_pct` (summary global) ne peuvent plus repondre differemment
+    # sur la meme bibliotheque. Le tier lu est celui persiste avec le rapport,
+    # calcule avec le profil actif au moment du scoring.
+    premium_count = sum(1 for item in reports if is_premium_tier(item.get("tier")))
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
     stats_obj = _parse_stats_json(run_row.get("stats_json"))
     # Fix audit 2026-05-26 (v1.5.6) Vague L : count-1. Aligner sur la source
