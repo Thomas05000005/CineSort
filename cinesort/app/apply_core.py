@@ -1477,7 +1477,10 @@ def move_duplicate_losers_to_user_decided(
             log("INFO", f"DUPLICATE_LOSER moved to _review/_duplicates_user_decided: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Un DOSSIER entier bouge ici ; sur un verrou Windows d'UN fichier interne,
+                # `shutil.move` degrade en copytree+rmtree et laisse la source eventree.
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1664,7 +1667,9 @@ def move_marked_for_deletion_to_bucket(
             log("INFO", f"{bucket_label}: {folder} -> {target}")
             if not dry_run:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR")
+                # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+                # Meme raison qu'au site DUPLICATE_LOSER ci-dessus (dossier entier).
+                atomic_move(row_record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
                 record_apply_op(
                     row_record_op,
                     op_type="MOVE_DIR",
@@ -1757,7 +1762,9 @@ def move_collection_folder(
     log("INFO", f"Move collection folder: {folder} -> {target}")
     if not dry_run:
         (cfg.root / cfg.collection_root_name).mkdir(parents=True, exist_ok=True)
-        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR")
+        # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+        # `target` est sous `cfg.root`, comme `folder` : meme volume, `os.rename` suffit.
+        atomic_move(record_op, src=folder, dst=target, op_type="MOVE_DIR", allow_copy_fallback=False)
         record_apply_op(
             record_op,
             op_type="MOVE_DIR",
@@ -3199,7 +3206,10 @@ def quarantine_row(
             return
         log("INFO", f"QUARANTINE folder: {folder} -> {target}")
         if not dry_run:
-            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR")
+            # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+            # Le dossier du film part en entier sous `_review/` : une degradation en
+            # copytree+rmtree y dedoublerait le contenu et eventrerait la source.
+            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR", allow_copy_fallback=False)
             record_apply_op(
                 record_op,
                 op_type="QUARANTINE_DIR",
