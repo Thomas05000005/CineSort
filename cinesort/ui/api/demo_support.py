@@ -18,10 +18,10 @@ import logging
 import shutil
 import sqlite3
 import time
-import uuid
 from typing import Any, Dict, List, Tuple
 
 from cinesort.infra import state
+from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
 
@@ -356,11 +356,27 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
         )
 
     started = time.time()
-    run_id = f"demo_{int(started)}_{uuid.uuid4().hex[:6]}"
+    # CINQUIEME producteur de run_id, longtemps oublie : il rendait
+    # `demo_<epoch>_<hex6>`, hors du format canonique. Ce n'etait pas cosmetique.
+    # `state.clean_old_runs` trie les dossiers par NOM en ordre decroissant puis
+    # rmtree tout ce qui depasse `keep_last` : « demo_… » (0x64) trie AVANT tout
+    # « 2026… » (0x32), donc les dossiers demo etaient eternellement classes « les
+    # plus recents » et purgeaient de VRAIS runs a leur place. Mesure sur 10 runs
+    # canoniques + 2 runs demo avec keep_last=10 : 2 dossiers demo survivants,
+    # 2 runs reels detruits. C'est exactement l'argument #1 du docstring de
+    # `infra/run_id.py`, applique au producteur qui lui echappait.
+    #
+    # Rien ne dependait du prefixe : `_is_demo_run` / `_list_demo_run_ids` et
+    # `stop_demo_mode` resolvent les runs demo par `config_json['is_demo']`
+    # UNIQUEMENT (le seul autre litteral `demo_` du depot est DEMO_PROFILE_ID).
+    run_id = generate_run_id()
     config = {"is_demo": True, "demo_label": "CineSort démo", "root": DEMO_ROOT}
 
     try:
-        run_paths = state.new_run(state_dir, run_id)
+        # exclusive=True : le mode demo contourne le JobRunner (insert direct,
+        # sans le verrou de run actif). La reservation atomique du dossier est
+        # donc sa seule garde contre l'ecrasement d'un run existant.
+        run_paths = state.new_run(state_dir, run_id, exclusive=True)
         store.run.insert_run_pending(
             run_id=run_id,
             root=DEMO_ROOT,

@@ -128,6 +128,12 @@ def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     total = 0
     for row in rows or []:
         rid = str(getattr(row, "row_id", "") or "")
+        # Ce filtre doit rester EN AMONT de `_row_estimated_size` : depuis
+        # #796 celui-ci parcourt l'arborescence (`_dir_tree_size`). Une row
+        # ecartee ici ne declenche donc aucun `rglob` — ce qui compte pour un
+        # film pose a la racine, dont le `folder` EST la racine de la
+        # bibliotheque : la sommer reviendrait a facturer toute la
+        # bibliotheque, en plus d'un parcours complet du disque par row.
         if rid not in approved_keys:
             continue
         total += _row_estimated_size(row)

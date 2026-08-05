@@ -308,11 +308,13 @@ class FolderWatcher(threading.Thread):
                 logger.info("[watcher] scan skipped (already running), change kept for next poll")
                 continue
 
-            # Le scan va etre declenche : on peut maintenant graver le snapshot.
-            self._previous_snapshot = current
-
-            # Declencher le scan
-            self._trigger_scan(detail)
+            # Audit 2026-06-01 (#487) : _trigger_scan peut early-return si un
+            # root est inaccessible (NAS debranche, droits) ou si start_plan
+            # echoue. On ne grave le snapshot QUE si le scan a effectivement
+            # ete lance ; sinon le changement reste a re-detecter au prochain
+            # poll (symetrique du cas "scan running" deja gere ci-dessus).
+            if self._trigger_scan(detail):
+                self._previous_snapshot = current
 
     def _is_scan_running(self) -> bool:
         """Verifie si un scan est deja en cours via l'API."""
@@ -326,12 +328,18 @@ class FolderWatcher(threading.Thread):
                     return True
         return False
 
-    def _trigger_scan(self, detail: str) -> None:
+    def _trigger_scan(self, detail: str) -> bool:
         """Lance un scan automatique via start_plan.
 
         R5-CRIT-6 fix : valide que tous les roots sont accessibles AVANT de lancer
         le scan. Sinon, NAS deconnecte = snapshot vide = "100 dossiers disparus"
         detecte = scan auto declenche pour rien (faux positif).
+
+        Audit 2026-06-01 (#487) : retourne True si le scan a ete effectivement
+        demarre (start_plan ok=True), False sinon (roots inaccessibles, start_plan
+        a echoue, ou exception). L'appelant doit ne graver le snapshot baseline
+        que si True, sinon le changement detecte reste a re-traiter au prochain
+        poll.
         """
         # R5-CRIT-6 : pre-validation accessibility roots
         inaccessible: List[str] = []
@@ -347,7 +355,7 @@ class FolderWatcher(threading.Thread):
                 len(inaccessible),
                 ", ".join(inaccessible[:3]),
             )
-            return
+            return False
 
         try:
             settings = self._api.settings.get_settings()
@@ -364,7 +372,13 @@ class FolderWatcher(threading.Thread):
                     f"Changement detecte. Scan lance en arriere-plan. ({detail})",
                 )
                 logger.info("[watcher] scan started run_id=%s", result.get("run_id", "?"))
-            else:
-                logger.warning("[watcher] scan failed: %s", result.get("message", "?"))
-        except (KeyError, TypeError, ValueError) as exc:
-            logger.warning("[watcher] scan trigger error: %s", exc)
+                return True
+            logger.warning("[watcher] scan failed: %s", result.get("message", "?"))
+            return False
+        # Audit 2026-06-01 (#488) : except large + logger.exception pour preserver
+        # le traceback et garantir la survie du thread daemon cinesort-watcher.
+        # AttributeError / OSError / RuntimeError (job_runner "run deja en cours")
+        # tuaient silencieusement le watcher avec l'except etroit precedent.
+        except Exception:
+            logger.exception("[watcher] scan trigger error")
+            return False

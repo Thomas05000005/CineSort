@@ -36,12 +36,13 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+from cinesort.infra import state
 
 _log = logging.getLogger(__name__)
 
@@ -189,19 +190,19 @@ def _load_ttl_manifest(root: Path) -> Dict[str, float]:
 def _save_ttl_manifest(root: Path, manifest: Dict[str, float]) -> None:
     """Ecrit le manifest (best-effort, ne leve jamais)."""
     path = _ttl_manifest_path(root)
-    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}")
     try:
         # R8-029 (F2-d) : ecriture ATOMIQUE (tmp sibling + os.replace) au lieu d'un
         # write_text direct. Avant, un crash ou un write concurrent (viewer + cron daemon,
         # last-writer-wins) en plein write TRONQUAIT/corrompait ttl_manifest.json -> la
         # comptabilite TTL devenait fausse. os.replace dans le meme dossier est atomique.
-        tmp.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        #
+        # Ce site portait l'AUTRE moitie de l'invariant : `.tmp` unique
+        # (pid+thread) mais AUCUN fsync ni controle de taille, donc un crash
+        # systeme pouvait quand meme promouvoir un manifest tronque. Le helper
+        # commun porte les deux moities ensemble (et balaie ses orphelins).
+        state.atomic_write_text(path, json.dumps(manifest, ensure_ascii=False))
     except (OSError, TypeError, ValueError) as exc:
         _log.warning("ttl manifest: ecriture %s echec : %s", path, exc)
-        with contextlib.suppress(OSError):
-            if tmp.exists():
-                tmp.unlink()
 
 
 def _stable_arrival_ts(fp: Path, default: float, *, anchor: Optional[Path] = None) -> float:

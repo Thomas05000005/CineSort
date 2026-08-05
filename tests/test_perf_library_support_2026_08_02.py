@@ -448,19 +448,37 @@ class DisplayTitleIsNotAProofTests(unittest.TestCase):
 
 class _FlakyFilmModal:
     """Enveloppe le VRAI FilmModalRepository ; les `fail_first` premieres
-    lectures levent (verrou SQLite transitoire : contention avec un ecrivain,
-    resolue quelques ms plus tard)."""
+    lectures PAR ROW levent, et les `fail_bulk_first` premieres lectures
+    GROUPEES aussi (verrou SQLite transitoire : contention avec un ecrivain,
+    resolue quelques ms plus tard).
 
-    def __init__(self, inner: Any, fail_first: int = 0) -> None:
+    FUSION #853 x #849 : `_enrich_plan_payload` ne lit plus les overrides par
+    row mais en UN SELECT (`film_support.list_tmdb_overrides_bulk`, qui passe
+    par `_ensure_tables` + `_managed_conn`). Un double qui ne sait faire echouer
+    que `get_tmdb_override` ne peut donc PLUS produire la panne que ces tests
+    pretendent prouver : il resterait vert quoi qu'il arrive. On instrumente les
+    DEUX chemins.
+    """
+
+    def __init__(self, inner: Any, fail_first: int = 0, fail_bulk_first: int = 0) -> None:
         self._inner = inner
         self.fail_first = fail_first
+        self.fail_bulk_first = fail_bulk_first
         self.calls: List[str] = []
+        self.bulk_calls = 0
 
     def get_tmdb_override(self, *, run_id: str, row_id: str):  # noqa: ANN201
         self.calls.append(f"{run_id}/{row_id}")
         if len(self.calls) <= self.fail_first:
             raise sqlite3.OperationalError("database is locked")
         return self._inner.get_tmdb_override(run_id=run_id, row_id=row_id)
+
+    def _ensure_tables(self) -> None:
+        """Premier appel de la lecture GROUPEE : c'est ici qu'on la fait echouer."""
+        self.bulk_calls += 1
+        if self.bulk_calls <= self.fail_bulk_first:
+            raise sqlite3.OperationalError("database is locked")
+        self._inner._ensure_tables()  # noqa: SLF001
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -541,8 +559,10 @@ class RealChainOverlayIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def _api(self, fail_first: int = 0) -> _RealChainApi:
-        self.store.film_modal = _FlakyFilmModal(self.store.film_modal, fail_first=fail_first)
+    def _api(self, fail_first: int = 0, fail_bulk_first: int = 0) -> _RealChainApi:
+        self.store.film_modal = _FlakyFilmModal(
+            self.store.film_modal, fail_first=fail_first, fail_bulk_first=fail_bulk_first
+        )
         return _RealChainApi(self.store, self._tmp, self.raw_rows)
 
     def test_manual_override_visible_and_read_once(self) -> None:
@@ -557,15 +577,25 @@ class RealChainOverlayIntegrationTests(unittest.TestCase):
         self.assertEqual(out[0]["title"], "Choix Manuel")
         self.assertEqual(out[0]["tmdb_id"], 999)
         self.assertEqual(out[0]["year"], 2021)
-        self.assertEqual(api.film_modal.calls, ["run1/r0"])
+        # FUSION #853 : l'enrichissement lit desormais les overrides du run en
+        # UNE fois -> plus AUCUNE lecture par row, ni pendant l'enrichissement
+        # ni apres. Retirer le guard du marqueur dans _build_library_rows
+        # repeuple immediatement `calls` : le pouvoir de detection est intact.
+        self.assertEqual(api.film_modal.calls, [])
+        self.assertEqual(api.film_modal.bulk_calls, 1)
         self.assertEqual(len(api.film_modal.calls) - api.calls_after_enrich, 0)
 
     def test_manual_override_survives_a_failed_enrichment_overlay(self) -> None:
         """LE test qui manquait. L'overlay de _enrich_plan_payload echoue (verrou
         SQLite transitoire, avale par son contextlib.suppress) mais il pose quand
         meme display_title. Sans marqueur explicite, la Bibliotheque sautait le
-        rattrapage et le choix manuel disparaissait -> 'Auto r0' / 111."""
-        api = self._api(fail_first=1)
+        rattrapage et le choix manuel disparaissait -> 'Auto r0' / 111.
+
+        FUSION #853 : l'enrichissement a maintenant DEUX chemins d'overlay (le
+        SELECT groupe, puis le repli par row). Le verrou doit les faire echouer
+        tous les deux pour reproduire la panne — sinon le repli sauve la row et
+        le test ne teste plus rien."""
+        api = self._api(fail_first=1, fail_bulk_first=1)
 
         out = library_support._build_library_rows(api, "run1")
 
@@ -577,10 +607,24 @@ class RealChainOverlayIntegrationTests(unittest.TestCase):
         self.assertEqual(out[0]["tmdb_id"], 999)
         self.assertEqual(out[0]["year"], 2021)
 
+    def test_manual_override_survives_a_failed_bulk_read_alone(self) -> None:
+        """FUSION #853 x #849 : la seule lecture groupee tombe, le repli par row
+        de l'enrichissement aboutit. La row est alors marquee par
+        `overlay_tmdb_override` et la Bibliotheque n'a RIEN a relire."""
+        api = self._api(fail_bulk_first=1)
+
+        out = library_support._build_library_rows(api, "run1")
+
+        self.assertEqual(api.film_modal.calls, ["run1/r0"])  # repli par row, 1 seule fois
+        self.assertEqual(api.calls_after_enrich, 1)  # aucune relecture cote Bibliotheque
+        self.assertEqual(out[0]["title"], "Choix Manuel")
+        self.assertEqual(out[0]["tmdb_id"], 999)
+        self.assertEqual(out[0]["year"], 2021)
+
     def test_enrichment_stamps_display_title_even_when_overlay_fails(self) -> None:
         """Preuve directe de l'objection : `display_title` est pose meme quand
         l'overlay vient d'echouer -> il ne prouve rien sur l'overlay."""
-        api = self._api(fail_first=1)
+        api = self._api(fail_first=1, fail_bulk_first=1)
 
         rows = api.run.get_plan("run1")["rows"]
 
@@ -589,13 +633,18 @@ class RealChainOverlayIntegrationTests(unittest.TestCase):
 
     def test_enrichment_stamps_marker_on_success(self) -> None:
         """Non-regression du gain de perf : sur le chemin nominal le marqueur EST
-        pose par la vraie chaine (sinon la Bibliotheque relirait toujours)."""
+        pose par la vraie chaine (sinon la Bibliotheque relirait toujours).
+
+        FUSION #853 : c'est desormais la lecture GROUPEE qui doit le poser
+        (`apply_tmdb_overrides_bulk`), sans quoi le N+1 supprime par #853
+        reviendrait par la Bibliotheque, fail-closed sur ce marqueur."""
         api = self._api()
 
         rows = api.run.get_plan("run1")["rows"]
 
         self.assertTrue(rows[0][TMDB_OVERLAY_DONE_KEY])
         self.assertEqual(rows[0]["proposed_title"], "Choix Manuel")
+        self.assertEqual(api.film_modal.calls, [])
 
 
 if __name__ == "__main__":
