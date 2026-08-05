@@ -743,11 +743,21 @@ export async function testConnection(token) {
   // Issue #233 : avant le refactor #84 PR 10, l'endpoint etait /api/get_settings.
   // Il a ete deplace sous /api/settings/get_settings (split en 5 facades).
   // L'ancien path retourne 404, ce qui cassait silencieusement le flow de login.
-  const resp = await fetch(`${baseUrl()}/api/settings/get_settings`, {
-    method: "POST",
-    headers,
-    body: "{}",
-  });
+  // Issue #492 : `fetch` REJETTE (TypeError "Failed to fetch") quand le reseau
+  // tombe entre la saisie du token et l'appel — VPN qui flappe, portail captif,
+  // serveur qui redemarre. Sans garde, l'exception traversait testConnection et
+  // login.js n'avait plus qu'un message generique a afficher. On la traduit en
+  // refus type, comme les cas 401/429/5xx juste en dessous.
+  let resp;
+  try {
+    resp = await fetch(`${baseUrl()}/api/settings/get_settings`, {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  } catch {
+    return { ok: false, message: "Serveur injoignable. Verifiez le reseau puis reessayez." };
+  }
 
   if (resp.status === 401) {
     return { ok: false, message: "Clé d'accès invalide." };
@@ -759,9 +769,24 @@ export async function testConnection(token) {
     return { ok: false, message: `Serveur indisponible (HTTP ${resp.status}). Reessayez dans quelques instants.` };
   }
 
-  // Si le POST passe, on recupere aussi le health pour la version
-  const healthResp = await fetch(`${baseUrl()}/api/health`);
-  const health = await healthResp.json().catch(() => ({}));
+  // Si le POST passe, on recupere aussi le health pour la version.
+  //
+  // Issue #492, le cas qui coute vraiment : a ce point l'authentification a
+  // REUSSI. Le `.catch(() => ({}))` d'origine ne couvrait que la promesse de
+  // `.json()`, pas le `fetch` lui-meme : une coupure reseau survenue APRES le
+  // POST faisait rejeter ce GET, l'exception remontait, et login.js affichait
+  // "erreur reseau" pour un token PARFAITEMENT VALIDE — un succes transforme en
+  // echec. La version backend est un enrichissement d'affichage : son absence
+  // se lit "?", elle n'invalide pas l'authentification.
+  let health = {};
+  try {
+    const healthResp = await fetch(`${baseUrl()}/api/health`);
+    if (healthResp.ok) {
+      health = (await healthResp.json().catch(() => ({}))) || {};
+    }
+  } catch {
+    /* best-effort : version="?" plutot que refuser un token valide */
+  }
 
   return { ok: true, version: health.version || "?", active_run_id: health.active_run_id || null };
 }
