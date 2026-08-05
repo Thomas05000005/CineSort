@@ -107,15 +107,21 @@ const _SHORTCUTS = [
   { keys: ["Ctrl", "B"], label: "Replier ou déployer la sidebar" },
   { keys: ["Ctrl", "I"], label: "Afficher ou masquer l'inspecteur droit" },
   { keys: ["Ctrl", ","], label: "Aller à Paramètres" },
-  // Revue post-merge 2026-08-03 : la ligne Ctrl+Z a ete RETIREE, en meme temps
-  // que le raccourci lui-meme (core/keyboard.js). Il dispatchait un evenement
-  // dont l'unique auditeur avait disparu a la migration ESM : la frappe ne
-  // faisait rien. Le libelle etait faux en prime — la Bibliotheque n'a aucun
-  // flux d'undo. Le rebrancher etait exclu : `run/undo_last_apply` redeplace des
-  // fichiers sur le disque, une action destructive qui doit rester derriere une
-  // confirmation explicite, ce qu'une frappe nue ne peut pas porter. L'undo est
-  // documente ci-dessous dans les rubriques d'aide, et reste accessible par ses
-  // boutons dans /traitement et /historique.
+  // Revue post-merge 2026-08-03 + ultra-audit N01/N08 : la ligne Ctrl+Z a ete
+  // RETIREE, en meme temps que le raccourci lui-meme (core/keyboard.js). Il
+  // dispatchait un evenement dont l'unique auditeur avait disparu a la
+  // migration ESM : la frappe ne faisait rien. Le libelle etait faux en prime —
+  // la Bibliotheque n'a aucun flux d'undo. Le rebrancher est exclu pour une
+  // raison de CIBLE (cf. le commentaire 4b de core/keyboard.js) : un raccourci
+  // GLOBAL n'a aucun batch a designer depuis /parametres ou /bibliotheque.
+  // L'undo est documente ci-dessous dans les rubriques d'aide et reste
+  // accessible par ses boutons dans /traitement et /historique, derriere leur
+  // confirmation.
+  //
+  // F5 est en revanche AJOUTE a la table : depuis que `cinesort:refresh` a un
+  // auditeur (core/keyboard.js `_refreshCurrentView`), la touche remonte
+  // reellement la vue courante — l'annoncer n'est plus une promesse en l'air.
+  { keys: ["F5"], label: "Rafraîchir la vue courante" },
   { keys: ["Esc"], label: "Fermer modal / palette / drawer" },
   { keys: ["?"], label: "Afficher cette aide" },
   // Revue post-merge 2026-08-03 : seule la vue Doublons implemente ArrowUp/
