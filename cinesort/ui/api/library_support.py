@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import time
 import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
@@ -30,6 +30,141 @@ from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Contrat de lecture des PlanRow serialisees (helper PARTAGE)
+# ---------------------------------------------------------------------------
+# AUDIT 2026-08-03 (#447 / #730) : `api.run.get_plan()` renvoie un simple
+# `asdict(PlanRow)` (run_data_support.serialize_rows_for_payload), enrichi de
+# quelques clefs seulement par `history_support._enrich_plan_payload`
+# (display_title / auto_approvable / tmdb_id via overlay_tmdb_override).
+# TOUTE autre clef lue sur ces dicts vaut None EN PERMANENCE et se fait avaler
+# par un fallback falsy (`or 0`, `or ""`) : aucune exception, juste une
+# fonctionnalite morte.
+#
+# `mtime`, `source_path` et `size_bytes` etaient exactement dans ce cas. Degats
+# constates cote utilisateur :
+#   - `added_ts` toujours 0.0  -> tris "added_asc"/"added_desc" inertes,
+#     filtres added_after/added_before jamais appliques, chip
+#     "recently_modified" (_row_recently_modified) toujours vide ;
+#   - `path` toujours ""       -> podiums release group / source vides
+#     (library_podiums_support:176 derive le filename du path), fallback
+#     filesystem de la timeline mort (library_timeline_support:277), colonne
+#     chemin vide a l'export (library_actions_support:1121) ;
+#   - `size_bytes` retombait sur la seule ESTIMATION bitrate x duree.
+#
+# Les trois se DERIVENT de `folder` + `video`, qui existent, eux, sur PlanRow.
+# Ces deux helpers sont la source unique de cette derivation : tout module qui
+# a besoin du chemin / de la date / de la taille d'une PlanRow doit les
+# appeler plutot que d'inventer une nouvelle clef fantome.
+
+
+def plan_row_media_path(row: Mapping[str, Any]) -> str:
+    """Chemin du media d'une PlanRow serialisee (`folder` + `video`).
+
+    Ce n'est pas une derivation inventee ici : c'est deja la facon dont le
+    depot localise le fichier d'une PlanRow, cf
+    `library_actions_support._rematch_tmdb_and_update_plan` (`folder_path /
+    target["video"]`, puis `video_path.exists()`).
+
+    Retourne le dossier seul quand `video` est vide (cas d'une PlanRow
+    "single" dont le fichier n'a pas ete resolu), et "" si les deux manquent.
+
+    Le chemin est celui du PLAN : apres un apply qui a deplace le dossier il
+    peut etre perime jusqu'au re-scan. `plan_row_fs_facts` degrade alors a
+    (0.0, 0), soit exactement la valeur que `added_ts` avait en permanence
+    avant ce correctif — aucune regression possible de ce cote.
+    """
+    folder = str(row.get("folder") or "").strip()
+    video = str(row.get("video") or "").strip()
+    if folder and video:
+        return os.path.join(folder, video)
+    return folder or video
+
+
+def _folder_fs_facts(folder: str, cache: Dict[str, Dict[str, Tuple[float, int]]]) -> Dict[str, Tuple[float, int]]:
+    """Index {nom_de_fichier: (mtime, size)} d'un dossier, memoise.
+
+    UN `os.scandir` par dossier DISTINCT plutot qu'un `os.stat` par film.
+    Pour un dossier mono-film les deux se valent (une enumeration de
+    repertoire vaut un aller-retour, comme un stat) ; le gain est sur les
+    dossiers PARTAGES — kinds "collection" et "extra", ou K PlanRow pointent
+    le meme dossier — qui passent de K aller-retours a un seul.
+
+    Cout mesure (853 films, 3 entrees par dossier, SSD local, 2026-08-03) :
+    38 ms au total, soit 45 us par film — face aux ~15 s que met deja la vue
+    Bibliotheque, c'est sous le bruit.
+
+    Reserve honnete (reintroduite apres la revue adversaire du 2026-08-03) :
+    ce chiffre est celui d'un SSD LOCAL. Sur un root SMB/NAS c'est un
+    aller-retour reseau par dossier distinct, et le `fs_cache` ne vit que le
+    temps d'UN appel a `_build_library_rows` — qui compte 9 appelants
+    (bibliotheque, podiums, timeline, audit qualite, audit decennies, export,
+    rollup, compteurs par chip, filtres). Rien n'est memoise d'un ecran a
+    l'autre : chaque vue repaie l'enumeration.
+
+    Pourquoi ne pas lire la DB plutot que le disque : `probe_cache` et
+    `incremental_file_hashes` portent bien des colonnes (path, size, mtime),
+    mais ce sont des CACHES dont la mtime fait partie de la clef — la valeur
+    stockee est celle constatee AU MOMENT du probe, elle n'est jamais mise a
+    jour quand le fichier bouge, et la ligne n'existe pas du tout pour un
+    film jamais probe. Afficher « date d'ajout » depuis cette source
+    rendrait une date fausse en silence, c'est-a-dire exactement la classe
+    de bug qu'on corrige ici. Le disque est la seule source honnete.
+    """
+    known = cache.get(folder)
+    if known is not None:
+        return known
+    facts: Dict[str, Tuple[float, int]] = {}
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                try:
+                    # `follow_symlinks=True` (defaut) VOLONTAIRE : on veut la
+                    # taille et la date du FILM, pas celles du lien. Avec
+                    # follow_symlinks=False une bibliotheque montee en liens
+                    # symboliques afficherait « 60 octets » partout. Sous
+                    # Windows l'info vient du cache de scandir pour tout ce
+                    # qui n'est pas un point d'analyse, donc aucun syscall
+                    # supplementaire dans le cas courant ; un lien casse
+                    # leve OSError et l'entree est simplement ignoree.
+                    st = entry.stat()
+                except OSError:
+                    continue
+                facts[entry.name] = (float(st.st_mtime), int(st.st_size))
+    except OSError as exc:
+        # Root debranche / dossier deja deplace : on degrade a (0.0, 0), qui
+        # est neutre pour les filtres (cf `_row_recently_modified`).
+        logger.debug("library_support: dossier illisible %s (%s)", folder, exc)
+    cache[folder] = facts
+    return facts
+
+
+def plan_row_fs_facts(
+    row: Mapping[str, Any],
+    cache: Optional[Dict[str, Dict[str, Tuple[float, int]]]] = None,
+) -> Tuple[float, int]:
+    """Retourne `(mtime_epoch, size_bytes)` reels du media d'une PlanRow.
+
+    `(0.0, 0)` si le media est introuvable/illisible — jamais d'exception :
+    la vue Bibliotheque doit rester affichable avec un root debranche.
+    """
+    if cache is None:
+        cache = {}
+    folder = str(row.get("folder") or "").strip()
+    video = str(row.get("video") or "").strip()
+    if folder and video:
+        return _folder_fs_facts(folder, cache).get(video, (0.0, 0))
+    target = folder or video
+    if not target:
+        return (0.0, 0)
+    try:
+        st = os.stat(target)
+    except OSError:
+        return (0.0, 0)
+    return (float(st.st_mtime), int(st.st_size))
+
 
 # ---------------------------------------------------------------------------
 # Utilitaires
@@ -371,6 +506,11 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             logger.debug("library_support poster batch fetch error: %s", exc)
 
+    # AUDIT 2026-08-03 (#447 / #730) : index {dossier: {fichier: (mtime, size)}}
+    # partage par toutes les rows du run -> un seul `os.scandir` par dossier
+    # distinct, meme pour les dossiers partages (collection / extras).
+    fs_cache: Dict[str, Dict[str, Tuple[float, int]]] = {}
+
     out: List[Dict[str, Any]] = []
     for r in plan_rows:
         row_id = str(r.get("row_id") or "")
@@ -482,6 +622,13 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
                     poster_url = cand_poster
                     break
 
+        # AUDIT 2026-08-03 (#447 / #730) : chemin + date + taille derives de
+        # folder/video (cf plan_row_media_path / plan_row_fs_facts en tete de
+        # module). Avant : r.get("mtime") / r.get("source_path") /
+        # r.get("size_bytes"), trois clefs absentes de PlanRow.
+        media_path = plan_row_media_path(r)
+        fs_mtime, fs_size = plan_row_fs_facts(r, fs_cache)
+
         row = {
             "row_id": row_id,
             "title": r.get("proposed_title") or r.get("nfo_title") or "",
@@ -533,14 +680,8 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
-            # PlanRow ne porte aucun timestamp : dériver added_ts = os.stat() par
-            # row (I/O dans une boucle sur potentiellement des milliers de films).
-            # Traité séparément (#730) ; en l'état, indisponible sans stat FS.
-            "added_ts": 0.0,
-            # PlanRow n'a ni source_path ni mtime : le chemin réel est folder/video
-            # (cf apply_core Path(row.folder)/row.video). Sans ce fallback, `path`
-            # était toujours vide → lien "ouvrir le dossier" cassé + podiums faussés.
-            "path": (str(Path(r.get("folder")) / (r.get("video") or "")) if r.get("folder") else ""),
+            "added_ts": fs_mtime,
+            "path": media_path,
             "poster_url": poster_url,
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),
@@ -553,15 +694,21 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
             # AUDIT 2026-06-11 (R3) : source MEDIA (bluray/web/dvd/other) derivee du
             # nom video, pour le filtre Source du drawer (distincte de
             # proposed_source = source d'identification).
-            "media_source": _media_source_label(r.get("video") or r.get("source_path") or ""),
+            "media_source": _media_source_label(r.get("video") or media_path),
             "confidence": confidence,
             # Fix audit 2026-05-26 (v1.5.6) Vague L (lib-2) : metrics["size_bytes"]
             # n'existe pas. La taille estimee est dans detected.file_size_bytes
             # (bitrate_kbps * duration_s, cf _estimate_file_size en domain/quality_score.py).
-            # Avant : metrics.get("size_bytes") = None -> tous les size_bytes
-            # provenaient uniquement de PlanRow.size_bytes (lui-meme souvent 0
-            # tant que le scan FS n'a pas posé la stat), cassant le tri/filtre taille.
-            "size_bytes": int(r.get("size_bytes") or detected.get("file_size_bytes") or 0),
+            #
+            # AUDIT 2026-08-03 (#447 / #730) : le terme prioritaire etait
+            # `r.get("size_bytes")` et le commentaire ci-dessus affirmait a tort
+            # que « PlanRow.size_bytes » existait — il n'a jamais existe (cf
+            # domain/core.py:PlanRow). La taille affichee etait donc TOUJOURS
+            # l'estimation bitrate x duree, jamais la taille reelle du fichier.
+            # `fs_size` (issu du meme scandir que fs_mtime, donc gratuit) est la
+            # vraie taille ; l'estimation reste en repli quand le media est
+            # illisible (root debranche).
+            "size_bytes": int(fs_size or detected.get("file_size_bytes") or 0),
         }
 
         # Si grain dans metrics
@@ -1796,7 +1943,20 @@ def _mark_for_deletion_impl(api: Any, run_id: Optional[str], row_id: str) -> Dic
             f"Film introuvable (row_id={row_id}).", category="resource", level="info", log_module=__name__
         )
 
-    source_path = str(row.get("source_path") or row.get("folder") or "")
+    # AUDIT 2026-08-03 (#447 / #730) : 3e site de la meme famille, dans ce
+    # fichier meme. `row` sort de `_find_plan_row`, donc c'est un
+    # `asdict(PlanRow)` BRUT : `source_path` n'y est pas, la lecture valait
+    # None en permanence et le `or row.get("folder")` la rendait invisible.
+    # La marque enregistrait donc TOUJOURS le dossier, jamais le fichier —
+    # et pour un kind "collection"/"extra" ce dossier est PARTAGE entre
+    # plusieurs films : la ligne `film_marked_for_deletion.source_path`
+    # designait un conteneur au lieu du media. Non destructif (l'apply
+    # bucketise par `marked_for_deletion_row_ids`, cf apply_core:1546 et 1609), mais
+    # faux dans la reponse d'API et dans `list_marked_for_deletion`.
+    # `plan_row_media_path` couvre deja le repli sur le dossier seul quand
+    # `video` est vide, et rend "" quand les deux manquent : un second terme
+    # `or row.get("folder")` serait une branche morte.
+    source_path = plan_row_media_path(row)
 
     store = _get_store(api)
     if store is None:
