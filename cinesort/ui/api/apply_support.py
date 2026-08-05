@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import dataclasses
 import io
 import json
 import logging
@@ -24,7 +25,7 @@ import cinesort.infra.plex_client as _plex_mod
 import cinesort.infra.state as state
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
-from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
@@ -37,7 +38,7 @@ from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._validators import clamp_timeout, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ _log = logging.getLogger(__name__)
 # fois passe ce delai. Constante en miroir de dashboard_support._UNDO_DEADLINE_SECONDS
 # pour eviter une dependance circulaire entre modules ui.api.
 _UNDO_DEADLINE_SECONDS = 24 * 3600
+
 
 class _DuplicateCheckError(Exception):
     pass
@@ -335,6 +337,114 @@ def undo_last_apply_preview(api: Any, run_id: str) -> Dict[str, Any]:
         return _err_response(t("errors.cannot_prepare_undo"), category="state", level="warning", log_module=__name__)
 
 
+def _mark_undo_status(
+    store: Any,
+    log_fn: Callable[[str, str], None],
+    *,
+    op_id: int,
+    undo_status: str,
+    error_message: Optional[str] = None,
+) -> None:
+    """F31 — persiste le statut d'undo d'une operation sans jamais interrompre l'undo.
+
+    Le statut en base est un ARTEFACT DE RAPPORT : quand on l'ecrit, la decision
+    filesystem est deja prise (fichier restaure, saute ou en echec). Son echec ne
+    doit donc jamais interrompre la boucle, sinon on laisse le disque a moitie
+    restaure — meme invariant que move_journal.py:13-15 pour le journal des moves.
+
+    Avant ce correctif, `sqlite3.Error` (qui n'herite PAS de OSError) traversait le
+    filet per-op : un "database is locked" sortait de _execute_undo_ops, les ops
+    suivantes n'etaient jamais reverties, le rapport done/skipped/failed n'etait
+    jamais construit (500 generique cote REST) et le batch restait affiche comme
+    annulable alors que le FS etait a moitie restaure.
+
+    Revue R1 : `AttributeError` a ete RETIRE du tuple. Un store dont la surface
+    `apply.mark_apply_operation_undo_status` est absente/renommee (ou dont
+    `store.apply` vaut None) n'est PAS une indisponibilite transitoire, c'est une
+    erreur de programmation. L'avaler rendait les 11 marks silencieusement no-op,
+    donc `all_resolved` toujours False et le batch classe UNDONE_PARTIAL a chaque
+    passage : exactement le "batch mensonger" que F31 devait supprimer, deplace
+    du lock vers le drift d'API. Meme regle que TypeError (spec F31, point d).
+    """
+    try:
+        store.apply.mark_apply_operation_undo_status(
+            op_id=int(op_id),
+            undo_status=str(undo_status),
+            error_message=error_message,
+        )
+    except (sqlite3.Error, OSError) as exc:
+        _log.warning("undo: statut op %s -> %s non persiste: %s", op_id, undo_status, exc)
+        log_fn("WARN", f"UNDO statut non persiste (op {op_id} -> {undo_status}) : {exc}")
+
+
+def _require_undo_status_api(store: Any) -> None:
+    """F31 (revue R1) : le store sait-il persister un statut d'undo ? Verifie AVANT tout move.
+
+    `_mark_undo_status` ne rattrape QUE les indisponibilites TRANSITOIRES
+    (sqlite3.Error / OSError) : un drift d'API (methode absente/renommee,
+    `store.apply` a None) est une erreur de programmation et doit echouer
+    bruyamment. Mais le laisser echouer au 1er mark abandonnerait l'undo avec un
+    filesystem A MOITIE restaure. On le detecte donc ici, avant le premier
+    deplacement, la ou l'echec n'a AUCUNE consequence sur le disque.
+    """
+    if not callable(getattr(getattr(store, "apply", None), "mark_apply_operation_undo_status", None)):
+        raise AttributeError(
+            "store.apply.mark_apply_operation_undo_status est introuvable : undo refuse, aucun fichier deplace."
+        )
+
+
+def _batch_all_ops_resolved(
+    store: Any,
+    log_fn: Callable[[str, str], None],
+    *,
+    batch_id: str,
+) -> bool:
+    """F31 (revue R1) : les ops reversibles du batch sont-elles toutes resolues ?
+
+    `list_apply_operations` est un appel SQLite NU sur le chemin de finalisation
+    de l'undo, execute APRES que le filesystem a deja ete restaure. Une DB
+    verrouillee — le declencheur meme de F31, qui verrouille TOUS les appels, pas
+    seulement les marks per-op — y levait une `sqlite3.Error` remontee jusqu'au
+    boundary REST : 500 generique, rapport done/skipped/failed perdu.
+
+    En cas d'indisponibilite on rend False = "on ne peut pas prouver que tout est
+    resolu", ce qui classe le batch UNDONE_PARTIAL : degradation CONSERVATRICE
+    (le batch reste proposable a l'annulation) plutot qu'un UNDONE_DONE menteur.
+    """
+    try:
+        remaining = store.apply.list_apply_operations(batch_id=str(batch_id))
+    except (sqlite3.Error, OSError) as exc:
+        _log.warning("undo: relecture des ops du batch %s indisponible: %s", batch_id, exc)
+        log_fn("WARN", f"UNDO statut du batch non verifiable ({batch_id}) : {exc}")
+        return False
+    return all(str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1)
+
+
+def _finalize_batch_undo_status(
+    store: Any,
+    log_fn: Callable[[str, str], None],
+    *,
+    batch_id: str,
+    status: str,
+    summary: Dict[str, Any],
+) -> bool:
+    """F31 (revue R1) : persiste le statut d'undo du BATCH sans perdre le rapport.
+
+    Meme invariant que `_mark_undo_status`, un cran plus haut : quand on ecrit ce
+    statut, l'undo filesystem est TERMINE. Laisser une `sqlite3.Error` remonter
+    ne protegeait rien (l'etat DB est identique dans les deux cas : batch non
+    finalise) et supprimait en plus le rapport done/skipped/failed rendu a
+    l'utilisateur. On logue donc un WARN et on rend le rapport.
+    """
+    try:
+        store.apply.mark_apply_batch_undo_status(batch_id=str(batch_id), status=str(status), summary=summary)
+        return True
+    except (sqlite3.Error, OSError) as exc:
+        _log.warning("undo: statut batch %s -> %s non persiste: %s", batch_id, status, exc)
+        log_fn("WARN", f"UNDO statut du batch non persiste ({batch_id} -> {status}) : {exc}")
+        return False
+
+
 def _execute_undo_ops(
     api: Any,
     reversible_ops: List[Dict[str, Any]],
@@ -356,6 +466,8 @@ def _execute_undo_ops(
     atomic=False : best-effort — les ops safe sont exécutées, les hash_mismatch
     sont marquées SKIPPED avec raison claire, les missing SKIPPED aussi.
     """
+    # F31 (revue R1) : fail-closed AVANT le premier move (cf. helper).
+    _require_undo_status_api(store)
     done = 0
     skipped = 0
     failed = 0
@@ -414,7 +526,9 @@ def _execute_undo_ops(
         op_id_for_check = int(op.get("id") or 0)
         if op_id_for_check in mismatch_ids:
             skipped += 1
-            store.apply.mark_apply_operation_undo_status(
+            _mark_undo_status(
+                store,
+                log_fn,
                 op_id=op_id_for_check,
                 undo_status="SKIPPED",
                 error_message=f"Empreinte modifiee depuis apply: {mismatch_reasons.get(op_id_for_check) or ''}",
@@ -431,7 +545,9 @@ def _execute_undo_ops(
         try:
             if not current_path.exists():
                 skipped += 1
-                store.apply.mark_apply_operation_undo_status(
+                _mark_undo_status(
+                    store,
+                    log_fn,
                     op_id=op_id,
                     undo_status="SKIPPED",
                     error_message=f"Source inverse introuvable: {current_path}",
@@ -471,16 +587,16 @@ def _execute_undo_ops(
                         # (apply_core.py _case_only_rename_with_rollback, non journalise lui aussi).
                         _case_only_rename_with_rollback(current_path, target_path)
                         done += 1
-                        store.apply.mark_apply_operation_undo_status(
-                            op_id=op_id, undo_status="DONE", error_message=None
-                        )
+                        _mark_undo_status(store, log_fn, op_id=op_id, undo_status="DONE", error_message=None)
                         log_fn(
                             "INFO",
                             f"UNDO casse-seule {idx}/{len(reversible_ops)}: {current_path} -> {target_path}",
                         )
                     except (OSError, PermissionError, FileExistsError) as case_exc:
                         failed += 1
-                        store.apply.mark_apply_operation_undo_status(
+                        _mark_undo_status(
+                            store,
+                            log_fn,
                             op_id=op_id,
                             undo_status="FAILED",
                             error_message=f"Undo casse-seule echoue: {case_exc}",
@@ -492,7 +608,45 @@ def _execute_undo_ops(
                     continue
 
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
-                conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
+                # REGLE INVIOLABLE n1 : le nom du fichier reste INTACT. L'ancien
+                # `api._unique_path` resolvait une collision dans le bac en
+                # renommant le FICHIER (`Rocky.1976.1080p.mkv` ->
+                # `Rocky.1976.1080p_2.mkv`) — 4e site de renommage du depot,
+                # celui-ci sur le chemin de l'UNDO, donc sur le filet de secours.
+                # `unique_bucket_path` porte l'index sur un DOSSIER a la place.
+                conflict_dst = unique_bucket_path(
+                    undo_conflicts_root / current_path.name,
+                    bucket_root=undo_conflicts_root,
+                    use_dup_suffix=False,
+                )
+                if conflict_dst is None:
+                    # Aucune desambiguisation de dossier possible. On REFUSE le
+                    # deplacement plutot que d'ecraser la cible ou de renommer le
+                    # fichier : sur un chemin destructif l'erreur va dans le sens
+                    # restrictif, et le fichier source reste ou il est.
+                    _log.error(
+                        "undo: quarantaine impossible sans renommer le fichier, abandon: %s",
+                        current_path,
+                    )
+                    failed += 1
+                    _mark_undo_status(
+                        store,
+                        log_fn,
+                        op_id=op_id,
+                        undo_status="FAILED",
+                        error_message=(
+                            "Quarantaine d'undo impossible sans renommer le fichier video "
+                            f"({current_path.name}) : deplacement refuse, le fichier est laisse en place."
+                        ),
+                    )
+                    continue
+                # `unique_bucket_path` INSERE un dossier d'index quand la cible est
+                # prise ; ce dossier n'existe pas encore. Sans ce mkdir, `shutil.move`
+                # leve FileNotFoundError, que la branche ci-dessous interprete comme
+                # « fichier disparu » et compte en SKIPPED — le fichier serait reste
+                # en place sans que rien ne signale d'echec. Constate par le test du
+                # site d'appel, avec deux conflits homonymes.
+                conflict_dst.parent.mkdir(parents=True, exist_ok=True)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
@@ -501,7 +655,9 @@ def _execute_undo_ops(
                 except FileNotFoundError:
                     _log.warning("undo: fichier disparu entre check et move (conflict): %s", current_path)
                     skipped += 1
-                    store.apply.mark_apply_operation_undo_status(
+                    _mark_undo_status(
+                        store,
+                        log_fn,
                         op_id=op_id,
                         undo_status="SKIPPED",
                         error_message=f"Fichier disparu entre check et move: {current_path}",
@@ -510,7 +666,9 @@ def _execute_undo_ops(
                 except PermissionError as perm_err:
                     _log.error("undo: permission refusee: %s -> %s: %s", current_path, conflict_dst, perm_err)
                     failed += 1
-                    store.apply.mark_apply_operation_undo_status(
+                    _mark_undo_status(
+                        store,
+                        log_fn,
                         op_id=op_id,
                         undo_status="FAILED",
                         error_message=str(perm_err),
@@ -518,7 +676,9 @@ def _execute_undo_ops(
                     continue
                 conflict_moves += 1
                 failed += 1
-                store.apply.mark_apply_operation_undo_status(
+                _mark_undo_status(
+                    store,
+                    log_fn,
                     op_id=op_id,
                     undo_status="FAILED",
                     error_message=f"Conflit cible existante, deplace vers {conflict_dst}",
@@ -538,7 +698,9 @@ def _execute_undo_ops(
             except FileNotFoundError:
                 _log.warning("undo: fichier disparu entre check et move: %s", current_path)
                 skipped += 1
-                store.apply.mark_apply_operation_undo_status(
+                _mark_undo_status(
+                    store,
+                    log_fn,
                     op_id=op_id,
                     undo_status="SKIPPED",
                     error_message=f"Fichier disparu entre check et move: {current_path}",
@@ -547,7 +709,9 @@ def _execute_undo_ops(
             except PermissionError as perm_err:
                 _log.error("undo: permission refusee: %s -> %s: %s", current_path, target_path, perm_err)
                 failed += 1
-                store.apply.mark_apply_operation_undo_status(
+                _mark_undo_status(
+                    store,
+                    log_fn,
                     op_id=op_id,
                     undo_status="FAILED",
                     error_message=str(perm_err),
@@ -566,11 +730,21 @@ def _execute_undo_ops(
                     cleanup_residual_dirs_reversed += 1
                 except ValueError:
                     pass
-            store.apply.mark_apply_operation_undo_status(op_id=op_id, undo_status="DONE", error_message=None)
+            _mark_undo_status(
+                store,
+                log_fn,
+                op_id=op_id,
+                undo_status="DONE",
+                error_message=None,
+            )
             log_fn("INFO", f"UNDO {idx}/{len(reversible_ops)}: {current_path} -> {target_path}")
-        except (OSError, FileExistsError, ValueError, TypeError) as exc:
+        except (sqlite3.Error, OSError, FileExistsError, ValueError, TypeError) as exc:
+            # F31 : sqlite3.Error ajoutee — aucun appel DB futur dans le corps de la
+            # boucle ne doit pouvoir avorter la restauration des ops suivantes.
             failed += 1
-            store.apply.mark_apply_operation_undo_status(
+            _mark_undo_status(
+                store,
+                log_fn,
                 op_id=op_id,
                 undo_status="FAILED",
                 error_message=str(exc),
@@ -697,10 +871,13 @@ def _undo_mkdir_ops(
                 path.rmdir()
                 removed += 1
                 log_fn("INFO", f"UNDO MKDIR: dossier vide supprime {path}")
-                with contextlib.suppress(OSError, TypeError, ValueError):
-                    store.apply.mark_apply_operation_undo_status(
-                        op_id=int(op.get("id") or 0), undo_status="DONE", error_message=None
-                    )
+                # F31 (revue R1) : ce mark etait le 12e appel DB de l'undo, reste
+                # NU sous un suppress SANS sqlite3.Error (qui n'herite PAS de
+                # OSError) — le trou exact du finding, en AVAL du perimetre
+                # patche. Il s'execute APRES le rmdir : une DB verrouillee
+                # laissait le dossier supprime, l'op PENDING, et l'exception
+                # remontait au boundary REST (500, rapport d'undo perdu).
+                _mark_undo_status(store, log_fn, op_id=int(op.get("id") or 0), undo_status="DONE")
         except (OSError, PermissionError) as exc:
             _log.debug("undo mkdir: rmdir %s skip: %s", path, exc)
     return removed
@@ -773,10 +950,27 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     except (FileNotFoundError, OSError):
         pass
 
+    # Ultra-audit 2026-08 (N25) : cette boucle appelait
+    # `list_apply_operations_by_row` PAR ROW. Chaque appel repo ouvre 2
+    # connexions SQLite neuves (_ensure_apply_journal_tables -> _existing_tables,
+    # puis la requete), soit 2N connexions pour N films. Mesure sur un batch de
+    # 5000 films : 165 s, contre 88 ms pour la requete unique + regroupement
+    # Python. `list_apply_operations` selectionne les MEMES colonnes avec le
+    # MEME `ORDER BY op_index ASC, id ASC` (repositories/apply.py:314-346 vs
+    # :460-489), donc l'ordre et le contenu des `ops` sont inchanges.
+    # Seule la convention du row_id NULL differe : le repo serialise NULL en ""
+    # (:341) alors que `get_batch_rows_summary` groupe sur
+    # COALESCE(row_id, '__legacy__') (:433). On realigne donc "" -> "__legacy__".
+    # Aucune ambiguite : `record_apply_operation` ecrit `str(row_id) if row_id
+    # else None` (:176), une chaine vide est donc stockee NULL, jamais "".
+    ops_by_row: Dict[str, List[Dict[str, Any]]] = {}
+    for op in store.apply.list_apply_operations(batch_id=bid):
+        ops_by_row.setdefault(str(op.get("row_id") or "") or "__legacy__", []).append(op)
+
     rows_out: List[Dict[str, Any]] = []
     for summary in rows_summary:
         rid = str(summary["row_id"])
-        ops = store.apply.list_apply_operations_by_row(batch_id=bid, row_id=rid)
+        ops = ops_by_row.get(rid, [])
         reversible_pending = [
             op for op in ops if int(op.get("reversible") or 0) == 1 and str(op.get("undo_status")) == "PENDING"
         ]
@@ -965,15 +1159,17 @@ def undo_selected_rows(
         _undo_mkdir_ops(store, bid, log_fn, run_id=run_id)
 
         # Determine batch-level status: check if ALL ops in the batch are now non-PENDING.
-        remaining = store.apply.list_apply_operations(batch_id=bid)
-        all_resolved = all(
-            str(op.get("undo_status")) != "PENDING" for op in remaining if int(op.get("reversible") or 0) == 1
-        )
+        # F31 (revue R1) : relecture + finalisation tolerantes a une DB
+        # indisponible — le FS est deja restaure, perdre le rapport en plus
+        # (500 REST) n'apporte aucune protection.
+        all_resolved = _batch_all_ops_resolved(store, log_fn, batch_id=bid)
         if all_resolved:
             batch_status = "UNDONE_DONE" if undo_counts["failed"] == 0 else "UNDONE_PARTIAL"
         else:
             batch_status = "UNDONE_PARTIAL"
-        store.apply.mark_apply_batch_undo_status(
+        _finalize_batch_undo_status(
+            store,
+            log_fn,
             batch_id=bid,
             status=batch_status,
             summary={
@@ -1126,7 +1322,10 @@ def _execute_and_finalize_undo(
     mkdir_dirs_removed = _undo_mkdir_ops(store, batch_id, log_fn, run_id=run_id)
 
     status = "UNDONE_DONE" if failed == 0 else "UNDONE_PARTIAL"
-    store.apply.mark_apply_batch_undo_status(
+    # F31 (revue R1) : finalisation tolerante (cf. _finalize_batch_undo_status).
+    _finalize_batch_undo_status(
+        store,
+        log_fn,
         batch_id=batch_id,
         status=status,
         summary={
@@ -1332,6 +1531,7 @@ def _validate_apply(
         from cinesort.ui.api.run_flow_support import (
             _project_decisions_ok_from_tri_state,
         )
+
         incoming = _project_decisions_ok_from_tri_state(incoming)
     except ImportError:
         # Environnement degrade : on continue sans projection (shape legacy
@@ -1377,9 +1577,7 @@ def _validate_apply(
     # rejected + 10 approved. Calcule apres _normalize_decisions_for_rows
     # qui resout le tri-etat (les decisions deferred deviennent ok=False).
     approved_keys = {
-        key
-        for key, value in safe_decisions.items()
-        if isinstance(value, dict) and value.get("ok") is True
+        key for key, value in safe_decisions.items() if isinstance(value, dict) and value.get("ok") is True
     }
     try:
         state.atomic_write_json(run_paths.validation_json, safe_decisions)
@@ -1406,6 +1604,253 @@ def _validate_apply(
         "ok": True,
         "_ctx": (cfg, run_paths, rows, log_fn, store, safe_decisions, decision_presence),
     }
+
+
+def _resolve_duplicate_loser_row_ids(
+    decisions: Any,
+    log_fn: Callable[[str, str], None],
+) -> Set[str]:
+    """F07 : reconcilie les decisions doublons d'un run en un set de perdants.
+
+    La table `duplicate_decisions` est upsert-only sur (run_id, group_key) et sa
+    cle derive de `titre|annee` (domain/duplicate_support.py) : des que
+    l'utilisateur corrige l'annee ou le titre en Validation, la cle change, la
+    decision precedente SURVIT (aucun DELETE nulle part) et l'union brute des
+    `loser_row_ids` faisait partir les DEUX exemplaires au bucket
+    `_review/_duplicates_user_decided/` — le film quittait entierement la
+    bibliotheque.
+
+    Regle : la decision la PLUS RECENTE gagne. Un row_id declare gagnant par une
+    decision recente ne peut plus etre declare perdant par une decision plus
+    ancienne (le role est attribue une seule fois, en parcourant du plus recent
+    au plus ancien).
+
+    Revue R1 : une decision dont `loser_row_ids` est VIDE n'ARBITRE rien et est
+    donc entierement ignoree. Sans ce garde, elle conferait une immunite a son
+    "gagnant" et ANNULAIT une decision anterieure legitime qui, elle, designait
+    ce row comme perdant : le set de perdants devenait vide et l'apply ne
+    deplacait plus rien, alors que l'union brute d'avant deplacait correctement
+    le perdant choisi par l'utilisateur. Cas reel : `mark_duplicate_winner`
+    (run_flow_support.py) persiste `loser_row_ids=[]` avec un `decided_ts` FRAIS
+    des que le groupe recharge n'a plus qu'UNE row (une copie deja presente sur
+    disque suffit a emettre un tel groupe, duplicate_support.py).
+
+    NB `decided_ts` ex-aequo (deux upserts dans le meme tick d'horloge) : le tri
+    Python est stable, donc l'ordre de lecture du repo (ORDER BY decided_ts DESC)
+    tranche. Cas theorique, non deterministe, assume.
+    """
+    usable = [dec for dec in (decisions or []) if isinstance(dec, dict)]
+    try:
+        ordered = sorted(usable, key=lambda d: float(d.get("decided_ts") or 0.0), reverse=True)
+    except (TypeError, ValueError):
+        # decided_ts illisible : on garde l'ordre du repo (deja DESC).
+        ordered = usable
+
+    role_by_row: Dict[str, str] = {}
+    for dec in ordered:
+        winner_id = str(dec.get("winner_row_id") or "").strip()
+        losers_of_dec = [str(lid or "").strip() for lid in (dec.get("loser_row_ids") or [])]
+        losers_of_dec = [lid for lid in losers_of_dec if lid and lid != winner_id]
+        if not losers_of_dec:
+            # Decision sans perdant : n'arbitre rien, ne confere aucune immunite.
+            continue
+        if winner_id:
+            role_by_row.setdefault(winner_id, "winner")
+        for loser_id in losers_of_dec:
+            if role_by_row.setdefault(loser_id, "loser") == "winner":
+                log_fn(
+                    "WARN",
+                    f"Doublons : row {loser_id} est perdant d'une decision perimee "
+                    "mais gagnant d'une decision plus recente -> conserve (non deplace).",
+                )
+    return {row_id for row_id, role in role_by_row.items() if role == "loser"}
+
+
+# F17 : cles du diagnostic de nettoyage residuel produites par
+# cleanup.preview_cleanup_residual_folders + apply_core (moved_count /
+# left_in_place_count / status_post). Utilisees pour fusionner les diagnostics
+# des roots 2..N au lieu de ne garder que celui du root 1.
+_CLEANUP_DIAG_COUNTER_KEYS = (
+    "candidates_considered",
+    "probable_eligible_count",
+    "empty_dir_count",
+    "has_video_count",
+    "ambiguous_count",
+    "symlink_count",
+    "no_files_count",
+    "moved_count",
+    "left_in_place_count",
+)
+_CLEANUP_DIAG_LIST_KEYS = (
+    "families",
+    "sample_eligible_dirs",
+    "sample_video_blocked_dirs",
+    "sample_ambiguous_dirs",
+    "sample_empty_dirs",
+    "sample_symlink_dirs",
+)
+# Rang de "severite d'activite" : le root le plus actif l'emporte, sinon un
+# moved_count somme > 0 coexisterait avec un status_post "executed_no_move".
+_CLEANUP_DIAG_STATUS_RANK = {"disabled": 0, "no_action_likely": 1, "ready": 2}
+_CLEANUP_DIAG_STATUS_POST_RANK = {
+    "disabled": 0,
+    "not_executed": 1,
+    "executed_no_move": 2,
+    "executed": 3,
+}
+_CLEANUP_DIAG_SAMPLE_MAX = 20
+
+
+def _is_plain_int(value: Any) -> bool:
+    """int VRAI (bool exclu : bool est une sous-classe de int)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _cleanup_diag_rank(ranks: Dict[str, int], value: Any) -> int:
+    """Rang d'activite d'un statut de nettoyage (-1 = statut inconnu)."""
+    return ranks.get(str(value or ""), -1)
+
+
+def _merge_cleanup_residual_diagnostic(
+    base: Any,
+    extra: Any,
+    *,
+    root_label: str,
+    base_root_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """F17 : agrege deux diagnostics de nettoyage residuel (multi-root).
+
+    Compteurs sommes, listes concatenees/dedupliquees/bornees, statuts arbitres
+    par rang d'activite, et detail par root conserve sous la cle purement
+    additive `per_root` (tous les lecteurs font des `.get()` sur des cles
+    nommees : aucune casse de forme).
+
+    Revue R1 : `per_root` est desormais alimente pour TOUS les roots, y compris
+    celui dont le diagnostic est vide. Avant, un root 1 sans diagnostic sortait
+    de la fonction par le raccourci `if not base_d` et son entree etait perdue —
+    le detail par root promis etait incomplet exactement dans le cas ou on en a
+    besoin (savoir QUEL root a produit les dossiers deplaces). Seul le cas ou
+    AUCUN root n'a de diagnostic reste rendu tel quel : sinon le resume
+    imprimerait un bloc "DETAIL NETTOYAGE RESIDUEL" entierement a zero.
+    """
+    base_d = dict(base) if isinstance(base, dict) else {}
+    extra_d = {k: v for k, v in dict(extra).items() if k != "per_root"} if isinstance(extra, dict) else {}
+    base_per_root: Dict[str, Any] = (
+        dict(base_d.get("per_root") or {}) if isinstance(base_d.get("per_root"), dict) else {}
+    )
+    base_own = {k: v for k, v in base_d.items() if k != "per_root"}
+    if not base_own and not base_per_root and not extra_d:
+        return base_d
+
+    per_root: Dict[str, Any] = base_per_root
+    if not per_root and base_root_label is not None:
+        per_root[str(base_root_label)] = dict(base_own)
+    per_root[str(root_label)] = dict(extra_d)
+
+    if not extra_d:
+        # Root secondaire muet : diagnostic de base inchange, mais on TRACE que
+        # ce root n'a rien produit (sinon son absence de per_root se lit comme
+        # "root jamais traite").
+        merged = dict(base_own)
+        merged["per_root"] = per_root
+        return merged
+    if not base_own:
+        merged = dict(extra_d)
+        merged["per_root"] = per_root
+        return merged
+
+    merged = dict(base_own)
+
+    for key in _CLEANUP_DIAG_COUNTER_KEYS:
+        base_val, extra_val = base_d.get(key), extra_d.get(key)
+        if _is_plain_int(base_val) or _is_plain_int(extra_val):
+            merged[key] = (int(base_val) if _is_plain_int(base_val) else 0) + (
+                int(extra_val) if _is_plain_int(extra_val) else 0
+            )
+    # `enabled` est un bool : OR, surtout pas une somme (True + True == 2).
+    if "enabled" in base_d or "enabled" in extra_d:
+        merged["enabled"] = bool(base_d.get("enabled")) or bool(extra_d.get("enabled"))
+
+    for key in _CLEANUP_DIAG_LIST_KEYS:
+        base_list = base_d.get(key) if isinstance(base_d.get(key), list) else []
+        extra_list = extra_d.get(key) if isinstance(extra_d.get(key), list) else []
+        if not base_list and not extra_list:
+            continue
+        deduped: List[Any] = []
+        for item in list(base_list) + list(extra_list):
+            if item not in deduped:
+                deduped.append(item)
+            if len(deduped) >= _CLEANUP_DIAG_SAMPLE_MAX:
+                break
+        merged[key] = deduped
+
+    pre_base = _cleanup_diag_rank(_CLEANUP_DIAG_STATUS_RANK, base_d.get("status"))
+    pre_extra = _cleanup_diag_rank(_CLEANUP_DIAG_STATUS_RANK, extra_d.get("status"))
+    if pre_extra > pre_base:
+        merged["status"] = extra_d.get("status")
+        merged["reason_code"] = extra_d.get("reason_code")
+        merged["message"] = extra_d.get("message")
+    post_base = _cleanup_diag_rank(_CLEANUP_DIAG_STATUS_POST_RANK, base_d.get("status_post"))
+    post_extra = _cleanup_diag_rank(_CLEANUP_DIAG_STATUS_POST_RANK, extra_d.get("status_post"))
+    if post_extra > post_base:
+        merged["status_post"] = extra_d.get("status_post")
+        merged["message_post"] = extra_d.get("message_post")
+
+    per_root[str(root_label)] = dict(extra_d)
+    merged["per_root"] = per_root
+    return merged
+
+
+def _merge_apply_results(
+    result: Any,
+    partial: Any,
+    *,
+    root_label: str,
+    base_root_label: Optional[str] = None,
+) -> Any:
+    """F17 : fusionne l'ApplyResult d'un root secondaire dans l'agregat.
+
+    Avant ce fix, seuls les champs `int` et le dict `skip_reasons` etaient
+    fusionnes : `error_messages` (list) et `cleanup_residual_diagnostic` (dict)
+    des roots 2..N etaient JETES. Consequence observable : le resume affichait
+    "Erreurs : 1" SANS la section "ABANDONNE / EN ERREUR", et concluait
+    "Aucun point d'attention bloquant apres apply." — exactement le silence que
+    le fix RELECTURE R2 [D2] devait supprimer.
+
+    `result` ALIASE l'ApplyResult du root 1 : les branches list/dict
+    reconstruisent une nouvelle liste / un nouveau dict avant `setattr`, donc
+    aucun aliasing cross-root n'est introduit.
+    """
+    for f in dataclasses.fields(partial):
+        val = getattr(partial, f.name, None)
+        if isinstance(val, bool):
+            # bool est une sous-classe de int : sans cette branche AVANT celle
+            # des int, un futur champ bool serait silencieusement somme a 2.
+            # Aucun champ bool dans ApplyResult a ce jour -> garde anti-drift.
+            setattr(result, f.name, bool(getattr(result, f.name, False)) or val)
+        elif isinstance(val, int):
+            setattr(result, f.name, int(getattr(result, f.name, 0) or 0) + val)
+        elif isinstance(val, list):
+            merged_list = list(getattr(result, f.name, None) or [])
+            merged_list.extend(val)
+            setattr(result, f.name, merged_list)
+        elif isinstance(val, dict) and f.name == "cleanup_residual_diagnostic":
+            setattr(
+                result,
+                f.name,
+                _merge_cleanup_residual_diagnostic(
+                    getattr(result, f.name, None),
+                    val,
+                    root_label=root_label,
+                    base_root_label=base_root_label,
+                ),
+            )
+        elif isinstance(val, dict) and f.name == "skip_reasons":
+            merged_counts = dict(getattr(result, f.name, None) or {})
+            for key, count in val.items():
+                merged_counts[key] = merged_counts.get(key, 0) + int(count)
+            setattr(result, f.name, merged_counts)
+    return result
 
 
 def _execute_apply(
@@ -1491,8 +1936,12 @@ def _execute_apply(
                 src_sha1=str(payload.get("src_sha1") or "") or None,
                 src_size=int(payload["src_size"]) if payload.get("src_size") is not None else None,
             )
-        except (OSError, TypeError, ValueError) as exc:
-            log_fn("WARN", f"Journal operation apply ignoree: {exc}")
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            # F11 : sqlite3.Error n'herite PAS de OSError. Sans cette entree, un
+            # "database is locked" avortait TOUT le batch APRES un move deja fait
+            # sur disque -> etat mixte et rows restantes jamais traitees. Le type est
+            # logue pour distinguer un lock transitoire d'une corruption reelle.
+            log_fn("WARN", f"Journal operation apply ignoree ({type(exc).__name__}): {exc}")
 
     if not bool(dry_run):
         try:
@@ -1506,6 +1955,16 @@ def _execute_apply(
             )
             batch_state[0] = apply_batch_id
         except (OSError, TypeError, ValueError) as exc:
+            # F11 — NE PAS ajouter sqlite3.Error ici (revue adversaire R1).
+            #
+            # L'invariant "un echec de journal n'empeche jamais un move" (cf.
+            # move_journal.py:13-15) ne vaut QUE pour les operations journalisees
+            # APRES un deplacement deja effectue. `insert_apply_batch` est appele
+            # AVANT tout deplacement : si le batch ne peut pas etre cree, l'apply
+            # s'executerait integralement sans aucune operation journalisee
+            # (record_apply_op retourne tot quand apply_batch_id est None), donc
+            # SANS AUCUN UNDO POSSIBLE — et serait rapporte ok. Un lock DB doit
+            # ici faire echouer l'apply AVANT qu'il touche au disque.
             apply_batch_id = None
             log_fn("WARN", f"Journal apply indisponible: {exc}")
 
@@ -1556,15 +2015,17 @@ def _execute_apply(
     # depuis la table duplicate_decisions pour les deplacer dans le bucket
     # `_duplicates_user_decided/` avant l'apply principal (cf
     # cinesort.app.apply_core.move_duplicate_losers_to_user_decided).
+    #
+    # F07 : la reconciliation (decision la plus recente prioritaire) est
+    # deleguee a _resolve_duplicate_loser_row_ids — l'union brute des
+    # loser_row_ids pouvait envoyer TOUTES les copies d'un film au bucket.
+    # sqlite3.Error ajoute a l'except : il n'herite PAS d'OSError, donc une DB
+    # verrouillee faisait CRASHER l'apply depuis un simple filet best-effort.
     duplicate_losers: Set[str] = set()
     try:
         decisions_db = store.apply.list_duplicate_decisions(run_id=run_id)
-        for dec in decisions_db or []:
-            for lid in dec.get("loser_row_ids") or []:
-                lid_s = str(lid or "").strip()
-                if lid_s:
-                    duplicate_losers.add(lid_s)
-    except (OSError, TypeError, ValueError) as exc:
+        duplicate_losers = _resolve_duplicate_loser_row_ids(decisions_db, log_fn)
+    except (sqlite3.Error, AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Lecture duplicate_decisions impossible: {exc}")
 
     # AUDIT 2026-06-14 (R7-3) : appliquer les overrides TMDb manuels (choix d'un
@@ -1586,6 +2047,20 @@ def _execute_apply(
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
                 _r.proposed_year = int(_ov["proposed_year"])
+    # Ultra-audit 2026-08 (N31) — l'absence de `sqlite3.Error` dans l'except
+    # ci-dessous est DELIBEREE, contrairement au bloc duplicate_decisions
+    # juste au-dessus. Ne pas « aligner » les deux tuples.
+    #
+    # Cet overlay materialise la DERNIERE volonte explicite de l'utilisateur, et
+    # la boucle porte sur TOUTES les rows. Degrader une sqlite3.Error en WARN
+    # ferait continuer l'apply avec un overlay PARTIEL (rows 0..k-1 overridees,
+    # k..n non) et renommerait des dossiers avec le titre auto-matche, en
+    # ecrasant silencieusement le choix manuel.
+    #
+    # Laisser remonter est fail-closed et sans perte : ce bloc s'execute AVANT
+    # tout appel a `_apply_rows_fn`, et les deux appelants de `_execute_apply`
+    # l'encadrent d'un try ; la boundary d'`apply_changes` clot alors le batch
+    # en FAILED. Aucun fichier n'a bouge, rien n'est a annuler.
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
@@ -1606,6 +2081,7 @@ def _execute_apply(
     marked_for_deletion: Set[str] = set()
     try:
         from cinesort.ui.api.library_actions_support import migrate_legacy_deletion_marks
+
         for _mid in migrate_legacy_deletion_marks(api, run_id):
             if _mid:
                 marked_for_deletion.add(str(_mid))
@@ -1641,50 +2117,27 @@ def _execute_apply(
 
     root_keys = list(rows_by_root.keys())
     result = None
+    result_root_label: Optional[str] = None
 
     for root_str in root_keys:
         root_rows = rows_by_root[root_str]
         root_path = Path(root_str)
-        # Creer un cfg avec le bon root pour ce groupe
+        # Creer un cfg avec le bon root pour ce groupe.
+        #
+        # F06 : copie EXHAUSTIVE par dataclasses.replace. La recopie manuelle
+        # des 28 kwargs qui vivait ici a derive TROIS fois (rustines ITER7
+        # lowercase_extensions puis separator, puis naming_movie_template /
+        # naming_tv_template / min_video_bytes / scan_max_workers oublies) :
+        # tout root SECONDAIRE retombait sur les defaults dataclass
+        # "{title} ({year})" / "{series} ({year})" et amputait le nom de dossier
+        # du preset de nommage de l'utilisateur (dossiers uniquement — le
+        # fichier video n'est jamais renomme). Ne JAMAIS re-lister les champs a
+        # la main : tout champ ajoute a core.Config doit suivre automatiquement.
+        #
+        # NB : replace() ne rejoue pas Config.normalized() — comportement
+        # strictement identique a la recopie manuelle qu'il remplace.
         if root_path != cfg.root and root_path.exists():
-            cfg_for_root = core.Config(
-                root=root_path,
-                enable_collection_folder=cfg.enable_collection_folder,
-                collection_root_name=cfg.collection_root_name,
-                empty_folders_folder_name=cfg.empty_folders_folder_name,
-                move_empty_folders_enabled=cfg.move_empty_folders_enabled,
-                empty_folders_scope=cfg.empty_folders_scope,
-                cleanup_residual_folders_enabled=cfg.cleanup_residual_folders_enabled,
-                cleanup_residual_folders_folder_name=cfg.cleanup_residual_folders_folder_name,
-                cleanup_residual_folders_scope=cfg.cleanup_residual_folders_scope,
-                cleanup_residual_include_nfo=cfg.cleanup_residual_include_nfo,
-                cleanup_residual_include_images=cfg.cleanup_residual_include_images,
-                cleanup_residual_include_subtitles=cfg.cleanup_residual_include_subtitles,
-                cleanup_residual_include_texts=cfg.cleanup_residual_include_texts,
-                video_exts=cfg.video_exts,
-                side_exts=cfg.side_exts,
-                generic_side_files=cfg.generic_side_files,
-                detect_extras_in_single_folder=cfg.detect_extras_in_single_folder,
-                extras_size_ratio=cfg.extras_size_ratio,
-                skip_tv_like=cfg.skip_tv_like,
-                enable_tv_detection=cfg.enable_tv_detection,
-                title_match_min_cov=cfg.title_match_min_cov,
-                title_match_min_seq=cfg.title_match_min_seq,
-                max_year_delta_when_name_has_year=cfg.max_year_delta_when_name_has_year,
-                enable_tmdb=cfg.enable_tmdb,
-                tmdb_language=cfg.tmdb_language,
-                incremental_scan_enabled=cfg.incremental_scan_enabled,
-                # ITER7 : propager le reglage UI "Extensions en minuscule" au
-                # cfg recopie multi-root (sinon le default True s'applique et
-                # le toggle OFF est silencieusement neutralise sur les apply
-                # multi-root).
-                lowercase_extensions=cfg.lowercase_extensions,
-                # ITER7 etape 3 : meme propagation pour le selecteur UI
-                # "Separateur". Sans cette ligne, le default " " ecraserait la
-                # valeur utilisateur sur les recopies multi-root (cause racine
-                # secondaire identifiee G.e pour lowercase_extensions).
-                separator=getattr(cfg, "separator", " "),
-            )
+            cfg_for_root = dataclasses.replace(cfg, root=root_path)
         else:
             cfg_for_root = cfg
 
@@ -1722,19 +2175,17 @@ def _execute_apply(
 
         if result is None:
             result = partial
+            result_root_label = root_str
         else:
-            # Merge les compteurs du résultat partiel
-            from dataclasses import fields as _dc_fields
-
-            for f in _dc_fields(partial):
-                val = getattr(partial, f.name)
-                if isinstance(val, int):
-                    setattr(result, f.name, getattr(result, f.name, 0) + val)
-                elif isinstance(val, dict) and f.name == "skip_reasons":
-                    merged = dict(getattr(result, f.name, {}))
-                    for k, v in val.items():
-                        merged[k] = merged.get(k, 0) + int(v)
-                    setattr(result, f.name, merged)
+            # F17 : merge complet (compteurs + error_messages + diagnostic de
+            # nettoyage residuel), extrait en helper module-level pour etre
+            # testable sans monter un apply entier.
+            result = _merge_apply_results(
+                result,
+                partial,
+                root_label=root_str,
+                base_root_label=result_root_label,
+            )
 
     if result is None:
         result = core.ApplyResult()
@@ -1770,7 +2221,16 @@ def _cleanup_apply(
     run_id: str,
     dry_run: bool,
     rows: List[Any],
-) -> Tuple[Dict[str, int], int, int, Dict[str, Any]]:
+) -> Tuple[Dict[str, int], int, int, Dict[str, Any], bool]:
+    """Finalise le batch et resume l'apply.
+
+    Le 5e element du tuple, `journal_finalized`, dit si `close_apply_batch(DONE)`
+    a REELLEMENT abouti. Il vaut False des que la finalisation a echoue : le
+    batch reste alors `PENDING`, donc `get_last_reversible_apply_batch`
+    (filtre `status='DONE'`) ne le verra pas et l'undo de cet apply est perdu.
+    Le caller doit le remonter dans la reponse — un apply destructif dont le
+    filet de securite a disparu ne peut pas etre annonce comme un succes muet.
+    """
     cleanup_diag = result.cleanup_residual_diagnostic if isinstance(result.cleanup_residual_diagnostic, dict) else {}
     skip_reason_order = [
         core.SKIP_REASON_NON_VALIDE,
@@ -1785,6 +2245,7 @@ def _cleanup_apply(
     skip_counts = {reason: int((result.skip_reasons or {}).get(reason, 0)) for reason in skip_reason_order}
     applied_count = int(result.applied_count or 0)
     total_rows = int(result.considered_rows or len(rows))
+    journal_finalized = True
     if apply_batch_id is not None:
         try:
             store.apply.close_apply_batch(
@@ -1801,8 +2262,22 @@ def _cleanup_apply(
                     "ops_count": int(op_index),
                 },
             )
-        except (OSError, TypeError, ValueError) as exc:
-            log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            # F11 (suite) : sqlite3.Error n'herite PAS de OSError. `close_apply_batch`
+            # est appelee APRES que tous les deplacements ont ete faits sur disque —
+            # c'est exactement le cas ou l'invariant « un echec de journal n'empeche
+            # jamais un move » s'applique (contrairement a `insert_apply_batch`
+            # ci-dessus, volontairement fail-closed). Sans cette entree, un
+            # « database is locked » (ThreadingHTTPServer du dashboard + threads de
+            # fond concurrents, disque plein, disk I/O error) s'echappait de
+            # _cleanup_apply, faisait remonter un apply REUSSI en HTTP 500 et — en
+            # mode atomique — declenchait un rollback destructif.
+            journal_finalized = False
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise ({type(exc).__name__}, batch_id={apply_batch_id}) : {exc} "
+                "— l'apply disque est termine, mais le batch reste PENDING donc l'undo peut etre indisponible.",
+            )
         except RuntimeError as exc:
             # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
             # (sous-classe de RuntimeError, definie dans
@@ -1816,10 +2291,15 @@ def _cleanup_apply(
             # public API du module repositories) et on log un WARN explicite :
             # le batch est peut-etre deja finalise ailleurs, l'apply reel a
             # reussi, on preserve la backward compat.
+            #
+            # REVUE ADVERSAIRE PR#852 : ce chemin non plus n'a pas abouti a un
+            # batch `DONE` (transition refusee = batch absent, ou deja dans un
+            # etat terminal non reversible). L'undo n'est donc pas plus arme
+            # ici que dans l'except ci-dessus -> meme drapeau.
+            journal_finalized = False
             log_fn(
                 "WARN",
-                f"Journal apply non finalise (transition d'etat refusee, "
-                f"batch_id={apply_batch_id}) : {exc}",
+                f"Journal apply non finalise (transition d'etat refusee, batch_id={apply_batch_id}) : {exc}",
             )
     log_fn(
         "INFO",
@@ -1866,7 +2346,7 @@ def _cleanup_apply(
             f"video_blocked={int(cleanup_diag.get('has_video_count') or 0)} "
             f"ambiguous={int(cleanup_diag.get('ambiguous_count') or 0)}",
         )
-    return skip_counts, applied_count, total_rows, cleanup_diag
+    return skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized
 
 
 def _summarize_apply(
@@ -1928,11 +2408,7 @@ def _summarize_apply(
         error_messages = [str(msg) for msg in (getattr(result, "error_messages", None) or []) if str(msg).strip()]
         if error_messages:
             shown = error_messages[:20]
-            summary_block += (
-                "\n"
-                "ABANDONNE / EN ERREUR (a verifier)\n"
-                + "".join(f"- {msg}\n" for msg in shown)
-            )
+            summary_block += "\nABANDONNE / EN ERREUR (a verifier)\n" + "".join(f"- {msg}\n" for msg in shown)
             if len(error_messages) > len(shown):
                 summary_block += f"- ... et {len(error_messages) - len(shown)} autre(s) message(s) dans le journal\n"
 
@@ -1954,11 +2430,25 @@ def _summarize_apply(
                 if isinstance(cleanup_diag.get("sample_ambiguous_dirs"), list)
                 else []
             )
+            # F17 (revue R1) : en multi-root les compteurs sont SOMMES sur tous
+            # les roots alors que `target_folder_*` reste celui du root 1. Un
+            # total sous un seul bucket est trompeur : des que `per_root` existe,
+            # on enumere le bucket ET le compte de CHAQUE root.
+            per_root_diag = cleanup_diag.get("per_root") if isinstance(cleanup_diag.get("per_root"), dict) else {}
+            default_bucket = cleanup_diag.get("target_folder_name") or cfg.cleanup_residual_folders_folder_name
+            if per_root_diag:
+                target_block = "- Dossiers cibles par root :\n"
+                for root_label, root_diag in per_root_diag.items():
+                    root_d = root_diag if isinstance(root_diag, dict) else {}
+                    bucket = root_d.get("target_folder_path") or root_d.get("target_folder_name") or default_bucket
+                    target_block += f"  - {root_label} -> {bucket} : {int(root_d.get('moved_count') or 0)} dossier(s)\n"
+            else:
+                target_block = f"- Dossier cible : {default_bucket}\n"
             summary_block += (
                 "\n"
                 "DETAIL NETTOYAGE RESIDUEL\n"
                 f"- Active : {'oui' if bool(cleanup_diag.get('enabled')) else 'non'}\n"
-                f"- Dossier cible : {cleanup_diag.get('target_folder_name') or cfg.cleanup_residual_folders_folder_name}\n"
+                f"{target_block}"
                 f"- Scope : {cleanup_scope_label(cleanup_diag.get('scope') or cfg.cleanup_residual_folders_scope)}\n"
                 f"- Familles actives : {families_label}\n"
                 f"- Statut avant application : {cleanup_status_label(cleanup_diag.get('status') or 'disabled')}\n"
@@ -1998,10 +2488,7 @@ def _summarize_apply(
             # n'a pu etre traite. Une row abandonnee cote destructif peut avoir ete
             # rangee/renommee par la boucle d'apply normale (cf. [D3]) : on n'affirme donc
             # PAS "rien n'a bouge", on renvoie vers le detail.
-            action_lines.append(
-                f"- {len(error_messages)} message(s) a verifier "
-                "(cf. section ABANDONNE / EN ERREUR)."
-            )
+            action_lines.append(f"- {len(error_messages)} message(s) a verifier (cf. section ABANDONNE / EN ERREUR).")
         if result.conflicts_quarantined_count > 0:
             action_lines.append(f"- Conflits fichiers a verifier: {review_root / '_conflicts'}")
         if result.conflicts_sidecars_quarantined_count > 0:
@@ -2074,7 +2561,8 @@ def _make_jellyfin_client(data: Dict[str, Any]) -> Any:
     """Cree un JellyfinClient depuis les settings. Retourne None si impossible."""
     url = str(data.get("jellyfin_url") or "").strip()
     api_key = str(data.get("jellyfin_api_key") or "").strip()
-    timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+    # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+    timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
     return JellyfinClient(url, api_key, timeout_s=timeout_s)
 
 
@@ -2116,7 +2604,8 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if not plex_url or not plex_token or not plex_lib:
         return
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2177,7 +2666,8 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
             log_module=__name__,
         )
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2338,6 +2828,7 @@ def _apply_changes_body(
             _log.debug("apply_begin a echoue, on continue sans progress", exc_info=True)
     _apply_cb: Optional[Callable[[int, int, str], None]] = None
     if rs is not None:
+
         def _apply_cb(idx: int, total: int, current: str, _rs: Any = rs) -> None:  # noqa: E306
             try:
                 _rs.apply_progress(idx, total, current, "rows")
@@ -2349,6 +2840,12 @@ def _apply_changes_body(
     if not dry_run:
         watched_ctx = _snapshot_jellyfin_watched(api, log_fn)
 
+    # Le rollback atomique ne doit rejouer QUE l'echec d'un apply incomplet. Ce
+    # drapeau passe a True des que `_execute_apply` a rendu la main : au-dela, le
+    # disque est dans l'etat voulu et toute exception ulterieure (finalisation du
+    # journal, resume, notifications, sync Jellyfin/Plex) ne justifie plus de
+    # defaire les deplacements — cf. le garde-fou plus bas.
+    apply_execution_completed = False
     try:
         try:
             result, batch_id, ops = _execute_apply(
@@ -2376,8 +2873,9 @@ def _apply_changes_body(
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
+        apply_execution_completed = True
 
-        skip_counts, applied_count, total_rows, cleanup_diag = _cleanup_apply(
+        skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized = _cleanup_apply(
             result,
             apply_batch_id,
             op_index,
@@ -2469,7 +2967,65 @@ def _apply_changes_body(
                 rs.apply_end(error=None)
             except Exception:
                 _log.debug("apply_end OK a echoue", exc_info=True)
-        return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
+        # REVUE ADVERSAIRE PR#852 — le silence etait le vrai defaut.
+        #
+        # Rendre `close_apply_batch` tolerante aux erreurs SQLite (F11) evite de
+        # transformer un apply reussi en HTTP 500 et de declencher un rollback
+        # destructif a tort. Mais elle transforme aussi un apply DONT L'UNDO EST
+        # MORT en un `{"ok": True}` totalement muet : le batch reste `PENDING`,
+        # `get_last_reversible_apply_batch` filtre `status='DONE'`, et
+        # l'utilisateur ne l'apprend qu'en cliquant « Annuler » (message
+        # generique « aucun apply annulable », sans lien avec l'apply qu'on
+        # vient de lui annoncer comme reussi). Un WARN dans le log technique
+        # n'est ni une information utilisateur ni une donnee exploitable par
+        # l'UI. Sur le chemin destructif, perdre l'annulation de 500 films DOIT
+        # etre une donnee de la reponse.
+        #
+        # `undo_available` couvre aussi le cas ou `insert_apply_batch` a echoue
+        # (OSError/TypeError/ValueError -> apply_batch_id None, apply poursuivi
+        # sans journal) et le dry-run (rien a annuler). Il exige EN PLUS au moins
+        # une operation journalisee (`op_index`) : un batch clos DONE mais vide
+        # n'est pas plus annulable qu'un batch PENDING, et annoncer
+        # `undo_available: True` a une UI qui proposerait alors un bouton
+        # « Annuler » inoperant serait le meme mensonge dans l'autre sens.
+        undo_available = bool(
+            not dry_run and apply_batch_id is not None and journal_finalized and int(op_index or 0) > 0
+        )
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "result": result.__dict__,
+            "apply_batch_id": apply_batch_id,
+            "journal_finalized": bool(journal_finalized),
+            "undo_available": undo_available,
+        }
+        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque :
+        # `applied_count` vient du resultat (donc reste vrai quand
+        # `insert_apply_batch` a echoue et que `op_index` est reste a 0), et
+        # `op_index` couvre les operations journalisees hors rows (nettoyage
+        # residuel). Un apply qui n'a rien deplace n'a rien perdu : crier au loup
+        # sur ce cas-la userait l'alerte exactement quand elle doit porter.
+        disk_touched = int(applied_count or 0) > 0 or int(op_index or 0) > 0
+        if not dry_run and disk_touched and not undo_available:
+            warning = t("errors.undo_unavailable_after_apply")
+            payload["journal_warning"] = warning
+            log_fn("WARN", warning)
+            # Un champ de payload que personne n'affiche serait un troisieme
+            # silence. Le centre de notifications (la cloche) est le seul canal
+            # qui SURVIT a la fermeture de l'ecran d'apply, et le miroir vers lui
+            # est inconditionnel (NotifyService.notify) : il ne depend d'aucun
+            # reglage de toasts desktop.
+            try:
+                api._notify.notify(
+                    "error",
+                    t("notifications.title_undo_unavailable"),
+                    warning,
+                    level="error",
+                )
+            except Exception:
+                # Un echec de notification ne doit pas transformer un apply
+                # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
+                _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
+        return payload
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
@@ -2486,7 +3042,11 @@ def _apply_changes_body(
                         "ops_count": int(op_index),
                     },
                 )
-            except (OSError, RuntimeError, TypeError, ValueError) as close_exc:
+            except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as close_exc:
+                # F11 (suite) : sans sqlite3.Error, un lock DB ici relevait une
+                # exception DEPUIS le handler d'erreur — elle sortait de
+                # _apply_changes_body avant meme le log « Echec application » et
+                # avant le rollback, ne laissant qu'un HTTP 500 generique.
                 log_fn(
                     "WARN",
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
@@ -2499,7 +3059,19 @@ def _apply_changes_body(
         # dict synthese qu'on logge sans propager (le caller recoit l'erreur
         # initiale via _err_response).
         atomic_rollback_summary: Optional[Dict[str, Any]] = None
-        if bool(apply_atomic) and apply_batch_id is not None:
+        if bool(apply_atomic) and apply_batch_id is not None and apply_execution_completed:
+            # L'apply lui-meme est alle au bout : le disque est dans l'etat
+            # demande et defaire 500 deplacements reussis a cause d'un echec de
+            # finalisation (journal verrouille, ecriture du resume, notification)
+            # serait la pire issue possible. On le dit explicitement dans le log
+            # d'apply pour que l'utilisateur sache pourquoi le badge « rollback
+            # atomique » n'apparait pas.
+            log_fn(
+                "WARN",
+                f"Mode atomique : rollback NON declenche batch={apply_batch_id} — l'apply s'est "
+                f"execute jusqu'au bout, l'echec est posterieur aux deplacements ({exc}).",
+            )
+        elif bool(apply_atomic) and apply_batch_id is not None:
             try:
                 atomic_rollback_summary = _atomic_rollback_forward(
                     store,
@@ -2543,7 +3115,10 @@ def _apply_changes_body(
                             "rollback_counts": atomic_rollback_summary.get("counts"),
                         },
                     )
-                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    # F11 (suite) : meme raison qu'aux deux except ci-dessus — le FS
+                    # est deja restaure, un lock DB ne doit pas transformer ce simple
+                    # marquage de statut en exception non rattrapee.
                     log_fn(
                         "WARN",
                         f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "
@@ -2561,9 +3136,7 @@ def _apply_changes_body(
                 "decision_count": len(decisions),
                 "apply_atomic": bool(apply_atomic),
                 "atomic_rollback_status": (
-                    str((atomic_rollback_summary or {}).get("rollback_status") or "")
-                    if atomic_rollback_summary
-                    else ""
+                    str((atomic_rollback_summary or {}).get("rollback_status") or "") if atomic_rollback_summary else ""
                 ),
             },
         )
@@ -2824,6 +3397,7 @@ def _build_apply_preview_body(
                 action_summary = "video_move"
         else:
             action_summary = op_type.lower() or "unknown"
+
         # Fix audit 2026-05-30 (APPLY-1) Vague J — defense en profondeur cote UI :
         # meme si une op a echappe au backend (regression future), on ne doit
         # PAS la presenter comme un rename si folder_old_name et folder_new_name
@@ -2833,10 +3407,7 @@ def _build_apply_preview_body(
         def _fs_equivalent_name(a: str, b: str) -> bool:
             if not a or not b:
                 return False
-            return (
-                unicodedata.normalize("NFC", a).casefold()
-                == unicodedata.normalize("NFC", b).casefold()
-            )
+            return unicodedata.normalize("NFC", a).casefold() == unicodedata.normalize("NFC", b).casefold()
 
         if op_type == "MOVE_DIR" and _fs_equivalent_name(folder_old_name, folder_new_name):
             action_summary = "noop_equivalent_fs"
@@ -2872,9 +3443,7 @@ def _build_apply_preview_body(
     # dont TOUTES les ops sont equivalentes FS doit etre classe "noop"
     # pour ne pas apparaitre comme un changement dans l'UI.
     for film in films_list:
-        effective_ops = [
-            op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"
-        ]
+        effective_ops = [op for op in film["ops"] if op.get("action_summary") != "noop_equivalent_fs"]
         n_move_dir = sum(1 for op in effective_ops if op["op_type"] == "MOVE_DIR")
         n_move_file = sum(1 for op in effective_ops if op["op_type"] == "MOVE_FILE")
         if n_move_dir + n_move_file == 0:
@@ -2890,10 +3459,7 @@ def _build_apply_preview_body(
     # Fix audit 2026-05-30 (APPLY-1) : nouveau compteur `noop_equivalent_fs`
     # pour observability des ops detectees comme equivalentes FS cote UI.
     noop_equivalent_fs_count = sum(
-        1
-        for f in films_list
-        for op in f["ops"]
-        if op.get("action_summary") == "noop_equivalent_fs"
+        1 for f in films_list for op in f["ops"] if op.get("action_summary") == "noop_equivalent_fs"
     )
     totals = {
         "films": len(films_list),

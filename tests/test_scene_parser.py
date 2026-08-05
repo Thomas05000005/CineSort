@@ -12,9 +12,11 @@ Couvre :
 
 from __future__ import annotations
 
+import re
 import unittest
+from unittest import mock
 
-from cinesort.domain.scene_parser import parse_scene_title
+from cinesort.domain.scene_parser import _ORPHAN_SEP_RE, parse_scene_title
 
 
 class StripReleaseGroupTests(unittest.TestCase):
@@ -330,6 +332,53 @@ class FrenchScenePatternsTests(unittest.TestCase):
         self.assertEqual(
             parse_scene_title("Movie.2018.4KLight.HEVC-Group.mkv"),
             "Movie 2018",
+        )
+
+
+class ModuleLevelPatternTests(unittest.TestCase):
+    """Coherence : les patterns du module sont compiles a l'import, pas par appel.
+
+    `_ORPHAN_SEP_RE` etait la seule exception des ~15 patterns du module : il
+    etait declare `_orphan_sep_re = re.compile(...)` DANS le corps de
+    `parse_scene_title`, donc reconstruit a chaque nom scanne.
+
+    La garde porte sur le COMPORTEMENT observable (le pattern orphelin n'est
+    jamais passe a `re.compile` pendant un appel), pas sur le texte du source :
+    un test qui comparerait une chaine de code casserait au moindre
+    reformatage sans rien detecter de reel.
+
+    Note : `re.sub()` passe par `re._compile` et non par `re.compile`, donc
+    l'espion ne voit que les compilations explicites — exactement la propriete
+    visee.
+    """
+
+    def test_orphan_sep_re_est_bien_une_constante_module_level(self):
+        self.assertIsInstance(_ORPHAN_SEP_RE, re.Pattern)
+
+    def test_le_pattern_orphelin_n_est_pas_recompile_a_chaque_appel(self):
+        vus: list[str] = []
+        vrai_compile = re.compile
+
+        def espion(pattern, *args, **kwargs):
+            if isinstance(pattern, str):
+                vus.append(pattern)
+            return vrai_compile(pattern, *args, **kwargs)
+
+        noms = (
+            "Le.Capitaine.Fracasse.1961.FRENCH.1080p.BluRay.x264-AZAZE.mkv",
+            "L'arme Fatale 2 - FR EN",
+            "Inception.2010.1080p.BluRay.x264-RARBG.mkv",
+        )
+        with mock.patch.object(re, "compile", espion):
+            for nom in noms:
+                parse_scene_title(nom)
+
+        self.assertNotIn(
+            _ORPHAN_SEP_RE.pattern,
+            vus,
+            "Le pattern de separateurs orphelins est recompile pendant "
+            "parse_scene_title : il doit rester une constante module-level "
+            "(_ORPHAN_SEP_RE), comme les ~15 autres patterns du module.",
         )
 
 

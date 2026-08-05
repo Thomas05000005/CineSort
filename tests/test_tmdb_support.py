@@ -104,8 +104,8 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
     def test_success_returns_posters_dict(self, mock_client_cls):
         client = MagicMock()
-        client.get_movie_poster_thumb_url.side_effect = (
-            lambda mid, size, force_refresh=False: f"https://img/{mid}_{size}.jpg"
+        client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
+            f"https://img/{mid}_{size}.jpg"
         )
         mock_client_cls.return_value = client
 
@@ -163,7 +163,17 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         self.assertEqual(result["posters"], {"1": "https://img/1.jpg"})
 
     @patch("cinesort.ui.api.tmdb_support.TmdbClient")
-    def test_ids_deduplicated_and_sorted(self, mock_client_cls):
+    def test_ids_deduplicated_keeping_caller_order(self, mock_client_cls):
+        """Ultra-audit 2026-08 (N20) : dedoublonnage SANS tri.
+
+        Ce test attendait auparavant `[1, 2, 3]`, c'est-a-dire le tri impose par
+        `sorted(set(ids))`. Ce tri n'avait aucune utilite fonctionnelle (le
+        resultat est un dict indexe par id) mais il decidait QUELS films
+        perdaient leur jaquette quand le cap de 2000 mordait : les 2000 plus
+        PETITS tmdb_id etaient gardes, donc les films les plus RECENTS etaient
+        systematiquement sacrifies. On preserve desormais l'ordre de l'appelant,
+        qui est l'ordre d'affichage. Cf tests/test_tmdb_posters_cap_order.py.
+        """
         captured_ids: list[int] = []
         client = MagicMock()
         client.get_movie_poster_thumb_url.side_effect = lambda mid, size, force_refresh=False: (
@@ -174,8 +184,8 @@ class TestGetTmdbPostersSuccess(unittest.TestCase):
         api = _make_api()
         tmdb_support.get_tmdb_posters(api, tmdb_ids=[3, 1, 2, 1, 3, 2])
 
-        # Dedup et tri
-        self.assertEqual(captured_ids, [1, 2, 3])
+        # Dedoublonne (6 ids -> 3), premiere occurrence gagnante, ordre conserve.
+        self.assertEqual(captured_ids, [3, 1, 2])
 
     # Fix audit 2026-05-26 (v1.5.6) Vague L : tmdb-1 — cap defensif eleve de
     # 20 a 2000 dans Vague J (cf tmdb_support.py:28-34). Le test originel

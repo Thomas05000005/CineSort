@@ -128,9 +128,7 @@ class M6ProcessingConfidenceThresholdsTests(unittest.TestCase):
 
     def test_thresholds_align_with_traitement(self) -> None:
         """La reference traitement.js utilise la meme source (non-regression)."""
-        traitement = (_ROOT / "web" / "dashboard" / "views" / "traitement.js").read_text(
-            encoding="utf-8"
-        )
+        traitement = (_ROOT / "web" / "dashboard" / "views" / "traitement.js").read_text(encoding="utf-8")
         self.assertIn("getConfidenceThresholdsSync()", traitement)
 
 

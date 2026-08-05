@@ -54,7 +54,9 @@ def _ensure_helper_loaded(page) -> None:
     page.evaluate("window.location.hash = '#/accueil'")
     page.wait_for_timeout(300)
     page.evaluate(_INJECT_HELPER_JS)
-    page.wait_for_function("() => window.__toastTest && typeof window.__toastTest.showToast === 'function'", timeout=5000)
+    page.wait_for_function(
+        "() => window.__toastTest && typeof window.__toastTest.showToast === 'function'", timeout=5000
+    )
 
 
 @pytest.mark.runtime
@@ -67,9 +69,7 @@ def test_toast_lifecycle_info_appears_then_disappears(dashboard_page) -> None:
     _ensure_helper_loaded(dashboard_page)
 
     # 1) ABSENT initial : aucun toast.
-    initial = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    initial = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert initial == 0, f"Etat initial doit etre 0 toast, vu {initial}"
 
     # 2) Emission.
@@ -97,9 +97,7 @@ def test_toast_lifecycle_info_appears_then_disappears(dashboard_page) -> None:
 
     # 3) ABSENT apres expiration (1500 plancher + 220 transition + 300 grace).
     dashboard_page.wait_for_timeout(1500 + 220 + 300)
-    after = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    after = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert after == 0, f"Apres duree : 0 toast attendu, vu {after}"
 
 
@@ -157,9 +155,7 @@ def test_toast_lifecycle_success_with_action(dashboard_page) -> None:
 def test_toast_container_has_aria_live_polite(dashboard_page) -> None:
     """Item 4.1.* — accessibility : #toast-container expose aria-live=polite."""
     _ensure_helper_loaded(dashboard_page)
-    dashboard_page.evaluate(
-        "() => window.__toastTest.showToast({ type: 'info', text: 'A11Y check', duration: 800 })"
-    )
+    dashboard_page.evaluate("() => window.__toastTest.showToast({ type: 'info', text: 'A11Y check', duration: 800 })")
     dashboard_page.wait_for_timeout(100)
 
     attrs = dashboard_page.evaluate(
@@ -232,9 +228,7 @@ def test_toast_clearall_purges_immediately(dashboard_page) -> None:
     )
     dashboard_page.wait_for_timeout(150)
 
-    before = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    before = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert before == 3, f"3 toasts persistants attendus, vu {before}"
 
     # PURGE.
@@ -244,14 +238,10 @@ def test_toast_clearall_purges_immediately(dashboard_page) -> None:
     # attend la transition + grace.
     dashboard_page.wait_for_timeout(220 + 200)
 
-    after = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    after = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert after == 0, f"Apres clearAllToasts : 0 toast attendu, vu {after}"
 
     # Verif idempotence : 2eme appel ne doit pas lever.
     dashboard_page.evaluate("() => window.__toastTest.clearAllToasts()")
-    final = dashboard_page.evaluate(
-        "() => document.querySelectorAll('#toast-container .toast').length"
-    )
+    final = dashboard_page.evaluate("() => document.querySelectorAll('#toast-container .toast').length")
     assert final == 0

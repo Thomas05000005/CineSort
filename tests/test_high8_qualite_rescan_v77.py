@@ -29,17 +29,21 @@ _RESCAN_CFG = {"rescan_run_id": "run-scan", "rescan_row_ids": ["row-0"]}
 
 
 def _insert_run(store: SQLiteStore, run_id: str, *, config: dict, ts: float, total: int) -> None:
-    store.run.insert_run_pending(
-        run_id=run_id, root="D:/Films", state_dir="X", config=config, created_ts=ts - 1
-    )
+    store.run.insert_run_pending(run_id=run_id, root="D:/Films", state_dir="X", config=config, created_ts=ts - 1)
     store.run.mark_run_running(run_id, started_ts=ts)
     store.run.mark_run_done(run_id, stats={"planned_rows": total}, ended_ts=ts + 10.0)
 
 
 def _insert_quality(store: SQLiteStore, run_id: str, row_id: str, tier: str) -> None:
     store.quality.upsert_quality_report(
-        run_id=run_id, row_id=row_id, score=80, tier=tier, reasons=[], metrics={},
-        profile_id="default", profile_version=1,
+        run_id=run_id,
+        row_id=row_id,
+        score=80,
+        tier=tier,
+        reasons=[],
+        metrics={},
+        profile_id="default",
+        profile_version=1,
     )
 
 

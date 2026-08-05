@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import re
 import unicodedata
 from pathlib import Path
@@ -14,7 +15,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # reconcilier les 'subtitle_missing_<lang>' cote serialisation (MEDI-31).
 from cinesort.domain.naming import (
     build_naming_context as _build_naming_context,
+)
+from cinesort.domain.naming import (
     folder_matches_template as _folder_matches_template,
+)
+from cinesort.domain.naming import (
     format_movie_folder as _format_movie_folder,
 )
 from cinesort.domain.subtitle_helpers import _normalize_iso639
@@ -36,7 +41,22 @@ def is_under_collection_root(
     except (ValueError, TypeError):
         return False
     parts = [part.lower() for part in rel.parts]
-    return len(parts) >= 1 and parts[0] == str(cfg.collection_root_name or "").lower()
+    if not parts:
+        # REVUE 2026-08-03 : `folder` EST la racine de la bibliotheque
+        # (`rel` == "."), cas des films poses EN VRAC directement a la racine
+        # (plan_support_core force alors kind='collection' avec folder == root).
+        # Les 3 appelants utilisent ce predicat comme "ce dossier doit-il etre
+        # redirige sous <root>/<collection_root_name>/ ?" et la reponse pour la
+        # racine est NON, absolument : la cible serait un DESCENDANT de la
+        # source. Repondre False ici menait a deux issues, les deux cassees :
+        # move_collection_folder -> shutil "Cannot move a directory into
+        # itself" (apply bloque a chaque relance, films jamais ranges), et
+        # merge_dir_safe quand <root>/<collection>/<nom racine> existait deja
+        # -> la bibliotheque ENTIERE videe dans _review/_leftovers avec un
+        # apply retournant errors=0. Les films de la racine sont ranges par la
+        # boucle apply normale, qui cree <root>/<Titre (Annee)>/.
+        return True
+    return parts[0] == str(cfg.collection_root_name or "").lower()
 
 
 def movie_dir_title_year(name: str) -> Optional[Tuple[str, int]]:
@@ -80,12 +100,27 @@ def single_folder_is_conform(
     norm_for_tokens: Callable[[str], str],
     movie_dir_title_year: Callable[[str], Optional[Tuple[str, int]]],
     naming_template: str = "",
+    edition: str = "",
+    separator: Optional[str] = None,
 ) -> bool:
     # Check 1 : template actif (si fourni)
     if naming_template:
         # VQ-1 : ancien lazy import remplace par alias top-level
         # `_folder_matches_template` (cycle casse via path_utils).
-        if _folder_matches_template(folder_name, naming_template, title, year):
+        # #469 : `edition` et `separator` doivent etre transmis, ce sont les deux
+        # seules entrees de contexte que les ecrivains (apply_single,
+        # planned_target_folder) alimentent en plus de title/year. Sans eux, un
+        # template qui encode l'edition ({edition-tag}, {edition}...) ou le
+        # separateur ({sep}) jugeait non conforme le dossier que l'apply venait
+        # lui-meme d'ecrire.
+        if _folder_matches_template(
+            folder_name,
+            naming_template,
+            title,
+            year,
+            edition=edition,
+            separator=separator,
+        ):
             return True
 
     # Check 1bis : defense en profondeur — equivalence FS Windows/SMB.
@@ -178,32 +213,61 @@ def existing_movie_folder_index(
     movie_key: Callable[[str, int], str],
 ) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
+
+    def _dirs(path: Path) -> List[Path]:
+        try:
+            return [child for child in path.iterdir() if child.is_dir()]
+        except (OSError, PermissionError, FileNotFoundError):
+            return []
+
+    def _index(path: Path) -> None:
+        pair = movie_dir_title_year(path.name)
+        if not pair:
+            return
+        title, year = pair
+        out.setdefault(movie_key(title, year), []).append(str(path))
+
     try:
         level1 = [path for path in cfg.root.iterdir() if path.is_dir()]
     except (OSError, PermissionError, FileNotFoundError):
         return out
 
+    # F18 : le dossier collections est un CONTENEUR TRANSPARENT. La cible reelle
+    # d'un single-saga est <root>/<collection_root>/<saga>/<Titre (Annee)>
+    # (planned_target_folder L160-171, miroir apply_core.py:2113) soit une
+    # profondeur 3, alors que la boucle historique (a) skippait tout dossier
+    # niveau-1 prefixe '_' — dont '_Collection' par defaut — et (b) n'indexait
+    # que 2 niveaux. Une copie deja rangee sous sa saga etait donc invisible du
+    # detecteur, la collision n'emergeant qu'a l'apply (merge_dir_safe).
+    # On teste le nom du dossier collections AVANT le skip '_' pour couvrir
+    # aussi un collection_root_name configure sans underscore.
+    #
+    # F18 (revue R1) : la transparence n'est valable que si la fonctionnalite
+    # collections est ACTIVE. Sinon planned_target_folder (L164/L169) ne vise
+    # JAMAIS <root>/<collection_root>/... et le dossier redevient ce que le
+    # commentaire ci-dessous decrit : un bucket interne CineSort, saute par le
+    # scan (scan_helpers.py:311, skip inconditionnel) et contenant de vraies
+    # copies parquees -> l'indexer fabrique des conflits fantomes (groupes a 1
+    # row citant une cible que rien ne planifie).
+    coll_root = str(getattr(cfg, "collection_root_name", "") or "").strip().lower()
+    collections_active = bool(getattr(cfg, "enable_collection_folder", False))
     for level1_dir in level1:
-        if level1_dir.name.startswith("_"):
+        name = level1_dir.name.lower()
+        if coll_root and collections_active and name == coll_root:
+            # Les sagas deviennent les "level1" -> la profondeur 3 est couverte.
+            containers = _dirs(level1_dir)
+        elif name.startswith("_"):
+            # _review / _Vide / _Conflicts / _Dossier Nettoyage restent exclus :
+            # ils contiennent de VRAIES copies mises de cote, les indexer
+            # creerait des conflits fantomes.
             continue
-        if level1_dir.name.lower() == "_review":
-            continue
+        else:
+            containers = [level1_dir]
 
-        pair = movie_dir_title_year(level1_dir.name)
-        if pair:
-            title, year = pair
-            out.setdefault(movie_key(title, year), []).append(str(level1_dir))
-
-        try:
-            children = [path for path in level1_dir.iterdir() if path.is_dir()]
-        except (OSError, PermissionError, FileNotFoundError):
-            children = []
-        for level2_dir in children:
-            pair2 = movie_dir_title_year(level2_dir.name)
-            if not pair2:
-                continue
-            title2, year2 = pair2
-            out.setdefault(movie_key(title2, year2), []).append(str(level2_dir))
+        for container in containers:
+            _index(container)
+            for child in _dirs(container):
+                _index(child)
     return out
 
 
@@ -306,17 +370,23 @@ def _reconciled_row_flags(row: Any) -> List[str]:
     dans find_duplicate_targets) ; un faux 'subtitle_missing_fr' du a du FR MUXE
     n'est donc pas reconciliable ici. Il l'est deja sur les ecrans Verification /
     Bibliotheque qui, eux, ont le quality_report.
+
+    F12 (2026-08-03) : `subtitle_forced_only_<lang>` traverse ici INTACT, et c'est
+    voulu. Sa reconciliation demande de savoir si une piste MUXEE COMPLETE existe
+    (clef `forced` des pistes embarquees), information absente de cette couche ;
+    `subtitle_languages` contient justement la langue du fichier FORCE, s'en servir
+    effacerait le flag a tous les coups. Sans preuve du contraire on garde l'alerte.
     """
     present: set = set()
-    for lang in (getattr(row, "subtitle_languages", None) or []):
+    for lang in getattr(row, "subtitle_languages", None) or []:
         norm = _normalize_iso639(str(lang)) or str(lang).strip().lower()
         if norm:
             present.add(norm)
     out: List[str] = []
-    for flag in (getattr(row, "warning_flags", None) or []):
+    for flag in getattr(row, "warning_flags", None) or []:
         text = str(flag)
         if text.startswith("subtitle_missing_"):
-            raw = text[len("subtitle_missing_"):].strip().lower()
+            raw = text[len("subtitle_missing_") :].strip().lower()
             lang = _normalize_iso639(raw) or raw
             if lang and lang in present:
                 continue  # faux positif : la langue EST presente -> drop
@@ -344,12 +414,8 @@ def _template_varies_by_edition(template: str) -> bool:
     CONSTRUCTION, robuste a toute variable d'edition presente/future, aucune
     heuristique de sous-chaine fragile.
     """
-    with_edition = _format_movie_folder(
-        template, _build_naming_context(title="Film", year=2000, edition="Edition")
-    )
-    without_edition = _format_movie_folder(
-        template, _build_naming_context(title="Film", year=2000, edition="")
-    )
+    with_edition = _format_movie_folder(template, _build_naming_context(title="Film", year=2000, edition="Edition"))
+    without_edition = _format_movie_folder(template, _build_naming_context(title="Film", year=2000, edition=""))
     return with_edition != without_edition
 
 
@@ -376,9 +442,7 @@ def find_duplicate_targets(
     # par le template la porte (sinon la cle diverge de existing_movie_folder_index
     # qui indexe "Titre (Annee)" SANS edition -> detection cible-existante morte,
     # et deux editions visant le meme dossier ne sont plus vues comme un conflit).
-    template_uses_edition = _template_varies_by_edition(
-        str(getattr(cfg, "naming_movie_template", "") or "")
-    )
+    template_uses_edition = _template_varies_by_edition(str(getattr(cfg, "naming_movie_template", "") or ""))
 
     for row in rows:
         dec = decisions.get(row.row_id, {})
@@ -443,9 +507,24 @@ def find_duplicate_targets(
         existing_paths = existing_idx.get(key, [])
         plan_targets = [item["target"] for item in items]
 
-        has_plan_dupe = len(set(plan_targets)) < len(plan_targets)
+        # F22 : la collision de destination se juge sur des chemins NORMALISES.
+        # NTFS est insensible a la casse et movie_key groupe deja en lower ->
+        # '...\\SEVEN (1995)' et '...\\Seven (1995)' sont le MEME dossier, mais
+        # la comparaison de chaines BRUTES les voyait distincts (plan_conflict
+        # faux negatif). norm_win_path rend un PureWindowsPath dont l'egalite et
+        # le hash sont insensibles a la casse MEME sous Linux/CI.
+        normalized_targets = []
+        for target in plan_targets:
+            try:
+                normalized_targets.append(norm_win_path(Path(target)))
+            except (ValueError, TypeError, OSError):
+                # Degradation sure : on retombe sur la comparaison brute pour ce
+                # seul chemin plutot que de faire echouer check_duplicates.
+                normalized_targets.append(str(target))
+
+        has_plan_dupe = len(set(normalized_targets)) < len(normalized_targets)
         existing_elsewhere = []
-        target_norms = {norm_win_path(Path(target)) for target in plan_targets}
+        target_norms = set(normalized_targets)
         # REGRESSION M8 (relecture B2) : depuis la redirection saga, la cible d'un
         # single-saga (<root>/<_Collection>/<saga>/<nom>) DIVERGE de son dossier
         # SOURCE deja conforme (<root>/<nom>). existing_movie_folder_index indexe
@@ -514,9 +593,7 @@ def find_duplicate_targets(
                 break
 
             if conflict or (
-                (not matched_target)
-                and existing_norm not in target_norms
-                and existing_norm not in source_norms
+                (not matched_target) and existing_norm not in target_norms and existing_norm not in source_norms
             ):
                 existing_elsewhere.append(existing_path)
 
@@ -538,10 +615,8 @@ def find_duplicate_targets(
         roots.discard("")
         parents = set()
         for it in items:
-            try:
+            with contextlib.suppress(ValueError, TypeError, OSError):
                 parents.add(norm_win_path(Path(it["source_folder"]).parent))
-            except (ValueError, TypeError, OSError):
-                pass
         if len(roots) > 1:
             scope = "cross_root"
         elif len(parents) > 1:

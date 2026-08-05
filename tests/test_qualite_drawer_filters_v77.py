@@ -23,9 +23,15 @@ from cinesort.ui.api.library_support import _row_matches
 
 
 def _row(**kw):
-    base = {"codec": "hevc", "resolution": "1080p", "media_source": "bluray",
-            "audio_languages": ["fra"], "subtitle_languages": [], "title": "X",
-            "year": 1994}
+    base = {
+        "codec": "hevc",
+        "resolution": "1080p",
+        "media_source": "bluray",
+        "audio_languages": ["fra"],
+        "subtitle_languages": [],
+        "title": "X",
+        "year": 1994,
+    }
     base.update(kw)
     return base
 
@@ -82,14 +88,16 @@ class QualiteDrawerAudioAutreTests(unittest.TestCase):
 class CombinedQualitePayloadTests(unittest.TestCase):
     def test_full_qualite_drawer_payload(self) -> None:
         # Payload exact du drawer Qualite (EMPTY_FILTERS + selections).
-        filters = {"decades": ["1990"], "genres": [], "sources": ["BluRay"],
-                   "audio_languages": ["FR"], "period_days": 30}
-        self.assertTrue(_row_matches(_row(year=1994, media_source="bluray",
-                                          audio_languages=["fra"]), filters))
-        self.assertFalse(_row_matches(_row(year=1994, media_source="web",
-                                           audio_languages=["fra"]), filters))
-        self.assertFalse(_row_matches(_row(year=2005, media_source="bluray",
-                                           audio_languages=["fra"]), filters))
+        filters = {
+            "decades": ["1990"],
+            "genres": [],
+            "sources": ["BluRay"],
+            "audio_languages": ["FR"],
+            "period_days": 30,
+        }
+        self.assertTrue(_row_matches(_row(year=1994, media_source="bluray", audio_languages=["fra"]), filters))
+        self.assertFalse(_row_matches(_row(year=1994, media_source="web", audio_languages=["fra"]), filters))
+        self.assertFalse(_row_matches(_row(year=2005, media_source="bluray", audio_languages=["fra"]), filters))
 
 
 if __name__ == "__main__":

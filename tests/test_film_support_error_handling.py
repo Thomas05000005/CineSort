@@ -28,13 +28,15 @@ def _make_api_raising() -> MagicMock:
 
 
 def _make_api_obsolete_run() -> MagicMock:
-    """API mock dont run.get_plan() leve (run_id obsolete / DB inaccessible)."""
+    """API mock dont le chargement du plan leve (run_id obsolete / DB inaccessible)."""
     api = MagicMock()
     api.settings.get_settings.return_value = {"state_dir": None, "tmdb_api_key": ""}
     # _resolve_run_id voit run_id non vide -> renvoie tel quel sans toucher au store.
-    # _find_plan_row appelle api.run.get_plan -> mais celui-ci attrape deja les
-    # exceptions tabulaires ; on force donc une exception NON listee dans le
-    # except etroit pour faire remonter au wrap global.
+    # _find_plan_row delegue a history_support.get_plan_row, dont la 1re etape est
+    # api._get_run (PERF ultra-audit 2026-08 : on ne materialise plus tout le plan
+    # via run.get_plan pour une seule row). On force une exception NON listee dans
+    # l'except etroit de _find_plan_row pour faire remonter au wrap global.
+    api._get_run.side_effect = MemoryError("simulated infra blow up")
     api.run.get_plan.side_effect = MemoryError("simulated infra blow up")
     return api
 
@@ -65,7 +67,7 @@ class GetFilmFullErrorHandlingTests(unittest.TestCase):
         api = _make_api_obsolete_run()
         # _find_plan_row a un except etroit (OSError, AttributeError, KeyError,
         # TypeError, ValueError). MemoryError n'est PAS dans la liste -> remonte
-        # au wrap global de get_film_full.
+        # au wrap global de get_film_full, quel que soit le chemin de chargement.
         res = film_support.get_film_full(api, "run_obsolete", "row42")
 
         self.assertIsInstance(res, dict)

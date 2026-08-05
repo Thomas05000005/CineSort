@@ -46,38 +46,70 @@ class ApplyBatchStateError(RuntimeError):
 # ROLLED_BACK/FAILED/UNDONE_* -> DONE) est rejetee pour eviter la
 # regression de reversibilite decrite par H14.
 _ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
-    "PENDING": frozenset({
-        "PENDING",
-        "DONE",
-        "FAILED",
-        "ROLLED_BACK",
-        "ROLLED_BACK_BY_ATOMIC",
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-        "ABORTED",
-        "ABORTED_HASH_MISMATCH",
-    }),
+    "PENDING": frozenset(
+        {
+            "PENDING",
+            "DONE",
+            "FAILED",
+            "ROLLED_BACK",
+            "ROLLED_BACK_BY_ATOMIC",
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+            "ABORTED",
+            "ABORTED_HASH_MISMATCH",
+        }
+    ),
     # Premier undo full ou selectif depuis un batch acheve.
-    "DONE": frozenset({
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-    }),
+    "DONE": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
     # Reprise d'un undo selectif partiel : on autorise a re-affiner le
     # statut tant qu'on reste dans la famille UNDONE_*. Tout retour vers
     # DONE/PENDING reste interdit (regression H14).
-    "UNDONE_PARTIAL": frozenset({
-        "UNDONE_DONE",
-        "UNDONE_PARTIAL",
-    }),
+    "UNDONE_PARTIAL": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
     # R8-015 (F2-c) : un apply qui a echoue est clos FAILED, PUIS rollback_forward
     # restaure le FS. Si le revert reussit completement, le statut du batch doit
     # refleter cet etat reel -> ROLLED_BACK_BY_ATOMIC (sinon il reste fige a FAILED,
     # impossible de savoir depuis apply_batches.status si le FS est restaure). On
     # n'autorise QUE cette transition depuis FAILED (pas de retour vers DONE/PENDING
     # = pas de reintroduction dans get_last_reversible_apply_batch).
-    "FAILED": frozenset({
-        "ROLLED_BACK_BY_ATOMIC",
-    }),
+    "FAILED": frozenset(
+        {
+            "ROLLED_BACK_BY_ATOMIC",
+        }
+    ),
+    # Nuance N06 (ultra-audit 2026-08-03) : les deux statuts poses par le
+    # boot-cleanup (cf cinesort/app/apply_batches_reconciliation.py:59-60)
+    # n'avaient aucune entree ici. Consequence mesuree : apres un crash
+    # mid-apply suivi d'un reboot, un undo selectif restaurait bien les fichiers
+    # sur disque, puis `close_apply_batch` levait ApplyBatchStateError
+    # ("transition invalide vers 'UNDONE_DONE'") — que
+    # `apply_support._finalize_batch_undo_status` ne rattrape pas (il ne catche
+    # que sqlite3.Error / OSError) -> HTTP 500 sur une operation REUSSIE, et le
+    # statut du batch restait fige sur le libelle du boot-cleanup.
+    # On n'ouvre que la famille UNDONE_* : aucun retour vers DONE/PENDING, donc
+    # l'invariant H14 (pas de reintroduction dans
+    # get_last_reversible_apply_batch) est preserve.
+    "COMPLETED_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
+    "ROLLED_BACK_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
 }
 
 
@@ -200,10 +232,7 @@ class ApplyRepository(_BaseRepository):
             # Construire la liste des statuts source autorises pour atteindre
             # `target_status`. Si la cible n'apparait dans AUCUN frozenset
             # autorise, on bloque immediatement.
-            allowed_sources = [
-                src for src, targets in _ALLOWED_BATCH_TRANSITIONS.items()
-                if target_status in targets
-            ]
+            allowed_sources = [src for src, targets in _ALLOWED_BATCH_TRANSITIONS.items() if target_status in targets]
             if not allowed_sources:
                 # Avant de lever, on lit l'etat reel pour message clair.
                 cur = conn.execute(
@@ -211,7 +240,7 @@ class ApplyRepository(_BaseRepository):
                     (str(batch_id),),
                 )
                 row = cur.fetchone()
-                current = (row["status"] if row else None)
+                current = row["status"] if row else None
                 raise ApplyBatchStateError(
                     f"close_apply_batch: transition invalide vers '{target_status}' "
                     f"(batch_id={batch_id}, etat courant={current!r})"
@@ -235,7 +264,7 @@ class ApplyRepository(_BaseRepository):
                     (str(batch_id),),
                 )
                 row2 = cur2.fetchone()
-                current = (row2["status"] if row2 else None)
+                current = row2["status"] if row2 else None
                 raise ApplyBatchStateError(
                     f"close_apply_batch: transition refusee vers '{target_status}' "
                     f"(batch_id={batch_id}, etat courant={current!r}, "
@@ -662,7 +691,12 @@ class ApplyRepository(_BaseRepository):
         """
         self._ensure_apply_atomic_tables()
         ts = str(rolled_back_at) if rolled_back_at is not None else None
-        if ts is None and str(status) in ("IN_PROGRESS", "ROLLED_BACK_BY_ATOMIC", "ROLLBACK_FAILED", "ROLLBACK_PARTIAL"):
+        if ts is None and str(status) in (
+            "IN_PROGRESS",
+            "ROLLED_BACK_BY_ATOMIC",
+            "ROLLBACK_FAILED",
+            "ROLLBACK_PARTIAL",
+        ):
             # auto-fill timestamp ISO-like pour audit
             ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._managed_conn() as conn:

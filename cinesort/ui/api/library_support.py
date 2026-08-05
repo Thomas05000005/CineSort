@@ -57,10 +57,18 @@ _CODEC_NORMALIZE = {
 }
 
 
+# Issue #681 : sentinelle « aucun codec detecte ». Elle est NON VIDE, donc
+# truthy : tout consommateur qui se contente d'un test de verite la compte comme
+# un codec reel. La nommer ici (au lieu du litteral duplique cote lecteurs) rend
+# le contrat explicite et empeche les deux bords de diverger.
+CODEC_UNKNOWN = "unknown"
+
+
 def _normalize_codec(codec: Optional[str]) -> str:
     if not codec:
-        return "unknown"
-    return _CODEC_NORMALIZE.get(str(codec).strip().lower(), str(codec).strip().lower())
+        return CODEC_UNKNOWN
+    normalized = str(codec).strip().lower()
+    return _CODEC_NORMALIZE.get(normalized, normalized)
 
 
 def _classify_resolution(width: int, height: int) -> str:
@@ -163,8 +171,36 @@ def _build_display_tier_fields(
 # ---------------------------------------------------------------------------
 
 
-def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
-    """Construit la liste des rows Library enrichies (probe + perceptual V2)."""
+def _dedup_ids_preserving_order(ids: List[int]) -> List[int]:
+    """Deduplique une liste d'ids en O(n) (set) en gardant l'ordre d'apparition.
+
+    PERF (audit 2026-08-02, LOW confirmee) : la collecte des tmdb_id du batch
+    jaquettes testait l'appartenance sur la LISTE en construction
+    (`if tid not in tmdb_ids`), soit O(n^2). Mesure sur cette machine :
+    239 ms a 10 000 ids, 983 ms a 20 000, 2 470 ms a 30 000, contre
+    0,7 / 1,8 / 3,0 ms avec un set. Le resultat est strictement identique
+    (memes ids, meme ordre de premiere apparition).
+    """
+    seen: set[int] = set()
+    out: List[int] = []
+    for value in ids:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> List[Dict[str, Any]]:
+    """Construit la liste des rows Library enrichies (probe + perceptual V2).
+
+    Args:
+        with_posters: si False, on saute le batch `get_tmdb_posters` (les rows
+            gardent `poster_url=None` sauf fallback candidat, deja gratuit).
+            Reserve aux appelants qui n'exposent AUCUNE jaquette au frontend
+            (compteurs de chips, rollup scoring) : ce batch reconstruit un
+            TmdbClient et rejoue tout `tmdb_cache.json` a chaque appel, et
+            frappe TMDb en HTTP pour les ids pas encore en cache.
+    """
     # Charger le plan
     try:
         settings = api.settings.get_settings()
@@ -225,8 +261,30 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
     # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides) sur
     # chaque row -> la biblio reflete le match choisi (tmdb_id/titre/annee) et ne
     # revient plus au match auto au reload. No-op si aucun override.
-    from cinesort.ui.api.film_support import overlay_tmdb_override
+    from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY, overlay_tmdb_override
+
+    # PERF (audit 2026-08-02, HIGH library_support:231) : `api.run.get_plan`
+    # ci-dessus a DEJA applique cet overlay sur chaque row
+    # (history_support._enrich_plan_payload:125), avec le MEME store
+    # (`_get_store(api)` == `api._get_or_create_infra(state_dir)`). Le refaire
+    # ici relisait `film_tmdb_overrides` une 2e fois par film, or chaque
+    # `get_tmdb_override` ouvre DEUX connexions SQLite (`_ensure_tables` puis le
+    # SELECT) qui commitent chacune une ligne dans `pragma_history` : la vue
+    # Bibliotheque payait 4N connexions au lieu de 2N.
+    #
+    # Revue adversaire PR #849 : on ne saute le travail que sur presentation du
+    # marqueur EXPLICITE pose par l'overlay lui-meme, sur son seul chemin de
+    # succes (film_support.TMDB_OVERLAY_DONE_KEY). La version precedente
+    # inferait ce succes de la presence de `display_title`, que
+    # `_enrich_plan_payload` pose de toute facon (`row.setdefault`) meme quand
+    # l'overlay vient d'echouer sous son `contextlib.suppress(Exception)` :
+    # store indisponible ou base verrouillee -> le choix TMDb manuel de
+    # l'utilisateur disparaissait EN SILENCE de la Bibliotheque.
+    # Fail-closed : marqueur absent (ou falsy) => on relit. Le cout du cas
+    # nominal reste nul, seul le cas degrade repaye les 2N connexions.
     for _r in plan_rows:
+        if isinstance(_r, dict) and _r.get(TMDB_OVERLAY_DONE_KEY):
+            continue
         overlay_tmdb_override(store, run_id, _r)
 
     # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
@@ -261,7 +319,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         # score desc cote linker domain).
         best: Optional[int] = None
         best_score = -1.0
-        for cand in (row_dict.get("candidates") or []):
+        for cand in row_dict.get("candidates") or []:
             if not isinstance(cand, dict):
                 continue
             cid = cand.get("tmdb_id")
@@ -290,10 +348,18 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         tid = _resolve_tmdb_id(r)
         if tid and tid > 0:
             resolved_tmdb_by_row[rid] = tid
-            if tid not in tmdb_ids:
-                tmdb_ids.append(tid)
+            tmdb_ids.append(tid)
     posters_by_tmdb: Dict[str, str] = {}
-    if tmdb_ids:
+    if with_posters and tmdb_ids:
+        # PERF : dedup O(n) via set (cf. _dedup_ids_preserving_order) — l'ancien
+        # `if tid not in tmdb_ids` etait quadratique.
+        # Revue Sourcery PR#849 : la dedup ne sert QU'a l'argument du batch, donc
+        # elle est faite DANS la garde. Les deux appelants `with_posters=False`
+        # (`get_library_rollup`:1206 et le compteur de chips :1384) sont les plus
+        # chauds — le second est rejoue a chaque clic de chip / tri / filtre — et
+        # ne payent plus une passe sur toute la bibliotheque pour rien. La garde
+        # elle-meme est insensible a la dedup : une liste non vide le reste.
+        tmdb_ids = _dedup_ids_preserving_order(tmdb_ids)
         try:
             poster_res = api.integrations.get_tmdb_posters(tmdb_ids, "w342")
             if poster_res and poster_res.get("ok"):
@@ -409,7 +475,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
         if resolved_tid:
             poster_url = posters_by_tmdb.get(str(resolved_tid))
         if not poster_url:
-            for cand in (r.get("candidates") or []):
+            for cand in r.get("candidates") or []:
                 cand_poster = cand.get("poster_url") if isinstance(cand, dict) else None
                 if cand_poster:
                     poster_url = cand_poster
@@ -488,11 +554,7 @@ def _build_library_rows(api: Any, run_id: str) -> List[Dict[str, Any]]:
             # Avant : metrics.get("size_bytes") = None -> tous les size_bytes
             # provenaient uniquement de PlanRow.size_bytes (lui-meme souvent 0
             # tant que le scan FS n'a pas posé la stat), cassant le tri/filtre taille.
-            "size_bytes": int(
-                r.get("size_bytes")
-                or detected.get("file_size_bytes")
-                or 0
-            ),
+            "size_bytes": int(r.get("size_bytes") or detected.get("file_size_bytes") or 0),
         }
 
         # Si grain dans metrics
@@ -530,18 +592,25 @@ _DRAWER_RES_ALIAS = {"480p": "sd", "720p": "720p", "1080p": "1080p", "4k": "4k"}
 _KNOWN_RES = {"4k", "1080p", "720p", "sd"}
 # Source media : source_hint (release_name_parser) -> vocabulaire drawer.
 _SOURCE_HINT_TO_DRAWER = {
-    "bluray": "bluray", "remux": "bluray",
-    "webdl": "web", "webrip": "web",
+    "bluray": "bluray",
+    "remux": "bluray",
+    "webdl": "web",
+    "webrip": "web",
     "dvd": "dvd",
-    "hdtv": "other", "cam": "other",
+    "hdtv": "other",
+    "cam": "other",
 }
 # AUDIT 2026-06-11 (R4-P5) : le drawer Qualite (qualite-filters-drawer.js) envoie
 # des LIBELLES ('BluRay'/'WEB-DL'/'WEB-Rip'/'DVD'/'HDTV'/'Autre') sous la cle
 # 'sources' (pluriel) ; le drawer Biblio envoie bluray/web/dvd/other sous
 # 'source'. On normalise les libelles vers le vocabulaire backend.
 _DRAWER_SOURCE_ALIAS = {
-    "web-dl": "web", "web-rip": "web", "webdl": "web", "webrip": "web",
-    "hdtv": "other", "autre": "other",
+    "web-dl": "web",
+    "web-rip": "web",
+    "webdl": "web",
+    "webrip": "web",
+    "hdtv": "other",
+    "autre": "other",
 }
 
 
@@ -555,6 +624,7 @@ def _media_source_label(video_name: str) -> str:
         return ""
     try:
         from cinesort.domain.release_name_parser import parse_release_name  # noqa: PLC0415
+
         hint = str(parse_release_name(name).source_hint or "").strip().lower()
     except (ImportError, OSError, TypeError, ValueError):
         return ""
@@ -569,9 +639,7 @@ def _media_source_label(video_name: str) -> str:
 # commentary (que _LANG_MAP mappe a '' et que le fallback brut reintroduisait
 # comme fausses langues) + la plage ISO 639-2 usage local qaa..qtz (convention
 # pistes commentaire), via _is_non_language_code (520 codes, pas de frozenset).
-_NON_LANG_CODES = frozenset(
-    {"und", "unknown", "zxx", "mis", "mul", "multi", "forced", "sdh", "cc", "commentary"}
-)
+_NON_LANG_CODES = frozenset({"und", "unknown", "zxx", "mis", "mul", "multi", "forced", "sdh", "cc", "commentary"})
 
 
 def _is_non_language_code(code: str) -> bool:
@@ -595,6 +663,7 @@ def _to_iso639_1(lang: str) -> str:
         return ""
     try:
         from cinesort.domain.subtitle_helpers import _normalize_iso639  # noqa: PLC0415
+
         return str(_normalize_iso639(raw) or "").strip().lower() or raw
     except (ImportError, OSError, TypeError, ValueError):
         return raw
@@ -616,7 +685,8 @@ def _row_matches(row: Dict[str, Any], filters: Dict[str, Any]) -> bool:
     def _in_list(row_val: Any, filter_list: Any) -> bool:
         if not filter_list:
             return True
-        return str(row_val or "").lower() in [str(v).lower() for v in filter_list]
+        wanted = {str(v).lower() for v in filter_list}
+        return str(row_val or "").lower() in wanted
 
     def _any_in_list(row_vals: Any, filter_list: Any) -> bool:
         """True si au moins un element de row_vals (liste) est dans filter_list."""
@@ -907,9 +977,7 @@ def get_library_filtered(
     try:
         return _get_library_filtered_impl(api, run_id, filters, sort, page, page_size)
     except Exception as exc:  # noqa: BLE001 - boundary top-level pour endpoint UI
-        logger.exception(
-            "get_library_filtered failed for run_id=%s page=%s", run_id, page
-        )
+        logger.exception("get_library_filtered failed for run_id=%s page=%s", run_id, page)
         return {
             "ok": False,
             "error": "library_load_failed",
@@ -1147,7 +1215,10 @@ def get_scoring_rollup(
     if not resolved_rid:
         return {"ok": True, "by": dim, "groups": []}
 
-    rows = _build_library_rows(api, resolved_rid)
+    # PERF (audit 2026-08-02) : la reponse n'expose que group_name/count/scores/
+    # top_film_ids — AUCUNE jaquette. On evite donc le batch TMDb (reconstruction
+    # de TmdbClient + relecture integrale de tmdb_cache.json a chaque appel).
+    rows = _build_library_rows(api, resolved_rid, with_posters=False)
     if not rows:
         return {"ok": True, "by": dim, "groups": []}
 
@@ -1320,7 +1391,12 @@ def get_library_counters_by_chip(
             },
         }
 
-    all_rows = _build_library_rows(api, resolved_rid)
+    # PERF (audit 2026-08-02, HIGH library_support:1325) : cet endpoint ne
+    # renvoie QUE des compteurs (aucun `poster_url` dans la reponse) et aucun
+    # predicat de comptage ne lit `poster_url` — il payait pourtant le batch
+    # jaquettes complet a chaque clic de chip / tri / filtre, en doublon de
+    # get_library_filtered appele juste avant par bibliotheque.js.
+    all_rows = _build_library_rows(api, resolved_rid, with_posters=False)
     # Appliquer filters EN AMONT pour scoper les counters (utile si search actif).
     scoped_rows = [r for r in all_rows if _row_matches(r, filters)]
 
@@ -1408,6 +1484,7 @@ def _confidence_label_from_value(value: int) -> str:
     mais maintenant pilotes depuis 1 endroit.
     """
     from cinesort.domain.confidence_thresholds import confidence_label  # noqa: PLC0415
+
     return confidence_label(value)
 
 
@@ -1584,7 +1661,9 @@ def clear_tmdb_override(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
     try:
         res = store.film_modal.clear_tmdb_override(run_id=rid, row_id=str(row_id))
     except (OSError, AttributeError, TypeError, ValueError) as exc:
-        return _err_response(f"clear_tmdb_override echoue : {exc}", category="runtime", level="error", log_module=__name__)
+        return _err_response(
+            f"clear_tmdb_override echoue : {exc}", category="runtime", level="error", log_module=__name__
+        )
     removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
     return {"ok": True, "run_id": rid, "row_id": str(row_id), "removed": removed}
 
@@ -1635,7 +1714,9 @@ def unmark_for_deletion(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         ValueError,
         sqlite3.Error,
     ) as exc:
-        return _err_response(f"unmark_for_deletion echoue : {exc}", category="runtime", level="error", log_module=__name__)
+        return _err_response(
+            f"unmark_for_deletion echoue : {exc}", category="runtime", level="error", log_module=__name__
+        )
     removed = bool(res.get("removed")) if isinstance(res, dict) else bool(res)
 
     # Revue adversaire R3 2026-07-13 (defaut 4) : le drain ci-dessus est
@@ -1812,7 +1893,7 @@ def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
         return f"{(year // 10) * 10}s"
     if dim == "codec":
         codec = str(row.get("codec") or "").strip()
-        return codec.upper() if codec and codec != "unknown" else None
+        return codec.upper() if codec and codec != CODEC_UNKNOWN else None
     if dim == "era_grain":
         era = row.get("grain_era_v2")
         return str(era) if era else None

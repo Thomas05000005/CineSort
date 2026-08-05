@@ -13,7 +13,9 @@ Falsifiabilite : un torn-write donnerait un JSONDecodeError (I1 ROUGE).
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/c3_concurrent_settings_save.py
 Aucun effet sur la vraie biblio : tempfile exclusif.
 """
+
 from __future__ import annotations
+
 import json
 import tempfile
 import threading
@@ -22,10 +24,12 @@ from pathlib import Path
 from cinesort.ui.api.settings_support import get_settings_payload, save_settings_payload
 
 D = dict(
-    default_root="C:/Films", default_collection_folder_name="_Collection",
+    default_root="C:/Films",
+    default_collection_folder_name="_Collection",
     default_empty_folders_folder_name="_Vide",
     default_residual_cleanup_folder_name="_Dossier Nettoyage",
-    default_probe_backend="auto", debug_enabled=False,
+    default_probe_backend="auto",
+    debug_enabled=False,
 )
 KEY = "collection_folder_name"  # cle scalaire non-secrete, persistee
 N_THREADS = 8
@@ -49,11 +53,13 @@ def run():
                 written_values.add(val)
             try:
                 save_settings_payload(
-                    payload, current_state_dir=tmp,
+                    payload,
+                    current_state_dir=tmp,
                     default_collection_folder_name=D["default_collection_folder_name"],
                     default_empty_folders_folder_name=D["default_empty_folders_folder_name"],
                     default_residual_cleanup_folder_name=D["default_residual_cleanup_folder_name"],
-                    default_root=D["default_root"], default_probe_backend=D["default_probe_backend"],
+                    default_root=D["default_root"],
+                    default_probe_backend=D["default_probe_backend"],
                     debug_enabled=D["debug_enabled"],
                 )
             except Exception as e:  # noqa: BLE001
@@ -79,8 +85,10 @@ def run():
     for t in range(N_THREADS):
         threads.append(threading.Thread(target=writer, args=(t,)))
         threads.append(threading.Thread(target=reader, args=(t,)))
-    for th in threads: th.start()
-    for th in threads: th.join()
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
 
     # verif finale : fichier valide + valeur finale coherente
     final = get_settings_payload(state_dir=tmp, default_state_dir_example=str(tmp), **D)
@@ -93,7 +101,8 @@ def run():
         errors.append(f"FINAL JSON corrompu: {e}")
 
     out = {
-        "threads": N_THREADS, "iters": ITERS,
+        "threads": N_THREADS,
+        "iters": ITERS,
         "writes_total": N_THREADS * ITERS,
         "I1_lectures_sans_exception": len([e for e in errors if e.startswith("READ")]) == 0,
         "I2_valeurs_incoherentes": bad_values[:10],
@@ -102,8 +111,8 @@ def run():
         "valeur_finale_coherente": final_val in written_values,
         "erreurs": errors[:10],
         "VERDICT": "SERIALISATION OK (aucun torn-write/corruption)"
-                   if not errors and not bad_values and raw_ok
-                   else "INCOHERENCE DETECTEE",
+        if not errors and not bad_values and raw_ok
+        else "INCOHERENCE DETECTEE",
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
 

@@ -132,10 +132,7 @@ def test_skeleton_historique_lifecycle_present_then_replaced(dashboard_page) -> 
             timeout=10000,
         )
     except Exception as exc:  # noqa: BLE001
-        pytest.fail(
-            f"SKELETON INFINI: aucun contenu reel apparu apres 10s sur /historique. "
-            f"Exception={exc}"
-        )
+        pytest.fail(f"SKELETON INFINI: aucun contenu reel apparu apres 10s sur /historique. Exception={exc}")
 
     # THEN: skeletons Historique disparu (cible v5-skeleton sous l'arbre historique).
     histo_skeletons_after = dashboard_page.evaluate(

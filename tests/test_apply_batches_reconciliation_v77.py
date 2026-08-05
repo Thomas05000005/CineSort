@@ -21,8 +21,6 @@ from __future__ import annotations
 import sqlite3
 import time
 import unittest
-from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 from cinesort.app.apply_batches_reconciliation import (
@@ -110,9 +108,7 @@ def _insert_op(
 
 
 def _get_batch_status(conn: sqlite3.Connection, batch_id: str) -> str:
-    cur = conn.execute(
-        "SELECT status FROM apply_batches WHERE batch_id = ?", (batch_id,)
-    )
+    cur = conn.execute("SELECT status FROM apply_batches WHERE batch_id = ?", (batch_id,))
     row = cur.fetchone()
     return str(row[0]) if row else ""
 
@@ -144,9 +140,7 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
         self.assertEqual(report["batches"], [])
 
     def test_only_done_batch_no_action(self) -> None:
-        _insert_batch(
-            self.conn, batch_id="b-done", started_ts=self.old_ts, status="DONE"
-        )
+        _insert_batch(self.conn, batch_id="b-done", started_ts=self.old_ts, status="DONE")
         report = reconcile_pending_batches(self.store, now_ts=self.now)
         self.assertEqual(report["pending_found"], 0)
         # Le DONE reste DONE
@@ -155,12 +149,8 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
     # ---- Cas 2 : 1 PENDING jeune (<1h) -> ignore ----
 
     def test_young_pending_batch_ignored(self) -> None:
-        _insert_batch(
-            self.conn, batch_id="b-young", started_ts=self.fresh_ts, status="PENDING"
-        )
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        _insert_batch(self.conn, batch_id="b-young", started_ts=self.fresh_ts, status="PENDING")
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 0)
         # Toujours PENDING : pas touche
         self.assertEqual(_get_batch_status(self.conn, "b-young"), "PENDING")
@@ -181,15 +171,11 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
         _insert_op(self.conn, batch_id="b-old-ok", op_index=0)
         _insert_op(self.conn, batch_id="b-old-ok", op_index=1)
 
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 1)
         self.assertEqual(report["completed"], 1)
         self.assertEqual(report["rolled_back"], 0)
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-ok"), STATUS_COMPLETED_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-old-ok"), STATUS_COMPLETED_BY_BOOT)
         self.assertEqual(report["batches"][0]["verdict"], "completed")
 
     def test_old_pending_incomplete_ops_marked_rolled_back(self) -> None:
@@ -207,15 +193,11 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
         _insert_op(self.conn, batch_id="b-old-partial", op_index=0)
         _insert_op(self.conn, batch_id="b-old-partial", op_index=1)
 
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 1)
         self.assertEqual(report["completed"], 0)
         self.assertEqual(report["rolled_back"], 1)
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-partial"), STATUS_ROLLED_BACK_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-old-partial"), STATUS_ROLLED_BACK_BY_BOOT)
 
     def test_old_pending_without_expected_ops_marked_rolled_back(self) -> None:
         """Sans expected_ops dans le summary (cas reel : insert_apply_batch
@@ -231,22 +213,16 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
         _insert_op(self.conn, batch_id="b-old-noexp", op_index=0)
         _insert_op(self.conn, batch_id="b-old-noexp", op_index=1)
 
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 1)
         self.assertEqual(report["completed"], 0)
         self.assertEqual(report["rolled_back"], 1)
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-noexp"), STATUS_ROLLED_BACK_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-old-noexp"), STATUS_ROLLED_BACK_BY_BOOT)
 
     # ---- Cas 4 : 1 PENDING vieux incomplet -> ROLLED_BACK ----
 
     def test_old_pending_with_failed_op_marked_rolled_back(self) -> None:
-        _insert_batch(
-            self.conn, batch_id="b-old-ko", started_ts=self.old_ts, status="PENDING"
-        )
+        _insert_batch(self.conn, batch_id="b-old-ko", started_ts=self.old_ts, status="PENDING")
         # 1 op OK + 1 op avec erreur -> verdict 'rolled_back'
         _insert_op(self.conn, batch_id="b-old-ko", op_index=0)
         _insert_op(
@@ -256,65 +232,45 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
             error_message="disk full mid-move",
         )
 
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 1)
         self.assertEqual(report["completed"], 0)
         self.assertEqual(report["rolled_back"], 1)
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-ko"), STATUS_ROLLED_BACK_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-old-ko"), STATUS_ROLLED_BACK_BY_BOOT)
         self.assertEqual(report["batches"][0]["verdict"], "rolled_back")
 
     def test_old_pending_with_no_ops_marked_rolled_back(self) -> None:
         """Batch PENDING sans aucune operation -> rollback (incoherent)."""
-        _insert_batch(
-            self.conn, batch_id="b-empty", started_ts=self.old_ts, status="PENDING"
-        )
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        _insert_batch(self.conn, batch_id="b-empty", started_ts=self.old_ts, status="PENDING")
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 1)
         self.assertEqual(report["rolled_back"], 1)
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-empty"), STATUS_ROLLED_BACK_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-empty"), STATUS_ROLLED_BACK_BY_BOOT)
 
     def test_old_pending_with_undo_failed_op_marked_rolled_back(self) -> None:
         """undo_status='FAILED' compte aussi comme echec partiel."""
-        _insert_batch(
-            self.conn, batch_id="b-undo-failed", started_ts=self.old_ts, status="PENDING"
-        )
+        _insert_batch(self.conn, batch_id="b-undo-failed", started_ts=self.old_ts, status="PENDING")
         _insert_op(
             self.conn,
             batch_id="b-undo-failed",
             op_index=0,
             undo_status="FAILED",
         )
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["rolled_back"], 1)
 
     # ---- Idempotence ----
 
     def test_idempotent_second_call_is_noop(self) -> None:
-        _insert_batch(
-            self.conn, batch_id="b-old-ok", started_ts=self.old_ts, status="PENDING"
-        )
+        _insert_batch(self.conn, batch_id="b-old-ok", started_ts=self.old_ts, status="PENDING")
         _insert_op(self.conn, batch_id="b-old-ok", op_index=0)
 
         # 1er passage : cleanup effectif
-        r1 = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        r1 = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(r1["pending_found"], 1)
 
         # 2e passage : plus rien a faire (batch n'est plus PENDING)
-        r2 = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now + 10.0
-        )
+        r2 = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now + 10.0)
         self.assertEqual(r2["pending_found"], 0)
         self.assertEqual(r2["completed"], 0)
         self.assertEqual(r2["rolled_back"], 0)
@@ -323,9 +279,7 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
 
     def test_mixed_batches_processed_correctly(self) -> None:
         # 1 jeune ignore, 1 vieux complet, 1 vieux incomplet, 1 deja DONE
-        _insert_batch(
-            self.conn, batch_id="b-young", started_ts=self.fresh_ts, status="PENDING"
-        )
+        _insert_batch(self.conn, batch_id="b-young", started_ts=self.fresh_ts, status="PENDING")
         _insert_batch(
             self.conn,
             batch_id="b-old-ok",
@@ -334,34 +288,24 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
             summary_json='{"expected_ops": 1}',  # preuve de completude (R3e gap[1])
         )
         _insert_op(self.conn, batch_id="b-old-ok", op_index=0)
-        _insert_batch(
-            self.conn, batch_id="b-old-ko", started_ts=self.old_ts, status="PENDING"
-        )
+        _insert_batch(self.conn, batch_id="b-old-ko", started_ts=self.old_ts, status="PENDING")
         _insert_op(
             self.conn,
             batch_id="b-old-ko",
             op_index=0,
             error_message="boom",
         )
-        _insert_batch(
-            self.conn, batch_id="b-done", started_ts=self.old_ts, status="DONE"
-        )
+        _insert_batch(self.conn, batch_id="b-done", started_ts=self.old_ts, status="DONE")
 
-        report = reconcile_pending_batches(
-            self.store, max_age_hours=1.0, now_ts=self.now
-        )
+        report = reconcile_pending_batches(self.store, max_age_hours=1.0, now_ts=self.now)
         self.assertEqual(report["pending_found"], 2)
         self.assertEqual(report["completed"], 1)
         self.assertEqual(report["rolled_back"], 1)
 
         # Verifications individuelles
         self.assertEqual(_get_batch_status(self.conn, "b-young"), "PENDING")
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-ok"), STATUS_COMPLETED_BY_BOOT
-        )
-        self.assertEqual(
-            _get_batch_status(self.conn, "b-old-ko"), STATUS_ROLLED_BACK_BY_BOOT
-        )
+        self.assertEqual(_get_batch_status(self.conn, "b-old-ok"), STATUS_COMPLETED_BY_BOOT)
+        self.assertEqual(_get_batch_status(self.conn, "b-old-ko"), STATUS_ROLLED_BACK_BY_BOOT)
         self.assertEqual(_get_batch_status(self.conn, "b-done"), "DONE")
 
     # ---- Robustesse ----

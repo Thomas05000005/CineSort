@@ -1,3 +1,32 @@
+"""Helpers de conversion tolerants — source unique pour tout le depot.
+
+REGLE DE REVUE (grep-able) — sentinelle falsy
+=============================================
+Ne JAMAIS ecrire ``x or DEFAUT`` (ni ``if x and ...``) quand ``0``, ``0.0``,
+``False`` ou ``""`` est une valeur METIER legitime distincte de "absent" :
+Python evalue le falsy, pas l'absence, donc la valeur nulle voulue par
+l'utilisateur est silencieusement remplacee par le defaut.
+
+Utiliser a la place le helper de ce module, qui ne collapse que ``None`` et
+l'invalide :
+
+    to_int(value, default)     # 0 preserve, None/"" -> default
+    to_float(value, default)
+    to_bool(value, default)
+    to_optional_int/float/bool/bitrate(value)   # None si absent
+
+ou un test ``is None`` explicite.
+
+Detection des recidives (le motif dangereux est le defaut NON NUL, car il
+signifie qu'un 0 legitime serait ecrase) :
+
+    grep -rnE "\\bor [1-9][0-9]*(\\.[0-9]+)?\\b" cinesort/ --include=*.py | grep -vE "\\bor 0"
+
+Chaque hit doit etre justifie : soit ``0`` est impossible/insignifiant a cet
+endroit, soit il faut passer par ``to_int``/``to_float``/``is None``.
+Historique de la famille : #440, #611, #639, #698, #785, #791.
+"""
+
 from __future__ import annotations
 
 import re
@@ -5,10 +34,24 @@ from typing import Any, Optional
 
 
 def to_int(value: Any, default: int) -> int:
-    """Convert *value* to int, returning *default* on failure."""
+    """Convert *value* to int, returning *default* on failure.
+
+    `OverflowError` fait partie du tuple, et c'est le meme piege que la regle 4
+    du CLAUDE.md (`sqlite3.Error` n'herite pas d'`OSError`) : il derive
+    d'`ArithmeticError`, PAS de `ValueError`. Le cas est ATTEIGNABLE parce que
+    `json.loads` accepte `Infinity` et `NaN` par defaut (extension non
+    standard), et que ce helper est nourri de valeurs persistees :
+
+        int(float("nan"))  -> ValueError      (attrape de longue date)
+        int(float("inf"))  -> OverflowError   (NON attrape avant ce correctif)
+
+    Sans cette entree, ce helper — 100+ sites d'appel — laissait remonter
+    l'exception au lieu de rendre `default`, ce qui contredit frontalement son
+    contrat « returning default on failure ».
+    """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return int(default)
 
 
@@ -47,9 +90,7 @@ def to_bool(value: Any, default: bool) -> bool:
 _GROUPED_NUMBER_RE = re.compile(r"(\d{1,3}(?:[ \t,\.]\d{3})+)")
 _GROUP_SEP_RE = re.compile(r"[ \t,\.]")
 _FIRST_DIGITS_RE = re.compile(r"\d+")
-_BITRATE_UNIT_RE = re.compile(
-    r"([0-9]+(?:[.,][0-9]+)?)\s*(gb/s|gbit/s|gib/s|mb/s|mbit/s|mib/s|kb/s|kbit/s|kib/s)"
-)
+_BITRATE_UNIT_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)\s*(gb/s|gbit/s|gib/s|mb/s|mbit/s|mib/s|kb/s|kbit/s|kib/s)")
 
 
 def to_optional_float(value: Any) -> Optional[float]:
@@ -82,8 +123,11 @@ def to_optional_int(value: Any) -> Optional[int]:
         return value
     if isinstance(value, float):
         try:
+            # `round(inf)` leve deja OverflowError, avant meme le `int()`.
+            # Meme raison que dans `to_int` : OverflowError derive
+            # d'ArithmeticError, pas de ValueError.
             return int(round(value))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
     s = str(value)
     s_clean = s.replace(" ", " ").strip()
@@ -137,8 +181,18 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
 
 
 def to_optional_bool(value: Any) -> Optional[bool]:
-    """Parse *value* en bool, retourne None si vide / non reconnu."""
-    s = str(value or "").strip().lower()
+    """Parse *value* en bool, retourne None si vide / non reconnu.
+
+    Gardes de type en tete (comme to_bool / to_optional_int / to_optional_bitrate) :
+    ``False`` et ``0`` sont des valeurs mesurees, pas des absences (#785).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
     if not s:
         return None
     if s in {"1", "true", "yes", "oui"}:
