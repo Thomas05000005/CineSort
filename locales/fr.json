@@ -510,6 +510,7 @@
     "title_undo_done": "Annulation terminée",
     "title_scan_error": "Erreur d'analyse",
     "title_critical_error": "Erreur critique",
+    "title_undo_unavailable": "Application NON annulable",
     "scan_done_body": "{{count}} film(s) détecté(s) en {{elapsed}}s.",
     "apply_done_body": "{{renames}} renommé(s), {{moves}} déplacé(s), {{errors}} erreur(s).",
     "undo_done_body": "{{done}} restauré(s), {{failed}} échec(s)."
@@ -530,6 +531,7 @@
     "payload_tmdb_ids_invalid": "Payload invalide: 'tmdb_ids' doit être une liste.",
     "row_ids_required": "Liste de row_ids requise.",
     "no_reversible_apply": "Aucun apply réel réversible à annuler.",
+    "undo_unavailable_after_apply": "Les fichiers ont bien été rangés, mais le journal d'annulation n'a pas pu être finalisé (base de données indisponible) : cet apply N'EST PAS annulable. Vérifiez le journal d'application avant toute autre opération.",
     "preview_undo_ready": "Preview undo prêt.",
     "no_reversible_op_available": "Aucune opération réversible disponible.",
     "no_reversible_op_pending": "Aucune opération réversible en attente pour les films sélectionnés.",
