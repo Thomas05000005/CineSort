@@ -193,8 +193,20 @@ class TestHelperCanonique(_AtomicAssertions):
         real_replace = os.replace
 
         def recording_replace(src, dst, *a, **kw):
-            with lock:
-                seen.append(str(src))
+            # `mock.patch("os.replace")` est GLOBAL au processus : il intercepte
+            # AUSSI les publications atomiques faites par un thread de fond
+            # survivant a un test anterieur (job runner, watcher, backup SQLite
+            # depuis #669). Un seul de ces `os.replace` etrangers ajoutait un
+            # 33e chemin distinct et faisait echouer l'assertion ci-dessous sans
+            # qu'aucun des 32 ecrivains ait fauté — faux rouge observe en suite
+            # complete, jamais en isolation. On ne retient donc que les
+            # publications vers LA cible du test. Le pouvoir discriminant est
+            # intact : tout `.tmp` des 32 ecrivains vise `target` et reste
+            # compte, donc deux d'entre eux qui partageraient un `.tmp` font
+            # toujours tomber le compte a 31.
+            if Path(dst) == target:
+                with lock:
+                    seen.append(str(src))
             return real_replace(src, dst, *a, **kw)
 
         # Aucune tolerance : un ecrivain qui echoue a basculer a PERDU son

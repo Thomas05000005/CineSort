@@ -183,7 +183,11 @@ def detect_cross_verdicts(
         )
 
     # 2. Faux 4K
-    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and bits < 8.0 and blur > BLUR_THRESHOLD_FAKE_4K:
+    # `bits` (effective_bits_mean) vaut 0.0 par defaut tant que l'analyse pixel
+    # n'a produit aucune frame ; il provient d'une passe ffmpeg independante de
+    # `blur`/`h`. Un 0.0 est "non mesure", pas "mesure a 0" : on exige donc une
+    # mesure reelle (>0.0) pour ne pas emettre un faux verdict "Faux 4K".
+    if h >= FAKE_4K_VERDICT_MIN_HEIGHT and 0.0 < bits < 8.0 and blur > BLUR_THRESHOLD_FAKE_4K:
         verdicts.append(
             {
                 "id": "fake_4k",
