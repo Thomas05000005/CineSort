@@ -222,7 +222,7 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
             runs = store.run.get_runs_summary(limit=1)
         except (OSError, AttributeError, KeyError, TypeError, ValueError):
             runs = []
-        run_id = str(runs[0]["run_id"]) if runs else None
+        run_id = (str(runs[0].get("run_id") or "") or None) if runs else None
 
     if not run_id:
         return {
@@ -258,7 +258,14 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
 
     # 1. Tente de recuperer les dates Jellyfin par tmdb_id
     jelly_dates = _get_jellyfin_date_map(api, settings)
-    using_jellyfin = bool(jelly_dates)
+    # Issue #683 : `source` est le badge de PROVENANCE des dates affichees, donc
+    # il doit se deduire des dates REELLEMENT retenues. Le figer a
+    # `bool(jelly_dates)` avant la boucle le rendait vrai des qu'un seul film,
+    # meme etranger a ce run, existait cote Jellyfin : sur une bibliotheque dont
+    # aucun tmdb_id ne matche (autre bibliotheque, films non identifies, merge
+    # partiel), 100 % des mois venaient du mtime filesystem et le badge annoncait
+    # quand meme « mixed ». `using_filesystem` etait deja derive des matchs, lui.
+    using_jellyfin = False
     using_filesystem = False
 
     # 2. Pour chaque film, resoud le mois
@@ -271,7 +278,12 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
         if tmdb_id and jelly_dates:
             iso = jelly_dates.get(str(tmdb_id))
             if iso:
+                # Une date Jellyfin illisible ou implausible (`_parse_iso_to_month`
+                # rend None) ne compte pas comme une date Jellyfin UTILISEE : la
+                # row retombe sur le mtime juste en dessous.
                 month = _parse_iso_to_month(iso)
+                if month is not None:
+                    using_jellyfin = True
         # Fallback filesystem
         if month is None:
             path = str(row.get("path") or "")

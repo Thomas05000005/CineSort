@@ -35,7 +35,7 @@ from typing import Any, Dict, Optional
 import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import ResponseTooLargeError, get_bounded, make_session_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -241,13 +241,13 @@ class OmdbClient:
         # Flush cache best-effort (OMDb n'a pas de throttle save : ecritures
         # toujours immediates via _save_cache_atomic, mais on garantit la
         # symetrie avec TmdbClient).
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             self._save_cache_atomic()
         except Exception:  # noqa: BLE001
             pass
         session = getattr(self, "_session", None)
         if session is not None:
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 session.close()
             except Exception:  # noqa: BLE001
                 pass
@@ -297,9 +297,22 @@ class OmdbClient:
         #    replace. Sinon, garder l'ancien cache et logguer un warning.
         # 3. Sur toute exception en cours d'ecriture, nettoyer le .tmp pour
         #    eviter d'accumuler des fichiers orphelins.
+        #
+        # Fix issue #620 : le snapshot du cache est pris SOUS `self._lock`.
+        # `json.dumps` itere `self._cache` ; un `_cache_set` concurrent (OMDb
+        # est appele depuis le ThreadingHTTPServer REST et depuis le JobRunner)
+        # le fait grossir pendant cette iteration -> `RuntimeError: dictionary
+        # changed size during iteration`, que le `except (OSError,
+        # PermissionError, ValueError)` ci-dessous n'attrape PAS : l'exception
+        # remonte jusqu'a l'appelant et fait echouer l'identification.
+        # L'ecriture disque (write + fsync + replace) reste volontairement HORS
+        # du verrou : un fsync lent ne doit pas bloquer les threads qui
+        # alimentent le cache.
         tmp = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
         try:
-            payload = json.dumps(self._cache, ensure_ascii=False)
+            with self._lock:
+                snapshot = dict(self._cache)
+            payload = json.dumps(snapshot, ensure_ascii=False)
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(payload)
                 f.flush()
@@ -375,16 +388,18 @@ class OmdbClient:
         # bien HTTPError vu par le breaker (cf _is_server_down dans
         # _circuit_breaker.py:51-67 — 5xx et 429 ouvrent le circuit, 4xx hors
         # 429 ne le ferment pas).
+        # Issue #798 : la borne de taille est appliquee A LA LECTURE du flux
+        # (get_bounded), pas apres que requests ait deja alloue tout le corps.
+        # ResponseTooLargeError derive de ValueError : le breaker ne la compte
+        # pas comme un echec serveur, et le `except` ci-dessous l'attrape
+        # exactement comme l'ancien `ValueError("Response too large")`.
         def _do_get() -> requests.Response:
-            resp = self._session.get(OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
+            resp = get_bounded(self._session, OMDB_API_BASE, params=full_params, timeout=self.timeout_s)
             resp.raise_for_status()
             return resp
 
         try:
             response = self._breaker.call(_do_get)
-            _body = getattr(response, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = response.json()
         except (requests.RequestException, CircuitOpenError, ValueError, KeyError, TypeError) as exc:
             logger.debug("omdb HTTP error: %s", exc)
@@ -484,7 +499,8 @@ class OmdbClient:
         self._rate_limit_wait()
 
         def _do_get() -> requests.Response:
-            resp = self._session.get(
+            resp = get_bounded(
+                self._session,
                 OMDB_API_BASE,
                 params=params,
                 timeout=self.timeout_s,
@@ -494,6 +510,20 @@ class OmdbClient:
 
         try:
             response = self._breaker.call(_do_get)
+        except ResponseTooLargeError:
+            # Issue #798 : le corps est desormais refuse PENDANT la lecture, donc
+            # avant que `response` n'existe. On rend le meme verdict que l'ancien
+            # garde-fou post-materialisation (`invalid_resp`) ; les compteurs de
+            # quota ne sont pas disponibles puisque la reponse a ete abandonnee.
+            logger.warning("omdb test_connection : reponse au-dela de la borne de taille, abandonnee")
+            return {
+                "ok": False,
+                "message": "Reponse OMDb illisible",
+                "error_code": "invalid_resp",
+                "quota_remaining": None,
+                "quota_limit": None,
+                "quota_reset_at": None,
+            }
         except CircuitOpenError:
             # Circuit deja ouvert (5+ echecs recents : quota ou panne OMDb).
             # On ne touche pas au reseau et on retourne immediatement le code
@@ -571,9 +601,6 @@ class OmdbClient:
         # 2xx — parser le body. OMDb peut renvoyer 200 + Response=False
         # quand la clé est invalide (selon version). On gère ce cas.
         try:
-            _body = getattr(response, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = response.json()
         except ValueError:
             return {

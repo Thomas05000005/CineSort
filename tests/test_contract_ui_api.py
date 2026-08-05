@@ -386,16 +386,19 @@ class ContractUiApiTests(unittest.TestCase):
         la matrice M1. Etat 2026-07-09 apres purge Phase 5 (6 vues + 20 modules
         morts supprimes) : 48 fichiers JS, 160 sites apiPost (etait 74/193)."""
         self.assertGreaterEqual(
-            self.data["js_file_count"], 40,
+            self.data["js_file_count"],
+            40,
             "Trop peu de fichiers JS scannes : web/dashboard a-t-il bouge ?",
         )
         self.assertGreaterEqual(
-            len(self.data["sites"]), 150,
+            len(self.data["sites"]),
+            150,
             "Trop peu de sites apiPost trouves : parseur ou arborescence casses ?",
         )
         total_methods = sum(len(m) for m in self.data["facades"].values())
         self.assertGreaterEqual(
-            total_methods, 150,
+            total_methods,
+            150,
             "Introspection facades anormalement pauvre (172 methodes attendues).",
         )
 

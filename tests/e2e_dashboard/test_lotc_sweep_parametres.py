@@ -29,15 +29,22 @@ from typing import Any, Dict, List
 # ---------------------------------------------------------------------------
 
 _CAPTURES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "docs" / "internal" / "verif_totale_2026_07" / "captures_runtime"
+    Path(__file__).resolve().parent.parent.parent / "docs" / "internal" / "verif_totale_2026_07" / "captures_runtime"
 )
 
 # Les 10 categories (sous-sections) declarees dans PARAMETRES_GROUPS
 # (web/dashboard/views/parametres.js).
 _CATEGORIES = [
-    "sources", "analyse", "nommage", "bibliotheque", "integrations",
-    "notifications", "serveur", "apparence", "profils-qualite", "avance",
+    "sources",
+    "analyse",
+    "nommage",
+    "bibliotheque",
+    "integrations",
+    "notifications",
+    "serveur",
+    "apparence",
+    "profils-qualite",
+    "avance",
 ]
 
 # Bruit console connu, tolere (liste blanche NOMINATIVE — tout le reste est un
@@ -107,9 +114,7 @@ def _goto_parametres(page) -> None:
 
 def _click_category(page, category: str) -> None:
     page.click(f'[data-category="{category}"]')
-    page.wait_for_selector(
-        f'[data-category="{category}"].is-active', timeout=10000
-    )
+    page.wait_for_selector(f'[data-category="{category}"].is-active', timeout=10000)
     page.wait_for_selector(".parametres-panel", timeout=10000)
 
 
@@ -133,6 +138,7 @@ def _api_get_settings(e2e_server: Dict[str, Any]) -> Dict[str, Any]:
 # 1) Navigation sous-sections + screenshot + 0 erreur console
 # ---------------------------------------------------------------------------
 
+
 class TestParametresSweep:
     """Sweep runtime de la vue Parametres (Lot C)."""
 
@@ -154,9 +160,7 @@ class TestParametresSweep:
         # Screenshot de la vue (exigence Lot C).
         _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
         _click_category(dashboard_page, "integrations")
-        dashboard_page.screenshot(
-            path=str(_CAPTURES_DIR / "parametres.png"), full_page=True
-        )
+        dashboard_page.screenshot(path=str(_CAPTURES_DIR / "parametres.png"), full_page=True)
 
         _assert_no_errors(errors, "navigation sous-sections")
 
@@ -171,9 +175,7 @@ class TestParametresSweep:
 
         # Requete qui matche (jellyfin -> categorie Integrations).
         dashboard_page.fill("[data-parametres-search]", "jellyfin")
-        dashboard_page.wait_for_selector(
-            "mark.parametres-search-highlight", timeout=5000
-        )
+        dashboard_page.wait_for_selector("mark.parametres-search-highlight", timeout=5000)
         marks = dashboard_page.locator("mark.parametres-search-highlight").count()
         assert marks > 0, "Aucun surlignage pour la recherche 'jellyfin'"
 
@@ -193,8 +195,7 @@ class TestParametresSweep:
         dashboard_page.wait_for_timeout(400)
         count = dashboard_page.locator("[data-category]").count()
         assert count == len(_CATEGORIES), (
-            f"{count} categories apres effacement de la recherche "
-            f"(attendu {len(_CATEGORIES)})"
+            f"{count} categories apres effacement de la recherche (attendu {len(_CATEGORIES)})"
         )
 
         _assert_no_errors(errors, "recherche")
@@ -217,17 +218,11 @@ class TestParametresSweep:
         try:
             # --- Mode expert (header) : ON -> classe is-expert, puis OFF.
             expert_initial = dashboard_page.is_checked("[data-parametres-expert]")
-            has_expert_before = dashboard_page.evaluate(
-                "() => !!document.querySelector('.is-expert')"
-            )
+            has_expert_before = dashboard_page.evaluate("() => !!document.querySelector('.is-expert')")
             dashboard_page.click("[data-parametres-expert]")
             dashboard_page.wait_for_timeout(200)
-            has_expert_after = dashboard_page.evaluate(
-                "() => !!document.querySelector('.is-expert')"
-            )
-            assert has_expert_after != has_expert_before, (
-                "Le toggle Mode expert n'a pas bascule la classe is-expert"
-            )
+            has_expert_after = dashboard_page.evaluate("() => !!document.querySelector('.is-expert')")
+            assert has_expert_after != has_expert_before, "Le toggle Mode expert n'a pas bascule la classe is-expert"
             # Reaction visible : indicateur '✓ Sauvegardé' apres l'autosave.
             dashboard_page.wait_for_function(
                 """() => (document.querySelector('[data-parametres-saved-indicator]')
@@ -258,8 +253,7 @@ class TestParametresSweep:
         after = _api_get_settings(e2e_server)
         for key in ("expert_mode", "jellyfin_refresh_on_apply"):
             assert bool(after.get(key)) == bool(before.get(key)), (
-                f"settings[{key}] non restaure : avant={before.get(key)!r} "
-                f"apres={after.get(key)!r}"
+                f"settings[{key}] non restaure : avant={before.get(key)!r} apres={after.get(key)!r}"
             )
         _assert_no_errors(errors, "toggles")
 
@@ -301,9 +295,7 @@ class TestParametresSweep:
                 timeout=30000,
             )
             text = dashboard_page.inner_text(res_sel).strip()
-            assert text.startswith("✗"), (
-                f"{method} : resultat inattendu sur serveur mock : {text!r}"
-            )
+            assert text.startswith("✗"), f"{method} : resultat inattendu sur serveur mock : {text!r}"
 
         # OMDb : le resultat est reporte dans le panneau d'etat dedie.
         omdb_btn = '[data-test-method="integrations/test_omdb_connection"]'
@@ -354,9 +346,7 @@ class TestParametresSweep:
             arg=input_sel,
             timeout=5000,
         )
-        assert dashboard_page.input_value(input_sel) == "•" * 8, (
-            "Le masque SEC-H3 doit etre restaure apres re-masquage"
-        )
+        assert dashboard_page.input_value(input_sel) == "•" * 8, "Le masque SEC-H3 doit etre restaure apres re-masquage"
 
         _assert_no_errors(errors, "reveal token")
 
@@ -370,9 +360,7 @@ class TestParametresSweep:
         _goto_parametres(dashboard_page)
         _click_category(dashboard_page, "serveur")
 
-        dashboard_page.wait_for_selector(
-            "[data-rest-token-regen]", state="attached", timeout=8000
-        )
+        dashboard_page.wait_for_selector("[data-rest-token-regen]", state="attached", timeout=8000)
         # Valeur affichee avant (masque SEC-H3 '••••••••' — voir finding reveal).
         token_before = dashboard_page.input_value("#prm_rest_api_token")
         dashboard_page.locator("[data-rest-token-regen]").click()
@@ -382,13 +370,11 @@ class TestParametresSweep:
         assert "token" in title.lower(), f"Titre de modale inattendu : {title!r}"
         # ANNULER — ne jamais confirmer.
         dashboard_page.click("#dashDangerModal [data-danger-cancel]")
-        dashboard_page.wait_for_selector(
-            "#dashDangerModal", state="detached", timeout=5000
-        )
+        dashboard_page.wait_for_selector("#dashDangerModal", state="detached", timeout=5000)
         # Le champ token n'a pas change apres l'annulation.
-        assert (
-            dashboard_page.input_value("#prm_rest_api_token") == token_before
-        ), "Le token a change alors que la regen a ete ANNULEE"
+        assert dashboard_page.input_value("#prm_rest_api_token") == token_before, (
+            "Le token a change alors que la regen a ete ANNULEE"
+        )
         # Et cote backend, le vrai token est intact : l'appel API suivant
         # (Bearer = token initial) doit toujours passer.
         settings = _api_get_settings(e2e_server)
@@ -402,9 +388,7 @@ class TestParametresSweep:
     # 7) Modale reset : saisie CONFIRMER + countdown, puis ANNULER
     # -----------------------------------------------------------------------
 
-    def test_reset_modale_confirmer_countdown_puis_annuler(
-        self, dashboard_page, e2e_server
-    ):
+    def test_reset_modale_confirmer_countdown_puis_annuler(self, dashboard_page, e2e_server):
         """OUVRIR la modale reset, verifier les garde-fous, ANNULER."""
         errors = _attach_error_watch(dashboard_page)
         before = _api_get_settings(e2e_server)
@@ -416,26 +400,16 @@ class TestParametresSweep:
         modal = "#parametresResetModal"
         confirm_btn = f"{modal} [data-parametres-reset-confirm]"
         # 12 scopes proposes.
-        scopes = dashboard_page.locator(
-            f"{modal} input[name='parametres-reset-scope']"
-        ).count()
+        scopes = dashboard_page.locator(f"{modal} input[name='parametres-reset-scope']").count()
         assert scopes == 12, f"{scopes} scopes dans la modale reset (attendu 12)"
         # Scope initial = 'all' -> countdown 3s affiche + bouton desactive.
-        assert dashboard_page.is_disabled(confirm_btn), (
-            "Confirmer devrait etre desactive a l'ouverture (countdown)"
-        )
-        countdown_txt = dashboard_page.inner_text(
-            f"{modal} [data-parametres-reset-countdown]"
-        ).strip()
-        assert countdown_txt.startswith("("), (
-            f"Countdown absent a l'ouverture (scope=all) : {countdown_txt!r}"
-        )
+        assert dashboard_page.is_disabled(confirm_btn), "Confirmer devrait etre desactive a l'ouverture (countdown)"
+        countdown_txt = dashboard_page.inner_text(f"{modal} [data-parametres-reset-countdown]").strip()
+        assert countdown_txt.startswith("("), f"Countdown absent a l'ouverture (scope=all) : {countdown_txt!r}"
         # Saisie incorrecte -> toujours desactive meme apres le countdown.
         dashboard_page.fill(f"{modal} [data-parametres-reset-input]", "confirmer")
         dashboard_page.wait_for_timeout(3500)  # laisser expirer le countdown 3s
-        assert dashboard_page.is_disabled(confirm_btn), (
-            "Confirmer actif sans la saisie exacte 'CONFIRMER'"
-        )
+        assert dashboard_page.is_disabled(confirm_btn), "Confirmer actif sans la saisie exacte 'CONFIRMER'"
         # Saisie exacte -> le bouton devient actif (countdown deja expire)…
         dashboard_page.fill(f"{modal} [data-parametres-reset-input]", "CONFIRMER")
         dashboard_page.wait_for_function(
@@ -475,9 +449,7 @@ class TestParametresSweep:
         _click_category(dashboard_page, "analyse")
 
         # Le panneau outils charge en asynchrone (runtime/get_probe_tools_status).
-        dashboard_page.wait_for_selector(
-            ".parametres-field--probe-tools", state="attached", timeout=10000
-        )
+        dashboard_page.wait_for_selector(".parametres-field--probe-tools", state="attached", timeout=10000)
         dashboard_page.wait_for_function(
             """() => {
                 const el = document.querySelector('.parametres-field--probe-tools');
@@ -516,15 +488,13 @@ class TestParametresSweep:
         for i in range(3):
             _goto_parametres(dashboard_page)
             # Pas d'empilement : une seule instance de la vue et de ses ancres.
-            assert dashboard_page.locator(".parametres-view").count() == 1, (
-                f"Passe {i + 1} : .parametres-view empilee"
-            )
+            assert dashboard_page.locator(".parametres-view").count() == 1, f"Passe {i + 1} : .parametres-view empilee"
             assert dashboard_page.locator("[data-parametres-search]").count() == 1, (
                 f"Passe {i + 1} : champ recherche duplique"
             )
-            assert dashboard_page.locator(
-                "[data-parametres-action='reset']"
-            ).count() == 1, f"Passe {i + 1} : bouton reset duplique"
+            assert dashboard_page.locator("[data-parametres-action='reset']").count() == 1, (
+                f"Passe {i + 1} : bouton reset duplique"
+            )
 
             dashboard_page.evaluate("() => { window.location.hash = '#/aide'; }")
             # Le router bascule la classe .active entre sections ; unmountParametres
@@ -539,12 +509,9 @@ class TestParametresSweep:
                 timeout=10000,
             )
             settings_active = dashboard_page.evaluate(
-                "() => document.getElementById('view-settings')"
-                "?.classList.contains('active')"
+                "() => document.getElementById('view-settings')?.classList.contains('active')"
             )
-            assert not settings_active, (
-                f"Passe {i + 1} : view-settings encore active sur #/aide"
-            )
+            assert not settings_active, f"Passe {i + 1} : view-settings encore active sur #/aide"
             assert dashboard_page.locator(".parametres-view").count() <= 1, (
                 f"Passe {i + 1} : .parametres-view empilee apres depart"
             )

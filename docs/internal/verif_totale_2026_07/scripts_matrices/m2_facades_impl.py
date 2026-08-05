@@ -30,10 +30,9 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 REPO = Path(__file__).resolve().parents[3]
 if REPO.name != "CineSort" and not (REPO / "cinesort").is_dir():
@@ -67,11 +66,7 @@ def collect_support_modules() -> Dict[str, Dict[str, int]]:
     out: Dict[str, Dict[str, int]] = {}
     for f in sorted(API_DIR.glob("*_support*.py")):
         tree = parse(f)
-        funcs = {
-            n.name: n.lineno
-            for n in tree.body
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
+        funcs = {n.name: n.lineno for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         out[f.stem] = funcs
     return out
 
@@ -80,7 +75,7 @@ def collect_support_modules() -> Dict[str, Dict[str, int]]:
 # 2. Imports d'un module : alias -> module support, et nom -> (module, orig)
 # ---------------------------------------------------------------------------
 def collect_imports(tree: ast.Module, support_names: Set[str]) -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]]]:
-    mod_alias: Dict[str, str] = {}          # alias local -> nom module support
+    mod_alias: Dict[str, str] = {}  # alias local -> nom module support
     from_funcs: Dict[str, Tuple[str, str]] = {}  # nom local -> (module, nom origine)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -104,9 +99,9 @@ def collect_imports(tree: ast.Module, support_names: Set[str]) -> Tuple[Dict[str
 # ---------------------------------------------------------------------------
 # 3. Extraction des cibles de delegation dans le corps d'une fonction
 # ---------------------------------------------------------------------------
-def extract_calls(fn: ast.FunctionDef, mod_alias: Dict[str, str],
-                  from_funcs: Dict[str, Tuple[str, str]],
-                  self_attr_api: bool) -> List[Dict[str, Any]]:
+def extract_calls(
+    fn: ast.FunctionDef, mod_alias: Dict[str, str], from_funcs: Dict[str, Tuple[str, str]], self_attr_api: bool
+) -> List[Dict[str, Any]]:
     """Retourne la liste des cibles appelees : god (via self._api.X ou self.X),
     support (module.fn ou fn importee)."""
     targets: List[Dict[str, Any]] = []
@@ -125,8 +120,13 @@ def extract_calls(fn: ast.FunctionDef, mod_alias: Dict[str, str],
         if isinstance(f, ast.Attribute):
             v = f.value
             # self._api.X(...)  (facade -> god)
-            if (self_attr_api and isinstance(v, ast.Attribute) and v.attr == "_api"
-                    and isinstance(v.value, ast.Name) and v.value.id == "self"):
+            if (
+                self_attr_api
+                and isinstance(v, ast.Attribute)
+                and v.attr == "_api"
+                and isinstance(v.value, ast.Name)
+                and v.value.id == "self"
+            ):
                 add("god", "cinesort_api.CineSortApi", f.attr, node.lineno)
             # self.X(...) (god -> god interne)
             elif isinstance(v, ast.Name) and v.id == "self" and not self_attr_api:
@@ -258,20 +258,14 @@ def main() -> None:
         calls_map: Dict[str, Set[str]] = {}
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                called = {
-                    c.func.id for c in ast.walk(node)
-                    if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
-                }
+                called = {c.func.id for c in ast.walk(node) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
                 calls_map[node.name] = called
         support_internal_calls[mod] = calls_map
 
     homonyms = []
     for name in sorted(god_impls):
         if name in support_func_index:
-            god_calls_twin = any(
-                c["kind"] == "support" and c["name"] == name
-                for c in god_impls[name]["calls"]
-            )
+            god_calls_twin = any(c["kind"] == "support" and c["name"] == name for c in god_impls[name]["calls"])
             # le god impl appelle-t-il un wrapper support qui appelle le twin ?
             twin_via_wrapper = None
             for c in god_impls[name]["calls"]:
@@ -281,13 +275,15 @@ def main() -> None:
                 if name in mod_calls.get(c["name"], set()):
                     twin_via_wrapper = f"{c['module']}.{c['name']} -> {c['module']}.{name}"
                     break
-            homonyms.append({
-                "name": name,
-                "god_line": f"{REL(GOD_FILE)}:{god_impls[name]['lineno']}",
-                "support_defs": support_func_index[name],
-                "god_delegates_to_support_twin": god_calls_twin,
-                "twin_reachable_via_wrapper": twin_via_wrapper,
-            })
+            homonyms.append(
+                {
+                    "name": name,
+                    "god_line": f"{REL(GOD_FILE)}:{god_impls[name]['lineno']}",
+                    "support_defs": support_func_index[name],
+                    "god_delegates_to_support_twin": god_calls_twin,
+                    "twin_reachable_via_wrapper": twin_via_wrapper,
+                }
+            )
     homonym_names = {h["name"] for h in homonyms}
 
     # _X_impl definis UNIQUEMENT dans un support (pas de twin god-class)
@@ -334,8 +330,7 @@ def main() -> None:
                 for c in sup:
                     chain.append(f"{c['module']}.{c['name']}")
                 return chain, depth + 1, "support"
-            nxt = [c for c in info["calls"] if c["kind"] == "self" and c["name"] in god_methods
-                   and c["name"] != cur]
+            nxt = [c for c in info["calls"] if c["kind"] == "self" and c["name"] in god_methods and c["name"] != cur]
             if len(nxt) == 1 and len(info["calls"]) <= 2:
                 cur = nxt[0]["name"]
                 depth += 1
@@ -373,7 +368,9 @@ def main() -> None:
                 reasons.append(f"cible self._api.{god_targets[0]} inexistante sur CineSortApi")
             elif m["name"] in multi_facade:
                 verdict = "DOUBLE_CHEMIN"
-                reasons.append(f"methode exposee sur {len(multi_facade[m['name']])} facades: {', '.join(multi_facade[m['name']])}")
+                reasons.append(
+                    f"methode exposee sur {len(multi_facade[m['name']])} facades: {', '.join(multi_facade[m['name']])}"
+                )
             elif len(god_targets) > 1:
                 verdict = "DOUBLE_CHEMIN"
                 reasons.append(f"{len(god_targets)} cibles god distinctes: {', '.join(god_targets)}")
@@ -384,19 +381,21 @@ def main() -> None:
             else:
                 verdict = "PROPRE"
 
-            matrix.append({
-                "facade": fc["class"],
-                "file": fc["file"],
-                "method": m["name"],
-                "line": m["lineno"],
-                "delegation_kind": status,
-                "god_targets": god_targets,
-                "support_targets": support_targets,
-                "chain": chain,
-                "depth": depth,
-                "verdict": verdict,
-                "reasons": reasons,
-            })
+            matrix.append(
+                {
+                    "facade": fc["class"],
+                    "file": fc["file"],
+                    "method": m["name"],
+                    "line": m["lineno"],
+                    "delegation_kind": status,
+                    "god_targets": god_targets,
+                    "support_targets": support_targets,
+                    "chain": chain,
+                    "depth": depth,
+                    "verdict": verdict,
+                    "reasons": reasons,
+                }
+            )
 
     # --- references des _X_impl god : facades vs reste du repo ---
     facade_refs: Dict[str, Set[str]] = {}
@@ -413,8 +412,7 @@ def main() -> None:
         facade_files = {REL(f) for f in list(FACADES_DIR.glob("*.py")) + [SIMILAR_FILE]}
         god_file_rel = REL(GOD_FILE)
         external_refs = [
-            r for r in all_refs
-            if r.rsplit(":", 1)[0] not in facade_files and r.rsplit(":", 1)[0] != god_file_rel
+            r for r in all_refs if r.rsplit(":", 1)[0] not in facade_files and r.rsplit(":", 1)[0] != god_file_rel
         ]
         internal_god_refs = [r for r in all_refs if r.rsplit(":", 1)[0] == god_file_rel]
         if name in homonym_names:
@@ -426,15 +424,17 @@ def main() -> None:
         else:
             verdict = "PROPRE"
         god_verdict_count[verdict] = god_verdict_count.get(verdict, 0) + 1
-        god_report.append({
-            "name": name,
-            "line": info["lineno"],
-            "delegates_to": sorted({f"{c['module']}.{c['name']}" for c in info["calls"] if c["kind"] == "support"}),
-            "referenced_by_facades": by_facades,
-            "external_refs_outside_facades": external_refs[:8],
-            "internal_god_refs": internal_god_refs[:5],
-            "verdict": verdict,
-        })
+        god_report.append(
+            {
+                "name": name,
+                "line": info["lineno"],
+                "delegates_to": sorted({f"{c['module']}.{c['name']}" for c in info["calls"] if c["kind"] == "support"}),
+                "referenced_by_facades": by_facades,
+                "external_refs_outside_facades": external_refs[:8],
+                "internal_god_refs": internal_god_refs[:5],
+                "verdict": verdict,
+            }
+        )
 
     # --- stats ---
     verdict_count: Dict[str, int] = {}

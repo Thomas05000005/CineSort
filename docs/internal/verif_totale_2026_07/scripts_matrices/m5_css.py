@@ -18,6 +18,7 @@ sont marquees INCERTAIN, jamais ORPHELINE.
 Sortie : docs/internal/verif_totale_2026_07/matrices/m5_css.json (UTF-8, sans BOM).
 Aucune ecriture hors de matrices/. Aucune execution d'app ni de tests.
 """
+
 import json
 import re
 import sys
@@ -29,10 +30,7 @@ WEB = REPO / "web"
 OUT = REPO / "docs/internal/verif_totale_2026_07/matrices/m5_css.json"
 
 CSS_FILES = sorted((WEB / "dashboard").glob("*.css")) + sorted((WEB / "shared").glob("*.css"))
-USAGE_FILES = sorted(
-    p for p in (WEB / "dashboard").rglob("*")
-    if p.suffix in (".js", ".mjs", ".html") and p.is_file()
-)
+USAGE_FILES = sorted(p for p in (WEB / "dashboard").rglob("*") if p.suffix in (".js", ".mjs", ".html") and p.is_file())
 
 TOKENS_CSS = (WEB / "shared" / "tokens.css").resolve()
 CLASS_TOKEN = re.compile(r"^-?[_a-zA-Z][\w-]*$")
@@ -62,7 +60,7 @@ def strip_block_comments(text: str) -> str:
         k = text.find("*/", j + 2)
         if k < 0:
             k = n - 2
-        out.append("".join(c if c == "\n" else " " for c in text[j:k + 2]))
+        out.append("".join(c if c == "\n" else " " for c in text[j : k + 2]))
         i = k + 2
     return "".join(out)
 
@@ -92,11 +90,15 @@ def parse_css(path: Path, defined, hex_findings):
         if m and not is_tokens:
             prop, value = m.group(1), m.group(2)
             for hm in HEX_RE.finditer(value):
-                hex_findings.append({
-                    "file": rel(path), "line": buf_line + text[:m.start(2) + hm.start()].count("\n"),
-                    "hex": hm.group(0).lower(), "property": prop.strip(),
-                    "selector": " > ".join(s[:80] for s in prelude_stack) or "(top)",
-                })
+                hex_findings.append(
+                    {
+                        "file": rel(path),
+                        "line": buf_line + text[: m.start(2) + hm.start()].count("\n"),
+                        "hex": hm.group(0).lower(),
+                        "property": prop.strip(),
+                        "selector": " > ".join(s[:80] for s in prelude_stack) or "(top)",
+                    }
+                )
 
     for ch in raw:
         if ch == "\n":
@@ -141,7 +143,7 @@ def split_template(value: str):
             elif value[k] == "}":
                 depth -= 1
             k += 1
-        parts.append(("e", value[j + 2:k - 1]))
+        parts.append(("e", value[j + 2 : k - 1]))
         i = k
     return parts
 
@@ -240,6 +242,7 @@ def scan_usage(path: Path, used, prefixes, unknown_dyn):
     def sink_at(pos, ctx):
         ln = lineno(text, pos)
         s = {"static": set(), "prefix": defaultdict(int), "unknown": 0}
+
         def commit():
             for c in s["static"]:
                 used[c].append({"file": fp, "line": ln, "ctx": ctx})
@@ -247,6 +250,7 @@ def scan_usage(path: Path, used, prefixes, unknown_dyn):
                 prefixes[p].append({"file": fp, "line": ln, "ctx": ctx, "n": n})
             if s["unknown"]:
                 unknown_dyn.append({"file": fp, "line": ln, "ctx": ctx})
+
         return s, commit
 
     for rx in CLASS_ATTR_RES:
@@ -295,12 +299,12 @@ def scan_usage(path: Path, used, prefixes, unknown_dyn):
 
 # ----------------------------------------------------------------------- main
 def main():
-    defined = defaultdict(list)   # classe -> [file:line]
+    defined = defaultdict(list)  # classe -> [file:line]
     hex_findings = []
     for f in CSS_FILES:
         parse_css(f, defined, hex_findings)
 
-    used = defaultdict(list)      # classe -> [{file,line,ctx}]
+    used = defaultdict(list)  # classe -> [{file,line,ctx}]
     prefixes = defaultdict(list)  # prefixe dynamique -> occurrences
     unknown_dyn = []
     for f in USAGE_FILES:
@@ -312,11 +316,16 @@ def main():
             continue
         text = strip_block_comments(read(f))
         for m in re.finditer(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b", text):
-            ctx = text[max(0, m.start() - 60):m.start() + 20].splitlines()[-1].strip()
-            hex_findings.append({
-                "file": rel(f), "line": lineno(text, m.start()),
-                "hex": m.group(0).lower(), "property": "(js)", "selector": ctx[:100],
-            })
+            ctx = text[max(0, m.start() - 60) : m.start() + 20].splitlines()[-1].strip()
+            hex_findings.append(
+                {
+                    "file": rel(f),
+                    "line": lineno(text, m.start()),
+                    "hex": m.group(0).lower(),
+                    "property": "(js)",
+                    "selector": ctx[:100],
+                }
+            )
 
     prefix_list = sorted(prefixes)
     classes = []
@@ -332,9 +341,12 @@ def main():
                 verdict, note = "INCERTAIN", "utilisee uniquement dans web/dashboard/tests/"
         elif u:
             verdict = "UTILISEE_NON_DEFINIE"
-            note = ("hook JS (posee et selectionnee cote JS, jamais stylee)"
-                    if {e["ctx"] for e in u} & {"class-attr", "classList.add", "className=", "cls-prop"}
-                    and any(e["ctx"] == "selector" for e in u) else "")
+            note = (
+                "hook JS (posee et selectionnee cote JS, jamais stylee)"
+                if {e["ctx"] for e in u} & {"class-attr", "classList.add", "className=", "cls-prop"}
+                and any(e["ctx"] == "selector" for e in u)
+                else ""
+            )
         else:
             hits = [p for p in prefix_list if cls.startswith(p)]
             if hits:
@@ -344,9 +356,10 @@ def main():
                 verdict, note = "DEFINIE_NON_UTILISEE", ""
         stats[verdict] += 1
         entry = {
-            "class": cls, "verdict": verdict,
+            "class": cls,
+            "verdict": verdict,
             "defined_in": (d or [])[:8],
-            "used_in": [f'{e["file"]}:{e["line"]} ({e["ctx"]})' for e in (u or [])[:8]],
+            "used_in": [f"{e['file']}:{e['line']} ({e['ctx']})" for e in (u or [])[:8]],
         }
         if note:
             entry["note"] = note
@@ -371,9 +384,7 @@ def main():
             "dynamic_unknown_count": len(unknown_dyn),
         },
         "stats": dict(sorted(stats.items())),
-        "dynamic_prefixes": {
-            p: [f'{e["file"]}:{e["line"]}' for e in v[:5]] for p, v in sorted(prefixes.items())
-        },
+        "dynamic_prefixes": {p: [f"{e['file']}:{e['line']}" for e in v[:5]] for p, v in sorted(prefixes.items())},
         "dynamic_unknown": unknown_dyn[:40],
         "classes": classes,
         "hex_hors_tokens": hex_findings,
@@ -382,8 +393,10 @@ def main():
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    print(f"defined={len(defined)} used={len(used)} prefixes={len(prefix_list)} "
-          f"unknown_dyn={len(unknown_dyn)} hex={len(hex_findings)}")
+    print(
+        f"defined={len(defined)} used={len(used)} prefixes={len(prefix_list)} "
+        f"unknown_dyn={len(unknown_dyn)} hex={len(hex_findings)}"
+    )
     for k, v in sorted(stats.items()):
         print(f"  {k}: {v}")
     print(f"-> {rel(OUT)}")

@@ -38,6 +38,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.resolution_class import RES_1080P, classify_resolution, is_below
+
 # Mapping canonique genre TMDb → clé interne.
 # Les genres TMDb sont en anglais ("Animation", "Action", "Thriller", ...).
 _GENRE_CANONICAL: Dict[str, str] = {
@@ -167,6 +169,7 @@ def compute_genre_adjustments(
     has_hdr: bool,
     has_atmos: bool,
     has_heavy_grain: bool = False,
+    width: int = 0,
 ) -> Tuple[float, List[Dict[str, Any]]]:
     """Calcule les ajustements de score liés au genre.
 
@@ -177,10 +180,18 @@ def compute_genre_adjustments(
     Args:
         primary_genre : clé canonique (animation, action, ...) ou None.
         video_codec : "hevc", "av1", "h264", ...
-        height : résolution hauteur.
+        height : hauteur, BRUTE (flux) ou canonique — voir `width`.
         has_hdr : True si HDR10/HDR10+/Dolby Vision détecté.
         has_atmos : True si audio Atmos/TrueHD détecté.
         has_heavy_grain : True si grain notable détecté (depuis perceptual).
+        width : largeur mesurée, 0 si inconnue. Issue #682 : le malus
+            « résolution modeste » testait `height < 1080` sur la hauteur BRUTE
+            du flux, donc pénalisait tout 1080p cinémascope (1920x800 →
+            -5 en action). Le site d'appel de production a été désamorcé par la
+            PR #854 (il passe désormais la hauteur CANONIQUE de la classe), mais
+            la garde dépendait alors entièrement de son appelant. On classe ici
+            avec `resolution_class` : passer `width` suffit à rendre la fonction
+            correcte même sur des dimensions brutes.
     """
     rules = get_genre_rules(primary_genre)
     if not rules:
@@ -240,9 +251,13 @@ def compute_genre_adjustments(
             }
         )
 
-    # Low resolution malus contextuel
+    # Low resolution malus contextuel.
+    # #682 : classe canonique (largeur-primaire) et non plus `height < 1080`.
+    # `is_below` renvoie False sur une classe inconnue : sans mesure, pas de
+    # malus — c'est la direction non destructive (un fichier dont le probe a
+    # échoué ne doit pas perdre de points).
     lrm = float(rules.get("low_resolution_malus", 0.0) or 0.0)
-    if lrm < 0 and height > 0 and height < 1080:
+    if lrm < 0 and is_below(classify_resolution(width, height), RES_1080P):
         total += lrm
         factors.append(
             {

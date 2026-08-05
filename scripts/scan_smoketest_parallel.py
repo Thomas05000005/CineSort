@@ -1,7 +1,7 @@
 """Smoke test parallel : verifie qu'avec workers>1, le code-path VO-B s'active."""
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys

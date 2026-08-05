@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import List, Tuple
 from unittest.mock import MagicMock, patch
 
 from cinesort.domain.perceptual.ssim_self_ref import (
@@ -16,6 +18,8 @@ from cinesort.domain.perceptual.ssim_self_ref import (
     compute_ssim_self_ref,
 )
 
+_RE_SCALE = re.compile(r"scale=(\d+):(\d+)")
+
 
 def _fake_completed(stderr: str = "", returncode: int = 0) -> MagicMock:
     cp = MagicMock()
@@ -23,6 +27,17 @@ def _fake_completed(stderr: str = "", returncode: int = 0) -> MagicMock:
     cp.stderr = stderr
     cp.returncode = returncode
     return cp
+
+
+def _scale_steps(cmd: List[str]) -> List[Tuple[int, int]]:
+    """Dimensions successives imposees par le graphe de filtres de `cmd`.
+
+    On lit l'argument de -filter_complex et on en extrait les etapes `scale=W:H`
+    dans l'ordre. La derniere est la taille de `[ref]` presentee au filtre ssim :
+    elle DOIT egaler la taille native de `[b]`, sinon ffmpeg refuse le graphe.
+    """
+    idx = cmd.index("-filter_complex")
+    return [(int(w), int(h)) for w, h in _RE_SCALE.findall(cmd[idx + 1])]
 
 
 class TestClassifyVerdict(unittest.TestCase):
@@ -56,15 +71,55 @@ class TestClassifyVerdict(unittest.TestCase):
 
 class TestBuildCommand(unittest.TestCase):
     def test_includes_split_and_scale(self):
-        cmd = build_ssim_self_ref_command("ffmpeg", "x.mkv", 100.0, 120.0)
+        cmd = build_ssim_self_ref_command("ffmpeg", "x.mkv", 100.0, 120.0, 3840, 2160)
         joined = " ".join(cmd)
         self.assertIn("split=2", joined)
-        self.assertIn("scale=1920:1080", joined)
-        self.assertIn("scale=3840:2160", joined)
         self.assertIn("ssim", joined)
         self.assertIn("-ss", cmd)
         self.assertIn("100.0", cmd)
         self.assertIn("-t", cmd)
+        # UHD 16:9 : comportement historique inchange (demi-resolution = 1080p).
+        self.assertEqual(_scale_steps(cmd), [(1920, 1080), (3840, 2160)])
+
+    def test_ref_matches_native_size_on_every_geometry(self):
+        """#525 : `[ref]` doit sortir a la taille NATIVE, sinon ssim refuse le graphe.
+
+        Le filtre ssim exige des entrees de meme taille ; l'ancien graphe
+        re-upscalait toujours vers 3840x2160, donc toute geometrie non-UHD-16:9
+        faisait echouer ffmpeg -> returncode != 0 -> verdict "error" silencieux.
+        """
+        for w, h in ((3840, 2160), (4096, 2160), (3840, 1920), (4096, 1856), (2560, 1920)):
+            with self.subTest(w=w, h=h):
+                steps = _scale_steps(build_ssim_self_ref_command("ffmpeg", "x.mkv", 0.0, 120.0, w, h))
+                self.assertEqual(steps[-1], (w, h), "la taille de [ref] doit egaler la taille de [b]")
+                # L'etape intermediaire reste un master demi-resolution, en pair
+                # (contrainte 4:2:0), donc reellement plus petit que le natif.
+                half_w, half_h = steps[0]
+                self.assertEqual(half_w % 2, 0)
+                self.assertEqual(half_h % 2, 0)
+                self.assertLess(half_w, w)
+                self.assertLess(half_h, h)
+                self.assertLessEqual(abs(half_w - w / 2), 1.0)
+                self.assertLessEqual(abs(half_h - h / 2), 1.0)
+
+    def test_compute_forwards_native_width_to_the_filter(self):
+        """Chaine complete : la largeur donnee a compute_ atteint bien le graphe."""
+        captured: List[List[str]] = []
+
+        def _capture(cmd, **kwargs):
+            captured.append(list(cmd))
+            return _fake_completed(stderr="[Parsed_ssim_0 @ 0x] SSIM Y:0.87 All:0.88")
+
+        with patch("cinesort.domain.perceptual.ssim_self_ref.tracked_run", _capture):
+            compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=4096)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(_scale_steps(captured[0])[-1], (4096, 2160))
+
+    def test_zero_width_reports_error_instead_of_running_ffmpeg(self):
+        with patch("cinesort.domain.perceptual.ssim_self_ref.tracked_run") as run:
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=0)
+        self.assertEqual(r.upscale_verdict, "error")
+        run.assert_not_called()
 
 
 class TestParseSsimStderr(unittest.TestCase):
@@ -103,19 +158,19 @@ class TestParseSsimStderr(unittest.TestCase):
 
 class TestComputeSsimSelfRef(unittest.TestCase):
     def test_skip_if_not_4k(self):
-        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=1080)
+        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=1080, video_width=1920)
         self.assertEqual(r.upscale_verdict, "not_applicable_resolution")
 
     def test_skip_if_animation(self):
-        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, is_animation=True)
+        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840, is_animation=True)
         self.assertEqual(r.upscale_verdict, "not_applicable_animation")
 
     def test_skip_if_duration_too_short(self):
-        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 60.0, video_height=2160)
+        r = compute_ssim_self_ref("ffmpeg", "x.mkv", 60.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "not_applicable_duration")
 
     def test_missing_ffmpeg_returns_error(self):
-        r = compute_ssim_self_ref("", "x.mkv", 7200.0, video_height=2160)
+        r = compute_ssim_self_ref("", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "error")
 
     def test_ffmpeg_error_returns_error(self):
@@ -123,7 +178,7 @@ class TestComputeSsimSelfRef(unittest.TestCase):
             "cinesort.domain.perceptual.ssim_self_ref.tracked_run",
             return_value=_fake_completed(returncode=1, stderr="error"),
         ):
-            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160)
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "error")
 
     def test_timeout_returns_error(self):
@@ -131,7 +186,7 @@ class TestComputeSsimSelfRef(unittest.TestCase):
             "cinesort.domain.perceptual.ssim_self_ref.tracked_run",
             side_effect=subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=45),
         ):
-            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160)
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "error")
 
     def test_oserror_returns_error(self):
@@ -139,7 +194,7 @@ class TestComputeSsimSelfRef(unittest.TestCase):
             "cinesort.domain.perceptual.ssim_self_ref.tracked_run",
             side_effect=OSError("no ffmpeg"),
         ):
-            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160)
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "error")
 
     def test_native_4k_end_to_end(self):
@@ -148,7 +203,7 @@ class TestComputeSsimSelfRef(unittest.TestCase):
             "cinesort.domain.perceptual.ssim_self_ref.tracked_run",
             return_value=_fake_completed(stderr=stderr),
         ):
-            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160)
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "native")
 
     def test_fake_4k_end_to_end(self):
@@ -157,7 +212,7 @@ class TestComputeSsimSelfRef(unittest.TestCase):
             "cinesort.domain.perceptual.ssim_self_ref.tracked_run",
             return_value=_fake_completed(stderr=stderr),
         ):
-            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160)
+            r = compute_ssim_self_ref("ffmpeg", "x.mkv", 7200.0, video_height=2160, video_width=3840)
         self.assertEqual(r.upscale_verdict, "upscale_fake")
 
 
