@@ -955,10 +955,9 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-02 (R5-STRESS-5) parallelisme batch inter-films
     ("perceptual_parallelism_enabled", True),
     ("perceptual_workers", 0),
-    # AUDIT 2026-06-11 (R4-P10) : lowercase_extensions est CONSOMME par
-    # build_cfg_from_settings (to_bool defaut True) mais etait absent du GET ->
-    # le toggle UI affichait OFF en permanence alors que l'effectif etait ON.
-    ("lowercase_extensions", True),
+    # AUDIT 2026-06-11 (R4-P10) : "lowercase_extensions" a vecu ici. RETIRE :
+    # le reglage ne servait qu'a renommer le fichier video (.MKV -> .mkv), ce
+    # qu'interdit la regle inviolable n1. Ne pas le reintroduire.
     ("perceptual_audio_fingerprint_enabled", True),
     ("perceptual_scene_detection_enabled", True),
     ("perceptual_audio_spectral_enabled", True),
@@ -1165,7 +1164,6 @@ def build_cfg_from_settings(
         scan_max_workers=cfg_scan_workers,
         naming_movie_template=cfg_movie_template,
         naming_tv_template=cfg_tv_template,
-        lowercase_extensions=to_bool(settings.get("lowercase_extensions"), True),
         # ITER7 etape 3 : approvisionnement separator Domain (drop silencieux
         # historique au save). Le coerce-and-default est aussi applique cote
         # _save_section_naming (settings_support.py:1611-1613) mais on duplique
@@ -1729,7 +1727,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Fix audit 2026-05-24 : section Nommage manquait totalement du dispatcher.
     6 champs (`naming_template`, `windows_safe`, `lowercase_extensions`, `separator`,
     `naming_movie_template`, `naming_tv_template`) etaient silencieusement droppes
-    a chaque save. Meme pattern que bug OMDb.
+    a chaque save. Meme pattern que bug OMDb. Il n'en reste que 3 : les 3 autres
+    ont depuis ete retires (fantomes, ou violation de la regle inviolable n1).
 
     Note : `_apply_naming_preset` (deja appele dans le dispatcher) gere uniquement
     la mecanique du preset selecteur ; ce helper gere les champs templates + regles.
@@ -1743,11 +1742,14 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["naming_tv_template"] = str(payload.get("naming_tv_template") or "").strip()
     # R8-101 (filet F5) : "windows_safe" RETIRÉ — fantôme. windows_safe() est appliquée
     # inconditionnellement (aucun gate settings) -> échappement Windows toujours actif.
-    if "lowercase_extensions" in payload:
-        out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
+    # "lowercase_extensions" RETIRE : le seul effet du toggle etait de renommer
+    # le FICHIER VIDEO (.MKV -> .mkv), interdit par la regle inviolable n1. Une
+    # cle deja presente dans un settings.json existant n'est PAS effacee (le
+    # merge read-modify-write de _save_settings_payload_locked part de
+    # l'existant) : elle devient simplement inerte.
     if "separator" in payload:
-        sep = str(payload.get("separator") or ".")
-        out["separator"] = sep if sep in {".", " ", "_", "-"} else "."
+        sep = str(payload.get("separator") or " ")
+        out["separator"] = sep if sep in {".", " ", "_", "-"} else " "
     return out
 
 
@@ -1788,8 +1790,13 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if "history_retention_days" in payload:
         out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
-    if "retention_days" in payload:
-        out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    # "retention_days" RETIRE (2026-08-03) — reglage FANTOME : persiste, jamais lu.
+    # Le seul cron de retention (app.py:495 et 1004 -> retention_cleanup) lit
+    # `history_retention_days` ci-dessus ; aucun code ne lisait `retention_days`.
+    # Le champ UI promettait "conservation des analyses perceptuelles et scores
+    # qualite" : cette purge n'existe pas, et la cabler par simple anciennete
+    # detruirait le cache probe vivant d'une bibliotheque stable (re-probe complet
+    # SMB/NAS). Le reglage est donc supprime plutot qu'invente.
     # VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review (defaut 30j, 0 = OFF).
     # Bornage [0, 3650] aligne sur history_retention_days. Le cron tourne 24h via
     # `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`, demarre depuis app.py.

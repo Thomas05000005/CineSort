@@ -12,7 +12,7 @@ Garde-fous (cf docs/internal/BILAN_ITER12_2026-06-08.md section 1) :
 - `allow_redirects=False`, `stream=True`, limit 5 MB (anti-DoS + anti-redirect).
 - Cache disque : `<state_dir>/cache/posters/<size>/<id>.<ext>` (ext deduite
   Content-Type, whitelist {jpg, png, webp}).
-- Ecriture cache atomique `.tmp` -> `os.replace`.
+- Ecriture cache atomique et durable via `cinesort.infra.state.atomic_write_bytes`.
 - Defense en profondeur : `cache_file.resolve()` doit etre sous
   `cache_root.resolve()`.
 - Cle TMDb scrubbee : `image.tmdb.org` est un CDN public, aucun secret
@@ -27,9 +27,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
-import os
 import re
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -38,6 +36,7 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitOpenError
 from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra.state import atomic_write_bytes
 from cinesort.infra.tmdb_client import TmdbClient
 
 logger = logging.getLogger(__name__)
@@ -328,54 +327,28 @@ def resolve_cache_file(cache_root: Path, size: str, tmdb_id: int) -> Optional[Tu
 # Fetch TMDb + ecriture cache atomique
 # ---------------------------------------------------------------------------
 
-#: Retentatives du basculement `os.replace`. Sous Windows, `MoveFileEx` (qui
-#: implemente `os.replace`) verrouille la destination le temps du basculement :
-#: deux threads qui remplacent la MEME cible au meme instant se voient refuser
-#: l'acces (WinError 5 / 32 -> `PermissionError`) alors que le fichier final
-#: reste parfaitement valide. Mesure du 2026-08-03 sur 32 threads simultanes :
-#: 19/32 echecs sans retentative, 0/32 avec le backoff ci-dessous (pire cas
-#: observe : 6 retentatives, ~0.13 s). Marge ~2x sur le plafond.
-_REPLACE_MAX_ATTEMPTS = 12
-_REPLACE_BACKOFF_BASE_S = 0.002
-_REPLACE_BACKOFF_CAP_S = 0.05
-
 
 def _atomic_write(target: Path, payload: bytes) -> None:
-    """Ecriture atomique d'un fichier binaire : `.tmp` -> `os.replace`.
+    """Ecriture atomique ET durable d'un fichier binaire.
 
-    Le `.tmp` est cree dans le meme repertoire que `target` pour garantir
-    que `os.replace` est atomique cote filesystem (memes device).
+    Fix #712 : le `.tmp` etait nomme en dur (`target.suffix + '.tmp'`), donc
+    identique pour tous les threads du `ThreadingHTTPServer`. Deux requetes
+    concurrentes sur le MEME (tmdb_id, size) — cas courant : une grille de
+    jaquettes qui se charge — s'ecrasaient mutuellement et pouvaient promouvoir
+    un JPEG a moitie ecrit dans le cache, servi ensuite pendant 30 jours
+    (Cache-Control immuable). Le helper unique fait le nom unique + le fsync +
+    le controle de taille.
+
+    Resolution du conflit avec `#718` (merge de main du 2026-08-04) : les deux
+    branches corrigent la MEME course, main sur place et celle-ci en routant
+    vers `state.atomic_write_bytes`. C'est cette derniere qui est retenue parce
+    qu'elle SUBSUME l'autre — `state._replace_with_retry` porte exactement la
+    politique de retentative mesuree par `#718` (12 tentatives, base 2 ms,
+    plafond 50 ms, jitter par thread ; 19/32 echecs sans elle, 0/32 avec) et y
+    ajoute le controle de taille ecrite. Garder les deux aurait duplique la
+    politique en deux exemplaires qui divergent au premier reglage.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # Nom de `.tmp` unique par processus/thread/instant : le serveur cache est
-    # multi-thread (ThreadingHTTPServer) et deux requetes concurrentes sur le
-    # meme poster partageaient sinon le meme `.tmp`, corrompant l'ecriture
-    # (CWE-362). Audit 2026-07-08.
-    tmp = target.with_name(f"{target.name}.tmp.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}")
-    try:
-        with open(tmp, "wb") as f:
-            f.write(payload)
-            f.flush()
-            with contextlib.suppress(OSError):
-                os.fsync(f.fileno())
-        # Le basculement est atomique, mais il peut etre REFUSE tant qu'un
-        # autre thread bascule sur la meme cible (cf `_REPLACE_MAX_ATTEMPTS`).
-        # On retente avec un delai desynchronise par thread, sinon tous les
-        # threads en attente repartent au meme instant et se re-collisionnent.
-        for attempt in range(_REPLACE_MAX_ATTEMPTS):
-            try:
-                os.replace(tmp, target)
-                break
-            except PermissionError:
-                if attempt == _REPLACE_MAX_ATTEMPTS - 1:
-                    raise
-                delay = min(_REPLACE_BACKOFF_CAP_S, _REPLACE_BACKOFF_BASE_S * (2**attempt))
-                time.sleep(delay + (threading.get_ident() % 8) * 0.0005)
-    except (OSError, PermissionError):
-        if tmp.exists():
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-        raise
+    atomic_write_bytes(target, payload)
 
 
 def fetch_and_cache(
