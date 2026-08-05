@@ -182,7 +182,9 @@ class RunSimulationIntegrationTests(unittest.TestCase):
         store.quality.list_quality_reports.return_value = reports
         store.run.get_latest_run.return_value = {"run_id": "RUN123"}
         store.run.list_runs.return_value = [{"run_id": "RUN123"}]
-        api._store = store
+        # CineSortApi n'a pas d'attribut _store : le support résout le store via
+        # _get_or_create_infra(_get_state_dir()), exactement comme en prod.
+        api._get_or_create_infra.return_value = (store, MagicMock())
         api._active_quality_profile_payload.return_value = {
             "profile_json": active_profile
             or {
@@ -258,7 +260,8 @@ class RunSimulationIntegrationTests(unittest.TestCase):
         ]
         api = self._make_api(reports)
         run_simulation(api, run_id="RUN123", preset_id="equilibre", scope="run")
-        api._store.save_quality_profile.assert_not_called()
+        store = api._get_or_create_infra.return_value[0]
+        store.save_quality_profile.assert_not_called()
         api._save_active_quality_profile.assert_not_called()
 
     def test_concurrent_simulations_thread_safe(self):
