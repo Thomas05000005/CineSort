@@ -87,8 +87,10 @@ class DetectLanguageBeforeFlagTokens(unittest.TestCase):
         self.assertEqual(detect_language_from_suffix("Movie.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.forced.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.sdh.srt"), "")
-        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.cc.srt"), "")
+        # #679 : 'hi' seul vaut desormais HINDI (le tag malentendant du projet
+        # est 'sdh'). Contrat detaille dans tests/test_subtitle_lang_vocab.py.
+        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "hi")
         self.assertEqual(detect_language_from_suffix("Movie.xyz123.srt"), "")
 
 

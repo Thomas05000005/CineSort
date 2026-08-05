@@ -361,13 +361,22 @@ def get_or_create_infra(
                 notify = getattr(api, "_notify", None)
                 report = reconcile_at_boot(store, notify=notify)
                 if report.get("examined", 0) > 0:
+                    # Issue #512 : la ligne de synthese doit compter AUSSI
+                    # `mismatched` (destination occupee par un AUTRE fichier,
+                    # verdict critique) et `unverified` (identite non verifiable).
+                    # Sans eux, une reconciliation qui detecte une incoherence
+                    # s'affichait « 1 examinee, 0 completed, 0 rolled_back,
+                    # 0 duplicated, 0 lost » : la synthese mentait.
                     _logger.info(
-                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
+                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, "
+                        "%d duplicated, %d lost, %d mismatched, %d unverified",
                         report["examined"],
                         report.get("completed", 0),
                         report.get("rolled_back", 0),
                         len(report.get("duplicated", [])),
                         len(report.get("lost", [])),
+                        len(report.get("mismatched", [])),
+                        len(report.get("unverified", [])),
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
