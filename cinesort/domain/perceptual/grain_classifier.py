@@ -443,22 +443,32 @@ def _texture_zone_variance(frames_y: List[np.ndarray], block_size: int = 16) -> 
     """
     if not frames_y:
         return 0.0
-    variances: List[float] = []
+    # Issue #560 — meme vectorisation que `find_flat_zones` (issue #74) : une
+    # seule reduction numpy par frame au lieu d'un `np.var` par bloc (~8000 pour
+    # du 1080p en blocs de 16). Le decoupage est identique a celui de la boucle
+    # remplacee : `range(0, h - bs + 1, bs)` produit exactement `h // bs` blocs,
+    # d'ou le rognage a `(h // bs) * bs`. L'ordre de collecte reste row-major
+    # (y externe, x interne), donc la moyenne finale somme dans le meme ordre.
+    chunks: List[np.ndarray] = []
     for frame in frames_y:
         if frame is None or frame.ndim != 2:
             continue
         h, w = frame.shape
         if h < block_size or w < block_size:
             continue
-        arr = frame.astype(np.float64, copy=False)
-        for y in range(0, h - block_size + 1, block_size):
-            for x in range(0, w - block_size + 1, block_size):
-                var = float(np.var(arr[y : y + block_size, x : x + block_size]))
-                if TEXTURE_ZONE_VARIANCE_MIN < var < TEXTURE_ZONE_VARIANCE_MAX:
-                    variances.append(var)
-    if not variances:
+        n_by = h // block_size
+        n_bx = w // block_size
+        arr = frame.astype(np.float64, copy=False)[: n_by * block_size, : n_bx * block_size]
+        blocks = arr.reshape(n_by, block_size, n_bx, block_size).swapaxes(1, 2)
+        block_vars = blocks.var(axis=(2, 3))
+        mask = (block_vars > TEXTURE_ZONE_VARIANCE_MIN) & (block_vars < TEXTURE_ZONE_VARIANCE_MAX)
+        if mask.any():
+            chunks.append(np.asarray(block_vars[mask], dtype=np.float64))
+    if not chunks:
         return 0.0
-    return float(np.mean(variances))
+    # `chunks` n'est alimente que si `mask.any()`, donc la concatenation contient
+    # au moins un element : pas de garde supplementaire a ecrire ici.
+    return float(np.concatenate(chunks).mean())
 
 
 def detect_partial_dnr(
