@@ -2091,20 +2091,51 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   // depuis _decisionsState (source de verite JS). Capture TOUTES les rows du
   // plan, pas seulement celles visibles dans le DOM apres filtre. Sans ca,
   // l'undo ne restaurait que les rows visibles -> perte silencieuse.
-  // Fix race condition (2026-06-05) : on memorise aussi le timestamp du
-  // snapshot. Au rollback (echec API ou undo), les decisions utilisateur
-  // intervenues pendant l'await fetch (decided_at > snapshot_ts) sont
-  // preservees au lieu d'etre ecrasees par un wipe-and-replace de la Map.
-  const snapshot_ts = Date.now();
+  // Fix race condition (2026-06-05) : au rollback (echec API ou undo), les
+  // decisions utilisateur intervenues pendant l'await fetch sont preservees au
+  // lieu d'etre ecrasees par un wipe-and-replace de la Map. Le critere de
+  // reconnaissance est plus bas (`_ecritParCeBulk`) : ce fut un timestamp de
+  // snapshot jusqu'au 2026-08-05, c'est desormais une empreinte exacte.
   const stateSnapshot = new Map();
   for (const [rid, st] of _decisionsState.entries()) {
     stateSnapshot.set(rid, { ...st });
   }
 
   // Mise a jour state JS (source de verite) + DOM visible.
+  //
+  // On memorise l'empreinte EXACTE que ce bulk vient d'ecrire pour chaque row.
+  // C'est elle, et non un ordre de timestamps, qui permettra de reconnaitre
+  // plus bas ce qui vient de nous — cf `_ecritParCeBulk`.
+  const bulkStamps = new Map();
   for (const rid of targetIds) {
     _setDecisionOk(rid, true);
+    const ecrit = _decisionsState.get(rid);
+    bulkStamps.set(rid, ecrit ? ecrit.decided_at : null);
   }
+
+  // Une row a-t-elle ete retouchee PAR L'UTILISATEUR depuis notre ecriture ?
+  //
+  // L'ancienne garde comparait `current.decided_at > snapshot_ts`, avec
+  // `snapshot_ts` pris AVANT le bulk. Or le bulk ecrit forcement APRES ce
+  // snapshot : des que `Date.now()` avait avance d'une milliseconde entre les
+  // deux, la garde prenait NOS PROPRES ecritures pour des decisions
+  // utilisateur et sautait la row — donc « Annuler » ne faisait RIEN, en
+  // silence.
+  //
+  // Mesure : deux echecs de CI a la signature identique sur main le 2026-08-05
+  // ({r1: true, r2: true, r3: true} au lieu de false), verts en local. La
+  // difference n'etait pas le code mais la RESOLUTION D'HORLOGE : dans la meme
+  // milliseconde `>` est faux et l'annulation marchait ; une milliseconde plus
+  // tard elle ne marchait plus.
+  //
+  // On compare desormais une IDENTITE, pas un ordre : la row porte-t-elle
+  // encore exactement l'empreinte que nous y avons mise ? Aucune horloge
+  // n'intervient dans le verdict.
+  const _ecritParCeBulk = (rid) => {
+    const current = _decisionsState.get(rid);
+    if (!current) return true;
+    return current.decided_at === bulkStamps.get(rid);
+  };
   if (_activeContainer) {
     _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
       if (targetIds.has(cb.dataset.rowId)) cb.checked = true;
@@ -2134,16 +2165,18 @@ async function _applyBulkApprove(targetIds, approvedCount) {
     // snapshot couvre toutes les rows du plan (pas seulement les visibles).
     // Fix race condition (2026-06-05) : merge selectif au lieu de wipe.
     // Toute decision (clic checkbox / edit year) faite par l'utilisateur
-    // pendant l'await save_validation a decided_at > snapshot_ts et doit
-    // etre preservee. On rollback uniquement les rows qu'on a effectivement
-    // mutees ci-dessus (targetIds) et dont l'utilisateur n'a pas retouche
-    // la decision depuis.
+    // pendant l'await save_validation remplace l'empreinte que ce bulk avait
+    // ecrite, et doit etre preservee. On rollback uniquement les rows qu'on a
+    // effectivement mutees ci-dessus (targetIds) et qui portent ENCORE notre
+    // empreinte.
     for (const rid of targetIds) {
       const current = _decisionsState.get(rid);
       const prev = stateSnapshot.get(rid);
-      // Si l'utilisateur a re-modifie cette row apres notre snapshot,
-      // on respecte son intent et on ne rollback pas.
-      if (current && current.decided_at > snapshot_ts) continue;
+      // Si l'utilisateur a re-modifie cette row DEPUIS NOTRE ECRITURE, on
+      // respecte son intent et on ne rollback pas. Voir `_ecritParCeBulk` :
+      // l'ancienne comparaison de timestamps sautait aussi nos propres
+      // ecritures des que l'horloge avait avance.
+      if (current && !_ecritParCeBulk(rid)) continue;
       if (prev) {
         _decisionsState.set(rid, { ...prev });
       } else {
@@ -2202,7 +2235,7 @@ async function _applyBulkApprove(targetIds, approvedCount) {
         for (const rid of targetIds) {
           const current = _decisionsState.get(rid);
           const prev = stateSnapshot.get(rid);
-          if (current && current.decided_at > snapshot_ts) continue;
+          if (current && !_ecritParCeBulk(rid)) continue;
           if (prev) {
             _decisionsState.set(rid, { ...prev });
           } else {

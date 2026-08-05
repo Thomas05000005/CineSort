@@ -308,6 +308,113 @@ class BulkApproveUndoRuntimeTests(unittest.TestCase):
         self.assertNotIn("success", res["failToasts"], "pas de toast de succes sur echec API")
 
 
+_BULK_HORLOGE_DRIVER = """
+// L'HORLOGE AVANCE — c'est tout ce qui change par rapport au pilote nominal.
+//
+// `_applyBulkApprove` prenait un `snapshot_ts = Date.now()` AVANT d'ecrire, puis
+// ses gardes de rollback/undo sautaient toute row dont `decided_at > snapshot_ts`
+// pour « preserver les decisions utilisateur posterieures ». Mais le bulk ecrit
+// lui aussi APRES ce snapshot : des que l'horloge avait avance d'une seule
+// milliseconde entre les deux, la garde prenait les ecritures DU BULK pour des
+// decisions utilisateur, et « Annuler » ne faisait plus RIEN, en silence.
+//
+// Sur un poste rapide tout tient dans la meme milliseconde et le defaut est
+// invisible. Sur un runner de CI, non : deux echecs a la signature identique le
+// 2026-08-05 sur main, verts en local. Forcer l'horloge rend le defaut
+// DETERMINISTE au lieu d'attendre qu'il retombe.
+const _vraiNow = Date.now;
+let _tic = _vraiNow.call(Date);
+Date.now = () => (_tic += 1);
+
+const ids = ["r1", "r2", "r3"];
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = true;
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+const afterApprove = M.__decisions();
+
+const toast = globalThis.__spy.toasts[globalThis.__spy.toasts.length - 1] || null;
+let afterUndo = null;
+if (toast && toast.action && typeof toast.action.onClick === "function") {
+  await toast.action.onClick();
+  afterUndo = M.__decisions();
+}
+
+// Meme scenario, mais l'utilisateur RETOUCHE r2 apres le bulk : cette
+// decision-la doit survivre a l'annulation.
+globalThis.__spy = { toasts: [], api: [] };
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+M.__retoucher("r2", true);
+const toast2 = globalThis.__spy.toasts[globalThis.__spy.toasts.length - 1] || null;
+let afterUndoAvecRetouche = null;
+if (toast2 && toast2.action && typeof toast2.action.onClick === "function") {
+  await toast2.action.onClick();
+  afterUndoAvecRetouche = M.__decisions();
+}
+
+Date.now = _vraiNow;
+__emit({ afterApprove, afterUndo, afterUndoAvecRetouche });
+"""
+
+_BULK_HORLOGE_EXTRA = (
+    _BULK_EXTRA
+    + """
+export function __retoucher(rowId, ok) {
+  _setDecisionOk(rowId, ok);
+}
+"""
+)
+
+
+class BulkUndoHorlogeQuiAvanceTests(unittest.TestCase):
+    """L'annulation ne doit pas dependre de la RESOLUTION D'HORLOGE.
+
+    Ce harnais force `Date.now()` a avancer d'une milliseconde a chaque appel,
+    ce qui reproduit de facon DETERMINISTE l'echec intermittent observe en CI :
+    deux runs de main le 2026-08-05, meme test, meme assertion, memes valeurs
+    ({r1: true, r2: true, r3: true} au lieu de false), alors que le meme test
+    passait en local.
+    """
+
+    _res: dict | None = None
+
+    def _run_or_skip(self) -> dict:
+        require_node(self)
+        if BulkUndoHorlogeQuiAvanceTests._res is None:
+            BulkUndoHorlogeQuiAvanceTests._res = run_module_test(
+                _TRAITEMENT_JS,
+                stubs=_BULK_STUBS,
+                extra=_BULK_HORLOGE_EXTRA,
+                driver=_BULK_HORLOGE_DRIVER,
+            )
+        return BulkUndoHorlogeQuiAvanceTests._res
+
+    def test_l_annulation_marche_meme_quand_l_horloge_a_avance(self) -> None:
+        res = self._run_or_skip()
+        self.assertEqual(res["afterApprove"], {"r1": True, "r2": True, "r3": True})
+        self.assertEqual(
+            res["afterUndo"],
+            {"r1": False, "r2": False, "r3": False},
+            "« Annuler » n'a rien fait : la garde a pris les ecritures DU BULK "
+            "pour des decisions utilisateur posterieures",
+        )
+
+    def test_une_retouche_utilisateur_SURVIT_a_l_annulation(self) -> None:
+        """La garde doit rester protectrice, pas seulement passante.
+
+        Corriger le defaut en supprimant la garde ferait passer le test
+        ci-dessus tout en ECRASANT une decision que l'utilisateur vient de
+        prendre. C'est ce test-ci qui l'interdit.
+        """
+        res = self._run_or_skip()
+        self.assertEqual(
+            res["afterUndoAvecRetouche"],
+            {"r1": False, "r2": True, "r3": False},
+            "r2 a ete retouchee APRES le bulk : l'annulation doit la respecter",
+        )
+
+
 class DoublonsStepTests(unittest.TestCase):
     """Spec §3.4 : etape Doublons inline (composant initDoublons)."""
 
