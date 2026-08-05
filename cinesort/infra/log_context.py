@@ -181,9 +181,14 @@ class RepeatedExceptionDedupFilter(logging.Filter):
     utilisees ici, suffisant pour notre usage best-effort.
     """
 
-    # Cap souple : au-dela, on balaie les cles inactives (liste vide apres
-    # fenetre). Evite la croissance non bornee de _counts sur process long.
+    # Cap souple : au-dela, on balaie les cles INACTIVES (aucun passage dans la
+    # fenetre de 60 s). Evite la croissance non bornee de _counts sur process long.
     _SWEEP_THRESHOLD = 512
+
+    # Fenetre glissante du rate-limit, en secondes. Sert aussi de critere de
+    # peremption au balayage : une cle dont le dernier passage est plus vieux
+    # que cette fenetre ne peut plus influencer aucune decision.
+    _WINDOW_S = 60.0
 
     def __init__(self, max_per_minute: int = 5):
         super().__init__()
@@ -201,14 +206,22 @@ class RepeatedExceptionDedupFilter(logging.Filter):
         now = _time.monotonic()
         timestamps = self._counts.setdefault(key, [])
         # cleanup > 60s
-        timestamps[:] = [t for t in timestamps if now - t < 60.0]
+        timestamps[:] = [t for t in timestamps if now - t < self._WINDOW_S]
         if len(timestamps) >= self._max:
             return False
         timestamps.append(now)
         # Purge opportuniste : sans elle, chaque cle unique (logger, type,
         # msg[:80]) resterait a vie meme une fois l'erreur disparue -> fuite.
+        #
+        # Le critere doit porter sur la PEREMPTION, pas sur la vacuite. Seule la
+        # cle courante voit sa liste elaguee (le `timestamps[:]` ci-dessus), et
+        # elle ressort forcement NON VIDE : soit elle a atteint `_max` et on a
+        # rendu False plus haut, soit on vient d'y pousser `now`. Un balayage
+        # `if v` ne pouvait donc jamais rien retirer — la fuite qu'il pretend
+        # empecher restait entiere, et elle est reelle des qu'un message est
+        # construit en f-string (un `msg[:80]` distinct par film).
         if len(self._counts) > self._SWEEP_THRESHOLD:
-            self._counts = {k: v for k, v in self._counts.items() if v}
+            self._counts = {k: v for k, v in self._counts.items() if v and now - v[-1] < self._WINDOW_S}
         return True
 
 

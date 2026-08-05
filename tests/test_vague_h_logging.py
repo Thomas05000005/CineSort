@@ -8,6 +8,7 @@ types.
 from __future__ import annotations
 
 import logging
+import time
 import unittest
 
 from cinesort.infra.log_context import (
@@ -85,6 +86,45 @@ class RepeatedExceptionDedupFilterTests(unittest.TestCase):
         self.assertFalse(flt.filter(_make_record("cs.a", "msg", exc)))
         # autre logger -> ok
         self.assertTrue(flt.filter(_make_record("cs.b", "msg", exc)))
+
+    def test_balayage_retire_les_cles_perimees(self) -> None:
+        """Au-dela du seuil, les cles hors fenetre doivent DISPARAITRE.
+
+        Le balayage testait la vacuite de la liste (`if v`), or elle ne peut
+        jamais etre vide : seule la cle courante est elaguee, et elle ressort
+        soit a `_max` (on rend False avant), soit avec le `now` qu'on vient d'y
+        pousser. Le garde ne retirait donc rien et `_counts` grossissait a vie —
+        une entree par `msg[:80]` distinct, donc une par film des qu'un message
+        est construit en f-string.
+        """
+        flt = RepeatedExceptionDedupFilter(max_per_minute=5)
+        perime = time.monotonic() - 3600.0  # 1 h : tres au-dela de la fenetre 60 s
+        for i in range(flt._SWEEP_THRESHOLD + 50):
+            flt._counts[f"cinesort.scan:OSError:film {i} illisible"] = [perime]
+        self.assertGreater(len(flt._counts), flt._SWEEP_THRESHOLD)
+
+        # Un enregistrement neuf franchit le seuil et declenche le balayage.
+        self.assertTrue(flt.filter(_make_record("cinesort.scan", "film neuf", OSError("boom"))))
+
+        self.assertEqual(len(flt._counts), 1, "seule la cle du record neuf doit subsister")
+
+    def test_balayage_preserve_les_cles_actives(self) -> None:
+        """Non-regression : une cle vue dans la fenetre garde son compteur."""
+        flt = RepeatedExceptionDedupFilter(max_per_minute=2)
+        exc = ValueError("actif")
+        self.assertTrue(flt.filter(_make_record("cinesort.a", "msg actif", exc)))
+        cle_active = next(iter(flt._counts))
+
+        perime = time.monotonic() - 3600.0
+        for i in range(flt._SWEEP_THRESHOLD + 50):
+            flt._counts[f"cinesort.b:OSError:vieux {i}"] = [perime]
+
+        self.assertTrue(flt.filter(_make_record("cinesort.c", "declencheur", OSError("x"))))
+
+        self.assertIn(cle_active, flt._counts, "une cle dans la fenetre ne doit pas etre balayee")
+        # Le compteur de la cle active est intact : le 2e passage passe, le 3e non.
+        self.assertTrue(flt.filter(_make_record("cinesort.a", "msg actif", exc)))
+        self.assertFalse(flt.filter(_make_record("cinesort.a", "msg actif", exc)))
 
     def test_install_repeated_exception_dedup_idempotent(self) -> None:
         """install_repeated_exception_dedup attache un filter une seule fois."""

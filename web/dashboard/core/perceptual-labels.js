@@ -58,6 +58,57 @@ export function humanize(code, fallback) {
   return VERDICT_LABELS[key] || (fallback != null ? fallback : code);
 }
 
+/* --- Analyse mel (#381) -----------------------------------------------------
+ *
+ * Table SEPAREE de VERDICT_LABELS, et non une poignee de cles ajoutees dedans :
+ * `mel_verdict` et `grain_label` partagent le code "clean" avec deux sens
+ * differents. Dans VERDICT_LABELS, "clean" vaut deja « Très propre (denoised) »,
+ * qui parle du GRAIN VIDEO ; passer un verdict mel par `humanize()` afficherait
+ * donc « denoised » a propos d'une piste AUDIO — exactement l'etiquette fausse
+ * que ce lot corrige ailleurs. Les deux tables restent disjointes.
+ *
+ * Codes emis par cinesort/domain/perceptual/mel_analysis.py (compute_mel_score
+ * + les deux gardes d'analyze_mel) et par audio_perceptual.py ("disabled").
+ */
+export const MEL_VERDICT_LABELS = {
+  clean: "Aucune signature de compression",
+  soft_clipped: "Soft clipping (harmoniques de saturation)",
+  mp3_encoded: "Signature MP3 (coupure vers 16 kHz)",
+  aac_low_bitrate: "AAC bas débit (trous spectraux)",
+  degraded: "Dégradé (aucun motif dominant)",
+  insufficient_data: "Non mesuré (signal trop court)",
+  disabled: "Analyse mel désactivée",
+  unknown: "Non mesuré",
+};
+
+/**
+ * Verdicts mel qui attestent d'une mesure ABOUTIE.
+ *
+ * Les autres ("insufficient_data", "disabled", "unknown") laissent les quatre
+ * sous-detections a leur valeur par defaut — 0.0 / false — qui ne sont pas des
+ * mesures. Les afficher telles quelles annoncerait « 0,0 % de frames clippees »
+ * et « aplatissement 0,000 » pour une analyse qui n'a jamais tourne : un
+ * resultat faux, pas une absence de resultat.
+ */
+export const MEL_MEASURED_VERDICTS = [
+  "clean",
+  "soft_clipped",
+  "mp3_encoded",
+  "aac_low_bitrate",
+  "degraded",
+];
+
+/** Label humain d'un `mel_verdict`. Ne retombe JAMAIS sur VERDICT_LABELS. */
+export function humanizeMelVerdict(code) {
+  const key = String(code == null ? "" : code).toLowerCase();
+  return MEL_VERDICT_LABELS[key] || MEL_VERDICT_LABELS.unknown;
+}
+
+/** True si `code` designe une mesure mel qui a abouti. */
+export function isMelMeasured(code) {
+  return MEL_MEASURED_VERDICTS.includes(String(code == null ? "" : code).toLowerCase());
+}
+
 /**
  * Classification rapide d'une severite a partir du tier_v2.
  */
