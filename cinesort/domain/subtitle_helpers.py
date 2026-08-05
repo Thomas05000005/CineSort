@@ -385,6 +385,15 @@ def _vobsub_index_companions(subtitles: List[SubtitleInfo]) -> Set[str]:
     porte aucun tag (`Film.fr.idx` / `Film.fr.sub`), donc rien ne l'excluait —
     verifie sur main avant correctif. Un `.idx` SANS `.sub` frere reste compte :
     il est alors le seul fichier qui represente ce sous-titre.
+
+    L'appartenance a une paire se verifie par la PRESENCE du `.sub` frere, jamais
+    par la seule extension `.idx` : ecarter tout `.idx` masquerait un VRAI
+    doublon (`Film.fr.idx` orphelin a cote de `Film.fr.srt`), donc ferait taire
+    une alerte — le mauvais sens. Aucune autre couche ne materialise la paire :
+    `domain.core.classify_sidecars` rattache les sidecars UN PAR UN par leur
+    stem, et `SIDECAR_METADATA_EXTS` / `RESIDUAL_SUBTITLE_EXTS` listent `.idx` et
+    `.sub` comme deux entrees independantes. Le seul endroit ou les deux
+    fichiers doivent redevenir UN, c'est ce decompte-ci.
     """
     data_stems = {Path(s.filename).stem.lower() for s in subtitles if s.ext == _VOBSUB_DATA_EXT}
     return {s.filename for s in subtitles if s.ext == _VOBSUB_INDEX_EXT and Path(s.filename).stem.lower() in data_stems}
@@ -507,6 +516,12 @@ def _normalize_iso639(raw: str) -> str:
     un faux anglais (#610).
     """
     return _ISO639_MAP.get((raw or "").strip().lower(), "")
+
+
+# Une paire VobSub, c'est DEUX fichiers de meme stem : `.sub` porte le flux
+# bitmap, `.idx` l'index des timings/offsets. L'un sans l'autre est illisible.
+_VOBSUB_DATA_EXT = ".sub"
+_VOBSUB_INDEX_EXT = ".idx"
 
 
 def build_subtitle_report(
@@ -633,16 +648,21 @@ def build_subtitle_report(
 
     # Doublons de langue : restent sur les sous-titres EXTERNES uniquement
     # (un MKV avec 2 pistes FR embarquees n'est pas un probleme utilisateur).
-    # F12 corollaire OBLIGATOIRE : depuis que `.fr.forced.srt` resout bien 'fr',
-    # la paire LEGITIME `Film.fr.srt` + `Film.fr.forced.srt` (piste complete +
-    # piste forcee, convention Plex/Jellyfin) compterait 2 fois 'fr' et leverait
-    # `subtitle_duplicate_lang` a tort. On ne compte donc que les sous-titres
-    # SANS tag de variante : deux `.fr.srt` restent impossibles (meme nom), deux
-    # variantes taguees ne sont pas un doublon utilisateur.
-    # #749 : la paire VobSub `Film.fr.idx` + `Film.fr.sub` ne porte AUCUN tag,
-    # elle passait donc entiere dans le comptage et levait un faux doublon. On
-    # ecarte l'index de la paire (`count` et `formats` restent, eux, des mesures
-    # de FICHIERS et ne bougent pas).
+    #
+    # DEUX exclusions INDEPENDANTES se cumulent ici. Elles ne se recouvrent pas :
+    # un cas exclu par l'une n'est jamais vu par l'autre.
+    #
+    # (1) F12 corollaire OBLIGATOIRE : depuis que `.fr.forced.srt` resout bien
+    #     'fr', la paire LEGITIME `Film.fr.srt` + `Film.fr.forced.srt` (piste
+    #     complete + piste forcee, convention Plex/Jellyfin) compterait 2 fois
+    #     'fr' et leverait `subtitle_duplicate_lang` a tort. On ne compte donc
+    #     que les sous-titres SANS tag de variante.
+    #
+    # (2) #749 : une paire VobSub (`Film.fr.idx` + `Film.fr.sub`, meme stem) est
+    #     UN seul sous-titre stocke en deux fichiers. Elle ne porte AUCUN tag de
+    #     variante, donc l'exclusion (1) ne la voit pas et 'fr' etait compte 2
+    #     fois. L'index reste dans `count`, `formats` et `languages` — ce sont
+    #     des mesures de FICHIERS ; seul le decompte des doublons l'ecarte.
     vobsub_index_files = _vobsub_index_companions(matched)
     lang_counts: Dict[str, int] = {}
     for s in matched:

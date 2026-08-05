@@ -283,13 +283,16 @@ def detect_mp3_shelf(
         # Nyquist insuffisant, pas de shelf mesurable
         return {"shelf_detected": False, "shelf_drop_db": 0.0, "frames_pct": 0.0}
 
-    drops = []
-    for i in range(mel_spec_db.shape[0]):
-        before_pow = float(np.mean(mel_spec_db[i, before_idx]))
-        after_pow = float(np.mean(mel_spec_db[i, after_idx]))
-        drops.append(before_pow - after_pow)
-
-    drops_arr = np.asarray(drops, dtype=np.float64)
+    # Issue #560 — deux reductions numpy au lieu de deux `np.mean` par frame
+    # (soit ~1400 appels sur un spectrogramme de 700 frames). `dtype=np.float64`
+    # est explicite : le pipeline fournit deja du float64 (verifie sur
+    # `analyze_mel` avec des echantillons f64/f32/int16), mais la fonction est
+    # publique et un appelant qui passerait du float32 verrait sinon la
+    # SOUSTRACTION s'effectuer en float32 — moins precis que la boucle remplacee,
+    # qui repassait par un `float()` Python a chaque frame.
+    before_pow = mel_spec_db[:, before_idx].mean(axis=1, dtype=np.float64)
+    after_pow = mel_spec_db[:, after_idx].mean(axis=1, dtype=np.float64)
+    drops_arr = np.asarray(before_pow - after_pow, dtype=np.float64)
     mean_drop = float(drops_arr.mean()) if drops_arr.size > 0 else 0.0
     frames_with_shelf = int(np.sum(drops_arr > MEL_MP3_SHELF_DROP_DB))
     frames_pct = 100.0 * frames_with_shelf / max(1, drops_arr.size)

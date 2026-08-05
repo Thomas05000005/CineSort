@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, Generator
+from typing import Any, Dict, Generator, List
 
 import pytest
 
@@ -179,6 +179,39 @@ def _diagnostic_shell_absent(page, e2e_server: Dict[str, Any], exc: Exception) -
     with contextlib.suppress(Exception):
         lignes.append(f"  <title> = {page.title()!r}")
 
+    # Mesure du 2026-08-05 : le serveur REPOND (connect_ex = 0), la page est
+    # chargee, `#app-shell` EXISTE mais garde sa classe `hidden`. L'epuisement
+    # de sockets est donc REFUTE — le defaut est dans l'amorcage frontend.
+    #
+    # Restent DEUX causes que le diagnostic ne separait pas :
+    #   (1) la route vaut "/login" -> router.js fait
+    #       shell.classList.toggle("hidden", isLogin), donc le shell reste
+    #       cache legitimement ;
+    #   (2) un `await` de la chaine d'amorcage n'a jamais rendu la main —
+    #       `_mountV5Shell` et `_loadDashTheme` n'ont AUCUN garde-fou de delai,
+    #       contrairement a `initI18n` et `cachedGetSettings`.
+    #
+    # `__APP_JS_LOADED` (app.js:558/561) tranche a lui seul jusqu'ou le module
+    # est alle : absent = le module n'a pas ete evalue, "module-end-reached" =
+    # evalue mais DOMContentLoaded jamais declenche, "domcontentloaded-fired" =
+    # l'amorcage a demarre et s'est arrete DEDANS.
+    with contextlib.suppress(Exception):
+        etat = page.evaluate(
+            "() => ({"
+            " hash: location.hash,"
+            " appJs: window.__APP_JS_LOADED || '(absent)',"
+            " token: !!(localStorage.getItem('cinesort_token')),"
+            " loginVisible: !document.getElementById('view-login')?.classList.contains('hidden'),"
+            "})"
+        )
+        lignes.append(
+            f"  location.hash = {etat.get('hash')!r}"
+            f"{'  -> route de LOGIN : le shell est cache A RAISON' if str(etat.get('hash')).startswith('#/login') else ''}"
+        )
+        lignes.append(f"  __APP_JS_LOADED = {etat.get('appJs')!r}")
+        lignes.append(f"  token en localStorage = {etat.get('token')}")
+        lignes.append(f"  #view-login visible = {etat.get('loginVisible')}")
+
     # Erreurs console : c'est la que ERR_NO_BUFFER_SPACE apparaitrait.
     with contextlib.suppress(Exception):
         erreurs = getattr(page, "_cinesort_console_errors", None)
@@ -186,6 +219,38 @@ def _diagnostic_shell_absent(page, e2e_server: Dict[str, Any], exc: Exception) -
             lignes.append(f"  erreurs console ({len(erreurs)}) : {erreurs[:5]}")
 
     return "\n".join(lignes)
+
+
+def _brancher_capture_console(page) -> None:
+    """Attache un ECOUTEUR de console. Sans lui, le diagnostic lisait du vide.
+
+    Le diagnostic de la PR #925 lisait `page._cinesort_console_errors` — un
+    attribut que RIEN ne peuplait. La ligne « erreurs console » ne s'affichait
+    donc jamais, et une erreur JS pendant l'amorcage passait inapercue :
+    precisement l'information qui manque pour trancher #924.
+
+    Defaut de l'instrumentation, pas du code teste.
+    """
+    if getattr(page, "_cinesort_console_branche", False):
+        return
+    erreurs: List[str] = []
+    page._cinesort_console_errors = erreurs
+    page._cinesort_console_branche = True
+
+    def _sur_message(msg) -> None:
+        with contextlib.suppress(Exception):
+            if msg.type in ("error", "warning"):
+                erreurs.append(f"[{msg.type}] {msg.text}"[:300])
+
+    def _sur_pageerror(err) -> None:
+        with contextlib.suppress(Exception):
+            erreurs.append(f"[pageerror] {err}"[:300])
+
+    # Ne jamais laisser la capture casser le test qu'elle observe.
+    with contextlib.suppress(Exception):
+        page.on("console", _sur_message)
+    with contextlib.suppress(Exception):
+        page.on("pageerror", _sur_pageerror)
 
 
 @pytest.fixture(scope="function")
@@ -202,6 +267,8 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
 
     url = e2e_server["dashboard_url"]
     token = e2e_server["token"]
+    # AVANT le goto : une erreur d'amorcage survient pendant le chargement.
+    _brancher_capture_console(page)
     page.goto(url)
     try:
         page.wait_for_selector("#app-shell:not(.hidden)", timeout=_SHELL_TIMEOUT_MS)
