@@ -9,22 +9,28 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
 
+from cinesort.infra.state import atomic_write_text, sweep_atomic_tmp_orphans
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constantes couleurs tiers qualité
 # ---------------------------------------------------------------------------
+# AUDIT 2026-06-10 : couleurs tier INVARIANTES (memoire user / CLAUDE.md #2),
+# source canonique web/shared/tokens.css. L'export HTML est un fichier autonome
+# qui ne peut pas charger le CSS de l'app -> duplication CONTROLEE des hex, mais
+# avec les bonnes valeurs (avant : #e2e8f0/#f59e0b/#94a3b8/#ca8a04, fausses).
 _TIER_COLORS = {
-    "platinum": "#e2e8f0",
-    "gold": "#f59e0b",
-    "silver": "#94a3b8",
-    "bronze": "#ca8a04",
-    "reject": "#ef4444",
+    "platinum": "#E5E4E2",
+    "gold": "#FFD700",
+    "silver": "#C0C0C0",
+    "bronze": "#CD7F32",
+    "reject": "#ef4444",  # hors invariant (pas un tier affiche), rouge conserve
     # Retro-compat lecture pour les profils/reports anterieurs a la migration 011
-    "premium": "#e2e8f0",
-    "bon": "#f59e0b",
-    "moyen": "#94a3b8",
-    "faible": "#ca8a04",
+    "premium": "#E5E4E2",
+    "bon": "#FFD700",
+    "moyen": "#C0C0C0",
+    "faible": "#CD7F32",
 }
 _TIER_LABELS = {
     "platinum": "Platinum",
@@ -273,10 +279,36 @@ def export_nfo_for_run(
             continue
 
         try:
-            nfo_path.write_text(xml_content, encoding="utf-8")
+            # Fix #822 : `write_text` tronque le .nfo EN PLACE. Coupure secteur
+            # ou NAS qui decroche pendant l'ecriture -> l'utilisateur se
+            # retrouve avec un .nfo vide/tronque a la place de celui que
+            # Jellyfin/Kodi lisait tres bien avant l'export. `mkdir=False` :
+            # on n'a AUCUNE raison de recreer le dossier d'un film disparu.
+            #
+            # Conflit avec #834 (main) : les deux branches ferment la MEME
+            # issue #822, main avec un `tmp + fsync + os.replace` ECRIT SUR
+            # PLACE, celle-ci en routant vers le helper unique. Le helper
+            # SUBSUME la version inline — meme fsync, plus le controle de
+            # taille ecrite, le `.tmp` unique (pid/thread/ns/uuid au lieu du
+            # seul pid, qui collisionnait entre threads du meme processus), la
+            # retentative d'`os.replace` mesuree par #718 et le nettoyage du
+            # `.tmp` en `finally`. La mecanique inline de #834 est donc retiree
+            # plutot que doublee : deux implementations de la meme garantie
+            # divergent au premier reglage.
+            atomic_write_text(nfo_path, xml_content, mkdir=False)
             written += 1
             details.append({"path": str(nfo_path), "status": "written"})
+            # Le `.tmp` unique n'est JAMAIS reecrase : un export interrompu
+            # laisse ici un residu DEFINITIF, dans le dossier du film, a cote
+            # du .mkv — visible par l'utilisateur et scanne par Jellyfin/Kodi.
+            # On balaie les orphelins de CE .nfo (et d'aucun autre fichier du
+            # dossier) a chaque export reussi : la borne « au plus un residu »
+            # qu'offrait l'ancien `.tmp` fixe est ainsi retablie.
+            sweep_atomic_tmp_orphans(nfo_path.parent, target_name=nfo_path.name)
         except (OSError, PermissionError) as exc:
+            # Le nettoyage du `.tmp` que #834 faisait ici est desormais dans le
+            # `finally` d'`atomic_write_bytes` : il s'execute sur TOUS les
+            # chemins de sortie, y compris l'echec du controle de taille.
             errors += 1
             details.append({"path": str(nfo_path), "status": f"error: {exc}"})
 

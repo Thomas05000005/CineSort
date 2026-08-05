@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional, TypeVar
 
 from .constants import (
@@ -103,21 +103,28 @@ def run_parallel_tasks(
     workers = max(1, int(max_workers))
     results: dict[str, tuple[bool, Any]] = {}
 
-    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool)
-    if workers <= 1 or len(tasks) == 1:
+    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool).
+    # Exception : si un timeout par tache est demande, on route TOUJOURS via le
+    # pool, car seul `fut.result(timeout=...)` peut borner une tache qui hang.
+    # Sinon le garde-fou anti-hang serait silencieusement desactive des qu'il
+    # n'y a qu'une tache (ou 1 worker sur machine <MIN_CPU_CORES).
+    if timeout_per_task_s is None and (workers <= 1 or len(tasks) == 1):
         for name, fn in tasks.items():
             if cancel_event is not None and cancel_event.is_set():
                 results[name] = (False, _CancelledError("cancelled"))
                 continue
             try:
                 results[name] = (True, fn())
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:  # noqa: BLE001 - capture large + log, re-raise critiques au-dessus
                 logger.warning("run_parallel_tasks: tache '%s' a echoue: %s", name, exc)
                 results[name] = (False, exc)
         return results
 
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="perceptual")
     futures: dict[str, Future] = {}
+    timeout_hit = False  # Si un timeout est detecte -> shutdown non bloquant
     try:
         for name, fn in tasks.items():
             futures[name] = executor.submit(fn)
@@ -132,13 +139,25 @@ def run_parallel_tasks(
                 results[name] = (True, value)
             except TimeoutError as exc:
                 logger.warning("run_parallel_tasks: tache '%s' timeout apres %ss", name, timeout_per_task_s)
+                # Bug 1 fix: annuler le future en timeout pour ne pas bloquer le shutdown(wait=True).
+                # Si le worker ne respecte pas la cancellation (subprocess deja lance), shutdown
+                # passera en wait=False + cancel_futures=True via timeout_hit -> pas de hang.
+                try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                    fut.cancel()
+                except Exception:  # noqa: BLE001 - cancel best-effort
+                    pass
+                timeout_hit = True
                 results[name] = (False, exc)
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:  # noqa: BLE001 - capture large + log, re-raise critiques au-dessus
                 logger.warning("run_parallel_tasks: tache '%s' a echoue: %s", name, exc)
                 results[name] = (False, exc)
     finally:
-        cancel_futures = cancel_event is not None and cancel_event.is_set()
-        executor.shutdown(wait=not cancel_futures, cancel_futures=cancel_futures)
+        # Bug 1 fix: si un timeout a ete detecte, shutdown non bloquant avec cancel_futures
+        # pour eviter que le pool reste bloque a attendre un worker qui ne rendra jamais la main.
+        force_cancel = (cancel_event is not None and cancel_event.is_set()) or timeout_hit
+        executor.shutdown(wait=not force_cancel, cancel_futures=force_cancel)
 
     return results
 
@@ -227,7 +246,9 @@ def run_batch_parallel(
                 continue
             try:
                 results[i] = (True, worker_fn(item))
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:  # noqa: BLE001 - capture large + log, re-raise critiques au-dessus
                 logger.warning("run_batch_parallel: item %d a echoue: %s", i, exc)
                 results[i] = (False, exc)
         return results
@@ -241,14 +262,22 @@ def run_batch_parallel(
                 continue
             futures[executor.submit(worker_fn, item)] = i
 
-        for fut, idx in futures.items():
+        # Bug 3 fix: utiliser as_completed pour traiter les futures dans l'ordre
+        # ou elles terminent, pas dans l'ordre de soumission. L'ordre du resultat
+        # est preserve via `idx` (assignation par index dans `results`).
+        # Cela evite que des films lents bloquent la lecture de resultats deja prets.
+        for fut in as_completed(futures):
+            idx = futures[fut]
             if cancel_event is not None and cancel_event.is_set():
+                # Cancel best-effort des futures non encore lancees.
                 fut.cancel()
                 results[idx] = (False, _CancelledError("cancelled"))
                 continue
             try:
                 results[idx] = (True, fut.result())
-            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:  # noqa: BLE001 - capture large + log, re-raise critiques au-dessus
                 logger.warning("run_batch_parallel: item %d a echoue: %s", idx, exc)
                 results[idx] = (False, exc)
     finally:

@@ -31,10 +31,97 @@ from typing import Optional
 
 # --- Patterns -------------------------------------------------------------
 
+# Provider tags (Plex/Jellyfin/Radarr/TRaSH) inseres par l'utilisateur dans
+# les noms de dossier/fichier pour forcer un auto-link deterministe au scan.
+# Formats supportes : {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345},
+#                     [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567].
+# Fix B02-TAGS-BRACKETS : avant ce fix, les chiffres TMDb (ex 27205) restaient
+# dans le titre nettoye et polluaient la query fuzzy. parse_scene_title() doit
+# strip ces tags AVANT le pipeline noise/year/release-group.
+_PROVIDER_TMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*tmdb(?:id)?[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    re.IGNORECASE,
+)
+_PROVIDER_IMDB_TAG_RE = re.compile(
+    r"[\{\[]\s*imdb(?:id)?[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    re.IGNORECASE,
+)
+
+
+def strip_provider_tags(name: str) -> str:
+    """Retire les tags providers (TMDb/IMDb) inseres dans un nom de fichier/dossier.
+
+    Les tags `{tmdb-XXX}` / `[imdbid-ttXXX]` sont inseres par les conventions
+    Plex/Jellyfin/Radarr/TRaSH pour forcer un auto-link deterministe. Ils ne
+    doivent pas se retrouver dans le titre nettoye envoye en query fuzzy TMDb,
+    sinon les chiffres TMDb peuvent etre confondus avec des annees ou polluer
+    la similarite.
+
+    Examples:
+        >>> strip_provider_tags("Inception (2010) {tmdb-27205}")
+        'Inception (2010)'
+        >>> strip_provider_tags("Fight Club [tmdb-550] [imdbid-tt0137523]")
+        'Fight Club'
+        >>> strip_provider_tags("The Matrix (1999) [imdb:tt0133093]")
+        'The Matrix (1999)'
+
+    Args:
+        name: Nom brut de dossier ou fichier (avec ou sans extension).
+
+    Returns:
+        Le nom sans les brackets/braces provider, whitespace collapse.
+    """
+    if not name:
+        return ""
+    cleaned = _PROVIDER_TMDB_TAG_RE.sub(" ", name)
+    cleaned = _PROVIDER_IMDB_TAG_RE.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def extract_provider_tags(name: str) -> tuple[Optional[int], Optional[str]]:
+    """Extrait les ids providers (tmdb_id, imdb_id) depuis un nom.
+
+    Retourne `(None, None)` si rien trouve. Le tmdb_id est cast en `int`, le
+    imdb_id est normalise en lowercase (`tt0133093`).
+
+    Examples:
+        >>> extract_provider_tags("Inception (2010) {tmdb-27205}")
+        (27205, None)
+        >>> extract_provider_tags("Fight Club [tmdb-550] [imdbid-tt0137523]")
+        (550, 'tt0137523')
+        >>> extract_provider_tags("Inception (2010)")
+        (None, None)
+
+    Args:
+        name: Nom brut de dossier ou fichier.
+
+    Returns:
+        Tuple `(tmdb_id, imdb_id)`. Composants `None` si non extractibles.
+    """
+    if not name:
+        return (None, None)
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+    m = _PROVIDER_TMDB_TAG_RE.search(name)
+    if m:
+        try:
+            tmdb_id = int(m.group(1))
+        except (ValueError, TypeError):
+            tmdb_id = None
+    m = _PROVIDER_IMDB_TAG_RE.search(name)
+    if m:
+        imdb_id = m.group(1).lower()
+    return (tmdb_id, imdb_id)
+
+
 # Tags techniques uniquement (resolution, codec, audio, source, profil).
 # Volontairement SANS langue ni edition residue : ces tokens peuvent apparaitre
 # dans des vrais titres ("The French Connection", "The Final Cut", "Theatre of
 # Blood"). Ils sont stripes plus tard en mode end-anchored seulement.
+# BUG-TITLE-CHANNEL-RESIDUE (Lot D 2026-07) : `h[\s.]?26[45]` au lieu de
+# `h\.?26[45]` — le `\.?` etait mort car les points sont deja remplaces par des
+# espaces avant le sub ; "H.265-EVO" devenait "H 265-EVO" jamais nettoye (meme
+# famille de residu colle au groupe que "7.1-GRP").
 _NOISE_RE = re.compile(
     r"""
     \b(
@@ -43,7 +130,7 @@ _NOISE_RE = re.compile(
         hdr10\+?|hdr|dv|dolby[\s.-]?vision|sdr|
         bluray|blu[\s.-]?ray|brrip|bdrip|bd[\s.-]?remux|bd[\s.-]?rip|
         web[\s.-]?dl|web[\s.-]?rip|hdtv|hdrip|remux|dvdrip|cam|camrip|telesync|telecine|
-        x265|x264|hevc|avc|xvid|divx|h\.?264|h\.?265|av1|vp9|
+        x265|x264|hevc|avc|xvid|divx|h[\s.]?26[45]|av1|vp9|
         truehd|dts[\s.-]?hd|dts[\s.-]?x|dts|atmos|aac|ac3|eac3|ddp|opus|flac|mp3|
         dd5\.?1|dd7\.?1|dd2\.?0|
         10bit|8bit|12bit|
@@ -79,12 +166,81 @@ _AFTER_YEAR_NOISE_RE = re.compile(
 # Release group : "-GROUPNAME" en fin de chaine.
 # Requiert un espace AVANT le tiret pour ne pas casser "Spider-Man".
 # 2-25 chars alphanum + _, evite de manger "Toy Story 4" -> "Toy Story" (le 4 n'a pas de tiret).
-_RELEASE_GROUP_RE = re.compile(r"\s-\s*[A-Za-z0-9_]{2,25}\s*$")
+# AUDIT 2026-06-11 (R4-P2) : le tiret doit etre COLLE au groupe (pas de \s* apres).
+# Signal structurel scene : "x264-DEiTY" laisse " -DEiTY" apres le strip noise
+# (tiret colle), alors qu'un sous-titre legitime " - Ragnarok" a un espace des
+# DEUX cotes. L'ancien \s* permettait a "Thor - Ragnarok 4K" (had_tech_marker
+# via 4K) de perdre " - Ragnarok". Trade-off assume : un groupe P2P exotique
+# " - GROUP" (espace apres tiret, rare) n'est plus strippe — preferer un residu
+# dans le titre a un titre ampute.
+_RELEASE_GROUP_RE = re.compile(r"\s-[A-Za-z0-9_]{2,25}\s*$")
+
+# Tags langue trailing sans annee prealable. Couvre les cas type
+# "L'arme Fatale 2 - FR EN mHDgz.mkv" ou les tokens FR/EN/VF/VO/MULTI/VOSTFR
+# en fin de chaine ne sont pas precedes d'une annee (donc _AFTER_YEAR_NOISE_RE
+# ne match pas). On strip ces tokens (1-3 tokens consecutifs max) y compris
+# avec un release group court qui suit.
+_TRAILING_LANG_TOKENS_RE = re.compile(
+    r"(?:\s+(?:fr|en|vf|vo|vff|vfq|vfi|vof|vostfr|vostr|vost|multi)\b){1,3}\s*$",
+    re.IGNORECASE,
+)
 
 # Residus audio : "DTS-HD MA", "DTS-HD HRA", "5.1", "7.1", "2.0", "Atmos".
 # NOISE_RE catch "dts-hd" mais pas "ma" / "hra" standalone, et pas les channel counts.
+# AUDIT 2026-06-10 (REAL 2/2) : l'ancien pattern `\b(?:ma|hra|[257][\s.]?[01]|
+# 2[\s.]?0|atmos)\b` mutilait des TITRES reels : "21 Jump Street" -> "Jump
+# Street", "50 First Dates" -> "First Dates", "Ma Vie de Courgette" -> "Vie de
+# Courgette", "71 (2014)" -> "2014", "20 000 Leagues" -> "000 Leagues". Causes :
+# (a) `[\s.]?` rendait le separateur de canal OPTIONNEL -> "21"/"50"/"71"/"20"
+# matchaient comme si c'etait du 2.1/5.0/7.1/2.0 ; (b) "ma"/"hra" nus matchaient
+# des mots de titre ("Ma"). On exige desormais un separateur ENTRE le nombre de
+# canaux et le ".1/.0" (un vrai tag audio "5.1" devient "5 1" apres le replace
+# point->espace), et on retire "ma"/"hra" (trop agressifs ; "DTS-HD MA" est
+# deja gere par _NOISE_RE). `[257][\s.][01]` couvre 5.1/7.1/2.1/5.0/7.0/2.0.
+# Les canaux (5.1/7.1/2.0) et "atmos" sont insensibles a la casse.
+# F33 (2026-07-18) : l'alternative `(?-i:MA|HRA)` a ete RETIREE. Le garde
+# title-case ne protegeait que "Ma Vie de Courgette" ; toute release ALL-CAPS
+# (courante) etait MUTILEE : "MA.2019.1080p.BluRay.x264-GRP" -> "2019" (query
+# TMDb purement numerique = film introuvable), "MA.LOUTE.2016..." -> "LOUTE
+# 2016", "MA.VIE.DE.COURGETTE.2016..." -> "VIE DE COURGETTE 2016". Le residu
+# "MA"/"HRA" est desormais strippe UNIQUEMENT avec son contexte DTS-HD, via
+# _DTS_HD_MASTER_RE ci-dessous. Compromis assume : un "MA" audio sans prefixe
+# DTS (ex. "TrueHD.MA.7.1") reste dans le titre — bruit ADDITIF d'un token que
+# la similarite TMDb absorbe, la ou l'ancien comportement detruisait le titre.
+# Une heuristique qui peut mutiler un titre s'abandonne, elle ne s'itere pas.
+# R8-040 (F4) : préfixe DD/DDP optionnel COLLÉ au nombre de canaux. Après
+# `name.replace('.',' ')`, "DD5.1" devient "DD5 1" : le `\b` devant `[257]`
+# échoue (le 5 est précédé d'une lettre, pas de frontière de mot) -> "DD5 1"/
+# "DDP5 1"/"DD7 1" restait et polluait la query TMDb. Le `(?:ddp?)?` optionnel
+# absorbe le préfixe sans toucher le strip release-group (R1/R4) ; le séparateur
+# OBLIGATOIRE `[\s.]` entre canal et `.1` reste (anti "21 Jump Street"/"50"/"71").
 _AUDIO_RESIDUE_RE = re.compile(
-    r"\b(?:ma|hra|[257][\s.]?[01]|2[\s.]?0|atmos)\b",
+    r"\b(?:(?:ddp?)?[257][\s.][01]|atmos)\b",
+    re.IGNORECASE,
+)
+
+# F33 : residu "MA"/"HRA" strippe UNIQUEMENT avec son contexte DTS-HD (Master
+# Audio / High Resolution Audio). Couvre les 3 graphies du corpus reel :
+# "DTS-HD.MA", "DTS-HDMA", "DTS HD-MA". DOIT etre applique AVANT _NOISE_RE :
+# ce dernier mange "dts"/"dts-hd" et detruirait le contexte.
+_DTS_HD_MASTER_RE = re.compile(r"\bdts[\s._-]*hd[\s._-]*(?:ma|hra)\b", re.IGNORECASE)
+
+# F33 : 2e contexte legitime de "MA" = la plateforme source Movies Anywhere,
+# qui precede le tag WEB/WEB-DL/WEBRip ("...1080p.MA.WEB-DL.DDP5.1...").
+# Verrouille par tests/test_lotd_titles_nfo_tmdbid_v77.py:80 (Avatar 2).
+#
+# ANCRAGE OBLIGATOIRE SUR LA RESOLUTION (revue adversaire R1). Le lookahead sur
+# "web" seul ne suffit PAS a distinguer le tag source d'un titre : il mutilait
+# "MA.WEB.2019...", qui rendait "WEB 2019" au lieu de "MA 2019" — exactement la
+# classe de defaut que F33 devait supprimer, reintroduite par une autre porte.
+# Dans le corpus reel le tag source suit TOUJOURS la resolution
+# ("2160p.MA.WEB-DL"), jamais le debut du nom. En exigeant cette resolution, un
+# "MA" en tete de titre ne peut plus matcher : la regle devient non ambigue au
+# lieu d'etre une heuristique qui peut mutiler un titre.
+# La resolution est capturee puis restituee (groupe 1) pour ne pas l'effacer.
+# Meme contrainte d'ordre que ci-dessus : AVANT _NOISE_RE, qui mange "web-dl".
+_WEB_SOURCE_MA_RE = re.compile(
+    r"(\b\d{3,4}p)[\s._-]+(?-i:MA)(?=[\s._-]+web(?:[\s._-]?(?:dl|rip))?\b)",
     re.IGNORECASE,
 )
 
@@ -93,6 +249,20 @@ _PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(?:19\d{2}|20\d{2})\s*[\)\]\}]")
 
 # Caracteres de garbage en fin de chaine apres nettoyage
 _TRAILING_GARBAGE_RE = re.compile(r"[\s\-_\.]+$")
+
+# Separateurs orphelins en fin de chaine (- ou _ ou . isoles apres strip).
+# Utilise dans parse_scene_title pour nettoyer apres release group strip.
+_ORPHAN_SEP_RE = re.compile(r"\s+[-_.]+\s*$")
+
+# LOTD-DUP-TITLE-YEAR + BUG-TITLE-CHANNEL-RESIDUE (Lot D 2026-07) : sur un nom
+# SANS vraie extension (dossier, release nue), Path.stem traitait le dernier
+# segment pointe comme une extension et mangeait ".2005" (l'annee -> identite
+# titre+annee divergente selon qu'un tag qualite suit ou non) ou ".1-GRP"
+# (canal "7.1" colle au release group -> residu "7" orphelin dans le titre).
+# On ne strippe le suffixe que s'il ressemble a une vraie extension de fichier
+# (point + lettre + alphanum) : comportement inchange pour ".mkv"/".FRENCH",
+# suffixes numeriques/composites (".2005", ".1-GRP", ".0") conserves.
+_REAL_FILE_EXT_RE = re.compile(r"^\.[A-Za-z][A-Za-z0-9]*$")
 
 # Release group extraction (Phase Dashboard Podiums).
 # Validation d'un candidat (2-25 chars alphanum + underscore, au moins une lettre).
@@ -107,6 +277,14 @@ _SCENE_MARKER_RE = re.compile(
     r"hdtv|hdrip|dvdrip|remux|truehd|dts|atmos|aac|ac3|10bit|hdr|uhd)\b",
     re.IGNORECASE,
 )
+
+# AUDIT 2026-06-11 (R1a) : le garde "vraie release scene" de parse_scene_title
+# reutilise directement _NOISE_RE (source unique des tags techniques, defini plus
+# bas) AU LIEU d'une liste dupliquee. La 1re version (2026-06-10) avait un
+# _TECH_MARKER_RE trop ETROIT (omettait xvid/divx/eac3/ddp/hdlight/amzn...) :
+# pour "Old.Movie.1998.XviD-DEiTY" -> "Old Movie 1998 -DEiTY" (release group plus
+# strippe -> polluait la query TMDb). _NOISE_RE couvre tous ces tags ET n'inclut
+# PAS l'annee (un titre propre comme "Thor - Ragnarok (2017)" reste preserve).
 
 # Source extraction (Phase Dashboard Podiums).
 # Detecte la source scene (BluRay, WEB-DL, HDTV, Remux, DVDRip, etc.) dans
@@ -238,12 +416,32 @@ def parse_scene_title(filename: str) -> str:
     # 1. Strip extension + separateurs
     # Note : Path(".mkv").stem retourne ".mkv" (cas hidden file). On filtre ce
     # cas degenere en cherchant "." final pour traiter comme une extension.
+    # LOTD-DUP-TITLE-YEAR / BUG-TITLE-CHANNEL-RESIDUE : suffixe strippe
+    # UNIQUEMENT s'il ressemble a une vraie extension (cf _REAL_FILE_EXT_RE).
     p = Path(filename)
-    name = p.stem if p.suffix else p.name
+    name = p.stem if (p.suffix and _REAL_FILE_EXT_RE.match(p.suffix)) else p.name
     if name.startswith("."):
         # Cas pathologique ".mkv" / ".mp4" - retour vide
         return ""
+
+    # 1.b Strip provider tags `{tmdb-XXX}` / `[imdbid-ttXXX]` (B02-TAGS-BRACKETS).
+    # Doit etre fait AVANT le replace `.` -> ` ` car certains formats peuvent
+    # contenir des dots (peu probable mais defensif), et SURTOUT avant le
+    # pipeline noise/year/release-group : sinon les chiffres TMDb (ex 27205)
+    # peuvent etre confondus avec une annee (annee >= 1900) ou polluer la
+    # similarite de titre. Les ids extraits eux-memes sont disponibles via
+    # `extract_provider_tags()` pour le futur auto-link deterministe.
+    name = strip_provider_tags(name)
+
     name = name.replace(".", " ").replace("_", " ")
+
+    # AUDIT 2026-06-10/11 (REAL 2/2 + R1a) : on ne strippe un "-GROUP" final QUE si
+    # le nom est une vraie release scene (au moins un tag technique present).
+    # Calcule AVANT le strip noise (qui retire ces marqueurs). Sinon
+    # "Thor - Ragnarok (2017)" -> "Thor". On reutilise _NOISE_RE (source unique
+    # des tags : xvid/divx/eac3/ddp/hdlight/x264/web-dl/... ; SANS l'annee, donc
+    # un titre propre avec annee reste preserve).
+    had_tech_marker = bool(_NOISE_RE.search(name))
 
     # 2. Position-aware strip si annee parenthesee : strip aussi le suffixe
     # "(year) LANG" → garde uniquement le titre avant la parenthese.
@@ -255,6 +453,12 @@ def parse_scene_title(filename: str) -> str:
     # 3. Strip noise tags AVANT release group : NOISE_RE retire les tags
     # adjacents au groupe (codec, audio), ce qui isole "-XXXX" en fin de chaine
     # avec un espace avant — matchable par _RELEASE_GROUP_RE.
+    # F33 : "DTS-HD MA"/"DTS-HD HRA" et le tag source "MA WEB-DL" se strippent
+    # AVANT _NOISE_RE, qui mangerait le "dts"/"web-dl" porteur du contexte et
+    # laisserait un "MA" orphelin.
+    name = _DTS_HD_MASTER_RE.sub(" ", name)
+    # Groupe 1 = la resolution d'ancrage, restituee telle quelle (seul "MA" part).
+    name = _WEB_SOURCE_MA_RE.sub(r"\1 ", name)
     name = _NOISE_RE.sub(" ", name)
 
     # 4. Strip audio residue
@@ -271,16 +475,21 @@ def parse_scene_title(filename: str) -> str:
     #   confond avec un tag standard, laissant un dash orphelin "-" qui empeche
     #   l'after-year noise de matcher.
     # Cap a 4 iterations par securite.
-    _orphan_sep_re = re.compile(r"\s+[-_.]+\s*$")
     for _ in range(4):
         prev = name
-        # Release group `-GROUP$`
-        name = _RELEASE_GROUP_RE.sub(" ", name)
+        # Release group `-GROUP$` — seulement si vraie release (marqueur technique).
+        if had_tech_marker:
+            name = _RELEASE_GROUP_RE.sub(" ", name)
         # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
-        name = _orphan_sep_re.sub("", name)
+        name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         # Position-aware after-year noise tokens
         name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        # Trailing language tokens sans annee prealable
+        # (cas "L'arme Fatale 2 - FR EN ...")
+        name = _TRAILING_LANG_TOKENS_RE.sub("", name)
+        name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         if name == prev:
             break

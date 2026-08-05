@@ -18,6 +18,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     CROPDETECT_LIMIT,
     CROPDETECT_ROUND,
@@ -36,8 +38,6 @@ from .constants import (
     MPDECIMATE_JUDDER_PULLDOWN,
     MPDECIMATE_SEGMENT_DURATION_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 from .parallelism import resolve_max_workers, run_parallel_tasks
 
@@ -324,12 +324,23 @@ def detect_crop_multi_segments(
 
 
 def classify_crop(segments: List[CropSegment], orig_w: int, orig_h: int) -> CropInfo:
-    """Classifie le crop (letterbox/pillarbox/...) a partir des segments."""
+    """Classifie le crop (letterbox/pillarbox/...) a partir des segments.
+
+    `segments` est attendu trie par temps croissant : c'est le contrat de
+    `detect_crop_multi_segments`, qui reordonne ses resultats par cle de tache.
+    """
     if not segments or orig_w <= 0 or orig_h <= 0:
         return CropInfo(False, "unknown", 0, 0, 0.0, [])
 
-    # Utilise le premier segment comme reference (stable apres 60s)
-    seg = segments[0]
+    # Reference = segment MEDIAN, pas segments[0] (issue #828).
+    # detect_crop_multi_segments place son premier segment a t=0 exactement
+    # (start = total_useful * 0 / (n - 1)) : cropdetect y analyse les logos de
+    # studio et les cartons noirs de l'intro, la portion la MOINS representative
+    # du cadrage reel. Le dernier segment, lui, tombe dans le generique de fin.
+    # L'ancien commentaire « stable apres 60s » decrivait en fait le choix de la
+    # DERNIERE ligne `crop=` a l'interieur d'un segment (cf _parse_last_crop),
+    # pas le choix du segment.
+    seg = segments[len(segments) // 2]
     w, h = seg.crop_w, seg.crop_h
     ar = w / h if h > 0 else 0.0
 
@@ -442,6 +453,9 @@ def classify_imax(
       2. Aspect ratio container (1.43 ou 1.90)
       3. Resolution native > 2600p
       4. TMDb keyword "imax"
+
+    Le verdict NEGATIF porte une confiance graduee selon le nombre de methodes
+    reellement evaluables (0.30 a 0.90), jamais 1.0 : cf. le bloc final.
     """
     ars = [s.aspect_ratio for s in (crop_segments or []) if s.aspect_ratio > 0]
 
@@ -467,4 +481,29 @@ def classify_imax(
     if any("imax" in k for k in kws):
         return ImaxInfo(True, "tmdb_keyword", 0.60, ars or [container_ar])
 
-    return ImaxInfo(False, "none", 1.0, ars)
+    # 5. Verdict negatif (issue #827). Sa confiance doit refleter les methodes
+    # REELLEMENT evaluables, pas le simple fait d'avoir traverse la chaine :
+    #   - methode 1 (expansion, la plus discriminante) : exige >= 2 segments
+    #     cropdetect exploitables. cropdetect en echec => ars == [] => methode
+    #     jamais evaluee ;
+    #   - methodes 2 et 3 : exigent une geometrie de probe valide, soit
+    #     container_ar > 0 (donc probe_width ET probe_height > 0) ;
+    #   - methode 4 : exige une reponse TMDb non vide. Une liste vide est une
+    #     ABSENCE DE DONNEE, pas une absence d'IMAX.
+    # Sans aucun de ces signaux, « pas IMAX » est un repli, pas une mesure : la
+    # confiance 1.0 d'origine transformait une mesure ratee en certitude. Meme
+    # famille que #804 (combine_fake_4k_verdicts, upscale_detection.py).
+    # Plafond a 0.90 : un negatif ne peut pas etre plus sur que le plus fort des
+    # positifs du meme module (expansion, 0.90) — un rip letterboxe d'une source
+    # IMAX ne laisse justement aucun de ces 3 signaux.
+    signals = sum((len(ars) >= 2, container_ar > 0.0, bool(kws)))
+    if signals >= 3:
+        return ImaxInfo(False, "none", 0.90, ars)
+    if signals == 2:
+        return ImaxInfo(False, "none", 0.75, ars)
+    if signals == 1:
+        return ImaxInfo(False, "none", 0.55, ars)
+    # Aucun signal : 0.30 (comme le cas "ambiguous" de combine_fake_4k_verdicts)
+    # et non 0.0, qui est la valeur PAR DEFAUT de VideoPerceptual.imax_confidence
+    # — « mesure impossible » resterait indistinguable de « jamais calcule ».
+    return ImaxInfo(False, "none", 0.30, ars)

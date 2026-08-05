@@ -1,0 +1,224 @@
+name: Release (PyInstaller + Nuitka hybride)
+
+# V2.5 — Build hybride sur tag v*.
+#
+# Backward compat ABSOLUE : PyInstaller reste le binaire officiel
+# (CineSort.exe), publie comme avant. Nuitka est OPT-IN : le binaire
+# CineSortNuitka.exe est ajoute en asset supplementaire, jamais
+# substitue. Si le job Nuitka echoue, la release continue avec le
+# PyInstaller seul (cf job-level continue-on-error sur Nuitka).
+#
+# Declenchement :
+#   - tag git "v*"  (workflow complet, build + upload assets)
+#   - workflow_dispatch (manuel, debug en local sans creer de release)
+#
+# Le smoke test CI (ci.yml) reste sur PyInstaller uniquement pour
+# preserver la vitesse des PR (Nuitka compile en C, ~10x plus lent).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: "Backend(s) a builder"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - pyinstaller
+          - nuitka
+
+permissions:
+  contents: read
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1 : PyInstaller (binaire officiel, comportement historique)
+  # -------------------------------------------------------------------
+  build-pyinstaller:
+    name: Build PyInstaller (officiel)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    if: github.event_name == 'push' || github.event.inputs.backend == 'both' || github.event.inputs.backend == 'pyinstaller'
+
+    steps:
+      - name: Checkout du depot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/uv.lock
+
+      - name: Installation des dependances
+        shell: pwsh
+        run: |
+          uv pip install --system -r requirements.txt -r requirements-build.txt
+
+      - name: Build PyInstaller
+        shell: pwsh
+        run: pyinstaller --noconfirm CineSort.spec
+
+      - name: Verification taille EXE (max 60 MB)
+        shell: pwsh
+        run: |
+          $exe = "dist\CineSort.exe"
+          if (-not (Test-Path $exe)) { Write-Error "EXE introuvable : $exe"; exit 1 }
+          $sizeMB = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "Taille PyInstaller : $sizeMB MB"
+          if ((Get-Item $exe).Length -gt 60MB) {
+            Write-Error "EXE trop volumineux : $sizeMB MB (limite : 60 MB)"
+            exit 1
+          }
+
+      - name: Upload artefact PyInstaller
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CineSort-pyinstaller
+          path: dist/CineSort.exe
+          retention-days: 30
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------
+  # Job 2 : Nuitka (opt-in, asset supplementaire CineSortNuitka.exe)
+  # Job-level continue-on-error : un echec Nuitka ne bloque pas la release.
+  # -------------------------------------------------------------------
+  build-nuitka:
+    name: Build Nuitka (opt-in)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    if: github.event_name == 'push' || github.event.inputs.backend == 'both' || github.event.inputs.backend == 'nuitka'
+
+    steps:
+      - name: Checkout du depot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/uv.lock
+
+      - name: Installation des dependances runtime
+        shell: pwsh
+        run: |
+          uv pip install --system -r requirements.txt
+
+      - name: Installation de Nuitka + UPX
+        shell: pwsh
+        run: |
+          uv pip install --system "nuitka>=2.4"
+          uv pip install --system ordered-set zstandard
+          # UPX optionnel : si l'installation echoue, Nuitka builde sans
+          # --enable-plugin=upx (cf script PowerShell).
+          choco install upx -y --no-progress
+        continue-on-error: false
+
+      - name: Build Nuitka (standalone onefile)
+        shell: pwsh
+        run: |
+          python -m nuitka `
+            --standalone `
+            --onefile `
+            --assume-yes-for-downloads `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=assets/cinesort.ico `
+            --enable-plugin=upx `
+            --include-data-dir=web=web `
+            --include-data-dir=locales=locales `
+            --include-data-dir=cinesort/infra/db/migrations=cinesort/infra/db/migrations `
+            --include-data-files=VERSION=VERSION `
+            --nofollow-import-to=torch `
+            --nofollow-import-to=torchvision `
+            --nofollow-import-to=torchaudio `
+            --nofollow-import-to=tensorflow `
+            --nofollow-import-to=transformers `
+            --nofollow-import-to=scipy `
+            --nofollow-import-to=matplotlib `
+            --nofollow-import-to=pandas `
+            --nofollow-import-to=tkinter `
+            --nofollow-import-to=pytest `
+            --nofollow-import-to=playwright `
+            --output-filename=CineSortNuitka.exe `
+            --output-dir=dist-nuitka `
+            app.py
+
+      - name: Verification taille EXE Nuitka
+        shell: pwsh
+        run: |
+          $exe = "dist-nuitka\CineSortNuitka.exe"
+          if (-not (Test-Path $exe)) { Write-Error "EXE Nuitka introuvable : $exe"; exit 1 }
+          $sizeMB = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "Taille Nuitka : $sizeMB MB"
+
+      - name: Upload artefact Nuitka
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CineSort-nuitka
+          path: dist-nuitka/CineSortNuitka.exe
+          retention-days: 30
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------
+  # Job 3 : publication GitHub Release (seulement sur tag, attache les
+  # deux binaires comme assets, Nuitka optionnel)
+  # -------------------------------------------------------------------
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-pyinstaller, build-nuitka]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout du depot
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - name: Telecharger artefact PyInstaller
+        uses: actions/download-artifact@v5
+        with:
+          name: CineSort-pyinstaller
+          path: ./release-assets
+
+      - name: Telecharger artefact Nuitka (optionnel)
+        uses: actions/download-artifact@v5
+        with:
+          name: CineSort-nuitka
+          path: ./release-assets
+        continue-on-error: true
+
+      - name: Creer / mettre a jour la GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') }}
+          files: |
+            release-assets/CineSort.exe
+            release-assets/CineSortNuitka.exe
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

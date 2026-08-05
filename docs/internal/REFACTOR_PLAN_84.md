@@ -1,8 +1,70 @@
 # Plan refactor #84 — God class CineSortApi → 5 façades par bounded context
 
-**Version** : 1.3 (Sprint C1 — extraction 8 méthodes orphelines + input clamping audit C7)
-**Auteur** : Claude Code (session 2026-05-14, sprint 7 2026-05-21, sprint C1 2026-05-21)
-**Statut** : ✅ Phase 1 + Phase 2 + Sprint 7 + Sprint C1 **TERMINÉES** — Lot D restant (migration callers JS legacy)
+**Version** : 1.4 (M-03 — inventaire lazy imports residuels + 4 conversions stdlib safes)
+**Auteur** : Claude Code (sessions 2026-05-14, 2026-05-21 Sprint 7/C1, 2026-06-01 M-03 Vague M)
+**Statut** : ✅ Phase 1 + Phase 2 + Sprint 7 + Sprint C1 **TERMINÉES** — Lot D restant (migration callers JS legacy) + lazy imports residuels documentes
+
+## M-03 (Vague M, juin 2026) — Inventaire lazy imports residuels + conversions safes
+
+**Contexte** : item M-03-FINISH-REFACTOR-84 vise la cloture des etapes 2-4 du refactor.
+L'estimation initiale de 179 lazy imports etait pessimiste : apres Issue #83 (mai 2026,
+150 lazy imports convertis sur ~165), il restait **73 lazy imports** dans le code source
+au demarrage du sprint M-03.
+
+**Strategie pragmatique** : refactor minimal viable a haut risque/faible rendement.
+La majorite des 73 restants sont des choix volontaires documentes (deps optionnelles,
+platform-specific, cycles intentionnels). Sprint M-03 :
+
+- Convertit **4 lazy imports stdlib** dont la conversion etait clairement safe :
+  - `cinesort/ui/api/settings_support.py` : `import re as _re` (L1444), `import secrets as _secrets` (L817) -> top-level
+  - `cinesort/ui/api/quality_simulator_support.py` : `import re` (L443) -> top-level
+  - `cinesort/infra/db/migration_manager.py` : `from pathlib import Path as _P` (L206) -> `Path` deja top-level, doublon supprime
+- Compte final : **69 lazy imports** (verifie par AST visitor)
+- Ajoute `tests/test_refactor_84_progress_v77.py` qui borne le compte a `MAX_LAZY_IMPORTS=69`
+  pour prevenir toute regression future
+- Documente ci-dessous les 69 lazy imports residuels par categorie
+
+### Inventaire lazy imports residuels (69 total au M-03)
+
+| Categorie | Count | Exemples / Justification |
+|-----------|-------|--------------------------|
+| **Dependances optionnelles** | ~17 | `segno` (QR), `onnxruntime` (LPIPS), `rapidfuzz` (fuzzy), `msvcrt`/`fcntl` (platform), `requests` ; bundle accepte ces deps mais le code reste robuste si absentes |
+| **Cycles intentionnels documentes** | ~24 | `runtime_support.py` (evite cycle avec settings_support au load), `library_actions_support.py` (cross-module run_flow/plan/tmdb), `cleanup.py <-> apply_core`, `cinesort_api.py` endpoints rarement utilises |
+| **Stdlib lazy par WHY documente** | ~8 | `apply_core.sha1_quick` `import time as _time_mod` (commentaire : eviter shadow), `cinesort_api._get_app_version_impl` (subprocess + datetime + sys, endpoint ponctuel) |
+| **Cas restants a auditer** | ~20 | Petit gain attendu, risque potentiel de cycle ; reportes a un sprint futur (Vague N+) |
+
+### Top fichiers avec lazy imports residuels
+
+| Fichier | Count | Type dominant |
+|---------|-------|---------------|
+| `cinesort/ui/api/perceptual_support.py` | 7 | Cross-module + dep optionnelle onnxruntime |
+| `cinesort/ui/api/cinesort_api.py` | 6 | Endpoints ponctuels documentes (`# noqa: PLC0415`) + dep segno |
+| `cinesort/ui/api/library_actions_support.py` | 5 | Cross-module run_flow / plan_support / tmdb_client (cycle potentiel) |
+| `cinesort/domain/perceptual/audio_perceptual.py` | 4 | Dep onnxruntime + numpy |
+| `cinesort/domain/perceptual/lpips_compare.py` | 4 | Dep onnxruntime |
+| `cinesort/infra/single_instance.py` | 4 | Platform-specific (msvcrt vs fcntl) |
+| `cinesort/ui/api/library_audit_support.py` | 4 | Cross-module library_support + tmdb_client |
+| `cinesort/ui/api/run_flow_support.py` | 4 | Cross-module quality_audit / perceptual / run_data_support |
+
+### Travail residuel (Vague N+ ou futur sprint dedie)
+
+- **Resolution des ~20 cas restants** : audit fichier par fichier de cinesort_api.py, run_flow_support.py
+  et library_actions_support.py. Necessite analyse fine du graphe d'imports pour chaque cas.
+- **Suppression des `# noqa: PLC0415`** : si le lazy import devient inutile, retirer le noqa.
+- **CI ajouter rule ruff PLC0415** : non strict pour eviter regression, mais signaler dans la review.
+- **Re-verifier MAX_LAZY_IMPORTS** : si le code grossit, mettre a jour la borne (ou faire du cleanup).
+
+### Acceptance de M-03 (Vague M)
+
+- [x] Inventaire des lazy imports residuels documente (69 categorises)
+- [x] 4 conversions stdlib safes appliquees sans regression
+- [x] Test regression `tests/test_refactor_84_progress_v77.py` qui borne le compte
+- [x] CLAUDE.md / REFACTOR_PLAN_84.md mis a jour
+- [ ] **Status PARTIAL** : 4 conversions sur ~20 candidats convertibles. Effort restant
+      ~10-15h reporte a un sprint dedie (Vague N+) car risk/reward non-favorable pour M-03
+      (la majorite des candidats demandent une analyse cycle import par cas).
+
+---
 
 ## Résumé d'avancement (au 2026-05-21)
 
@@ -529,3 +591,26 @@ Avant exécution, l'utilisateur doit valider :
 ---
 
 *Préparation 2026-05-14 par Claude Code. Validé par utilisateur le [DATE_VALIDATION]. Exécution démarrée le [DATE_DEMARRAGE].*
+
+---
+
+## 11. Journal des bornes d'imports différés (`MAX_LAZY_IMPORTS_BY_LAYER`)
+
+Le cliquet de `tests/test_refactor_84_progress_v77.py::test_lazy_imports_bounded` est posé
+**à zéro marge** sur la mesure réelle. Toute PR qui ajoute un import différé le fait donc
+rougir — c'est voulu : chaque ajout doit être une décision, pas une dérive. Ce journal
+enregistre les décisions.
+
+Règle : on ne remonte une borne que si l'import différé est **nécessaire** (cycle réel), et
+on en profite pour **redescendre** toute couche qui aurait pris de la marge dormante — une
+marge non reprise laisse passer une récidive gratuite.
+
+| date | couche | avant → après | raison |
+|---|---|---|---|
+| 2026-08-03 | toutes | — | valeurs initiales, mesurées à zéro marge |
+| 2026-08-04 | `app` | 24 → **23** | marge dormante reprise (mesure réelle = 23) |
+| 2026-08-04 | `ui` | 110 → **111** | PR#853 : `film_support` importe tardivement `history_support.get_plan_row`. Les deux modules se référencent mutuellement ; un import de tête crée un cycle à l'import du paquet. Le total global reste à 170, `app` rendant le point que `ui` prend. |
+| 2026-08-04 | `ui` | 111 → **113** | PR#847, +2 : `quality_report_support` importe tardivement `run_read_support.full_langs_from_embedded` et `domain.subtitle_helpers._normalize_iso639`. **Aucun cycle dur établi** — `run_read_support` n'importe pas `quality_report_support` en retour. Relevée quand même parce que ces deux imports suivent le motif déjà en place dans le module (`dashboard_support.py:300-309` importe `run_read_support` tardivement à quatre endroits) : les convertir isolément n'aurait pas de sens, c'est le motif entier qui demande un nettoyage. **Dette assumée, à reprendre dans le chantier de conversion de la couche `ui`.** |
+| 2026-08-04 | `app` | 23 → **25** | PR#852, +2, les deux vérifiés un par un. (a) `cleanup` → `apply_core._append_error_message` : **vrai cycle**, `apply_core.py:15` importe déjà `cleanup`. (b) `apply_batches_reconciliation` → `apply_audit.read_apply_audit` : **pas** de cycle ; conservé pour la raison que révèle le `except ImportError` en dessous — sur un build EXE **amputé**, un import de tête tuerait tout le module de réconciliation, l'import local ne dégrade que la lecture du marqueur. Le commentaire du code affichait une autre raison (« éviter de charger au boot »), corrigée. |
+| 2026-08-05 | `ui` | 113 → **111** | Issue #599, **−2 : conversion, pas relèvement**. `film_support._fetch_tmdb_extras` portait deux imports différés : `from cinesort.infra.tmdb_client import TmdbClient` et `import requests as _req`. Aucun cycle ne les justifiait — le contrat `infra_bounded` interdit à `infra` de remonter vers `ui`, donc un import de tête est sûr, et il est écrit **module-style** (`from cinesort.infra import tmdb_client as _tmdb_client`) pour que les `patch("cinesort.infra.tmdb_client.TmdbClient", …)` des tests restent opérants. Le second a purement disparu : le `requests.get` direct est rapatrié sur `TmdbClient.get_movie_extras`. Nouveau total mesuré : **172**. |
+| 2026-08-04 | — | 170 → **174** | Fusion PR#852 ↔ main. Rien à arbitrer côté bornes : les deux apports portent sur des couches **disjointes** (`app` +2, `ui` +2), et la mesure post-fusion retombe **exactement** sur chaque borne — aucune couche n'a pris de marge dormante. Deux affirmations sont en revanche devenues fausses et ont été corrigées : (a) « le total reste à 170 » — la compensation `app`/`ui` de PR#853 était une coïncidence, pas une règle, seule la borne **par couche** fait foi ; (b) « `apply_audit` n'importe que la stdlib » — main y a ajouté `infra.log_scrubber` (issue #414), qui tire `infra.log_context`. Le verdict de (b) tient quand même : `infra_bounded` interdit à `infra` de remonter vers `app`, donc toujours aucun cycle, et l'argument du build EXE amputé se **renforce** puisque la chaîne d'import s'allonge. |

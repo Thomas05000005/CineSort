@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import cinesort.ui.api.cinesort_api as backend
 import cinesort.app.apply_core as apply_core
 import cinesort.domain.core as core
+import cinesort.ui.api.cinesort_api as backend
 from cinesort.app.apply_core import build_apply_context
 
 

@@ -15,14 +15,13 @@ import unittest
 from unittest import mock
 
 from cinesort.domain.perceptual.audio_perceptual import (
-    analyze_audio_perceptual,
+    _compute_audio_score,
     analyze_astats,
+    analyze_audio_perceptual,
     analyze_clipping_segments,
     analyze_loudnorm,
     select_best_audio_track,
-    _compute_audio_score,
 )
-
 
 # ---------------------------------------------------------------------------
 # select_best_audio_track (2 tests)
@@ -213,6 +212,39 @@ class AudioScoreTests(unittest.TestCase):
         s_safe = _compute_audio_score(loud_safe, None, None)
         s_clip = _compute_audio_score(loud_clip, None, None)
         self.assertGreater(s_safe, s_clip)
+
+    def test_true_peak_evidence_survives_clean_deep_clipping(self) -> None:
+        """#523 : la mesure deep ne doit pas effacer la preuve True Peak.
+
+        `loud` (true peak) et `clip` (segments ecretes) sont deux mesures
+        INDEPENDANTES. Un fichier a tp=+0.5 dBTP dont peu de segments sont
+        detectes ecretes ressortait a 90 (« propre ») parce que le bloc deep
+        REAFFECTAIT le sous-score au lieu de le combiner.
+        """
+        loud_clip = {"loudness_range": 12.0, "true_peak": 0.5, "integrated_loudness": -24.0}
+        loud_safe = {"loudness_range": 12.0, "true_peak": -3.0, "integrated_loudness": -24.0}
+        clean_deep = {"clipping_pct": 0.0, "total_segments": 100, "clipping_segments": 0}
+
+        s_tp_only = _compute_audio_score(loud_clip, None, None)
+        s_tp_and_clean_deep = _compute_audio_score(loud_clip, None, clean_deep)
+        s_safe_and_clean_deep = _compute_audio_score(loud_safe, None, clean_deep)
+        s_safe_no_deep = _compute_audio_score(loud_safe, None, None)
+
+        self.assertEqual(s_tp_and_clean_deep, s_tp_only, "la penalite TP doit survivre a la mesure deep")
+        self.assertLess(s_tp_and_clean_deep, s_safe_and_clean_deep)
+        # Garde-fou dans l'autre sens : sans preuve TP, une mesure deep propre
+        # doit toujours pouvoir remonter au-dessus du defaut « non analyse » (80).
+        self.assertGreater(s_safe_and_clean_deep, s_safe_no_deep)
+
+    def test_deep_clipping_still_penalises_without_true_peak(self) -> None:
+        """L'autre sens de la combinaison : deep severe sans preuve TP = malus."""
+        loud_safe = {"loudness_range": 12.0, "true_peak": -3.0, "integrated_loudness": -24.0}
+        severe_deep = {"clipping_pct": 20.0, "total_segments": 100, "clipping_segments": 20}
+        clean_deep = {"clipping_pct": 0.0, "total_segments": 100, "clipping_segments": 0}
+        self.assertLess(
+            _compute_audio_score(loud_safe, None, severe_deep),
+            _compute_audio_score(loud_safe, None, clean_deep),
+        )
 
 
 # ---------------------------------------------------------------------------

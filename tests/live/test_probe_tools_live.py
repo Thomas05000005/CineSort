@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import live_env
+
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.infra.probe.service import ProbeService
 

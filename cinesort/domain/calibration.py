@@ -18,23 +18,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable, Optional
 
+# SCORE-02 (Vague M, M-06) : centralisation des helpers tiers dans
+# tiers_helpers. On reexporte tier_ordinal pour ne pas casser les imports
+# existants (cinesort.domain.calibration.tier_ordinal).
+from cinesort.domain.tiers_helpers import tier_ordinal
+
 logger = logging.getLogger(__name__)
-
-
-# Ordre des tiers (du plus bas au plus haut), pour calculer les deltas ordinaux.
-_TIER_ORDER = ["Reject", "Bronze", "Silver", "Gold", "Platinum"]
-
-
-def tier_ordinal(tier: str) -> int:
-    """Retourne le rang du tier (0 = Reject, 4 = Platinum). -1 si inconnu."""
-    t = str(tier or "").strip().title()
-    # Accepter les alias legacy
-    legacy = {"Premium": "Platinum", "Bon": "Gold", "Moyen": "Silver", "Mauvais": "Reject", "Faible": "Bronze"}
-    t = legacy.get(t, t)
-    try:
-        return _TIER_ORDER.index(t)
-    except ValueError:
-        return -1
 
 
 def compute_tier_delta(computed_tier: str, user_tier: str) -> int:
@@ -132,6 +121,11 @@ def suggest_weight_adjustment(
       - Rééquilibrer pour que la somme reste constante (réduire proportionnellement
         les autres poids).
 
+    Lecture de `current_weights` : un poids a 0 est une valeur METIER valide
+    (categorie desactivee) et est lu tel quel ; seule l'ABSENCE (cle manquante
+    ou None) retombe sur 60/30/10. Un poids present mais illisible est
+    FAIL-CLOSED : journalise en warning puis None, aucune suggestion.
+
     Retourne None si aucune suggestion applicable, sinon dict avec
     `{from: weights, to: weights, rationale: str}`.
     """
@@ -149,14 +143,34 @@ def suggest_weight_adjustment(
     if focus_count == 0:
         return None
 
-    try:
-        w_video = int(current_weights.get("video", 60) or 60)
-        w_audio = int(current_weights.get("audio", 30) or 30)
-        w_extras = int(current_weights.get("extras", 10) or 10)
-    except (TypeError, ValueError):
-        return None
-
-    weights = {"video": w_video, "audio": w_audio, "extras": w_extras}
+    # Lecture des poids : le defaut ne s'applique qu'a l'ABSENCE, jamais a un
+    # 0 explicite. validate_quality_profile (quality_score.py:423) autorise
+    # explicitement un poids a 0 ; un profil qui desactive volontairement une
+    # categorie ne doit pas la voir ressuscitee au defaut, sinon `total_before`
+    # et le prorata de reequilibrage portent sur un profil qui n'existe pas
+    # (#639). Cf la regle de revue "sentinelle falsy" dans
+    # cinesort/domain/conversions.py.
+    #
+    # FAIL-CLOSED conserve (et NON remplace par to_int) : `current_weights`
+    # provient d'un `profile_json` arbitraire (cinesort_api.py:2616-2617). Une
+    # valeur PRESENTE mais illisible ("abc", []) n'est pas une absence — retomber
+    # en silence sur 60/30/10 ferait porter la suggestion sur un profil qui n'est
+    # pas celui de l'utilisateur. On journalise et on renonce.
+    weights: Dict[str, int] = {}
+    for _cat, _fallback in (("video", 60), ("audio", 30), ("extras", 10)):
+        _raw = current_weights.get(_cat)
+        if _raw is None:
+            weights[_cat] = _fallback
+            continue
+        try:
+            weights[_cat] = int(_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "calibration.suggest_weight_adjustment: poids %s illisible (%r) — aucune suggestion emise",
+                _cat,
+                _raw,
+            )
+            return None
     total_before = sum(weights.values())
 
     delta = 5 if direction == "underscore" else -5

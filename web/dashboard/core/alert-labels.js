@@ -68,8 +68,13 @@ const FLAG_MAP = {
   // --- Source / Filesystem ---
   root_level_source: {
     icon: "📁",
-    label: "Source non identifiée",
-    description: "Le dossier source n'est pas dans un format scene standard — fichier probablement renommé à la main.",
+    // AUDIT 2026-06-13 (R5-I) : ce flag signale UNIQUEMENT un film pose
+    // directement a la racine (plan_support_core.py:707), pas un probleme
+    // d'identification ni un fichier "renomme a la main" (un BluRay scene a la
+    // racine declenchait a tort ce message trompeur). On dit la verite :
+    // le film sera range dans un sous-dossier "Titre (Annee)" a l'application.
+    label: "Film à la racine",
+    description: "Ce film est posé directement à la racine de la bibliothèque (hors sous-dossier dédié). Il sera rangé dans un dossier « Titre (Année) » lors de l'application.",
     severity: "info",
     action: { kind: "ignore", label: "Ignorer" },
   },
@@ -85,6 +90,17 @@ const FLAG_MAP = {
     label: "Intégrité fichier invalide",
     description: "L'en-tête du fichier vidéo est corrompu ou illisible — re-télécharger ou vérifier.",
     severity: "critical",
+    action: { kind: "rescan", label: "Re-scanner" },
+  },
+  // VN-A.1 : flag explicite pour exposer probe_quality=FAILED/PARTIAL en UI.
+  // Backend : analyze_encode_quality + quality_report_support marquent ce flag
+  // quand ffprobe/MediaInfo echouent ou ne renvoient qu'un sous-ensemble des
+  // metriques. Avant : l'utilisateur voyait juste un score "weird" sans cause.
+  integrity_probe_failed: {
+    icon: "🛰",
+    label: "Analyse technique incomplète",
+    description: "La probe ffprobe/MediaInfo a échoué ou n'a renvoyé qu'une partie des métriques — score qualité partiel.",
+    severity: "warning",
     action: { kind: "rescan", label: "Re-scanner" },
   },
 
@@ -107,6 +123,26 @@ const FLAG_MAP = {
     icon: "💬",
     label: "Sous-titres manquants",
     description: "Aucun sous-titre détecté pour les langues configurées.",
+    severity: "warning",
+    action: { kind: "config_subs", label: "Configurer recherche subs" },
+  },
+  // ARBITRAGE PRODUIT F12 (2026-08-03) : un « .fr.forced.srt » ne traduit que les
+  // passages en langue étrangère. La langue EST détectée (donc pas de
+  // subtitle_missing_fr, qui serait de toute façon effacé par les réconciliations
+  // backend), mais il n'existe aucune piste FR complète -> flag dédié.
+  subtitle_forced_only_fr: {
+    icon: "💬",
+    label: "Sous-titres FR forcés uniquement",
+    description:
+      "Seul un sous-titre FR « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste FR complète.",
+    severity: "warning",
+    action: { kind: "config_subs", label: "Configurer recherche subs" },
+  },
+  subtitle_forced_only_en: {
+    icon: "💬",
+    label: "Sous-titres EN forcés uniquement",
+    description:
+      "Seul un sous-titre EN « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste EN complète.",
     severity: "warning",
     action: { kind: "config_subs", label: "Configurer recherche subs" },
   },
@@ -172,6 +208,33 @@ const FLAG_MAP = {
     severity: "critical",
     action: { kind: "open_film", label: "Voir détail" },
   },
+  // AUDIT 2026-06-14 (R6-I) : flag emis par la detection de doublons quand
+  // l'annee est introuvable -> n'etait pas mappe ("Alerte sans description.").
+  year_missing: {
+    icon: "📅",
+    label: "Année introuvable",
+    description: "Aucune année exploitable (ni NFO ni nom de dossier). Le regroupement de doublons se base alors sur le titre seul : vérifier l'année avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
+  // #613 : episode TV dont la saison n'a pas ete resolue (nom de type
+  // "Episode 12" sans saison). L'apply REFUSE de le ranger : "Saison 00" est le
+  // dossier des specials, pas une poubelle pour les saisons inconnues.
+  tv_season_unknown: {
+    icon: "📺",
+    label: "Saison indéterminée",
+    description: "La saison de cet épisode n'a pas pu être déterminée. L'application refusera de le ranger (le mettre dans « Saison 00 » le confondrait avec les specials) : renseigner la saison avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
+};
+
+// AUDIT 2026-06-14 (R6-I) : map de langues pour les flags subtitle_missing_<lang>
+// dynamiques (de/es/it/...) non listes explicitement ci-dessus.
+const _LANG_NAMES = {
+  fr: "français", en: "anglais", de: "allemand", es: "espagnol",
+  it: "italien", pt: "portugais", nl: "néerlandais", ja: "japonais",
+  ko: "coréen", zh: "chinois", ru: "russe", ar: "arabe",
 };
 
 const DEFAULT = {
@@ -189,7 +252,39 @@ const DEFAULT = {
 export function labelForFlag(code) {
   const c = String(code || "").trim();
   if (!c) return null;
-  const entry = FLAG_MAP[c] || DEFAULT;
+  let entry = FLAG_MAP[c];
+  // AUDIT 2026-06-14 (R6-I) : flags subtitle_missing_<lang> dynamiques.
+  if (!entry && c.startsWith("subtitle_missing_")) {
+    const lang = c.slice("subtitle_missing_".length);
+    const langName = _LANG_NAMES[lang] || lang.toUpperCase();
+    entry = {
+      icon: "💬",
+      label: `Sous-titres ${lang.toUpperCase()} manquants`,
+      description: `Aucun sous-titre ${langName} détecté pour ce film.`,
+      severity: "warning",
+      action: { kind: "config_subs", label: "Configurer recherche subs" },
+    };
+  }
+  // F12 (2026-08-03) : flags subtitle_forced_only_<lang> dynamiques (de/es/it/...).
+  if (!entry && c.startsWith("subtitle_forced_only_")) {
+    const lang = c.slice("subtitle_forced_only_".length);
+    const langName = _LANG_NAMES[lang] || lang.toUpperCase();
+    entry = {
+      icon: "💬",
+      label: `Sous-titres ${lang.toUpperCase()} forcés uniquement`,
+      description: `Seul un sous-titre ${langName} « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste ${lang.toUpperCase()} complète.`,
+      severity: "warning",
+      action: { kind: "config_subs", label: "Configurer recherche subs" },
+    };
+  }
+  // AUDIT 2026-06-14 (R6-I) : flag inconnu -> on affiche le code en clair plutot
+  // que le generique "Alerte sans description." (sans valeur pour l'utilisateur).
+  if (!entry) {
+    entry = {
+      ...DEFAULT,
+      description: `Alerte « ${c} » (non documentée). Signalez-la si elle est fréquente.`,
+    };
+  }
   return {
     code: c,
     icon: entry.icon,

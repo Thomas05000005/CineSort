@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,14 +50,35 @@ def film_identity_key(row: Any) -> str:
     if tmdb_id:
         return f"tmdb:{tmdb_id}{ed_suffix}"
 
-    title = _norm_title(str(getattr(row, "proposed_title", "") or ""))
+    # LOTD-DUP-TITLE-YEAR (revue round 1) : meme tolerance que movie_key —
+    # "Titre 2005"|2005 et "Titre"|2005 partagent l'identite (timeline film),
+    # "Blade Runner 2049"|2017 reste distinct. Le proposed_title n'est pas modifie.
     year = int(getattr(row, "proposed_year", 0) or 0)
+    raw_title = str(getattr(row, "proposed_title", "") or "")
+    title = _norm_title(strip_trailing_year_if_equal(raw_title, year))
     return f"title:{title}|{year}{ed_suffix}"
 
 
 # ---------------------------------------------------------------------------
 # Lecture des plan.jsonl
 # ---------------------------------------------------------------------------
+
+
+def _resolve_run_dir(state_dir: Path, run_id: str) -> Path:
+    """Resout le dossier d'un run. AUDIT 2026-06-10 (REAL 2/2) : les vrais
+    dossiers sont `runs/tri_films_<run_id>` (infra.state.new_run), pas
+    `runs/<run_id>` -> get_film_history/list_films_with_history ne trouvaient
+    jamais plan.jsonl et retournaient 0 evenement / 0 film. domain ne peut pas
+    importer infra.state (import-linter) : on duplique la convention de nommage,
+    en tolerant aussi un dossier non prefixe (robustesse)."""
+    runs = state_dir / "runs"
+    prefixed = runs / f"tri_films_{run_id}"
+    if prefixed.exists():
+        return prefixed
+    bare = runs / run_id
+    if bare.exists():
+        return bare
+    return prefixed  # defaut : convention canonique
 
 
 def _load_plan_rows_from_jsonl(plan_path: Path) -> List[Dict[str, Any]]:
@@ -80,8 +103,13 @@ def _load_plan_rows_from_jsonl(plan_path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _identity_key_from_dict(data: Dict[str, Any]) -> str:
-    """Calcule la cle d'identite depuis un dict plan.jsonl (sans instancier PlanRow)."""
+def identity_key_from_dict(data: Dict[str, Any]) -> str:
+    """Calcule la cle d'identite depuis un dict plan.jsonl (sans instancier PlanRow).
+
+    Variante de :func:`film_identity_key` qui opere sur un dict brut (plan.jsonl
+    deserialise) plutot que sur un PlanRow. Source unique partagee entre le
+    domain (timeline) et l'UI (film_support.get_film_full).
+    """
     edition = str(data.get("edition") or "").strip().lower()
     ed_suffix = f"|{edition}" if edition else ""
 
@@ -97,8 +125,12 @@ def _identity_key_from_dict(data: Dict[str, Any]) -> str:
     if tmdb_id:
         return f"tmdb:{tmdb_id}{ed_suffix}"
 
-    title = _norm_title(str(data.get("proposed_title") or ""))
+    # R2 (revue round 2) : identity_key_from_dict est LE chemin vivant
+    # (film_support.get_film_full + timeline) ; film_identity_key ne l'est pas.
+    # La tolerance d'annee doit donc etre ici pour que "Le Grand Voyage 2005" et
+    # "Le Grand Voyage" (annee 2005) partagent une timeline unique.
     year = int(data.get("proposed_year") or 0)
+    title = _norm_title(strip_trailing_year_if_equal(str(data.get("proposed_title") or ""), year))
     return f"title:{title}|{year}{ed_suffix}"
 
 
@@ -135,7 +167,7 @@ def get_film_timeline(
             continue
 
         # Chemin du plan.jsonl pour ce run
-        run_dir = state_dir / "runs" / run_id
+        run_dir = _resolve_run_dir(state_dir, run_id)
         plan_path = run_dir / "plan.jsonl"
         plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
@@ -143,7 +175,7 @@ def get_film_timeline(
         matched_row: Optional[Dict[str, Any]] = None
         matched_row_id: Optional[str] = None
         for row_data in plan_rows:
-            if _identity_key_from_dict(row_data) == film_id:
+            if identity_key_from_dict(row_data) == film_id:
                 matched_row = row_data
                 matched_row_id = str(row_data.get("row_id") or "")
                 break
@@ -257,13 +289,13 @@ def list_films_overview(
         return []
 
     run_id = str(last_run.get("run_id") or "")
-    run_dir = state_dir / "runs" / run_id
+    run_dir = _resolve_run_dir(state_dir, run_id)
     plan_path = run_dir / "plan.jsonl"
     plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
     films: List[Dict[str, Any]] = []
     for row_data in plan_rows[:limit]:
-        fid = _identity_key_from_dict(row_data)
+        fid = identity_key_from_dict(row_data)
         row_id = str(row_data.get("row_id") or "")
         score: Optional[int] = None
         tier = ""

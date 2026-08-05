@@ -3,11 +3,12 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
+
 import cinesort.domain.core as core
-from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.domain.tv_helpers import parse_tv_info
+from cinesort.ui.api.cinesort_api import CineSortApi
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -58,6 +59,14 @@ class TvParsingTests(unittest.TestCase):
     def test_year_extracted_from_folder(self) -> None:
         folder = Path("/lib/Breaking Bad (2008)")
         video = Path("/lib/Breaking Bad (2008)/S01E01.mkv")
+        result = parse_tv_info(folder, video)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.year, 2008)
+
+    def test_year_extracted_from_filename_flat_layout(self) -> None:
+        # Arborescence plate : l'annee n'est que dans le nom de fichier.
+        folder = Path("/lib/Downloads")
+        video = Path("/lib/Downloads/Breaking.Bad.2008.S01E01.mkv")
         result = parse_tv_info(folder, video)
         self.assertIsNotNone(result)
         self.assertEqual(result.year, 2008)

@@ -6,6 +6,11 @@
  * ============================================================================
  */
 
+/* V1.4 — utilities wrappees dans @layer utilities (cf tokens.css pour ordre).
+   Utilities < legacy < v5 dans la cascade. Les utilities .v5u-* avec !important
+   restent prioritaires malgre le layer car !important inverse l'ordre des layers. */
+@layer utilities {
+
 /* ===========================================================
  * Display
  * =========================================================== */
@@ -275,3 +280,5 @@
   .v5u-lg\:grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
   .v5u-lg\:grid-cols-5 { grid-template-columns: repeat(5, 1fr); }
 }
+
+} /* end @layer utilities */

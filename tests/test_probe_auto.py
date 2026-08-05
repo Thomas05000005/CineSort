@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest import mock
 
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
-from cinesort.infra.probe.service import ProbeService
 from cinesort.infra.probe import tooling
+from cinesort.infra.probe.service import ProbeService
 
 
 class _RunnerSpy:

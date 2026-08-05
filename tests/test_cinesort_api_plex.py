@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import cinesort.ui.api.cinesort_api as backend
 
@@ -204,8 +204,9 @@ class TestGetPlexSyncReport(unittest.TestCase):
             mock_infra.return_value = (store, MagicMock())
 
             # Crée un fichier plan.jsonl factice (vide → renverra "Aucun film")
-            (self.state_dir / "runs" / "run1").mkdir(parents=True)
-            (self.state_dir / "runs" / "run1" / "plan.jsonl").write_text("", encoding="utf-8")
+            # Audit 2026-06-02 : convention `tri_films_{run_id}` (state.new_run).
+            (self.state_dir / "runs" / "tri_films_run1").mkdir(parents=True)
+            (self.state_dir / "runs" / "tri_films_run1" / "plan.jsonl").write_text("", encoding="utf-8")
 
             result = self.api.integrations.get_plex_sync_report(run_id="run1")
             self.assertFalse(result["ok"])

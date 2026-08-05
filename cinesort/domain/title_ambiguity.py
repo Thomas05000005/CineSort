@@ -29,7 +29,6 @@ import unicodedata
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # Articles à strip avant comparaison (matching cross-langue plus robuste).
 # Note : les apostrophes sont converties en espaces lors de la normalisation,
 # donc "l'" devient "l " avant le strip d'article. Même remarque pour "d ".
@@ -65,6 +64,27 @@ def normalize_title_for_ambiguity(title: str) -> str:
     return s
 
 
+# Sources qui constituent le "groupe ambigu" : identités issues d'une
+# résolution provider (recherche TMDb, ou lookup TMDb/IMDb depuis un NFO).
+#
+# #762 — une SEULE définition, consommée par `detect_title_ambiguity` ET par
+# `disambiguate_by_context`. Elles divergeaient : la détection filtrait la
+# source, l'application du boost non. Un candidat `name` (titre dérivé du nom
+# de fichier) recevait donc le même boost contextuel que les candidats TMDb
+# qu'il était censé départager — et il l'obtenait quasi systématiquement, car
+# le signal « année exacte » compare `context["name_year"]` à l'année de ce
+# même candidat, toutes deux extraites du MÊME nom de fichier. Un signal
+# circulaire ne départage rien : il ne fait que sur-promouvoir le candidat
+# dont il est issu. Les deux moitiés partagent désormais le prédicat, elles
+# ne peuvent plus dériver.
+_AMBIGUITY_SOURCES = frozenset({"tmdb", "nfo_tmdb", "nfo_imdb"})
+
+
+def _is_ambiguity_source(candidate: Any) -> bool:
+    """True si ce candidat participe au groupe ambigu (identité provider)."""
+    return str(getattr(candidate, "source", "") or "").lower() in _AMBIGUITY_SOURCES
+
+
 def detect_title_ambiguity(candidates: List[Any]) -> Tuple[bool, Optional[str]]:
     """True si au moins 2 candidats TMDb ont le même titre normalisé.
 
@@ -77,8 +97,7 @@ def detect_title_ambiguity(candidates: List[Any]) -> Tuple[bool, Optional[str]]:
     tmdb_groups: Dict[str, int] = {}
     first_match: Optional[str] = None
     for c in candidates:
-        source = str(getattr(c, "source", "") or "").lower()
-        if source not in ("tmdb", "nfo_tmdb", "nfo_imdb"):
+        if not _is_ambiguity_source(c):
             continue
         title = str(getattr(c, "title", "") or "")
         key = normalize_title_for_ambiguity(title)
@@ -154,6 +173,13 @@ def disambiguate_by_context(
     Ne modifie les scores QUE si une ambiguïté est détectée — c'est volontaire :
     on ne veut pas sur-promouvoir un match année dans les cas non ambigus.
 
+    Périmètre (#762) : seuls les candidats MEMBRES du groupe ambigu sont
+    ajustés, c'est-à-dire ceux que `detect_title_ambiguity` a comptés (sources
+    `_AMBIGUITY_SOURCES`) et dont le titre normalisé est le titre ambigu. Un
+    candidat `name`/`nfo`/`name_tag` au même titre garde son score de base :
+    le rôle de cette fonction est de départager les identités provider entre
+    elles, pas de rebattre l'arbitrage provider-vs-nom-de-fichier.
+
     Args:
         candidates : liste de `Candidate` (dataclasses frozen).
         context : dict avec `name_year`, `nfo_tmdb_id`, `nfo_runtime` (optionnels).
@@ -169,10 +195,11 @@ def disambiguate_by_context(
 
     out: List[Any] = []
     for c in candidates:
-        # On ne boost que les candidats dont le titre normalisé correspond
-        # au groupe ambigu — les autres restent intacts.
+        # On ne boost que les candidats MEMBRES du groupe ambigu : même
+        # prédicat de source que la détection (#762) ET titre normalisé égal.
+        # Les autres restent intacts.
         title_key = normalize_title_for_ambiguity(str(getattr(c, "title", "") or ""))
-        if title_key != ambiguous_title:
+        if title_key != ambiguous_title or not _is_ambiguity_source(c):
             out.append(c)
             continue
         boost, reasons = _score_boost_for_context_match(c, context)

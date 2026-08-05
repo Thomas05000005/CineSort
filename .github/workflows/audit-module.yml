@@ -93,7 +93,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           fetch-depth: 0
 
@@ -170,19 +170,25 @@ jobs:
         uses: anthropics/claude-code-action@20c8abf165d5f85ab3fc970db9498436377dc9d1 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Modele : Opus 4.7. Le modele est passe via --model dans
-          # claude_args (NB : 'model' au niveau input direct n'existe
-          # pas, ca a fait fail le run du 12/05 23h).
+          # Modele : Opus 5 (dernier modele, MAJ 2026-08-02 depuis Opus 4.8).
+          # Le modele est passe via --model dans claude_args (NB : 'model' au
+          # niveau input direct n'existe pas, ca a fait fail le run du 12/05 23h).
           # max-turns 1500 + timeout 360min : audit ultra-complet sans
           # plafond. La qualite est la priorite, pas le cout token.
+          # --effort max : niveau de raisonnement maximal (low|medium|high|xhigh|max).
+          # Remplace --max-thinking-tokens 200000, qui N'EXISTE PLUS dans le CLI
+          # (verifie sur 2.1.147 : absent de --help). Le laisser exposait au meme
+          # type d'echec "flag inconnu" que l'incident du 12/05.
           # --allowedTools en camelCase + format "Tool1,Tool2,Bash(cmd:*)"
           # (separe par virgule sans espace, entoure de double-quotes).
           claude_args: |
-            --model claude-opus-4-7
+            --model claude-opus-5
             --max-turns 1500
+            --effort max
             --allowedTools "Edit,Write,Read,Glob,Grep,WebFetch,Bash(gh issue create:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr create:*),Bash(gh pr comment:*),Bash(gh pr edit:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh label create:*),Bash(gh label list:*),Bash(gh search:*),Bash(git push:*),Bash(git checkout:*),Bash(git commit:*),Bash(git add:*),Bash(git branch:*),Bash(git tag:*),Bash(git merge:*),Bash(git rebase:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(find:*),Bash(grep:*),Bash(rg:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(head:*),Bash(tail:*),Bash(cat:*),Bash(python -m:*)"
           prompt: >-
-            Audit automatique CineSort. Parametres de cette execution :
+            Audit automatique CineSort avec Opus 5, effort de raisonnement max.
+            Parametres de cette execution :
             - couche : "${{ steps.target.outputs.target }}"
             - niveau : "${{ github.event.inputs.level || 'modere' }}"
             - ouvrir PRs : "${{ github.event.inputs.open_prs || 'true' }}"
@@ -196,13 +202,29 @@ jobs:
             regles de dedup et de pre-commit, les outils 2026.
 
 
-            ETAPE 2 : applique ces instructions sur les modules suivants
+            ETAPE 2 OBLIGATOIRE : PRENDS LA MESURE DE L'EXISTANT AVANT
+            D'OUVRIR QUOI QUE CE SOIT. Le backlog ouvert est deja tres
+            important et il a ete constitue en grande partie par TES
+            executions precedentes. Compte-le
+            (gh pr list --state open --limit 300,
+            gh issue list --state open --limit 400) et applique le
+            budget d'ouverture defini dans audit-prompt.md.
+            Un finding deja decrit dans une issue ou une PR ouverte ne
+            doit JAMAIS donner lieu a une nouvelle issue : commente
+            l'existante. Un finding deja corrige sur main ne doit donner
+            lieu a RIEN : verifie dans le code avant d'ecrire.
+
+
+            ETAPE 3 : applique ces instructions sur les modules suivants
             (placeholder <MODULE_LIST> du fichier audit-prompt.md) :
 
 
             ${{ steps.target.outputs.target != 'transverse' && steps.modules.outputs.list || 'TRANSVERSE_ANALYSIS' }}
 
 
-            ETAPE 3 : execute (gh issue create, gh pr create, git push).
+            ETAPE 4 : execute (gh issue create, gh pr create, git push).
             Ne te contente PAS de decrire les actions. EXECUTE-les.
+            Mais n'ouvre RIEN qui depasse le budget de l'etape 2 : au-dela,
+            consigne les findings restants dans un unique commentaire de
+            l'issue de synthese du jour, sans ouvrir de nouvel element.
             Reponds en francais dans tous les commentaires et issues.
