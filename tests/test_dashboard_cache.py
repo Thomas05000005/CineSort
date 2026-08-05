@@ -132,6 +132,79 @@ class DashboardCacheTests(unittest.TestCase):
             ts=time.time(),
         )
 
+    def _prepare_run(self, run_id: str) -> None:
+        started = time.time() - 20.0
+        self._insert_run_done(run_id, started_ts=started, stats={"planned_rows": 2})
+        self._write_plan_rows(run_id, self._sample_rows())
+        self._insert_reports_for_run(run_id)
+
+    def _signature_for(self, run_id: str) -> dict:
+        run_row = self.store.run.get_run(run_id)
+        run_paths = self.api._run_paths_for(self.state_dir, run_id, ensure_exists=False)  # type: ignore[attr-defined]
+        return self.api._dashboard_cache_signature(  # type: ignore[attr-defined]
+            run_row=run_row, run_paths=run_paths, store=self.store
+        )
+
+    def test_signature_changes_when_auto_approve_threshold_changes(self) -> None:
+        # M7 : le seuil auto_approve alimente review_queue_count/conflicts_count
+        # (mis en cache) ; sans lui dans la signature, changer le seuil laisse le
+        # KPI fige. AVANT le fix les deux signatures sont identiques.
+        run_id = "20260315_101010_777"
+        self._prepare_run(run_id)
+
+        with mock.patch.object(self.api, "_get_settings_impl", return_value={"auto_approve_threshold": 85}):
+            sig_85 = self._signature_for(run_id)
+        with mock.patch.object(self.api, "_get_settings_impl", return_value={"auto_approve_threshold": 95}):
+            sig_95 = self._signature_for(run_id)
+
+        self.assertEqual(sig_85.get("auto_approve_threshold"), 85)
+        self.assertEqual(sig_95.get("auto_approve_threshold"), 95)
+        self.assertNotEqual(sig_85, sig_95)
+
+    def test_signature_changes_when_alert_ignored(self) -> None:
+        # M17 : "Ignorer une alerte" = INSERT dans ignored_alerts (table disjointe
+        # des stats quality/perceptual/anomaly). AVANT le fix la signature ne bouge
+        # pas et le KPI "Cas a verifier"/"Conflits" reste fige.
+        run_id = "20260315_111111_888"
+        self._prepare_run(run_id)
+
+        sig_before = self._signature_for(run_id)
+        res = self.store.film_modal.insert_ignored_alert("row_2", "low_confidence")
+        self.assertTrue(res.get("inserted"), res)
+        sig_after = self._signature_for(run_id)
+
+        self.assertNotEqual(sig_before.get("ignored_alerts"), sig_after.get("ignored_alerts"))
+        self.assertNotEqual(sig_before, sig_after)
+
+    def test_signature_changes_when_duplicate_decision_recorded(self) -> None:
+        # M18 : duplicates_groups derive de duplicate_decisions (mis en cache) ;
+        # sans cette table dans la signature, "Garder A"/"Auto-decider" laissent le
+        # compteur fige. Couvre aussi le changement d'avis (meme groupe, autre
+        # gagnant) qui doit encore differencier la signature.
+        run_id = "20260315_121212_999"
+        self._prepare_run(run_id)
+
+        sig_before = self._signature_for(run_id)
+        self.store.apply.upsert_duplicate_decision(
+            run_id=run_id,
+            group_key="Film A (2013)",
+            winner_row_id="row_1",
+            loser_row_ids=["row_2"],
+        )
+        sig_after = self._signature_for(run_id)
+        self.assertNotEqual(sig_before.get("duplicate_decisions"), sig_after.get("duplicate_decisions"))
+        self.assertNotEqual(sig_before, sig_after)
+
+        self.store.apply.upsert_duplicate_decision(
+            run_id=run_id,
+            group_key="Film A (2013)",
+            winner_row_id="row_2",
+            loser_row_ids=["row_1"],
+        )
+        sig_changed = self._signature_for(run_id)
+        self.assertNotEqual(sig_after.get("duplicate_decisions"), sig_changed.get("duplicate_decisions"))
+        self.assertNotEqual(sig_after, sig_changed)
+
     def test_get_dashboard_reuses_cache_on_second_open(self) -> None:
         run_id = "20260222_150000_444"
         started = time.time() - 40.0

@@ -12,7 +12,7 @@ Garde-fous (cf docs/internal/BILAN_ITER12_2026-06-08.md section 1) :
 - `allow_redirects=False`, `stream=True`, limit 5 MB (anti-DoS + anti-redirect).
 - Cache disque : `<state_dir>/cache/posters/<size>/<id>.<ext>` (ext deduite
   Content-Type, whitelist {jpg, png, webp}).
-- Ecriture cache atomique `.tmp` -> `os.replace`.
+- Ecriture cache atomique et durable via `cinesort.infra.state.atomic_write_bytes`.
 - Defense en profondeur : `cache_file.resolve()` doit etre sous
   `cache_root.resolve()`.
 - Cle TMDb scrubbee : `image.tmdb.org` est un CDN public, aucun secret
@@ -27,7 +27,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -37,6 +36,7 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitOpenError
 from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra.state import atomic_write_bytes
 from cinesort.infra.tmdb_client import TmdbClient
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
     coherent avec le reste de l'app).
     """
     import json  # noqa: PLC0415 — import local pour eviter pollution du module
+
     settings_file = state_dir / "settings.json"
     if not settings_file.exists():
         return ""
@@ -108,10 +109,11 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
                     SecretStorageError,
                     load_secret,
                 )
+
                 result = load_secret("tmdb_api_key", blob_b64)
                 return str(result.value or "").strip()
-            except (ImportError, SecretStorageError, Exception) as exc:  # noqa: BLE001 — boundary
-                logger.debug("poster_proxy DPAPI load warn: %s", type(exc).__name__)
+            except (ImportError, SecretStorageError) as exc:
+                logger.warning("poster_proxy: chargement cle DPAPI echoue: %s", type(exc).__name__)
                 return ""
     return ""
 
@@ -327,25 +329,26 @@ def resolve_cache_file(cache_root: Path, size: str, tmdb_id: int) -> Optional[Tu
 
 
 def _atomic_write(target: Path, payload: bytes) -> None:
-    """Ecriture atomique d'un fichier binaire : `.tmp` -> `os.replace`.
+    """Ecriture atomique ET durable d'un fichier binaire.
 
-    Le `.tmp` est cree dans le meme repertoire que `target` pour garantir
-    que `os.replace` est atomique cote filesystem (memes device).
+    Fix #712 : le `.tmp` etait nomme en dur (`target.suffix + '.tmp'`), donc
+    identique pour tous les threads du `ThreadingHTTPServer`. Deux requetes
+    concurrentes sur le MEME (tmdb_id, size) — cas courant : une grille de
+    jaquettes qui se charge — s'ecrasaient mutuellement et pouvaient promouvoir
+    un JPEG a moitie ecrit dans le cache, servi ensuite pendant 30 jours
+    (Cache-Control immuable). Le helper unique fait le nom unique + le fsync +
+    le controle de taille.
+
+    Resolution du conflit avec `#718` (merge de main du 2026-08-04) : les deux
+    branches corrigent la MEME course, main sur place et celle-ci en routant
+    vers `state.atomic_write_bytes`. C'est cette derniere qui est retenue parce
+    qu'elle SUBSUME l'autre — `state._replace_with_retry` porte exactement la
+    politique de retentative mesuree par `#718` (12 tentatives, base 2 ms,
+    plafond 50 ms, jitter par thread ; 19/32 echecs sans elle, 0/32 avec) et y
+    ajoute le controle de taille ecrite. Garder les deux aurait duplique la
+    politique en deux exemplaires qui divergent au premier reglage.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    try:
-        with open(tmp, "wb") as f:
-            f.write(payload)
-            f.flush()
-            with contextlib.suppress(OSError):
-                os.fsync(f.fileno())
-        os.replace(tmp, target)
-    except (OSError, PermissionError):
-        if tmp.exists():
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-        raise
+    atomic_write_bytes(target, payload)
 
 
 def fetch_and_cache(
@@ -713,13 +716,9 @@ def serve_poster(
                 pass
 
         # 3. Orchestrer cache hit / fetch.
-        cache_file, content_type, error_code = get_or_fetch(
-            tmdb_client, cache_root, tmdb_id, size
-        )
+        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
         if error_code is not None:
-            status, category, message = _HTTP_ERROR_MAP.get(
-                error_code, (502, "runtime", "Upstream error")
-            )
+            status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
             _respond_error_json(handler, status, category, message)
             return
 
@@ -766,6 +765,7 @@ def _respond_error_json(
 ) -> None:
     """Reponse JSON d'erreur conforme au pattern `_err_response` de l'app."""
     import json  # noqa: PLC0415
+
     body = json.dumps(
         {"ok": False, "category": category, "message": message},
         ensure_ascii=False,

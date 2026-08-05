@@ -89,9 +89,7 @@ def _split_sql_statements(sql: str) -> List[str]:
         else:
             out: List[str] = []
             for stmt in sqlparse.split(sql):
-                cleaned_stmt = sqlparse.format(
-                    stmt, strip_comments=True
-                ).strip().rstrip(";").strip()
+                cleaned_stmt = sqlparse.format(stmt, strip_comments=True).strip().rstrip(";").strip()
                 if not cleaned_stmt:
                     continue
                 if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
@@ -245,8 +243,7 @@ class MigrationManager:
                     # commentaire descriptif (ex: "ne PAS utiliser
                     # @manager: disable_fk ici") n'active le PRAGMA a tort.
                     needs_fk_disable = any(
-                        line.strip().startswith("-- @manager: disable_fk")
-                        for line in sql.splitlines()
+                        line.strip().startswith("-- @manager: disable_fk") for line in sql.splitlines()
                     )
                     if needs_fk_disable:
                         conn.execute("PRAGMA foreign_keys = OFF")

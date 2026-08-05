@@ -19,12 +19,41 @@ Usage :
 
 from __future__ import annotations
 
+import os
 import socket
 import sqlite3
 import tempfile
 import time
 from pathlib import Path
 from typing import Any, Tuple
+
+
+def _budget(local_s: float) -> float:
+    """Budget d'attente, elargi sur un runner de CI.
+
+    Les runners GitHub sont sensiblement plus lents que la machine de dev, et
+    surtout leur latence est TRES variable selon la charge du parc. Mesure du
+    2026-08-03 : `tests/test_apply_preview.py` construit son plan en ~5 s en
+    local et a mis **11 s** sur un runner — au-dela du budget de 10 s — alors
+    que le journal du run montrait `PLAN READY` atteint, donc aucun blocage
+    reel. Deux tests tombaient au hasard, et un check requis rouge suffit a
+    empecher toute fusion.
+
+    On ne releve pas le budget local : c'est lui qui attrape les vrais
+    interblocages en developpement, et l'allonger reviendrait a attendre une
+    minute pour apprendre qu'on s'est bloque. Seule la CI, ou le budget mesure
+    autre chose (la charge du parc), est elargie.
+
+    `CINESORT_TEST_TIMEOUT_S` permet de forcer une valeur, utile pour
+    reproduire un timeout en local sans toucher au code.
+    """
+    forced = os.environ.get("CINESORT_TEST_TIMEOUT_S")
+    if forced:
+        try:
+            return float(forced)
+        except ValueError:
+            pass
+    return local_s * 3.0 if os.environ.get("CI") else local_s
 
 
 def find_free_port() -> int:
@@ -54,7 +83,7 @@ def create_file(path: Path, size: int = 2048) -> None:
     path.write_bytes(b"x" * size)
 
 
-def wait_run_done(api: Any, run_id: str, timeout_s: float = 10.0) -> dict:
+def wait_run_done(api: Any, run_id: str, timeout_s: float | None = None) -> dict:
     """Poll `api.run.get_status(run_id)` jusqu'a etat terminal (done=True).
 
     Remplace les 10+ definitions duplicatees de `_wait_done` /
@@ -68,17 +97,18 @@ def wait_run_done(api: Any, run_id: str, timeout_s: float = 10.0) -> dict:
     Si le caller ignore le return (pattern `self._wait_done(api, run_id)`
     sans assignation), c'est OK — la valeur est retournee mais ignoree.
     """
-    deadline = time.monotonic() + float(timeout_s)
+    budget = _budget(10.0 if timeout_s is None else float(timeout_s))
+    deadline = time.monotonic() + budget
     last: dict = {}
     while time.monotonic() < deadline:
         last = api.run.get_status(run_id, 0) or {}
         if last.get("done"):
             return last
         time.sleep(0.03)
-    raise AssertionError(f"Timeout {timeout_s}s en attendant run_id={run_id}. Dernier status={last}")
+    raise AssertionError(f"Timeout {budget}s en attendant run_id={run_id}. Dernier status={last}")
 
 
-def wait_runner_terminal(runner: Any, run_id: str, timeout_s: float = 5.0) -> bool:
+def wait_runner_terminal(runner: Any, run_id: str, timeout_s: float | None = None) -> bool:
     """Poll `runner.get_status(run_id)` (JobRunner direct) jusqu'a snapshot.done.
 
     MEGA-HOTFIX bug (5) : factorisation du pattern `_wait_terminal` duplique
@@ -90,7 +120,7 @@ def wait_runner_terminal(runner: Any, run_id: str, timeout_s: float = 5.0) -> bo
     Retourne True si terminal atteint, False si timeout (le caller decide
     s'il considere ca comme un echec ou un cleanup best-effort).
     """
-    deadline = time.monotonic() + float(timeout_s)
+    deadline = time.monotonic() + _budget(5.0 if timeout_s is None else float(timeout_s))
     while time.monotonic() < deadline:
         snap = runner.get_status(run_id)
         if snap and getattr(snap, "done", False):
@@ -110,7 +140,7 @@ def wait_runner_status(
     MEGA-HOTFIX bug (5) : factorisation du pattern `_wait_status` utilise dans
     les tests de la state machine job_runner.
     """
-    deadline = time.monotonic() + float(timeout_s)
+    deadline = time.monotonic() + _budget(10.0 if timeout_s is None else float(timeout_s))
     while time.monotonic() < deadline:
         snap = runner.get_status(run_id)
         if snap and snap.status == status:
@@ -174,8 +204,7 @@ def existing_db_fixture(
     src_migrations = (migrations_dir or _project_migrations_dir()).resolve()
     if not src_migrations.is_dir():
         raise FileNotFoundError(
-            f"Migrations dir introuvable: {src_migrations}. "
-            "Specifier migrations_dir explicitement."
+            f"Migrations dir introuvable: {src_migrations}. Specifier migrations_dir explicitement."
         )
 
     tmp_root = Path(tmp_path) if tmp_path is not None else Path(tempfile.mkdtemp(prefix="cinesort_existing_db_"))
@@ -232,8 +261,7 @@ def existing_db_fixture(
         # grace au filtre ci-dessus.
         if final_version > target_schema_version:
             raise AssertionError(
-                f"existing_db_fixture: schema cible {target_schema_version} mais "
-                f"DB est a {final_version} apres apply"
+                f"existing_db_fixture: schema cible {target_schema_version} mais DB est a {final_version} apres apply"
             )
 
     conn = sqlite3.connect(str(db_path))

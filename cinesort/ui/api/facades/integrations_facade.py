@@ -36,12 +36,13 @@ class IntegrationsFacade(_BaseFacade):
         """
         return self._api._test_tmdb_key_impl(api_key, state_dir, timeout_s)
 
-    def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+    def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False) -> Dict[str, Any]:
         """Recupere les URL posters TMDb pour une liste d'IDs.
 
+        E4 : force_refresh=True bypass le cache local (refresh jaquette).
         Cf CineSortApi.get_tmdb_posters pour la doc complete.
         """
-        return self._api._get_tmdb_posters_impl(tmdb_ids, size)
+        return self._api._get_tmdb_posters_impl(tmdb_ids, size, force_refresh=force_refresh)
 
     def enrich_tmdb_ids_by_title(self, run_id: str, row_ids: Any) -> Dict[str, Any]:
         """R5-H2 : resout + persiste le tmdb_id de films identifies sans tmdb_id

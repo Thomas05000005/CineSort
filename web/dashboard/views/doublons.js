@@ -46,6 +46,21 @@ const _SELECTED_KEY_STORAGE = "cinesort.doublons.selectedGroupKey";
 // (winner_decided) prises en place restent reflechies dans le cache.
 let _groupsCache = null;   // { runId, groups, sizeSavingsTotal } | null
 
+// F25 (revue adversaire R1) : groupes pour lesquels le MODAL comparateur a ete
+// ouvert. Ce modal poste mark_duplicate_winner depuis son propre module avec son
+// propre verrou (`_state.decisionInFlight` de duplicate-comparator-modal.js) :
+// il n'alimente jamais `decisionInFlightByGroup`, et si l'utilisateur ferme sur
+// Echap pendant le POST son callback `onDecided` n'est JAMAIS appele
+// (closeDuplicateComparatorModal met son _state a null). La vue ne peut donc pas
+// savoir qu'une decision manuelle est partie : « Auto-decider tous » saute ces
+// groupes, le pire cas devenant « groupe non auto-decide » (annonce dans le
+// toast) au lieu de « choix de l'utilisateur ecrase ».
+//
+// Portee MODULE, comme _groupsCache : le cache de groupes survit aux
+// navigations et sert des `winner_decided` potentiellement perimes — le marquage
+// doit vivre aussi longtemps que lui. Il est vide a la fin de chaque bulk.
+const _comparatorPendingByGroup = new Set();
+
 // Fix audit 2026-05-24 : getNavSignal était importé puis assigné dans une
 // variable locale `signal` jamais utilisée (void signal). On centralise un
 // getter de signal pour le passer en 3e arg de tous les apiPost.
@@ -65,12 +80,21 @@ function _initState() {
     error: null,
     filter: "all", // all | conflict | pending | decided
     bulkInFlight: false,
+    // F25 (revue post-merge 2026-07-18) : verrou SPECIFIQUE a « Auto-décider
+    // tous ». `bulkInFlight` est partagé avec le bulk perceptuel (jusqu'à ~1 min
+    // de polling) qui, lui, ne pose aucune décision : le réutiliser bloquerait
+    // les boutons Garder A/B sans raison et afficherait un message faux.
+    autoDecideInFlight: false,
     // Fix audit 2026-05-24 : avant decisionInFlight était un seul booléen
     // global -> dès qu'on cliquait "Garder A" sur le groupe X, TOUS les
     // boutons "Garder A/B" de tous les autres groupes passaient disabled.
     // Désormais : Set des groupKeys en vol -> seuls les boutons du groupe
     // concerné se désactivent, l'utilisateur peut décider en parallèle.
     decisionInFlightByGroup: new Set(),
+    // F25 (revue adversaire R1) : reference vers le Set de portee MODULE
+    // (documente a sa declaration) — il doit survivre au demontage de la vue,
+    // exactement comme _groupsCache.
+    comparatorPendingByGroup: _comparatorPendingByGroup,
     // R6-C : true quand les groupes affiches viennent du cache (pas re-scannes).
     fromCache: false,
     // Fix audit 2026-05-30 (DUP-1) : barre de progression persistante pour le
@@ -334,7 +358,12 @@ function _renderGroupCard(group) {
   const rowAId = group.rows && group.rows[0] ? group.rows[0].row_id : null;
   const rowBId = group.rows && group.rows[1] ? group.rows[1].row_id : null;
   // Fix audit 2026-05-24 : disable uniquement les boutons du groupe en vol.
-  const inflight = _state.decisionInFlightByGroup.has(groupKey) ? "disabled" : "";
+  // F25 (revue post-merge 2026-07-18) : pendant un « Auto-decider tous », la
+  // boucle sequentielle poste sur un snapshot fige — une decision manuelle
+  // prise entre-temps etait ecrasee en silence. On desactive donc AUSSI les
+  // boutons Garder A/B tant que le bulk tourne.
+  const inflight = (_state.autoDecideInFlight || _state.decisionInFlightByGroup.has(groupKey)) ? "disabled" : "";
+  const inflightTitle = _state.autoDecideInFlight ? ' title="Auto-décision en cours…"' : "";
 
   // R6-A : badge de portee (liste unique par identite). Indique ou sont les copies.
   const scopeInfo = {
@@ -349,7 +378,7 @@ function _renderGroupCard(group) {
       <header class="doublons-card-header">
         <div class="doublons-card-poster" aria-hidden="true">
           ${posterUrl
-            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" />`
+            ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" />`
             : `<div class="doublons-card-poster-placeholder">🎬</div>`}
         </div>
         <div class="doublons-card-title-block">
@@ -407,18 +436,18 @@ function _renderGroupCard(group) {
           <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm"
                   data-doublons-card-action="keep" data-side="a"
                   data-row-id="${escapeHtml(rowAId)}"
-                  data-group-key="${escapeHtml(groupKey)}" ${inflight}>
+                  data-group-key="${escapeHtml(groupKey)}" ${inflight}${inflightTitle}>
             ✓ Garder A
           </button>` : ""}
           ${rowBId ? `
           <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm"
                   data-doublons-card-action="keep" data-side="b"
                   data-row-id="${escapeHtml(rowBId)}"
-                  data-group-key="${escapeHtml(groupKey)}" ${inflight}>
+                  data-group-key="${escapeHtml(groupKey)}" ${inflight}${inflightTitle}>
             ✓ Garder B
           </button>` : ""}
           <button type="button" class="v5-btn v5-btn--primary v5-btn--sm"
-                  data-doublons-card-action="compare" data-group-key="${escapeHtml(groupKey)}">
+                  data-doublons-card-action="compare" data-group-key="${escapeHtml(groupKey)}" ${inflight}${inflightTitle}>
             Comparer en détail
           </button>
           ${(group.rows && group.rows[0] && group.rows[0].row_id) ? `
@@ -597,13 +626,22 @@ function _renderRightPanel() {
     const alerts = labelsForFlags(allFlags);
 
     // Fix audit 2026-05-24 : disable uniquement si décision en vol pour CE groupe.
-    const inflight = _state.decisionInFlightByGroup.has(_groupKey(group)) ? "disabled" : "";
+    // F25 (revue adversaire R1) : ce panneau n'a PAS de bouton « Garder A/B »
+    // (ils sont dans _renderGroupCard) — le seul bouton qui mène à une décision
+    // est « Comparer en détail », c'est donc LUI qui doit porter le verrou du
+    // bulk (sinon il reste cliquable pour ne produire qu'un toast de refus).
+    // « Skip ce groupe » est une navigation PUREMENT LOCALE (_navigateNext,
+    // aucun réseau, aucune décision) : le désactiver pendant un bulk de
+    // plusieurs minutes était une régression d'ergonomie.
+    const decidingThisGroup = _state.decisionInFlightByGroup.has(_groupKey(group));
+    const skipInflight = decidingThisGroup ? "disabled" : "";
+    const compareInflight = (_state.autoDecideInFlight || decidingThisGroup) ? "disabled" : "";
 
     sections.push({
       title: "📌 Groupe sélectionné",
       html: `
         ${posterUrl
-          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" onerror="this.onerror=null;this.style.display='none'" /></div>`
+          ? `<div class="doublons-inspector-poster"><img src="${escapeHtml(posterUrl)}" alt="" loading="lazy" /></div>`
           : `<div class="doublons-inspector-poster doublons-inspector-poster--empty">🎬</div>`}
         <h4 class="doublons-inspector-title">${escapeHtml(title)}${escapeHtml(year)}</h4>
         ${runtime ? `<p class="doublons-inspector-meta">${escapeHtml(String(runtime))} min</p>` : ""}
@@ -640,7 +678,7 @@ function _renderRightPanel() {
         <div class="doublons-inspector-actions">
           <button type="button" class="v5-btn v5-btn--primary"
                   data-doublons-inspector-action="compare"
-                  data-group-key="${escapeHtml(_groupKey(group))}">
+                  data-group-key="${escapeHtml(_groupKey(group))}" ${compareInflight}>
             ▶ Comparer en détail
           </button>
           <button type="button" class="v5-btn v5-btn--secondary"
@@ -650,7 +688,7 @@ function _renderRightPanel() {
             ▾ Analyser perceptuel
           </button>
           <button type="button" class="v5-btn v5-btn--ghost"
-                  data-doublons-inspector-action="skip" ${inflight}>
+                  data-doublons-inspector-action="skip" ${skipInflight}>
             → Skip ce groupe
           </button>
         </div>
@@ -698,22 +736,37 @@ function _bindRightPanelEvents() {
 /* --- Comparator open --- */
 
 function _openComparator(group) {
-  if (!group) return;
+  if (!group || !_state) return;
+  // F25 : le modal comparateur poste mark_duplicate_winner avec son PROPRE
+  // verrou d'inflight — il contournerait tous les gardes de cette vue.
+  if (_state.autoDecideInFlight) {
+    showToast({ type: "info", text: "Auto-décision en cours — attends la fin avant de décider manuellement." });
+    return;
+  }
   const rowAId = group.rows && group.rows[0] ? group.rows[0].row_id : null;
   const rowBId = group.rows && group.rows[1] ? group.rows[1].row_id : null;
   if (!rowAId || !rowBId) {
     showToast({ type: "warn", text: "Comparaison nécessite au moins 2 rows valides." });
     return;
   }
+  const groupKey = _groupKey(group);
+  // F25 (revue adversaire R1) : marque le groupe AVANT l'ouverture. Des cet
+  // instant une decision manuelle peut partir du modal sans que cette vue en
+  // soit jamais informee (fermeture Echap pendant le POST -> onDecided perdu).
+  _state.comparatorPendingByGroup.add(groupKey);
   openDuplicateComparatorModal({
     runId: _state.runId,
-    groupKey: _groupKey(group),
+    groupKey,
     rowA: rowAId,
     rowB: rowBId,
     title: group.title,
     year: group.year,
     comparison: group.comparison || {},
     onDecided: (decision) => {
+      // La decision est connue : `winner_decided` (pose par _handleDecision)
+      // prend le relais comme garde du bulk.
+      if (!_state) return;   // vue demontee pendant le POST du modal
+      _state.comparatorPendingByGroup.delete(decision.groupKey);
       _handleDecision(decision.groupKey, decision.winnerSide, decision.winnerRowId, decision.payload);
     },
   });
@@ -722,8 +775,15 @@ function _openComparator(group) {
 /* --- Decision (mark_duplicate_winner) --- */
 
 async function _decideFromCard(groupKey, side, winnerRowId) {
+  if (!_state) return;
+  // F25 : filet pour un clic deja dispatche avant le re-render qui pose le
+  // `disabled`. Sans lui, la boucle bulk ecraserait la decision manuelle.
+  if (_state.autoDecideInFlight) {
+    showToast({ type: "info", text: "Auto-décision en cours — attends la fin avant de décider manuellement." });
+    return;
+  }
   // Fix audit 2026-05-24 : check + add + delete par groupKey (per-group lock).
-  if (!_state || _state.decisionInFlightByGroup.has(groupKey)) return;
+  if (_state.decisionInFlightByGroup.has(groupKey)) return;
   _state.decisionInFlightByGroup.add(groupKey);
   _render();
   try {
@@ -816,6 +876,10 @@ async function _autoDecideAll() {
     onConfirm: async () => {
       if (!_state) return;
       _state.bulkInFlight = true;
+      // F25 : verrou dédié — il désactive les boutons Garder A/B des cartes et
+      // du panneau droit, ainsi que l'ouverture du comparateur, pendant toute
+      // la boucle (cf. _renderCard / _openComparator / _decideFromCard).
+      _state.autoDecideInFlight = true;
       _render();
       showToast({
         type: "info",
@@ -824,42 +888,70 @@ async function _autoDecideAll() {
 
       let ok = 0;
       let ko = 0;
-      for (let i = 0; i < candidates.length; i++) {
-        if (!_state) return; // unmount pendant la boucle
-        const g = candidates[i];
-        const groupKey = _groupKey(g);
-        const side = String(g.comparison.winner).toLowerCase();
-        const winnerIdx = side === "a" ? 0 : 1;
-        const winnerRow = (g.rows || [])[winnerIdx];
-        const winnerRowId = winnerRow ? winnerRow.row_id : null;
-        if (!winnerRowId) { ko += 1; continue; }
-        try {
-          const res = await apiPost("run/mark_duplicate_winner", {
-            run_id: _state.runId,
-            group_key: groupKey,
-            winner_row_id: winnerRowId,
-            notes: "auto-decide:score_v2",
-          }, { signal: _signal() });
-          if (!_state) return;
-          const data = _payload(res);
-          if (data.ok === false) { ko += 1; }
-          else {
-            ok += 1;
-            g.winner_decided = true;
-            g.winner_side = side;
-            g.winner_row_id = winnerRowId;
-            if (data.losers) g.losers = data.losers;
+      let skipped = 0;
+      try {
+        for (let i = 0; i < candidates.length; i++) {
+          if (!_state) return; // unmount pendant la boucle
+          const g = candidates[i];
+          const groupKey = _groupKey(g);
+          // F25 : `candidates` est un snapshot fige AVANT la confirmation. JS est
+          // mono-thread : ce test et l'apiPost du tour de boucle sont dans le meme
+          // bloc synchrone, donc toute decision manuelle terminee (winner_decided)
+          // ou en vol (decisionInFlightByGroup) est vue ici et respectee. Sans ce
+          // garde, la boucle upsert un winner different (ON CONFLICT DO UPDATE =
+          // dernier ecrit gagne) et _loadGroups(true) resynchronise l'UI dessus :
+          // le fichier choisi par l'utilisateur partait en
+          // _review/_duplicates_user_decided/ a l'apply.
+          // F25 (revue adversaire R1) : `comparatorPendingByGroup` couvre le
+          // troisieme emetteur de decisions, invisible des deux autres gardes :
+          // le modal comparateur (module + verrou distincts, callback onDecided
+          // perdu si l'utilisateur ferme sur Echap pendant son POST).
+          if (
+            g.winner_decided
+            || _state.decisionInFlightByGroup.has(groupKey)
+            || _state.comparatorPendingByGroup.has(groupKey)
+          ) {
+            skipped += 1;
+            continue;
           }
-        } catch (_e) {
-          if (!_state) return;
-          ko += 1;
+          const side = String(g.comparison.winner).toLowerCase();
+          const winnerIdx = side === "a" ? 0 : 1;
+          const winnerRow = (g.rows || [])[winnerIdx];
+          const winnerRowId = winnerRow ? winnerRow.row_id : null;
+          if (!winnerRowId) { ko += 1; continue; }
+          try {
+            const res = await apiPost("run/mark_duplicate_winner", {
+              run_id: _state.runId,
+              group_key: groupKey,
+              winner_row_id: winnerRowId,
+              notes: "auto-decide:score_v2",
+            }, { signal: _signal() });
+            if (!_state) return;
+            const data = _payload(res);
+            if (data.ok === false) { ko += 1; }
+            else {
+              ok += 1;
+              g.winner_decided = true;
+              g.winner_side = side;
+              g.winner_row_id = winnerRowId;
+              if (data.losers) g.losers = data.losers;
+            }
+          } catch (_e) {
+            if (!_state) return;
+            ko += 1;
+          }
+          // Progress feedback tous les 5 groupes
+          if ((i + 1) % 5 === 0 && _state) {
+            _state.decidedCount = _state.groups.filter((x) => x.winner_decided).length;
+            _state.pendingCount = _state.groups.length - _state.decidedCount;
+            _render();
+          }
         }
-        // Progress feedback tous les 5 groupes
-        if ((i + 1) % 5 === 0 && _state) {
-          _state.decidedCount = _state.groups.filter((x) => x.winner_decided).length;
-          _state.pendingCount = _state.groups.length - _state.decidedCount;
-          _render();
-        }
+      } finally {
+        // F25 : le verrou doit tomber quel que soit le chemin de sortie (unmount,
+        // exception d'un rendu), sinon les boutons Garder A/B resteraient
+        // « disabled » jusqu'au remontage de la vue.
+        if (_state) _state.autoDecideInFlight = false;
       }
 
       if (!_state) return;
@@ -868,12 +960,25 @@ async function _autoDecideAll() {
       // R6-C : force le re-scan (bypass cache) + rafraichit le cache.
       await _loadGroups(true);
       if (!_state) return;
+      // F25 (revue adversaire R1) : le marquage « comparateur ouvert » est
+      // BORNE a une passe. Apres ce rechargement force (aller-retour serveur
+      // complet), un groupe reellement decide depuis le modal revient
+      // `winner_decided` — c'est desormais ce champ qui le protege. Un groupe
+      // que l'utilisateur a seulement REGARDE dans le comparateur redevient
+      // auto-decidable a la passe suivante, sans exclusion permanente.
+      _state.comparatorPendingByGroup.clear();
+      // F25 : les groupes ignores (decision manuelle deja prise ou possible via
+      // le comparateur) sont annonces explicitement, sinon l'utilisateur croit
+      // a un echec.
+      const skippedSuffix = skipped > 0
+        ? ` ${skipped} ignoré${skipped > 1 ? "s" : ""} : décision manuelle prise ou en cours (relancez pour les traiter).`
+        : "";
       if (ko === 0) {
-        showToast({ type: "success", text: `✓ ${ok} groupe${ok > 1 ? "s" : ""} auto-décidé${ok > 1 ? "s" : ""}.` });
+        showToast({ type: "success", text: `✓ ${ok} groupe${ok > 1 ? "s" : ""} auto-décidé${ok > 1 ? "s" : ""}.${skippedSuffix}` });
       } else {
         showToast({
           type: "warn",
-          text: `${ok} décidé${ok > 1 ? "s" : ""}, ${ko} échec${ko > 1 ? "s" : ""}. Vérifie les groupes restants.`,
+          text: `${ok} décidé${ok > 1 ? "s" : ""}, ${ko} échec${ko > 1 ? "s" : ""}.${skippedSuffix} Vérifie les groupes restants.`,
           duration: 6000,
         });
       }
@@ -1185,6 +1290,18 @@ async function _loadGroups(force = false) {
 
 /* --- Events --- */
 
+// LOTC-C1 : la CSP (script-src 'self') bloque les 'onerror' inline -> filet
+// jaquettes via listener 'error' delegue en phase capture (les events error
+// des <img> ne bouillonnent pas), meme pattern que la grille Bibliotheque
+// (R6-H). Sur document car l'inspecteur (right-panel) est rendu HORS
+// _container. Bind a l'init, retire au unmount ; fonction nommee -> no dup.
+function _onPosterError(ev) {
+  const img = ev.target;
+  if (!img || img.tagName !== "IMG" || typeof img.closest !== "function") return;
+  if (!img.closest(".doublons-card-poster, .doublons-inspector-poster")) return;
+  img.style.display = "none";
+}
+
 function _bindEvents() {
   if (!_container) return;
   const retryBtn = _container.querySelector("[data-doublons-retry]");
@@ -1270,6 +1387,7 @@ export async function initDoublons(container) {
   }
   _keyboardHandler = _onKeydown;
   document.addEventListener("keydown", _keyboardHandler);
+  document.addEventListener("error", _onPosterError, true); // LOTC-C1
   await _loadGroups();
 }
 
@@ -1280,6 +1398,7 @@ export function unmountDoublons() {
     document.removeEventListener("keydown", _keyboardHandler);
     _keyboardHandler = null;
   }
+  document.removeEventListener("error", _onPosterError, true); // LOTC-C1
   if (typeof setRightPanelSections === "function") {
     setRightPanelSections([]);
   }

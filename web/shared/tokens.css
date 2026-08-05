@@ -223,9 +223,14 @@
   --z-top-bar:     300;
   --z-overlay:     500;
   --z-modal:       600;
-  --z-toast:       800;
-  --z-palette:     900;
   --z-tooltip:     1000;
+  /* Z3-bis (revue Lot C-fix) : toasts et palette au-dessus de la famille
+   * drawers de vue (1500 : bibliotheque-drawer-host, aide-doc-drawer) —
+   * a 800/900 ils etaient masques par tout drawer ouvert. Echelle haute
+   * complete : drawers 1500 -> toast 1600 -> palette 1700 -> film-detail
+   * 10001 -> danger modal 10100 (cf components.css bloc dangerConfirmModal). */
+  --z-toast:       1600;
+  --z-palette:     1700;
 
   /* ===========================================================
    * Layout

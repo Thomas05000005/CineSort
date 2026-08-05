@@ -51,13 +51,12 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "traitement.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "traitement.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'traitement.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_run_id_param_in_doublons_js(self):
@@ -67,13 +66,12 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             "run_id_or",
             code,
-            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) "
-            "hors commentaires.",
+            "doublons.js ne doit plus utiliser `run_id_or` (parametre inexistant) hors commentaires.",
         )
         self.assertIn(
             'run_id: "latest"',
             content,
-            "doublons.js doit utiliser `run_id: \"latest\"` pour run/get_dashboard.",
+            'doublons.js doit utiliser `run_id: "latest"` pour run/get_dashboard.',
         )
 
     def test_film_detail_uses_perceptual_batch(self):
@@ -88,8 +86,7 @@ class FrontendApiCallsTests(unittest.TestCase):
         self.assertNotIn(
             '"quality/analyze_perceptual_single"',
             content,
-            "film-detail.js ne doit pas appeler l'endpoint inexistant "
-            "`quality/analyze_perceptual_single`.",
+            "film-detail.js ne doit pas appeler l'endpoint inexistant `quality/analyze_perceptual_single`.",
         )
 
 
@@ -100,7 +97,16 @@ class SettingsDispatcherSectionsTests(unittest.TestCase):
 
     def _dispatcher_source(self) -> str:
         # Source du dispatcher central qui agrege toutes les sections.
-        return inspect.getsource(settings_support.save_settings_payload)
+        # Fix lost-update : save_settings_payload est devenu un wrapper qui
+        # prend le verrou par state_dir puis delegue a
+        # _save_settings_payload_locked (ou vivent les appels _save_section_*).
+        # On concatene les deux sources pour que le contrat « la section est
+        # appelee dans le flux de save » survive aux refactors wrapper/helper.
+        src = inspect.getsource(settings_support.save_settings_payload)
+        locked = getattr(settings_support, "_save_settings_payload_locked", None)
+        if locked is not None:
+            src += inspect.getsource(locked)
+        return src
 
     def test_save_section_omdb_exists(self):
         self.assertTrue(

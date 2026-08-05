@@ -30,7 +30,6 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from typing import List
 from unittest import mock
 
 import cinesort.domain.core as core

@@ -4,30 +4,103 @@ niveau "<LEVEL>".
 Ouverture de PRs avec fixes : <OPEN_PRS>.
 
 
-CONTEXTE PROJET (mai 2026 - a jour) :
+=========================================================================
+BUDGET D'OUVERTURE - REGLE LA PLUS IMPORTANTE DE CE DOCUMENT
+=========================================================================
+Le backlog ouvert de ce depot a atteint ~180 PR et ~250 issues, constitue
+en tres grande majorite par les executions PRECEDENTES de cet audit. Il
+n'est plus lu par personne : produire davantage ne rend plus service, ca
+enterre les vrais problemes sous le bruit.
+
+Avant toute ouverture, COMPTE l'existant, et calcule la SOMME des deux :
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:pr+is:open&per_page=1' -q .total_count
+  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:issue+is:open&per_page=1' -q .total_count
+
+Puis applique ce budget, par execution :
+- 0 ouverture des que PR_ouvertes + issues_ouvertes depasse 150. C'est une
+  SOMME, pas un seuil par categorie : 110 PR et 195 issues font 305, donc
+  ZERO ouverture. Dans ce cas tu ne fais que COMMENTER l'existant et
+  proposer des fermetures. Cette ligne prime sur les deux suivantes ;
+- sinon, au plus 3 PR ouvertes, et UNIQUEMENT pour des correctifs surs,
+  petits, testes et sans arbitrage produit ;
+- sinon, au plus 5 issues ouvertes, reservees aux findings de severite HIGH
+  ou superieure.
+
+Repere mesure le 2026-08-03 : 110 PR + 195 issues ouvertes, et la file
+GitHub Actions a atteint 999 runs pour 16 creneaux d'execution, soit ~18 h
+de latence avant qu'une PR puisse fusionner. Ouvrir une PR de plus dans cet
+etat ne fait pas avancer le depot : ca retarde les correctifs deja prets.
+Le travail utile, quand le seuil est franchi, est de FERMER et de FUSIONNER.
+
+Regles de non-duplication, dans cet ordre :
+1. Le finding est-il deja CORRIGE sur main ? Verifie dans le code, pas
+   dans ta memoire. Si oui : n'ouvre rien, et si une issue ouverte le
+   decrit encore, commente-la pour proposer sa fermeture.
+2. Est-il deja decrit dans une issue/PR ouverte ? Si oui : commente
+   l'existante. N'en cree JAMAIS une seconde.
+3. Sinon seulement, et dans la limite du budget, ouvre.
+
+Preferer TOUJOURS : 1 issue de synthese listant N findings, plutot que
+N issues. Un finding sans correctif sur ne merite pas de PR.
+
+Enfin : une PR que tu ouvres doit pouvoir etre mergee. Si elle ne
+s'applique plus, si sa CI est rouge pour une raison qui t'est propre, ou
+si elle depend d'un arbitrage produit, ne l'ouvre pas - decris-la.
+
+=========================================================================
+
+CONTEXTE PROJET (mis a jour le 2026-08-02) :
+- Deux grosses campagnes de correction ont ete absorbees par main depuis
+  la redaction initiale de ce document. NE PAS re-signaler leurs findings
+  sans avoir verifie le code courant :
+  * `529fcd0` ultra-audit (2026-07-16) : 41 findings (1 CRITICAL, 19 HIGH,
+    21 MEDIUM) - granularite des operations destructives, row_id 64 bits,
+    score qualite en deux passes, exports, tri et accents.
+  * `2e213a60` revue post-merge (2026-08-02) : 35 findings (11 HIGH,
+    20 MEDIUM, 4 LOW) - tolerance sqlite3.Error dans le journal d'apply
+    et l'undo, plafonds de tier verrouillants, arbitrage longest-match des
+    sidecars, caches incrementaux, races frontend, restauration DB.
+  * `9df19d3b` : Pillow 12.3.0 + setuptools 83.0.0 (14 alertes Dependabot).
+- ETAT CI A CONNAITRE : la CI est ROUGE sur main lui-meme (ruff 0.15.22
+  resolu par la borne `<0.16` : erreurs de lint + drift de formatage
+  pre-existants). Un check rouge sur une PR ne dit donc RIEN de sa qualite.
+  Ne t'en sers pas comme critere, et n'ouvre pas d'issue a ce sujet : le
+  chantier est identifie et suivi separement.
+- Tests : 6592 unitaires passent (perimetre CI, hors e2e/manual/live/stress).
+  Il subsiste ~22 echecs PRE-EXISTANTS connus (flaky Windows sur verrous de
+  fichiers, perf, isolation Playwright) : ne pas les re-signaler comme neufs.
+- Seuil de couverture en CI : 75% (abaisse depuis 80% apres la migration B).
+
+CONTEXTE PROJET (structure, toujours valable) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
   * domain ne peut PAS importer app, infra, ui (contract `domain_pure`)
-  * infra ne peut PAS importer app, ui (contract `infra_no_upstream`)
-  * app ne peut PAS importer ui (contract `app_no_ui`)
+  * infra ne peut PAS importer app, ui (contract `infra_bounded`)
+  * app ne peut PAS importer ui (contract `app_bounded`)
 - Cycle historique `domain -> app` BRISE en mai 2026 (issue #83 closed).
   Toute regression sur ce point est bloquee par CI - ne pas reintroduire.
 - Repository pattern installe sur SQLiteStore : store.probe, store.scan,
-  store.quality, store.run, store.apply, store.perceptual, store.anomaly.
-  Les `_XxxMixin` legacy coexistent encore (thin wrappers de delegation).
-- Strangler Fig + Facade pattern : CineSortApi expose 5 facades
-  (api.run, api.settings, api.quality, api.integrations, api.library)
-  avec 50 methodes publiques. Les anciennes methodes directes sont
-  privatisees en `_X_impl(...)`.
+  store.quality, store.run, store.apply, store.perceptual, store.anomaly
+  (7 Repository agreges par composition, cf infra/db/repositories/).
+  Phase B8 CLOSE : les `_XxxMixin` legacy et l'heritage MRO ont ete SUPPRIMES
+  (verifie le 2026-08-03 : 0 occurrence). Ne pas reintroduire de mixin SQL.
+- Strangler Fig + Facade pattern : CineSortApi expose 6 facades
+  (api.run, api.settings, api.quality, api.integrations, api.library,
+  api.runtime). Les anciennes methodes directes sont privatisees en
+  `_X_impl(...)`. NB : ce document annoncait 5 facades jusqu'au 2026-08-02,
+  `api.runtime` etait oubliee.
 - Lazy imports residuels acceptables : seulement dans cinesort/app/cleanup.py
   (cycle cleanup <-> apply_core, non lie a domain->app). Tout autre lazy
   import nouveau doit etre justifie ou converti en top-level.
-- Tests : 4277 unitaires passent, coverage seuil 80% en CI.
+- Tests : cf. bloc « mis a jour le 2026-08-02 » plus haut (6592 unitaires,
+  seuil de couverture 75%). Le chiffre « 4277 / 80% » de mai est perime.
 
 
 Analyse transverse (si target=transverse) :
 1) Liste les fonctions > 100L restantes par ROI de refactor (complexite vs gain).
-2) Liste les composants JS dupliques desktop/dashboard (web/dashboard/views/*.js
-   vs web/views/*.js post-V6 ESM migration) et propose strategie de mutualisation.
+2) [OBSOLETE — cf issue #484] La duplication desktop/dashboard N'EXISTE PLUS :
+   il ne reste qu'un arbre JS unique sous web/dashboard/ (views/, components/,
+   core/). Ni web/views/ ni web/components/ de premier niveau (verifie le
+   2026-08-03). Ne cherche PAS de doublons desktop/dashboard : il n'y en a pas.
 3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
    depuis le dernier audit (cross-check avec `lint-imports`).
 4) Audit du Repository pattern : usages residuels de la couche mixin
@@ -1404,6 +1477,14 @@ REGLES :
 - Constante amelioration : meme sur des modules deja audites,
   cherche si quelque chose a evolue ou pourrait etre mieux.
 
-Pour la couche transverse : 1) liste les 49 fonctions de plus de 100 lignes par ROI de refactor (complexite vs gain). 2) liste les 22 composants JS dupliques desktop/dashboard et propose une strategie de mutualisation. 3) liste les 161 imports lazy et propose un decouplage cycle domain<->app. Cree une issue pour chacune. (si target=transverse)
+Pour la couche transverse (si target=transverse) — les inventaires ci-dessous sont
+DEJA SUIVIS par des issues OUVERTES : ENRICHIS-les, ne recree PAS d'issue.
+Les chiffres du prompt d'origine (49 fonctions / 22 composants JS / 161 imports
+lazy) sont PERIMES — cf issue #484.
+1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue OUVERTE #215.
+2) Duplication JS desktop/dashboard : SANS OBJET, elle n'existe plus (cf ci-dessus).
+3) Imports lazy et decouplage -> issue OUVERTE #779. Le cycle domain<->app est
+   BRISE (issue #83 close) ; le reliquat est INTRA-ui/api (cycles entre modules
+   *_support), pas un cycle inter-couches.
 
 ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.

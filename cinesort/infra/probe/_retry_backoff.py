@@ -132,11 +132,11 @@ def _is_transient(exc: BaseException) -> bool:
             return True
         winerror = getattr(exc, "winerror", None)
         if winerror in {
-            53,   # ERROR_BAD_NETPATH (chemin reseau introuvable)
-            64,   # ERROR_NETNAME_DELETED (nom reseau supprime)
-            67,   # ERROR_BAD_NET_NAME
+            53,  # ERROR_BAD_NETPATH (chemin reseau introuvable)
+            64,  # ERROR_NETNAME_DELETED (nom reseau supprime)
+            67,  # ERROR_BAD_NET_NAME
             121,  # ERROR_SEM_TIMEOUT (semaphore timeout, NAS lent/down)
-            1231, # ERROR_NETWORK_UNREACHABLE
+            1231,  # ERROR_NETWORK_UNREACHABLE
         }:
             return True
     return False

@@ -1,0 +1,5742 @@
+{
+  "meta": {
+    "generated_at": "2026-07-08T10:30:14.982735+00:00",
+    "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m1_ui_api.py",
+    "root": "C:\\Users\\blanc\\projects\\CineSort",
+    "js_files_scanned": 74,
+    "apipost_call_sites": 193,
+    "forward_rows": 198,
+    "facade_methods_total": 172,
+    "excluded_methods": [
+      "log",
+      "log_api_exception",
+      "open_path",
+      "progress"
+    ],
+    "regles": {
+      "dispatch": "rest_server.py L1197 result = method(**params); TypeError => 400",
+      "legacy": "Pass 1 desactivee par defaut => /api/<methode> sans facade = 410 Gone",
+      "exclusion": "_EXCLUDED_METHODS filtre Pass 1 ET Pass 2 (L215+L232)"
+    }
+  },
+  "facades": {
+    "run": {
+      "apply": {
+        "required": [
+          "run_id",
+          "decisions",
+          "dry_run",
+          "quarantine_unapproved"
+        ],
+        "optional": [
+          "apply_atomic"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', dry_run: 'bool', quarantine_unapproved: 'bool', apply_atomic: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "build_apply_preview": {
+        "required": [
+          "run_id",
+          "decisions"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+      },
+      "cancel_run": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "check_duplicates": {
+        "required": [
+          "run_id",
+          "decisions"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+      },
+      "check_duplicates_fusion": {
+        "required": [
+          "run_id",
+          "decisions"
+        ],
+        "optional": [
+          "audio_weight",
+          "video_weight"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', *, audio_weight: 'Optional[float]' = None, video_weight: 'Optional[float]' = None) -> 'Dict[str, Any]'"
+      },
+      "cleanup_old_runs": {
+        "required": [],
+        "optional": [
+          "retention_days"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, retention_days: 'int' = 90) -> 'Dict[str, Any]'"
+      },
+      "delete_run": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "export_apply_audit": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "batch_id",
+          "as_format"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', batch_id: 'Optional[str]' = None, as_format: 'str' = 'json') -> 'Dict[str, Any]'"
+      },
+      "export_run_nfo": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "overwrite",
+          "dry_run"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', overwrite: 'bool' = False, dry_run: 'bool' = True) -> 'Dict[str, Any]'"
+      },
+      "export_run_report": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "fmt"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', fmt: 'str' = 'json') -> 'Dict[str, Any]'"
+      },
+      "get_auto_approved_summary": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "threshold",
+          "enabled",
+          "quarantine_corrupted"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', threshold: 'int' = 85, enabled: 'bool' = False, quarantine_corrupted: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "get_cleanup_residual_preview": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_dashboard": {
+        "required": [],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+      },
+      "get_global_stats": {
+        "required": [],
+        "optional": [
+          "limit_runs"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+      },
+      "get_history_stats": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_plan": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_sidebar_counters": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_status": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "last_log_index"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+      },
+      "import_watchlist": {
+        "required": [
+          "csv_content",
+          "source"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, csv_content: 'str', source: 'str') -> 'Dict[str, Any]'"
+      },
+      "list_apply_history": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "list_pending_runs": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "list_quarantine_bucket": {
+        "required": [],
+        "optional": [
+          "limit"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, limit: 'int' = 500) -> 'Dict[str, Any]'"
+      },
+      "load_validation": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "mark_duplicate_winner": {
+        "required": [
+          "run_id",
+          "group_key",
+          "winner_row_id"
+        ],
+        "optional": [
+          "notes"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', group_key: 'str', winner_row_id: 'str', notes: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "pause_run": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "purge_quarantine_bucket": {
+        "required": [],
+        "optional": [
+          "ttl_days",
+          "dry_run"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, ttl_days: 'int' = 30, dry_run: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "purge_quarantine_bucket_all": {
+        "required": [],
+        "optional": [
+          "dry_run"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, dry_run: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "rescan_row": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "rescan_rows_bulk": {
+        "required": [
+          "row_ids"
+        ],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "resume_run": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "save_for_later": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "save_validation": {
+        "required": [
+          "run_id",
+          "decisions"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+      },
+      "start_plan": {
+        "required": [
+          "settings"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+      },
+      "undo_by_row_preview": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "batch_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', batch_id: 'str' = None) -> 'Dict[str, Any]'"
+      },
+      "undo_last_apply": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "dry_run",
+          "atomic"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', dry_run: 'bool' = True, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+      },
+      "undo_last_apply_preview": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "undo_selected_rows": {
+        "required": [
+          "run_id"
+        ],
+        "optional": [
+          "row_ids",
+          "dry_run",
+          "batch_id",
+          "atomic"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_ids: 'list' = None, dry_run: 'bool' = True, batch_id: 'str' = None, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+      }
+    },
+    "settings": {
+      "get_advanced_pragma_settings": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_confidence_thresholds": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_dashboard_qr": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_naming_presets": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_profiles": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_scan_max_workers": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_server_info": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_settings": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_user_data_size": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "preview_naming_template": {
+        "required": [],
+        "optional": [
+          "template",
+          "sample_row_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, template: 'str' = '', sample_row_id: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "reset_all_user_data": {
+        "required": [],
+        "optional": [
+          "confirmation"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, confirmation: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "reset_database": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "reset_settings": {
+        "required": [],
+        "optional": [
+          "scope"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, scope: 'str' = 'all') -> 'Dict[str, Any]'"
+      },
+      "restart_api_server": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "reveal_rest_token": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "save_profile": {
+        "required": [
+          "profile"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+      },
+      "save_settings": {
+        "required": [
+          "settings"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+      },
+      "set_active_profile": {
+        "required": [
+          "profile_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "set_advanced_pragma_settings": {
+        "required": [
+          "profile_name"
+        ],
+        "optional": [
+          "locking_mode_exclusive"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, profile_name: 'str', locking_mode_exclusive: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "set_locale": {
+        "required": [
+          "locale"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, locale: 'str') -> 'Dict[str, Any]'"
+      },
+      "set_scan_max_workers": {
+        "required": [
+          "mode"
+        ],
+        "optional": [
+          "value"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, mode: 'str', value: 'Any' = None) -> 'Dict[str, Any]'"
+      }
+    },
+    "quality": {
+      "analyze_perceptual_batch": {
+        "required": [
+          "run_id",
+          "row_ids"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "analyze_quality_batch": {
+        "required": [
+          "run_id",
+          "row_ids"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "apply_quality_preset": {
+        "required": [
+          "preset_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, preset_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "compare_perceptual": {
+        "required": [
+          "run_id",
+          "row_id_a",
+          "row_id_b"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "delete_score_feedback": {
+        "required": [
+          "feedback_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, feedback_id: 'int') -> 'Dict[str, Any]'"
+      },
+      "export_quality_profile": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "export_recyclarr_yaml": {
+        "required": [],
+        "optional": [
+          "profile_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, profile_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "export_shareable_profile": {
+        "required": [],
+        "optional": [
+          "name",
+          "author",
+          "description"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, name: 'str' = '', author: 'str' = '', description: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "get_breakdown_5_axes": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_calibration_report": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_custom_rules_catalog": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_custom_rules_templates": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_embedded_presets": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_films_by_tier": {
+        "required": [
+          "tier"
+        ],
+        "optional": [
+          "limit"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, tier: 'str', limit: 'int' = 8) -> 'Dict[str, Any]'"
+      },
+      "get_history": {
+        "required": [],
+        "optional": [
+          "period_days"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, period_days: 'int' = 30) -> 'Dict[str, Any]'"
+      },
+      "get_perceptual_compare_audio": {
+        "required": [
+          "run_id",
+          "row_id_a",
+          "row_id_b"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_perceptual_compare_frames": {
+        "required": [
+          "run_id",
+          "row_id_a",
+          "row_id_b"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_perceptual_details": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_perceptual_job_status": {
+        "required": [
+          "job_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, job_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_perceptual_report": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_profiles": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_quality_presets": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_quality_profile": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_quality_report": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_recompute_job_status": {
+        "required": [
+          "job_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, job_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_upgrade_until_score": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "import_quality_profile": {
+        "required": [
+          "profile_json"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile_json: 'Any') -> 'Dict[str, Any]'"
+      },
+      "import_recyclarr_yaml": {
+        "required": [
+          "yaml_text"
+        ],
+        "optional": [
+          "activate"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, yaml_text: 'str', activate: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "import_shareable_profile": {
+        "required": [
+          "content"
+        ],
+        "optional": [
+          "activate"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, content: 'str', activate: 'bool' = True) -> 'Dict[str, Any]'"
+      },
+      "queue_perceptual_analyses": {
+        "required": [
+          "pairs"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, pairs: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "queue_perceptual_batch": {
+        "required": [
+          "run_id",
+          "row_ids"
+        ],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "recompute_all_scores": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "reset_quality_profile": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "save_custom_quality_preset": {
+        "required": [
+          "name",
+          "profile_json"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, name: 'str', profile_json: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+      },
+      "save_profile": {
+        "required": [
+          "profile"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+      },
+      "save_quality_profile": {
+        "required": [
+          "profile_json"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile_json: 'Any') -> 'Dict[str, Any]'"
+      },
+      "set_active_profile": {
+        "required": [
+          "profile_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, profile_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "set_upgrade_until_score": {
+        "required": [
+          "score"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, score: 'Any') -> 'Dict[str, Any]'"
+      },
+      "simulate_quality_preset": {
+        "required": [],
+        "optional": [
+          "run_id",
+          "preset_id",
+          "overrides",
+          "scope"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str' = 'latest', preset_id: 'str' = 'equilibre', overrides: 'Optional[Dict[str, Any]]' = None, scope: 'str' = 'run') -> 'Dict[str, Any]'"
+      },
+      "submit_score_feedback": {
+        "required": [
+          "run_id",
+          "row_id",
+          "user_tier"
+        ],
+        "optional": [
+          "category_focus",
+          "comment"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str', user_tier: 'str', category_focus: 'Optional[str]' = None, comment: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "validate_custom_rules": {
+        "required": [
+          "rules"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, rules: 'Any') -> 'Dict[str, Any]'"
+      }
+    },
+    "integrations": {
+      "enrich_tmdb_ids_by_title": {
+        "required": [
+          "run_id",
+          "row_ids"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_ids: 'Any') -> 'Dict[str, Any]'"
+      },
+      "get_jellyfin_libraries": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_jellyfin_sync_report": {
+        "required": [],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "get_plex_libraries": {
+        "required": [],
+        "optional": [
+          "url",
+          "token",
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      },
+      "get_plex_sync_report": {
+        "required": [],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "get_radarr_status": {
+        "required": [],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "get_tmdb_posters": {
+        "required": [
+          "tmdb_ids"
+        ],
+        "optional": [
+          "size"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, tmdb_ids: 'List[int]', size: 'str' = 'w92') -> 'Dict[str, Any]'"
+      },
+      "refresh_jellyfin_library_now": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "refresh_plex_library_now": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "request_radarr_upgrade": {
+        "required": [
+          "radarr_movie_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, radarr_movie_id: 'int') -> 'Dict[str, Any]'"
+      },
+      "test_email_report": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "test_jellyfin_connection": {
+        "required": [],
+        "optional": [
+          "url",
+          "api_key",
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      },
+      "test_omdb_connection": {
+        "required": [],
+        "optional": [
+          "api_key",
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      },
+      "test_plex_connection": {
+        "required": [],
+        "optional": [
+          "url",
+          "token",
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      },
+      "test_radarr_connection": {
+        "required": [],
+        "optional": [
+          "url",
+          "api_key",
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      },
+      "test_tmdb_key": {
+        "required": [
+          "api_key",
+          "state_dir"
+        ],
+        "optional": [
+          "timeout_s"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, api_key: 'str', state_dir: 'str', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+      }
+    },
+    "library": {
+      "clear_field_lock": {
+        "required": [
+          "film_id",
+          "field_name"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, film_id: 'str', field_name: 'str') -> 'Dict[str, Any]'"
+      },
+      "clear_tmdb_override": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "delete_smart_playlist": {
+        "required": [
+          "playlist_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, playlist_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "export_films": {
+        "required": [
+          "row_ids"
+        ],
+        "optional": [
+          "format",
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, row_ids: 'list', format: 'str' = 'csv', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "export_full_library": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_film_full": {
+        "required": [
+          "row_id"
+        ],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, row_id: 'str', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_film_history": {
+        "required": [
+          "film_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, film_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_films_by_decade": {
+        "required": [],
+        "optional": [
+          "filters"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, filters: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_incomplete_sagas": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_library_counters_by_chip": {
+        "required": [],
+        "optional": [
+          "filters",
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, filters: 'Optional[Dict[str, Any]]' = None, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_library_filtered": {
+        "required": [],
+        "optional": [
+          "run_id",
+          "filters",
+          "sort",
+          "page",
+          "page_size"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]' = None, filters: 'Optional[Dict[str, Any]]' = None, sort: 'str' = 'title', page: 'int' = 1, page_size: 'int' = 50) -> 'Dict[str, Any]'"
+      },
+      "get_library_podiums": {
+        "required": [],
+        "optional": [
+          "run_id",
+          "limit"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]' = None, limit: 'int' = 10) -> 'Dict[str, Any]'"
+      },
+      "get_library_timeline": {
+        "required": [],
+        "optional": [
+          "months",
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, months: 'int' = 12, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_scoring_rollup": {
+        "required": [],
+        "optional": [
+          "by",
+          "limit",
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, by: 'str' = 'franchise', limit: 'int' = 20, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_smart_playlists": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "list_field_locks": {
+        "required": [
+          "film_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, film_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "list_films_with_history": {
+        "required": [],
+        "optional": [
+          "limit"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, limit: 'int' = 50) -> 'Dict[str, Any]'"
+      },
+      "mark_alert_ignored": {
+        "required": [
+          "row_id",
+          "alert_code"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, row_id: 'str', alert_code: 'str') -> 'Dict[str, Any]'"
+      },
+      "mark_for_deletion": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "mark_for_deletion_bulk": {
+        "required": [
+          "row_ids"
+        ],
+        "optional": [
+          "run_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "save_smart_playlist": {
+        "required": [
+          "name",
+          "filters"
+        ],
+        "optional": [
+          "playlist_id"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, name: 'str', filters: 'Dict[str, Any]', playlist_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "search_tmdb": {
+        "required": [
+          "query"
+        ],
+        "optional": [
+          "year"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, query: 'str', year: 'Optional[int]' = None) -> 'Dict[str, Any]'"
+      },
+      "set_field_lock": {
+        "required": [
+          "film_id",
+          "field_name"
+        ],
+        "optional": [
+          "locked_value",
+          "source"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, film_id: 'str', field_name: 'str', locked_value: 'Any' = None, source: 'str' = 'ui_lock') -> 'Dict[str, Any]'"
+      },
+      "set_film_tmdb_candidate": {
+        "required": [
+          "run_id",
+          "row_id",
+          "tmdb_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]', row_id: 'str', tmdb_id: 'int') -> 'Dict[str, Any]'"
+      },
+      "unmark_for_deletion": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+      }
+    },
+    "runtime": {
+      "auto_install_probe_tools": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "check_for_updates": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "clear_notifications": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "dismiss_notification": {
+        "required": [
+          "notification_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, notification_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_app_version": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_diagnostic": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_doc": {
+        "required": [
+          "file"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, file: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_event_ts": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_log_paths": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_notifications": {
+        "required": [],
+        "optional": [
+          "unread_only",
+          "limit",
+          "category"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, unread_only: 'bool' = False, limit: 'int' = 100, category: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+      },
+      "get_notifications_unread_count": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_probe": {
+        "required": [
+          "run_id",
+          "row_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "get_probe_tools_status": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_recent_logs": {
+        "required": [],
+        "optional": [
+          "limit"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, limit: 'int' = 100) -> 'Dict[str, Any]'"
+      },
+      "get_tools_status": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "get_update_info": {
+        "required": [],
+        "optional": [
+          "force_refresh"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, force_refresh: 'bool' = False) -> 'Dict[str, Any]'"
+      },
+      "install_probe_tools": {
+        "required": [],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "is_demo_mode_active": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "mark_all_notifications_read": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "mark_notification_read": {
+        "required": [
+          "notification_id"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, notification_id: 'str') -> 'Dict[str, Any]'"
+      },
+      "open_external_url": {
+        "required": [],
+        "optional": [
+          "url"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, url: 'str' = '') -> 'Dict[str, Any]'"
+      },
+      "open_logs_folder": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "purge_probe_cache": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "recheck_probe_tools": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "reset_incremental_cache": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "run_nas_benchmark": {
+        "required": [],
+        "optional": [
+          "n_writes",
+          "n_reads"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, n_writes: 'int' = 1000, n_reads: 'int' = 10000) -> 'Dict[str, Any]'"
+      },
+      "search_docs": {
+        "required": [
+          "query"
+        ],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self, query: 'str') -> 'Dict[str, Any]'"
+      },
+      "set_probe_tool_paths": {
+        "required": [],
+        "optional": [
+          "payload"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, payload: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "start_demo_mode": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "stop_demo_mode": {
+        "required": [],
+        "optional": [],
+        "has_kwargs": false,
+        "signature": "(self) -> 'Dict[str, Any]'"
+      },
+      "update_probe_tools": {
+        "required": [],
+        "optional": [
+          "options"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+      },
+      "validate_dropped_path": {
+        "required": [],
+        "optional": [
+          "path"
+        ],
+        "has_kwargs": false,
+        "signature": "(self, path: 'str' = '') -> 'Dict[str, Any]'"
+      }
+    }
+  },
+  "forward": [
+    {
+      "file": "web/dashboard/app.js",
+      "line": 591,
+      "arg_raw": "\"runtime/open_external_url\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/open_external_url",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 730,
+      "arg_raw": "\"run/get_sidebar_counters\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "run/get_sidebar_counters",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 764,
+      "arg_raw": "\"runtime/get_probe_tools_status\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_probe_tools_status",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 813,
+      "arg_raw": "\"runtime/get_update_info\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_update_info",
+      "verdict": "OK",
+      "detail": "signature (self, force_refresh: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 848,
+      "arg_raw": "\"runtime/get_notifications_unread_count\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_notifications_unread_count",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 881,
+      "arg_raw": "\"run/get_global_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "run/get_global_stats",
+      "verdict": "OK",
+      "detail": "signature (self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/app.js",
+      "line": 930,
+      "arg_raw": "\"settings/save_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/save_settings",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/duplicate-comparator-modal.js",
+      "line": 383,
+      "arg_raw": "\"quality/get_perceptual_compare_frames\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id_a",
+        "row_id_b",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_compare_frames",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/duplicate-comparator-modal.js",
+      "line": 465,
+      "arg_raw": "\"quality/get_perceptual_compare_audio\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id_a",
+        "row_id_b",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_compare_audio",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/duplicate-comparator-modal.js",
+      "line": 570,
+      "arg_raw": "\"run/mark_duplicate_winner\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "group_key",
+        "winner_row_id",
+        "notes"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/mark_duplicate_winner",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', group_key: 'str', winner_row_id: 'str', notes: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 101,
+      "arg_raw": "\"library/get_film_full\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "library/get_film_full",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 773,
+      "arg_raw": "\"library/unmark_for_deletion\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/unmark_for_deletion",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 784,
+      "arg_raw": "\"library/clear_tmdb_override\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/clear_tmdb_override",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 864,
+      "arg_raw": "\"quality/submit_score_feedback\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/submit_score_feedback",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 891,
+      "arg_raw": "\"quality/delete_score_feedback\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "feedback_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/delete_score_feedback",
+      "verdict": "OK",
+      "detail": "signature (self, feedback_id: 'int') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 922,
+      "arg_raw": "\"integrations/get_tmdb_posters\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "tmdb_ids",
+        "size",
+        "force_refresh"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/get_tmdb_posters",
+      "verdict": "PAYLOAD_DESACCORDE",
+      "detail": "cles inconnues de la signature (TypeError => 400): force_refresh"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 980,
+      "arg_raw": "\"library/set_film_tmdb_candidate\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id",
+        "tmdb_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/set_film_tmdb_candidate",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]', row_id: 'str', tmdb_id: 'int') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1077,
+      "arg_raw": "\"library/search_tmdb\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "query",
+        "year"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/search_tmdb",
+      "verdict": "OK",
+      "detail": "signature (self, query: 'str', year: 'Optional[int]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1191,
+      "arg_raw": "\"run/save_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1212,
+      "arg_raw": "\"open_path\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "path"
+      ],
+      "payload_flags": [],
+      "endpoint": "open_path",
+      "verdict": "EXCLU",
+      "detail": "methode 'open_path' dans _EXCLUDED_METHODS (rest_server.py) => jamais exposee en REST (404), appel UI mort"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1230,
+      "arg_raw": "\"run/rescan_row\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/rescan_row",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1258,
+      "arg_raw": "\"library/mark_for_deletion\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/mark_for_deletion",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/film-detail.js",
+      "line": 1277,
+      "arg_raw": "\"library/mark_alert_ignored\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "row_id",
+        "alert_code"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/mark_alert_ignored",
+      "verdict": "OK",
+      "detail": "signature (self, row_id: 'str', alert_code: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 191,
+      "arg_raw": "\"runtime/mark_all_notifications_read\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/mark_all_notifications_read",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 197,
+      "arg_raw": "\"runtime/clear_notifications\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/clear_notifications",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 207,
+      "arg_raw": "\"runtime/dismiss_notification\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "notification_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/dismiss_notification",
+      "verdict": "OK",
+      "detail": "signature (self, notification_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 214,
+      "arg_raw": "\"runtime/mark_notification_read\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "notification_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/mark_notification_read",
+      "verdict": "OK",
+      "detail": "signature (self, notification_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 231,
+      "arg_raw": "\"runtime/mark_notification_read\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "notification_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/mark_notification_read",
+      "verdict": "OK",
+      "detail": "signature (self, notification_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 238,
+      "arg_raw": "\"runtime/get_notifications\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "unread_only",
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/get_notifications",
+      "verdict": "OK",
+      "detail": "signature (self, unread_only: 'bool' = False, limit: 'int' = 100, category: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/notification-center.js",
+      "line": 316,
+      "arg_raw": "\"runtime/get_notifications_unread_count\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_notifications_unread_count",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/perceptual-modal.js",
+      "line": 485,
+      "arg_raw": "\"quality/get_perceptual_details\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_details",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/perceptual-modal.js",
+      "line": 533,
+      "arg_raw": "\"quality/get_perceptual_report\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_report",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/perceptual-modal.js",
+      "line": 557,
+      "arg_raw": "\"quality/get_perceptual_report\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_report",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/perceptual-modal.js",
+      "line": 582,
+      "arg_raw": "\"quality/get_perceptual_compare_frames\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id_a",
+        "row_id_b",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_compare_frames",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/perceptual-modal.js",
+      "line": 630,
+      "arg_raw": "\"library/get_library_filtered\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "page_size",
+        "page"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_library_filtered",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]' = None, filters: 'Optional[Dict[str, Any]]' = None, sort: 'str' = 'title', page: 'int' = 1, page_size: 'int' = 50) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/scan-banner.js",
+      "line": 122,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/components/scan-banner.js",
+      "line": 136,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/api.js",
+      "line": 507,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/api.js",
+      "line": 577,
+      "arg_raw": "\"settings/get_confidence_thresholds\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_confidence_thresholds",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/drop.js",
+      "line": 56,
+      "arg_raw": "\"runtime/validate_dropped_path\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "path"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/validate_dropped_path",
+      "verdict": "OK",
+      "detail": "signature (self, path: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/drop.js",
+      "line": 64,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/drop.js",
+      "line": 74,
+      "arg_raw": "\"settings/save_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/save_settings",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/core/journal-polling.js",
+      "line": 76,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/about.js",
+      "line": 58,
+      "arg_raw": "\"runtime/get_app_version\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_app_version",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 289,
+      "arg_raw": "\"integrations/test_tmdb_key\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "api_key",
+        "state_dir",
+        "timeout_s"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_tmdb_key",
+      "verdict": "OK",
+      "detail": "signature (self, api_key: 'str', state_dir: 'str', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 296,
+      "arg_raw": "\"integrations/test_jellyfin_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_jellyfin_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 303,
+      "arg_raw": "\"integrations/test_plex_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_plex_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 310,
+      "arg_raw": "\"integrations/test_radarr_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_radarr_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 313,
+      "arg_raw": "\"integrations/test_omdb_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "api_key",
+        "timeout_s"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_omdb_connection",
+      "verdict": "OK",
+      "detail": "signature (self, api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1008,
+      "arg_raw": "\"run/start_plan\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/start_plan",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1080,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1289,
+      "arg_raw": "\"runtime/open_external_url\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/open_external_url",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1334,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1335,
+      "arg_raw": "\"run/get_global_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "run/get_global_stats",
+      "verdict": "OK",
+      "detail": "signature (self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1336,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/accueil.js",
+      "line": 1337,
+      "arg_raw": "\"runtime/get_update_info\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_update_info",
+      "verdict": "OK",
+      "detail": "signature (self, force_refresh: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/aide.js",
+      "line": 296,
+      "arg_raw": "\"runtime/get_diagnostic\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_diagnostic",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/aide.js",
+      "line": 574,
+      "arg_raw": "\"runtime/get_doc\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "file"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/get_doc",
+      "verdict": "OK",
+      "detail": "signature (self, file: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/aide.js",
+      "line": 676,
+      "arg_raw": "\"runtime/search_docs\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "query"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/search_docs",
+      "verdict": "OK",
+      "detail": "signature (self, query: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/aide.js",
+      "line": 870,
+      "arg_raw": "\"runtime/open_logs_folder\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/open_logs_folder",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/aide.js",
+      "line": 884,
+      "arg_raw": "\"runtime/get_recent_logs\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/get_recent_logs",
+      "verdict": "OK",
+      "detail": "signature (self, limit: 'int' = 100) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 783,
+      "arg_raw": "\"library/get_library_counters_by_chip\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "filters"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_library_counters_by_chip",
+      "verdict": "OK",
+      "detail": "signature (self, filters: 'Optional[Dict[str, Any]]' = None, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 840,
+      "arg_raw": "\"library/get_library_filtered\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "filters",
+        "sort",
+        "page",
+        "page_size"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_library_filtered",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]' = None, filters: 'Optional[Dict[str, Any]]' = None, sort: 'str' = 'title', page: 'int' = 1, page_size: 'int' = 50) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1563,
+      "arg_raw": "\"integrations/enrich_tmdb_ids_by_title\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_ids"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/enrich_tmdb_ids_by_title",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_ids: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1589,
+      "arg_raw": "\"integrations/get_tmdb_posters\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "tmdb_ids",
+        "size"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/get_tmdb_posters",
+      "verdict": "OK",
+      "detail": "signature (self, tmdb_ids: 'List[int]', size: 'str' = 'w92') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1630,
+      "arg_raw": "\"quality/get_perceptual_job_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "job_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_job_status",
+      "verdict": "OK",
+      "detail": "signature (self, job_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1664,
+      "arg_raw": "\"quality/queue_perceptual_batch\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_ids"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/queue_perceptual_batch",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1709,
+      "arg_raw": "\"run/rescan_rows_bulk\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "row_ids"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/rescan_rows_bulk",
+      "verdict": "OK",
+      "detail": "signature (self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1775,
+      "arg_raw": "\"library/export_films\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "row_ids",
+        "format"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/export_films",
+      "verdict": "OK",
+      "detail": "signature (self, row_ids: 'list', format: 'str' = 'csv', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1824,
+      "arg_raw": "\"library/mark_for_deletion_bulk\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "row_ids"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/mark_for_deletion_bulk",
+      "verdict": "OK",
+      "detail": "signature (self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 1959,
+      "arg_raw": "\"library/save_smart_playlist\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "name",
+        "filters"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/save_smart_playlist",
+      "verdict": "OK",
+      "detail": "signature (self, name: 'str', filters: 'Dict[str, Any]', playlist_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 2000,
+      "arg_raw": "\"library/delete_smart_playlist\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "playlist_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/delete_smart_playlist",
+      "verdict": "OK",
+      "detail": "signature (self, playlist_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/bibliotheque.js",
+      "line": 2017,
+      "arg_raw": "\"library/get_smart_playlists\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "library/get_smart_playlists",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/demo-wizard.js",
+      "line": 30,
+      "arg_raw": "\"runtime/is_demo_mode_active\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/is_demo_mode_active",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/demo-wizard.js",
+      "line": 67,
+      "arg_raw": "\"runtime/start_demo_mode\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/start_demo_mode",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/demo-wizard.js",
+      "line": 123,
+      "arg_raw": "\"runtime/is_demo_mode_active\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/is_demo_mode_active",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/demo-wizard.js",
+      "line": 172,
+      "arg_raw": "\"runtime/stop_demo_mode\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/stop_demo_mode",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 149,
+      "arg_raw": "\"library/get_film_full\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_film_full",
+      "verdict": "OK",
+      "detail": "signature (self, row_id: 'str', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 730,
+      "arg_raw": "\"run/mark_duplicate_winner\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "group_key",
+        "winner_row_id",
+        "notes"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/mark_duplicate_winner",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', group_key: 'str', winner_row_id: 'str', notes: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 837,
+      "arg_raw": "\"run/mark_duplicate_winner\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "group_key",
+        "winner_row_id",
+        "notes"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/mark_duplicate_winner",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', group_key: 'str', winner_row_id: 'str', notes: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 954,
+      "arg_raw": "\"quality/queue_perceptual_analyses\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "pairs",
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/queue_perceptual_analyses",
+      "verdict": "OK",
+      "detail": "signature (self, pairs: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 997,
+      "arg_raw": "\"quality/get_perceptual_job_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "job_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_perceptual_job_status",
+      "verdict": "OK",
+      "detail": "signature (self, job_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 1124,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/doublons.js",
+      "line": 1153,
+      "arg_raw": "\"run/check_duplicates\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/check_duplicates",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/help.js",
+      "line": 219,
+      "arg_raw": "\"runtime/get_log_paths\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_log_paths",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/help.js",
+      "line": 377,
+      "arg_raw": "\"runtime/open_logs_folder\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/open_logs_folder",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 849,
+      "arg_raw": "\"run/get_history_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_history_stats",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 860,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 875,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 1095,
+      "arg_raw": "\"library/list_films_with_history\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/list_films_with_history",
+      "verdict": "OK",
+      "detail": "signature (self, limit: 'int' = 50) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 1170,
+      "arg_raw": "\"run/undo_last_apply\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "dry_run",
+        "atomic"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/undo_last_apply",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', dry_run: 'bool' = True, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 1189,
+      "arg_raw": "\"run/delete_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/delete_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 1215,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/historique.js",
+      "line": 1391,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 26,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 47,
+      "arg_raw": "\"integrations/test_jellyfin_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "api_key",
+        "timeout_s"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_jellyfin_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 52,
+      "arg_raw": "\"integrations/get_jellyfin_libraries\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/get_jellyfin_libraries",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 165,
+      "arg_raw": "\"integrations/test_jellyfin_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "api_key",
+        "timeout_s"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_jellyfin_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 195,
+      "arg_raw": "\"integrations/get_jellyfin_libraries\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/get_jellyfin_libraries",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/jellyfin.js",
+      "line": 227,
+      "arg_raw": "\"integrations/get_jellyfin_sync_report\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/get_jellyfin_sync_report",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/logs.js",
+      "line": 58,
+      "arg_raw": "\"run/get_global_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit_runs"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_global_stats",
+      "verdict": "OK",
+      "detail": "signature (self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/logs.js",
+      "line": 151,
+      "arg_raw": "\"run/cancel_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/cancel_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/logs.js",
+      "line": 192,
+      "arg_raw": "\"run/export_run_report\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "fmt"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/export_run_report",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', fmt: 'str' = 'json') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/logs.js",
+      "line": 210,
+      "arg_raw": "\"run/export_run_nfo\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "overwrite",
+        "dry_run"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/export_run_nfo",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', overwrite: 'bool' = False, dry_run: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/logs.js",
+      "line": 220,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1030,
+      "arg_raw": "method",
+      "resolution": "dynamique — affectation ligne 1029",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_probe_tools_status",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1030,
+      "arg_raw": "method",
+      "resolution": "dynamique — affectation ligne 1029",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/recheck_probe_tools",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1532,
+      "arg_raw": "\"settings/get_profiles\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_profiles",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1583,
+      "arg_raw": "\"settings/set_active_profile\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "profile_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/set_active_profile",
+      "verdict": "OK",
+      "detail": "signature (self, profile_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1636,
+      "arg_raw": "\"settings/save_profile\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "profile"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/save_profile",
+      "verdict": "OK",
+      "detail": "signature (self, profile: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1710,
+      "arg_raw": "\"quality/recompute_all_scores\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/recompute_all_scores",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1750,
+      "arg_raw": "\"settings/get_dashboard_qr\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_dashboard_qr",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1755,
+      "arg_raw": "\"settings/get_server_info\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_server_info",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1800,
+      "arg_raw": "\"settings/save_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/save_settings",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 1839,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2048,
+      "arg_raw": "\"settings/reset_database\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/reset_database",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2050,
+      "arg_raw": "\"settings/reset_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "scope"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/reset_settings",
+      "verdict": "OK",
+      "detail": "signature (self, scope: 'str' = 'all') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2207,
+      "arg_raw": "method",
+      "resolution": "dynamique — valeurs de dataset.testMethod dans le fichier",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_jellyfin_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2207,
+      "arg_raw": "method",
+      "resolution": "dynamique — valeurs de dataset.testMethod dans le fichier",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_omdb_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2207,
+      "arg_raw": "method",
+      "resolution": "dynamique — valeurs de dataset.testMethod dans le fichier",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_plex_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2207,
+      "arg_raw": "method",
+      "resolution": "dynamique — valeurs de dataset.testMethod dans le fichier",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_radarr_connection",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2207,
+      "arg_raw": "method",
+      "resolution": "dynamique — valeurs de dataset.testMethod dans le fichier",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/test_tmdb_key",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2311,
+      "arg_raw": "\"library/export_full_library\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "library/export_full_library",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2350,
+      "arg_raw": "\"run/list_quarantine_bucket\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/list_quarantine_bucket",
+      "verdict": "OK",
+      "detail": "signature (self, limit: 'int' = 500) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2405,
+      "arg_raw": "\"run/list_quarantine_bucket\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/list_quarantine_bucket",
+      "verdict": "OK",
+      "detail": "signature (self, limit: 'int' = 500) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2439,
+      "arg_raw": "\"run/purge_quarantine_bucket_all\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "dry_run"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/purge_quarantine_bucket_all",
+      "verdict": "OK",
+      "detail": "signature (self, dry_run: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2472,
+      "arg_raw": "\"settings/restart_api_server\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/restart_api_server",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2503,
+      "arg_raw": "\"runtime/get_update_info\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "force_refresh"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/get_update_info",
+      "verdict": "OK",
+      "detail": "signature (self, force_refresh: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2535,
+      "arg_raw": "\"runtime/open_external_url\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/open_external_url",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2603,
+      "arg_raw": "\"settings/get_advanced_pragma_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_advanced_pragma_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2625,
+      "arg_raw": "\"settings/set_advanced_pragma_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "profile_name",
+        "locking_mode_exclusive"
+      ],
+      "payload_flags": [],
+      "endpoint": "settings/set_advanced_pragma_settings",
+      "verdict": "OK",
+      "detail": "signature (self, profile_name: 'str', locking_mode_exclusive: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2750,
+      "arg_raw": "\"settings/get_scan_max_workers\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_scan_max_workers",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2775,
+      "arg_raw": "\"settings/set_scan_max_workers\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/set_scan_max_workers",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2897,
+      "arg_raw": "\"runtime/auto_install_probe_tools\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/auto_install_probe_tools",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2925,
+      "arg_raw": "\"runtime/update_probe_tools\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/update_probe_tools",
+      "verdict": "OK",
+      "detail": "signature (self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 2975,
+      "arg_raw": "\"runtime/install_probe_tools\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "options"
+      ],
+      "payload_flags": [],
+      "endpoint": "runtime/install_probe_tools",
+      "verdict": "OK",
+      "detail": "signature (self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3148,
+      "arg_raw": "\"quality/export_recyclarr_yaml\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/export_recyclarr_yaml",
+      "verdict": "OK",
+      "detail": "signature (self, profile_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3174,
+      "arg_raw": "\"quality/import_recyclarr_yaml\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "yaml_text",
+        "activate"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/import_recyclarr_yaml",
+      "verdict": "OK",
+      "detail": "signature (self, yaml_text: 'str', activate: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3197,
+      "arg_raw": "\"quality/get_embedded_presets\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/get_embedded_presets",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3242,
+      "arg_raw": "\"quality/set_upgrade_until_score\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "score"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/set_upgrade_until_score",
+      "verdict": "OK",
+      "detail": "signature (self, score: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3265,
+      "arg_raw": "\"quality/get_upgrade_until_score\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/get_upgrade_until_score",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/parametres.js",
+      "line": 3281,
+      "arg_raw": "\"quality/get_breakdown_5_axes\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/get_breakdown_5_axes",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/plex.js",
+      "line": 26,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/plex.js",
+      "line": 36,
+      "arg_raw": "\"integrations/test_plex_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "token"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_plex_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/plex.js",
+      "line": 58,
+      "arg_raw": "\"integrations/test_plex_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "token"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_plex_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/plex.js",
+      "line": 70,
+      "arg_raw": "\"integrations/get_plex_sync_report\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/get_plex_sync_report",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 425,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 426,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 436,
+      "arg_raw": "\"run/start_plan\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/start_plan",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 454,
+      "arg_raw": "\"run/cancel_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/cancel_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 469,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 528,
+      "arg_raw": "\"run/load_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/load_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 692,
+      "arg_raw": "\"run/save_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 768,
+      "arg_raw": "\"run/apply\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "dry_run",
+        "quarantine"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/apply",
+      "verdict": "PAYLOAD_DESACCORDE",
+      "detail": "params requis manquants: decisions, quarantine_unapproved; cles inconnues de la signature (TypeError => 400): quarantine"
+    },
+    {
+      "file": "web/dashboard/views/processing.js",
+      "line": 851,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 741,
+      "arg_raw": "\"quality/get_films_by_tier\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "tier",
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_films_by_tier",
+      "verdict": "OK",
+      "detail": "signature (self, tier: 'str', limit: 'int' = 8) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 757,
+      "arg_raw": "\"library/get_incomplete_sagas\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "library/get_incomplete_sagas",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 774,
+      "arg_raw": "\"library/get_films_by_decade\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "library/get_films_by_decade",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 799,
+      "arg_raw": "\"quality/get_history\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "period_days"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_history",
+      "verdict": "OK",
+      "detail": "signature (self, period_days: 'int' = 30) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 985,
+      "arg_raw": "\"quality/recompute_all_scores\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "quality/recompute_all_scores",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 1010,
+      "arg_raw": "\"quality/get_recompute_job_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "job_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "quality/get_recompute_job_status",
+      "verdict": "OK",
+      "detail": "signature (self, job_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/qualite.js",
+      "line": 1082,
+      "arg_raw": "\"run/get_global_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "run/get_global_stats",
+      "verdict": "OK",
+      "detail": "signature (self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/radarr.js",
+      "line": 26,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/radarr.js",
+      "line": 36,
+      "arg_raw": "\"integrations/test_radarr_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "api_key"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_radarr_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/radarr.js",
+      "line": 56,
+      "arg_raw": "\"integrations/test_radarr_connection\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "url",
+        "api_key"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/test_radarr_connection",
+      "verdict": "OK",
+      "detail": "signature (self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/radarr.js",
+      "line": 68,
+      "arg_raw": "\"integrations/get_radarr_status\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "integrations/get_radarr_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/radarr.js",
+      "line": 94,
+      "arg_raw": "\"integrations/request_radarr_upgrade\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "movie_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "integrations/request_radarr_upgrade",
+      "verdict": "PAYLOAD_DESACCORDE",
+      "detail": "params requis manquants: radarr_movie_id; cles inconnues de la signature (TypeError => 400): movie_id"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 78,
+      "arg_raw": "\"run/get_global_stats\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit_runs"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_global_stats",
+      "verdict": "OK",
+      "detail": "signature (self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 79,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 80,
+      "arg_raw": "\"runtime/get_probe_tools_status\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/get_probe_tools_status",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 81,
+      "arg_raw": "\"library/get_library_podiums\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "limit"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_library_podiums",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'Optional[str]' = None, limit: 'int' = 10) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 82,
+      "arg_raw": "\"library/get_library_timeline\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "months"
+      ],
+      "payload_flags": [],
+      "endpoint": "library/get_library_timeline",
+      "verdict": "OK",
+      "detail": "signature (self, months: 'int' = 12, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 88,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 834,
+      "arg_raw": "\"settings/get_settings\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_settings",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 884,
+      "arg_raw": "\"run/cancel_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/cancel_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 905,
+      "arg_raw": "\"runtime/auto_install_probe_tools\"",
+      "resolution": "litteral",
+      "payload_kind": "empty",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "runtime/auto_install_probe_tools",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 944,
+      "arg_raw": "\"settings/get_dashboard_qr\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_dashboard_qr",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 949,
+      "arg_raw": "\"settings/get_server_info\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/get_server_info",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/status.js",
+      "line": 989,
+      "arg_raw": "\"settings/reveal_rest_token\"",
+      "resolution": "litteral",
+      "payload_kind": "absent",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "settings/reveal_rest_token",
+      "verdict": "OK",
+      "detail": "signature (self) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 223,
+      "arg_raw": "\"run/get_dashboard\"",
+      "resolution": "litteral",
+      "payload_kind": "expression",
+      "payload_keys": [],
+      "payload_flags": [],
+      "endpoint": "run/get_dashboard",
+      "verdict": "OK",
+      "detail": "payload non analysable (expression)"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 274,
+      "arg_raw": "\"run/get_auto_approved_summary\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "enabled"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_auto_approved_summary",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', threshold: 'int' = 85, enabled: 'bool' = False, quarantine_corrupted: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 307,
+      "arg_raw": "\"run/get_status\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "last_log_index"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_status",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1276,
+      "arg_raw": "\"run/undo_last_apply_preview\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/undo_last_apply_preview",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1335,
+      "arg_raw": "\"run/undo_last_apply\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "dry_run"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/undo_last_apply",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', dry_run: 'bool' = True, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1426,
+      "arg_raw": "\"run/build_apply_preview\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/build_apply_preview",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1704,
+      "arg_raw": "\"run/pause_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/pause_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1718,
+      "arg_raw": "\"run/resume_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/resume_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1732,
+      "arg_raw": "\"run/save_for_later\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_for_later",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1752,
+      "arg_raw": "\"run/cancel_run\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/cancel_run",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1778,
+      "arg_raw": "\"run/start_plan\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "settings"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/start_plan",
+      "verdict": "OK",
+      "detail": "signature (self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 1796,
+      "arg_raw": "\"run/get_plan\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/get_plan",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2007,
+      "arg_raw": "\"run/save_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2106,
+      "arg_raw": "\"run/save_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2149,
+      "arg_raw": "\"run/apply\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions",
+        "dry_run",
+        "quarantine_unapproved",
+        "apply_atomic"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/apply",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', dry_run: 'bool', quarantine_unapproved: 'bool', apply_atomic: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2228,
+      "arg_raw": "\"run/apply\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions",
+        "dry_run",
+        "quarantine_unapproved",
+        "apply_atomic"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/apply",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', dry_run: 'bool', quarantine_unapproved: 'bool', apply_atomic: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2486,
+      "arg_raw": "\"run/rescan_row\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/rescan_row",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2498,
+      "arg_raw": "\"run/mark_alert_ignored\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "row_id"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/mark_alert_ignored",
+      "verdict": "MAUVAISE_FACADE",
+      "detail": "'mark_alert_ignored' absent de la facade 'run' mais present sur: library"
+    },
+    {
+      "file": "web/dashboard/views/traitement.js",
+      "line": 2674,
+      "arg_raw": "\"run/save_validation\"",
+      "resolution": "litteral",
+      "payload_kind": "object",
+      "payload_keys": [
+        "run_id",
+        "decisions"
+      ],
+      "payload_flags": [],
+      "endpoint": "run/save_validation",
+      "verdict": "OK",
+      "detail": "signature (self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    }
+  ],
+  "reverse": [
+    {
+      "facade": "run",
+      "method": "apply",
+      "endpoint": "run/apply",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 151,
+      "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', dry_run: 'bool', quarantine_unapproved: 'bool', apply_atomic: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "build_apply_preview",
+      "endpoint": "run/build_apply_preview",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "cancel_run",
+      "endpoint": "run/cancel_run",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 4,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "check_duplicates",
+      "endpoint": "run/check_duplicates",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "check_duplicates_fusion",
+      "endpoint": "run/check_duplicates_fusion",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]', *, audio_weight: 'Optional[float]' = None, video_weight: 'Optional[float]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "cleanup_old_runs",
+      "endpoint": "run/cleanup_old_runs",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, retention_days: 'int' = 90) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "delete_run",
+      "endpoint": "run/delete_run",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "export_apply_audit",
+      "endpoint": "run/export_apply_audit",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', batch_id: 'Optional[str]' = None, as_format: 'str' = 'json') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "export_run_nfo",
+      "endpoint": "run/export_run_nfo",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', overwrite: 'bool' = False, dry_run: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "export_run_report",
+      "endpoint": "run/export_run_report",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', fmt: 'str' = 'json') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_auto_approved_summary",
+      "endpoint": "run/get_auto_approved_summary",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', threshold: 'int' = 85, enabled: 'bool' = False, quarantine_corrupted: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_cleanup_residual_preview",
+      "endpoint": "run/get_cleanup_residual_preview",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_dashboard",
+      "endpoint": "run/get_dashboard",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 9,
+      "bare_name_refs": 12,
+      "signature": "(self, run_id: 'str' = 'latest') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_global_stats",
+      "endpoint": "run/get_global_stats",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 7,
+      "bare_name_refs": 11,
+      "signature": "(self, limit_runs: 'int' = 20) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_history_stats",
+      "endpoint": "run/get_history_stats",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_plan",
+      "endpoint": "run/get_plan",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_sidebar_counters",
+      "endpoint": "run/get_sidebar_counters",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "get_status",
+      "endpoint": "run/get_status",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 9,
+      "bare_name_refs": 14,
+      "signature": "(self, run_id: 'str', last_log_index: 'int' = 0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "import_watchlist",
+      "endpoint": "run/import_watchlist",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, csv_content: 'str', source: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "list_apply_history",
+      "endpoint": "run/list_apply_history",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "list_pending_runs",
+      "endpoint": "run/list_pending_runs",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "list_quarantine_bucket",
+      "endpoint": "run/list_quarantine_bucket",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, limit: 'int' = 500) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "load_validation",
+      "endpoint": "run/load_validation",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "mark_duplicate_winner",
+      "endpoint": "run/mark_duplicate_winner",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 4,
+      "signature": "(self, run_id: 'str', group_key: 'str', winner_row_id: 'str', notes: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "pause_run",
+      "endpoint": "run/pause_run",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "purge_quarantine_bucket",
+      "endpoint": "run/purge_quarantine_bucket",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, ttl_days: 'int' = 30, dry_run: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "purge_quarantine_bucket_all",
+      "endpoint": "run/purge_quarantine_bucket_all",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, dry_run: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "rescan_row",
+      "endpoint": "run/rescan_row",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "rescan_rows_bulk",
+      "endpoint": "run/rescan_rows_bulk",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "resume_run",
+      "endpoint": "run/resume_run",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "save_for_later",
+      "endpoint": "run/save_for_later",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "save_validation",
+      "endpoint": "run/save_validation",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 6,
+      "bare_name_refs": 8,
+      "signature": "(self, run_id: 'str', decisions: 'Dict[str, Dict[str, Any]]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "start_plan",
+      "endpoint": "run/start_plan",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 5,
+      "signature": "(self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "undo_by_row_preview",
+      "endpoint": "run/undo_by_row_preview",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', batch_id: 'str' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "undo_last_apply",
+      "endpoint": "run/undo_last_apply",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str', dry_run: 'bool' = True, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "undo_last_apply_preview",
+      "endpoint": "run/undo_last_apply_preview",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "run",
+      "method": "undo_selected_rows",
+      "endpoint": "run/undo_selected_rows",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_ids: 'list' = None, dry_run: 'bool' = True, batch_id: 'str' = None, atomic: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_advanced_pragma_settings",
+      "endpoint": "settings/get_advanced_pragma_settings",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_confidence_thresholds",
+      "endpoint": "settings/get_confidence_thresholds",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_dashboard_qr",
+      "endpoint": "settings/get_dashboard_qr",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_naming_presets",
+      "endpoint": "settings/get_naming_presets",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_profiles",
+      "endpoint": "settings/get_profiles",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_scan_max_workers",
+      "endpoint": "settings/get_scan_max_workers",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_server_info",
+      "endpoint": "settings/get_server_info",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_settings",
+      "endpoint": "settings/get_settings",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 12,
+      "bare_name_refs": 15,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "get_user_data_size",
+      "endpoint": "settings/get_user_data_size",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "preview_naming_template",
+      "endpoint": "settings/preview_naming_template",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, template: 'str' = '', sample_row_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "reset_all_user_data",
+      "endpoint": "settings/reset_all_user_data",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, confirmation: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "reset_database",
+      "endpoint": "settings/reset_database",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "reset_settings",
+      "endpoint": "settings/reset_settings",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, scope: 'str' = 'all') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "restart_api_server",
+      "endpoint": "settings/restart_api_server",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "reveal_rest_token",
+      "endpoint": "settings/reveal_rest_token",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "save_profile",
+      "endpoint": "settings/save_profile",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, profile: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "save_settings",
+      "endpoint": "settings/save_settings",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 5,
+      "signature": "(self, settings: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "set_active_profile",
+      "endpoint": "settings/set_active_profile",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, profile_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "set_advanced_pragma_settings",
+      "endpoint": "settings/set_advanced_pragma_settings",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, profile_name: 'str', locking_mode_exclusive: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "set_locale",
+      "endpoint": "settings/set_locale",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, locale: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "settings",
+      "method": "set_scan_max_workers",
+      "endpoint": "settings/set_scan_max_workers",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, mode: 'str', value: 'Any' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "analyze_perceptual_batch",
+      "endpoint": "quality/analyze_perceptual_batch",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "analyze_quality_batch",
+      "endpoint": "quality/analyze_quality_batch",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "apply_quality_preset",
+      "endpoint": "quality/apply_quality_preset",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, preset_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "compare_perceptual",
+      "endpoint": "quality/compare_perceptual",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "delete_score_feedback",
+      "endpoint": "quality/delete_score_feedback",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, feedback_id: 'int') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "export_quality_profile",
+      "endpoint": "quality/export_quality_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "export_recyclarr_yaml",
+      "endpoint": "quality/export_recyclarr_yaml",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, profile_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "export_shareable_profile",
+      "endpoint": "quality/export_shareable_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, name: 'str' = '', author: 'str' = '', description: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_breakdown_5_axes",
+      "endpoint": "quality/get_breakdown_5_axes",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_calibration_report",
+      "endpoint": "quality/get_calibration_report",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_custom_rules_catalog",
+      "endpoint": "quality/get_custom_rules_catalog",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_custom_rules_templates",
+      "endpoint": "quality/get_custom_rules_templates",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_embedded_presets",
+      "endpoint": "quality/get_embedded_presets",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_films_by_tier",
+      "endpoint": "quality/get_films_by_tier",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, tier: 'str', limit: 'int' = 8) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_history",
+      "endpoint": "quality/get_history",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self, period_days: 'int' = 30) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_perceptual_compare_audio",
+      "endpoint": "quality/get_perceptual_compare_audio",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_perceptual_compare_frames",
+      "endpoint": "quality/get_perceptual_compare_frames",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self, run_id: 'str', row_id_a: 'str', row_id_b: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_perceptual_details",
+      "endpoint": "quality/get_perceptual_details",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_perceptual_job_status",
+      "endpoint": "quality/get_perceptual_job_status",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, job_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_perceptual_report",
+      "endpoint": "quality/get_perceptual_report",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_profiles",
+      "endpoint": "quality/get_profiles",
+      "verdict": "ORPHELINE_INCERTAINE",
+      "literal_refs": 0,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_quality_presets",
+      "endpoint": "quality/get_quality_presets",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_quality_profile",
+      "endpoint": "quality/get_quality_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_quality_report",
+      "endpoint": "quality/get_quality_report",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_id: 'str', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_recompute_job_status",
+      "endpoint": "quality/get_recompute_job_status",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, job_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "get_upgrade_until_score",
+      "endpoint": "quality/get_upgrade_until_score",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "import_quality_profile",
+      "endpoint": "quality/import_quality_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, profile_json: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "import_recyclarr_yaml",
+      "endpoint": "quality/import_recyclarr_yaml",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, yaml_text: 'str', activate: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "import_shareable_profile",
+      "endpoint": "quality/import_shareable_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, content: 'str', activate: 'bool' = True) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "queue_perceptual_analyses",
+      "endpoint": "quality/queue_perceptual_analyses",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, pairs: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "queue_perceptual_batch",
+      "endpoint": "quality/queue_perceptual_batch",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', row_ids: 'Any', options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "recompute_all_scores",
+      "endpoint": "quality/recompute_all_scores",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "reset_quality_profile",
+      "endpoint": "quality/reset_quality_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "save_custom_quality_preset",
+      "endpoint": "quality/save_custom_quality_preset",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, name: 'str', profile_json: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "save_profile",
+      "endpoint": "quality/save_profile",
+      "verdict": "ORPHELINE_INCERTAINE",
+      "literal_refs": 0,
+      "bare_name_refs": 1,
+      "signature": "(self, profile: 'Dict[str, Any]') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "save_quality_profile",
+      "endpoint": "quality/save_quality_profile",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, profile_json: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "set_active_profile",
+      "endpoint": "quality/set_active_profile",
+      "verdict": "ORPHELINE_INCERTAINE",
+      "literal_refs": 0,
+      "bare_name_refs": 1,
+      "signature": "(self, profile_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "set_upgrade_until_score",
+      "endpoint": "quality/set_upgrade_until_score",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, score: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "simulate_quality_preset",
+      "endpoint": "quality/simulate_quality_preset",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str' = 'latest', preset_id: 'str' = 'equilibre', overrides: 'Optional[Dict[str, Any]]' = None, scope: 'str' = 'run') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "submit_score_feedback",
+      "endpoint": "quality/submit_score_feedback",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'str', row_id: 'str', user_tier: 'str', category_focus: 'Optional[str]' = None, comment: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "quality",
+      "method": "validate_custom_rules",
+      "endpoint": "quality/validate_custom_rules",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, rules: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "enrich_tmdb_ids_by_title",
+      "endpoint": "integrations/enrich_tmdb_ids_by_title",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str', row_ids: 'Any') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_jellyfin_libraries",
+      "endpoint": "integrations/get_jellyfin_libraries",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 5,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_jellyfin_sync_report",
+      "endpoint": "integrations/get_jellyfin_sync_report",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_plex_libraries",
+      "endpoint": "integrations/get_plex_libraries",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_plex_sync_report",
+      "endpoint": "integrations/get_plex_sync_report",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_radarr_status",
+      "endpoint": "integrations/get_radarr_status",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self, run_id: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "get_tmdb_posters",
+      "endpoint": "integrations/get_tmdb_posters",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, tmdb_ids: 'List[int]', size: 'str' = 'w92') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "refresh_jellyfin_library_now",
+      "endpoint": "integrations/refresh_jellyfin_library_now",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "refresh_plex_library_now",
+      "endpoint": "integrations/refresh_plex_library_now",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "request_radarr_upgrade",
+      "endpoint": "integrations/request_radarr_upgrade",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, radarr_movie_id: 'int') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_email_report",
+      "endpoint": "integrations/test_email_report",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_jellyfin_connection",
+      "endpoint": "integrations/test_jellyfin_connection",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 5,
+      "signature": "(self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_omdb_connection",
+      "endpoint": "integrations/test_omdb_connection",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_plex_connection",
+      "endpoint": "integrations/test_plex_connection",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 4,
+      "signature": "(self, url: 'str' = '', token: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_radarr_connection",
+      "endpoint": "integrations/test_radarr_connection",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 4,
+      "signature": "(self, url: 'str' = '', api_key: 'str' = '', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "integrations",
+      "method": "test_tmdb_key",
+      "endpoint": "integrations/test_tmdb_key",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, api_key: 'str', state_dir: 'str', timeout_s: 'float' = 10.0) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "clear_field_lock",
+      "endpoint": "library/clear_field_lock",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, film_id: 'str', field_name: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "clear_tmdb_override",
+      "endpoint": "library/clear_tmdb_override",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "delete_smart_playlist",
+      "endpoint": "library/delete_smart_playlist",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, playlist_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "export_films",
+      "endpoint": "library/export_films",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, row_ids: 'list', format: 'str' = 'csv', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "export_full_library",
+      "endpoint": "library/export_full_library",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 4,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_film_full",
+      "endpoint": "library/get_film_full",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self, row_id: 'str', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_film_history",
+      "endpoint": "library/get_film_history",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, film_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_films_by_decade",
+      "endpoint": "library/get_films_by_decade",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 3,
+      "signature": "(self, filters: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_incomplete_sagas",
+      "endpoint": "library/get_incomplete_sagas",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_library_counters_by_chip",
+      "endpoint": "library/get_library_counters_by_chip",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, filters: 'Optional[Dict[str, Any]]' = None, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_library_filtered",
+      "endpoint": "library/get_library_filtered",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'Optional[str]' = None, filters: 'Optional[Dict[str, Any]]' = None, sort: 'str' = 'title', page: 'int' = 1, page_size: 'int' = 50) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_library_podiums",
+      "endpoint": "library/get_library_podiums",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, run_id: 'Optional[str]' = None, limit: 'int' = 10) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_library_timeline",
+      "endpoint": "library/get_library_timeline",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, months: 'int' = 12, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_scoring_rollup",
+      "endpoint": "library/get_scoring_rollup",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, by: 'str' = 'franchise', limit: 'int' = 20, run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "get_smart_playlists",
+      "endpoint": "library/get_smart_playlists",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "list_field_locks",
+      "endpoint": "library/list_field_locks",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, film_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "list_films_with_history",
+      "endpoint": "library/list_films_with_history",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 3,
+      "signature": "(self, limit: 'int' = 50) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "mark_alert_ignored",
+      "endpoint": "library/mark_alert_ignored",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, row_id: 'str', alert_code: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "mark_for_deletion",
+      "endpoint": "library/mark_for_deletion",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "mark_for_deletion_bulk",
+      "endpoint": "library/mark_for_deletion_bulk",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, row_ids: 'list', run_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "save_smart_playlist",
+      "endpoint": "library/save_smart_playlist",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, name: 'str', filters: 'Dict[str, Any]', playlist_id: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "search_tmdb",
+      "endpoint": "library/search_tmdb",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, query: 'str', year: 'Optional[int]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "set_field_lock",
+      "endpoint": "library/set_field_lock",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, film_id: 'str', field_name: 'str', locked_value: 'Any' = None, source: 'str' = 'ui_lock') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "set_film_tmdb_candidate",
+      "endpoint": "library/set_film_tmdb_candidate",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'Optional[str]', row_id: 'str', tmdb_id: 'int') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "library",
+      "method": "unmark_for_deletion",
+      "endpoint": "library/unmark_for_deletion",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, run_id: 'Optional[str]', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "auto_install_probe_tools",
+      "endpoint": "runtime/auto_install_probe_tools",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "check_for_updates",
+      "endpoint": "runtime/check_for_updates",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "clear_notifications",
+      "endpoint": "runtime/clear_notifications",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "dismiss_notification",
+      "endpoint": "runtime/dismiss_notification",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, notification_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_app_version",
+      "endpoint": "runtime/get_app_version",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_diagnostic",
+      "endpoint": "runtime/get_diagnostic",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_doc",
+      "endpoint": "runtime/get_doc",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, file: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_event_ts",
+      "endpoint": "runtime/get_event_ts",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_log_paths",
+      "endpoint": "runtime/get_log_paths",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_notifications",
+      "endpoint": "runtime/get_notifications",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, unread_only: 'bool' = False, limit: 'int' = 100, category: 'Optional[str]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_notifications_unread_count",
+      "endpoint": "runtime/get_notifications_unread_count",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_probe",
+      "endpoint": "runtime/get_probe",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, run_id: 'str', row_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_probe_tools_status",
+      "endpoint": "runtime/get_probe_tools_status",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 4,
+      "bare_name_refs": 6,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_recent_logs",
+      "endpoint": "runtime/get_recent_logs",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, limit: 'int' = 100) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_tools_status",
+      "endpoint": "runtime/get_tools_status",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "get_update_info",
+      "endpoint": "runtime/get_update_info",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 3,
+      "signature": "(self, force_refresh: 'bool' = False) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "install_probe_tools",
+      "endpoint": "runtime/install_probe_tools",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "is_demo_mode_active",
+      "endpoint": "runtime/is_demo_mode_active",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "mark_all_notifications_read",
+      "endpoint": "runtime/mark_all_notifications_read",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "mark_notification_read",
+      "endpoint": "runtime/mark_notification_read",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 2,
+      "signature": "(self, notification_id: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "open_external_url",
+      "endpoint": "runtime/open_external_url",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 3,
+      "bare_name_refs": 3,
+      "signature": "(self, url: 'str' = '') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "open_logs_folder",
+      "endpoint": "runtime/open_logs_folder",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 2,
+      "bare_name_refs": 3,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "purge_probe_cache",
+      "endpoint": "runtime/purge_probe_cache",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "recheck_probe_tools",
+      "endpoint": "runtime/recheck_probe_tools",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "reset_incremental_cache",
+      "endpoint": "runtime/reset_incremental_cache",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "run_nas_benchmark",
+      "endpoint": "runtime/run_nas_benchmark",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, n_writes: 'int' = 1000, n_reads: 'int' = 10000) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "search_docs",
+      "endpoint": "runtime/search_docs",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self, query: 'str') -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "set_probe_tool_paths",
+      "endpoint": "runtime/set_probe_tool_paths",
+      "verdict": "ORPHELINE",
+      "literal_refs": 0,
+      "bare_name_refs": 0,
+      "signature": "(self, payload: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "start_demo_mode",
+      "endpoint": "runtime/start_demo_mode",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "stop_demo_mode",
+      "endpoint": "runtime/stop_demo_mode",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 2,
+      "signature": "(self) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "update_probe_tools",
+      "endpoint": "runtime/update_probe_tools",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, options: 'Optional[Dict[str, Any]]' = None) -> 'Dict[str, Any]'"
+    },
+    {
+      "facade": "runtime",
+      "method": "validate_dropped_path",
+      "endpoint": "runtime/validate_dropped_path",
+      "verdict": "CONSOMMEE",
+      "literal_refs": 1,
+      "bare_name_refs": 1,
+      "signature": "(self, path: 'str' = '') -> 'Dict[str, Any]'"
+    }
+  ],
+  "stats": {
+    "forward": {
+      "OK": 193,
+      "PAYLOAD_DESACCORDE": 3,
+      "EXCLU": 1,
+      "MAUVAISE_FACADE": 1
+    },
+    "reverse": {
+      "CONSOMMEE": 119,
+      "ORPHELINE": 50,
+      "ORPHELINE_INCERTAINE": 3
+    }
+  }
+}

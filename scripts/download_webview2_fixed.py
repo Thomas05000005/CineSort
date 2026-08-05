@@ -30,6 +30,7 @@ Notes :
   une URL directe est fournie via `--url` (cas mainteneur ayant deja
   recupere le lien direct CDN).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,16 +44,14 @@ from pathlib import Path
 # sur les caracteres non-ASCII (em-dash a L61 "CineSort V3.1 — Bundle ..."
 # sous Windows cp1252). errors="replace" garde le script robuste.
 for _stream in (sys.stdout, sys.stderr):
-    try:
+    try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
         _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     except (AttributeError, ValueError):
         pass
 
 # Page officielle Microsoft d'ou recuperer le lien direct "Fixed Version".
 # Le lien CDN direct change a chaque release Edge -> on ne hardcode PAS ici.
-WEBVIEW2_LANDING_URL = (
-    "https://developer.microsoft.com/en-us/microsoft-edge/webview2/"
-)
+WEBVIEW2_LANDING_URL = "https://developer.microsoft.com/en-us/microsoft-edge/webview2/"
 
 # Repertoire cible (a la racine du depot CineSort). Ignore par git.
 DEFAULT_TARGET_DIR = "webview2_fixed"

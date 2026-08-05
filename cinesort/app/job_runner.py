@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Optional
 from cinesort.domain.run_models import RunSnapshot, RunStatus
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.log_context import clear_run_id, set_run_id
-from cinesort.infra.run_id import normalize_or_generate_run_id
+from cinesort.infra.run_id import RUN_ID_PATTERN, generate_run_id, normalize_or_generate_run_id
 
 _logger = logging.getLogger(__name__)
 
@@ -87,9 +87,12 @@ class JobRunner:
             row = self._store.run.get_run(run_id)
             if not row:
                 return
-            state_dir = Path(str(row.get("state_dir") or ""))
-            if not state_dir:
+            # Path("") -> Path(".") est truthy : tester la chaine brute, sinon
+            # un state_dir vide ferait ecrire crash.txt dans le CWD du process.
+            state_dir_raw = str(row.get("state_dir") or "").strip()
+            if not state_dir_raw:
                 return
+            state_dir = Path(state_dir_raw)
             run_dir = state_dir / "runs" / f"tri_films_{run_id}"
             run_dir.mkdir(parents=True, exist_ok=True)
             content = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {header}\n\n{tb_text.rstrip()}\n"
@@ -97,9 +100,6 @@ class JobRunner:
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             self._debug(f"_write_crash_for_run warning run_id={run_id}: {exc}")
-
-    def _generate_current_format_run_id(self) -> str:
-        return time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
 
     def _safe_stats(self, stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return stats if isinstance(stats, dict) else None
@@ -151,9 +151,8 @@ class JobRunner:
             return job_fn(should_cancel)
 
         params = sig.parameters
-        accepts_should_pause = (
-            "should_pause" in params
-            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        accepts_should_pause = "should_pause" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
         )
         if accepts_should_pause:
             # AUDIT 2026-06-10 (REAL 2/2) : valider la LIAISON des arguments avant
@@ -259,9 +258,7 @@ class JobRunner:
                     return False, db_status_before
             # except Exception : defensif, on retombe sur le skip protecteur
             except Exception as exc:
-                self._debug(
-                    f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}"
-                )
+                self._debug(f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}")
         return True, db_status_before
 
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
@@ -293,12 +290,35 @@ class JobRunner:
     ) -> str:
         """Démarre un nouveau job en thread daemon et renvoie son `run_id`.
 
-        Lève `RuntimeError` si un run est déjà actif. Génère un `run_id` unique
-        si `run_id_hint` est absent ou en collision avec un run existant.
+        Lève `RuntimeError` si un run est déjà actif.
+
+        Génère un `run_id` unique si `run_id_hint` est absent. Si un
+        `run_id_hint` EXPLICITE entre en collision, on lève au lieu de lui
+        substituer un autre identifiant : l'appelant (start_plan) a déjà créé
+        le dossier `tri_films_<hint>` et le `RunState` sous cet id, et le
+        `job_fn` a capturé le même. Substituer faisait diverger `started_run_id`
+        du hint, ce que start_plan traduisait en erreur interne APRÈS que le
+        thread ait démarré : un scan fantôme, non pilotable, écrivant son plan
+        dans le dossier de l'ancien id pendant que la ligne `runs` vivait sous
+        le nouveau. Lever avant tout démarrage de thread supprime ce cas.
+
+        Un hint EXPLICITE hors format canonique est refusé pour la même raison :
+        `normalize_or_generate_run_id` lui aurait substitué un identifiant neuf,
+        c'est-à-dire exactement la divergence que le refus de collision
+        ci-dessous supprime, mais par un autre chemin. Le seul appelant du dépôt
+        (`run_flow_support:_start_plan_impl`) passe un id issu de
+        `reserve_unique_run`, donc déjà canonique : ce refus ne change rien au
+        flux réel, il rend le contrat vrai sur TOUTE la surface publique.
         """
         created_ts = time.time()
-        candidate = run_id_hint or self._generate_current_format_run_id()
-        run_id = normalize_or_generate_run_id(candidate)
+        if run_id_hint:
+            if not RUN_ID_PATTERN.match(run_id_hint):
+                raise RuntimeError(f"Le run_id demande n'est pas au format attendu : {run_id_hint!r}")
+            candidate = run_id_hint
+            run_id = run_id_hint
+        else:
+            candidate = generate_run_id()
+            run_id = normalize_or_generate_run_id(candidate)
         run_debug = debug_log or self._debug_logger
         self._debug(
             f"start_job called candidate={candidate} normalized_run_id={run_id} root={root} state_dir={state_dir}",
@@ -311,16 +331,22 @@ class JobRunner:
                 self._debug("start_job refused: active run already in progress", run_debug)
                 raise RuntimeError("Un run est deja en cours")
 
-            # If same run_id already exists in DB or memory, fallback to uuid-style id.
+            # Collision memoire/DB detectee sous verrou.
+            #  - hint EXPLICITE : on refuse, sans demarrer de thread (cf docstring).
+            #  - pas de hint : personne n'a encore rien cree sous cet id, la
+            #    substitution est sans effet de bord observable.
             if run_id in self._runs or self._store.run.get_run(run_id) is not None:
+                if run_id_hint:
+                    self._debug(f"start_job refused: run_id hint {run_id} already used", run_debug)
+                    raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}")
                 self._debug(f"start_job run_id collision for {run_id}, generating fallback id", run_debug)
                 run_id = normalize_or_generate_run_id(None)
 
             # Sprint 2 audit P0 #6 : insert_run_pending peut encore lever IntegrityError
             # malgre la pre-verification get_run() ci-dessus, en cas de race entre
-            # plusieurs threads (TOCTOU) ou si la generation _generate_current_format_run_id
-            # produit deux ID identiques dans la meme milliseconde. On retente une fois
-            # avec un run_id genere via normalize_or_generate_run_id(None) (uuid-style).
+            # plusieurs threads (TOCTOU) ou entre deux processus. Meme arbitrage que
+            # ci-dessus : on ne regenere QUE lorsque aucun hint explicite n'a ete
+            # fourni, pour ne jamais faire diverger l'id rendu de l'id du hint.
             try:
                 self._store.run.insert_run_pending(
                     run_id=run_id,
@@ -330,13 +356,24 @@ class JobRunner:
                     created_ts=created_ts,
                 )
             except sqlite3.IntegrityError as exc:
+                if run_id_hint:
+                    _logger.warning(
+                        "job: run_id hint collision on insert run_id=%s err=%s",
+                        run_id,
+                        exc,
+                    )
+                    self._debug(
+                        f"start_job IntegrityError on explicit hint run_id={run_id}, refusing",
+                        run_debug,
+                    )
+                    raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}") from exc
                 _logger.warning(
                     "job: run_id collision on insert, regenerating run_id=%s err=%s",
                     run_id,
                     exc,
                 )
                 self._debug(
-                    f"start_job IntegrityError collision run_id={run_id}, regenerating uuid-style",
+                    f"start_job IntegrityError collision run_id={run_id}, regenerating",
                     run_debug,
                 )
                 run_id = normalize_or_generate_run_id(None)
@@ -474,9 +511,7 @@ class JobRunner:
             # exception, annuler un run paused laissait le run bloque en
             # PAUSED a vie (slot actif jamais libere par le finally). On passe
             # should_cancel au helper pour qu'il fasse le bypass.
-            skip_terminal, db_status_before = self._should_skip_terminal(
-                run_id, should_cancel_fn=should_cancel
-            )
+            skip_terminal, db_status_before = self._should_skip_terminal(run_id, should_cancel_fn=should_cancel)
             if skip_terminal:
                 self._debug(
                     f"worker terminal transition SKIPPED — db_status={db_status_before} run_id={run_id}",
@@ -539,6 +574,7 @@ class JobRunner:
             self._debug(f"worker exception run_id={run_id}: {error_message}\n{tb_text}", run_debug)
             ended_ts = time.time()
             self._write_crash_for_run(run_id, "job_runner worker failed", tb_text)
+
             # C4 fix (hotfix2) : meme guard que pour DONE/CANCELLED — un
             # crash worker ne doit pas ecraser un PAUSED persiste par l'API.
             # L'erreur reste tracee dans la table `errors` (insert_error).
@@ -557,9 +593,7 @@ class JobRunner:
                         return False
                     return rt_chk.cancel_event.is_set()
 
-            skip_terminal, db_status_before = self._should_skip_terminal(
-                run_id, should_cancel_fn=_cancel_check
-            )
+            skip_terminal, db_status_before = self._should_skip_terminal(run_id, should_cancel_fn=_cancel_check)
             if skip_terminal:
                 self._debug(
                     f"worker FAILED transition SKIPPED — db_status={db_status_before} run_id={run_id}",
@@ -622,10 +656,7 @@ class JobRunner:
                         RunStatus.SAVED,
                         RunStatus.AWAITING_VALIDATION,
                     )
-                    if (
-                        not held
-                        and rt.snapshot.status not in _TERMINAL
-                    ):
+                    if not held and rt.snapshot.status not in _TERMINAL:
                         db_status_final = self._current_db_status(run_id)
                         if self._is_user_held_state(db_status_final):
                             try:
@@ -749,9 +780,7 @@ class JobRunner:
             # Idempotent si snapshot est deja sur le bon target.
             if rt.snapshot.status != target_status:
                 self._set_snapshot(run_id, status=target_status, running=False)
-            self._debug(
-                f"request_pause set pause flag run_id={run_id} target={target_status.value}", run_debug
-            )
+            self._debug(f"request_pause set pause flag run_id={run_id} target={target_status.value}", run_debug)
         return True
 
     def request_resume(self, run_id: str) -> bool:

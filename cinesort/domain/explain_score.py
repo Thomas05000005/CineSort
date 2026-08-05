@@ -43,6 +43,24 @@ _CATEGORY_LABELS_FR: Dict[str, str] = {
 
 # Chaque entrée : (match label substring, suggestion FR).
 # Si un factor négatif correspond, la suggestion est proposée.
+#
+# ÉTAT MESURÉ (audit NUANCE N05, 2026-08-03) — 4 motifs ne matchent AUCUN
+# libellé émis par `quality_score.py` (comptage sur les littéraux du module) :
+#   - "bitrate bas"      : le scorer écrit "Debit trop faible pour {res} (…)"  (L919)
+#   - "hdr 8bit"         : le scorer écrit "HDR detecte avec profondeur 8 bits" (L928)
+#   - "langue manquante" : aucun libellé équivalent (le plus proche, "Pas de VO
+#                          detectee" L1027, ne veut PAS dire la même chose)
+#   - "récent" (accentué): le libellé est "Film recent ({year}) en definition
+#                          standard" — mais il est capté juste après par
+#                          "standard", donc AUCUNE suggestion n'est perdue.
+# "commentary" est mort lui aussi, sans effet : "commentaire" est testé avant
+# dans la même boucle qui `break` et émet exactement le même texte.
+# Non corrigé DÉLIBÉRÉMENT : aucune UI ne lit `suggestions` (le front n'appelle
+# même pas get_quality_report ; seules sortent la clé `score_explanation_full`
+# de l'export JSON et un appel API scripté), et réaligner les motifs sur les
+# libellés FR recréerait à l'identique le couplage fragile qui a pourri ici.
+# Le vrai correctif est de clé sur une métadonnée de factor, pas sur une
+# sous-chaîne de libellé — refonte à arbitrer, pas une rustine.
 _SUGGESTION_RULES: List[tuple[str, str]] = [
     ("upscale", "Remplacer par une source native à la résolution annoncée (éviter les upscales)."),
     ("re-encode", "Chercher une version REMUX ou avec un bitrate plus élevé (≥ 15 Mbps en 1080p)."),
@@ -200,11 +218,27 @@ def _compute_baseline(
 
     next_tier: Optional[str] = None
     distance: Optional[int] = None
-    for name, threshold in order:
-        if threshold > score:
-            next_tier = name
-            distance = max(0, threshold - score)
-            break
+    # BUG-EXPLAIN-BASELINE-CAP (Lot D 2026-07) : raisonner depuis le tier
+    # AFFICHE (deja plafonne/ajuste par quality_score : cap probe FAILED ->
+    # Silver, cap CAM -> Bronze, hierarchy VP-B) et non depuis le score seul.
+    # Sinon un film cape Silver avec score >= seuil Platinum repondait
+    # next_tier=null ("aucun tier superieur") en contradiction avec le tier
+    # montre a l'utilisateur. distance peut valoir 0 dans ce cas : le blocage
+    # n'est pas une question de points (garde securite), cf _generate_suggestions.
+    tier_index = {name.lower(): i for i, (name, _) in enumerate(order)}
+    displayed_idx = tier_index.get(str(tier or "").strip().lower())
+    if displayed_idx is not None:
+        if displayed_idx + 1 < len(order):
+            next_name, next_threshold = order[displayed_idx + 1]
+            next_tier = next_name
+            distance = max(0, next_threshold - score)
+    else:
+        # Tier non canonique/inconnu : fallback historique base sur le score.
+        for name, threshold in order:
+            if threshold > score:
+                next_tier = name
+                distance = max(0, threshold - score)
+                break
 
     return {
         "tier_thresholds": thresholds,
@@ -230,10 +264,13 @@ def _generate_suggestions(
                 seen.add(text)
                 break
 
-    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique
+    # Si pas de suggestion spécifique mais distance faible au tier supérieur → suggestion générique.
+    # BUG-EXPLAIN-BASELINE-CAP : distance == 0 signifie tier plafonné par une
+    # garde sécurité (score déjà au-dessus du seuil) — une amélioration de
+    # points n'y changerait rien, donc pas de suggestion générique trompeuse.
     distance = baseline.get("distance_to_next_tier")
     next_tier = baseline.get("next_tier")
-    if not suggestions and distance is not None and distance <= 5 and next_tier:
+    if not suggestions and distance is not None and 1 <= distance <= 5 and next_tier:
         suggestions.append(
             f"Score à {distance} point(s) du tier {next_tier} — une légère amélioration audio ou vidéo suffirait."
         )

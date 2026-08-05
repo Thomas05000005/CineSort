@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cinesort.domain.core as core
 import cinesort.infra.state as state
 from cinesort.app.export_support import export_html_report
+from cinesort.domain.confidence_thresholds import CONF_MEDIUM
 from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
@@ -57,8 +58,10 @@ def _runs_history_payload(
     error_counts: Dict[str, Any],
     quality_counts: Dict[str, Dict[str, Any]],
     anomaly_counts: Dict[str, Any],
+    applied_counts: Optional[Dict[str, int]] = None,
 ) -> List[Dict[str, Any]]:
     history: List[Dict[str, Any]] = []
+    applied_counts = applied_counts or {}
     for run_row in runs:
         run_id = str(run_row.get("run_id") or "")
         stats_obj = _parse_stats_json(run_row.get("stats_json"))
@@ -82,7 +85,10 @@ def _runs_history_payload(
             run_paths_for_count,
             fallback=compute_total_fallback(run_row, stats_obj),
         )
-        applied_rows = int(stats_obj.get("applied_count") or 0)
+        # AUDIT 2026-07-13 (HIGH-7) : applied_count vit dans
+        # apply_batches.summary_json (ecrit par l'apply), PAS dans runs.stats_json
+        # (cle jamais ecrite) -> fallback stats_obj conserve pour les fixtures/demo.
+        applied_rows = int(applied_counts.get(run_id, 0) or stats_obj.get("applied_count") or 0)
         qstats = quality_counts.get(run_id, {})
         history.append(
             {
@@ -282,17 +288,47 @@ def _build_dashboard_section(
     # car le backend n'exposait ni review_queue_count ni conflicts_count. On les
     # calcule depuis les rows : "cas a verifier" = film avec une alerte OU une
     # confiance faible ; "conflits" = film avec un flag d'incoherence de source.
-    _CONFLICT_FLAGS = frozenset({
-        "year_conflict_folder_file", "nfo_year_mismatch", "nfo_title_mismatch",
-        "nfo_file_mismatch", "runtime_mismatch", "runtime_mismatch_likely_wrong_film",
-        "omdb_disagree", "title_ambiguity_detected", "not_a_movie", "year_missing",
-    })
+    # [partition] Source UNIQUE : is_auto_approvable (run_read_support). "cas à vérifier"
+    # = NON auto-approuvable (confiance < seuil, OU flag critique/intégrité/conflit, OU
+    # titre/année absent). "conflits" = flag de conflit, désormais SOUS-ENSEMBLE de
+    # "à examiner" (is_auto_approvable bloque sur _CONFLICT_FLAGS). Donc :
+    #   auto (843) + à-examiner (62) = total,  et  843 + 157 ne peut plus dépasser total.
+    # Avant : "à vérifier" = (flags OU low) comptait TOUT le run (905), et auto/conflits
+    # se chevauchaient. Le seuil est celui de l'auto-approbation (settings) -> cohérent
+    # avec la carte "Auto-approuvables (confiance ≥ N)".
+    from cinesort.domain.conversions import to_int as _to_int
+    from cinesort.ui.api.run_read_support import (
+        _CONFLICT_FLAGS,
+    )
+    from cinesort.ui.api.run_read_support import (
+        effective_flags as _effective_flags,
+    )
+    from cinesort.ui.api.run_read_support import (
+        ignored_alerts_by_row as _ignored_alerts_by_row,
+    )
+    from cinesort.ui.api.run_read_support import (
+        is_auto_approvable_flags as _is_auto_approvable_flags,
+    )
+
+    try:
+        _auto_thr = _to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
+    except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
+        _auto_thr = 85
+    # Flags EFFECTIFS (bruts − alertes ignorées) = MÊME entrée que le payload get_plan
+    # (history_support._subtract_ignored_flags), sinon "Cas à vérifier" (KPI) diverge de la
+    # liste "Tous problèmes" dès qu'une alerte bloquante est ignorée par l'utilisateur.
+    _ignored = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
     review_queue_count = 0
     conflicts_count = 0
     for _r in rows:
-        _flags = set(getattr(_r, "warning_flags", []) or [])
-        _label = str(getattr(_r, "confidence_label", "") or "").lower()
-        if _flags or _label == "low":
+        _flags = _effective_flags(getattr(_r, "warning_flags", []), _ignored.get(str(getattr(_r, "row_id", ""))))
+        if not _is_auto_approvable_flags(
+            _flags,
+            getattr(_r, "confidence", 0),
+            getattr(_r, "proposed_title", ""),
+            getattr(_r, "proposed_year", 0),
+            _auto_thr,
+        ):
             review_queue_count += 1
         if _flags & _CONFLICT_FLAGS:
             conflicts_count += 1
@@ -356,9 +392,7 @@ def _build_dashboard_section(
         "films_rejected_name": int(stats_obj.get("films_rejected_name") or 0),
         "folders_rejected_underscore": int(stats_obj.get("folders_rejected_underscore") or 0),
         "folders_rejected_depth": int(stats_obj.get("folders_rejected_depth") or 0),
-        "folders_rejected_scandir_error": int(
-            stats_obj.get("folders_rejected_scandir_error") or 0
-        ),
+        "folders_rejected_scandir_error": int(stats_obj.get("folders_rejected_scandir_error") or 0),
     }
     scan_diagnostic["total_excluded"] = int(
         scan_diagnostic["films_rejected_ext"]
@@ -609,7 +643,15 @@ def _build_library_rows(rows: list, reports: list) -> list:
                 "row_id": rid,
                 "proposed_title": str(row.proposed_title or ""),
                 "proposed_year": int(row.proposed_year or 0),
-                "resolution": str(detected.get("resolution_label") or ""),
+                # Issue #866 : la cle ecrite par le producteur unique de
+                # `metrics.detected` (quality_score._build_metrics:1960) est
+                # `resolution`, pas `resolution_label` -- ce dernier n'est qu'un
+                # nom de variable LOCAL dans le scoring. `resolution_label`
+                # n'existant dans aucun `detected` produit, le `.get()` rendait
+                # None sur 100% des films et la colonne Resolution de ces rows
+                # etait vide par construction. `_classify_resolution` (l.448)
+                # lit deja la bonne cle sur le meme dict, dans ce meme fichier.
+                "resolution": str(detected.get("resolution") or ""),
                 "score": q.get("score"),
                 "confidence": int(getattr(row, "confidence", 0) or 0),
                 "source": str(row.proposed_source or ""),
@@ -688,6 +730,12 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         error_counts = store.run.get_error_counts_for_runs(run_ids)
         quality_counts = store.quality.get_quality_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
+        # AUDIT 2026-07-13 (HIGH-7) : applied_count reel depuis apply_batches
+        # (best-effort : {} si la table est indisponible, ne bloque pas l'accueil).
+        try:
+            applied_counts = store.apply.get_applied_counts_for_runs(run_ids)
+        except (OSError, AttributeError, TypeError, ValueError):
+            applied_counts = {}
         runs_history = _runs_history_payload(
             api,
             runs=runs,
@@ -695,6 +743,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             error_counts=error_counts,
             quality_counts=quality_counts,
             anomaly_counts=anomaly_counts,
+            applied_counts=applied_counts,
         )
 
         if not run_row:
@@ -750,6 +799,10 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
                 # "En attente" / "Reporte".
                 cached_kpis["accepted_count"] = int(accepted_live)
                 cached_kpis["deferred_count"] = int(deferred_live)
+                # AUDIT 2026-07-13 (HIGH-7) : applied_rows LIVE (source
+                # apply_batches) pour l'etape Apply (traitement.js) — injecte hors
+                # cache car l'apply survient APRES l'ecriture du cache dashboard.
+                cached_kpis["applied_rows"] = int(applied_counts.get(resolved_run_id, 0))
                 cached_payload = {**cached_payload, "kpis": cached_kpis}
             return {
                 "ok": True,
@@ -785,6 +838,12 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
         except (KeyError, OSError, TypeError, ValueError) as cache_exc:
             logger.debug("Dashboard cache write ignoree run_id=%s err=%s", resolved_run_id, cache_exc)
 
+        # AUDIT 2026-07-13 (HIGH-7) : applied_rows LIVE injecte APRES l'ecriture du
+        # cache (le cache ne doit pas figer le 0 du scan ; le chemin cache ci-dessus
+        # re-injecte la valeur live a chaque GET).
+        if isinstance(cached_section.get("kpis"), dict):
+            cached_section["kpis"]["applied_rows"] = int(applied_counts.get(resolved_run_id, 0))
+
         return {
             "ok": True,
             "mode": mode,
@@ -814,10 +873,7 @@ def get_dashboard(api: Any, run_id: str = "latest") -> Dict[str, Any]:
             "ok": False,
             "error": "dashboard_load_failed",
             "message": "Impossible de charger la synthese du run.",
-            "user_message": (
-                "Impossible de charger la synthese du run. Relance un scan ou "
-                "redemarre l'app."
-            ),
+            "user_message": ("Impossible de charger la synthese du run. Relance un scan ou redemarre l'app."),
             "detail": str(exc),
         }
 
@@ -949,12 +1005,14 @@ def compose_score_explanation(
     # custom_rules pour la cohérence du waterfall (contribution non chiffrée
     # ici car deja agregee dans la video subscore par compute_quality_score).
     if applied_rule_ids and not any(c.get("name") == "custom_rules" for c in categories_list):
-        categories_list.append({
-            "name": "custom_rules",
-            "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
-            "rule_ids": list(applied_rule_ids),
-            "rules_count": len(applied_rule_ids),
-        })
+        categories_list.append(
+            {
+                "name": "custom_rules",
+                "label": _CATEGORY_LABELS_FR_FALLBACK["custom_rules"],
+                "rule_ids": list(applied_rule_ids),
+                "rules_count": len(applied_rule_ids),
+            }
+        )
 
     return {
         "categories": categories_list,
@@ -972,8 +1030,16 @@ def _build_row_payload(
     row: Any,
     decision: Dict[str, Any],
     quality: Dict[str, Any],
+    ignored_alerts: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], bool, str, bool]:
-    """Construit le payload d'une row pour le report. Retourne (payload, decision_ok, tier, is_partial)."""
+    """Construit le payload d'une row pour le report. Retourne (payload, decision_ok, tier, is_partial).
+
+    ``ignored_alerts`` : codes d'alertes IGNOREES par l'utilisateur pour cette row
+    (run_read_support.ignored_alerts_by_row, recupere en BULK par l'appelant
+    build_run_report_payload — pas de requete DB par row). Soustrait des warning_flags
+    AVANT toute reconciliation, pour que l'export (JSON/CSV/HTML/NFO) soit le miroir exact
+    de l'ecran Verification (history_support._subtract_ignored_flags -> _enrich_plan_payload).
+    None (defaut) = aucune soustraction (backward compat)."""
     metrics = quality.get("metrics") if isinstance(quality.get("metrics"), dict) else {}
     probe_quality = str(metrics.get("probe_quality") or "")
     # BUG-018 (hotfix1) : helper centralise (case-insensitive) au lieu de .upper() inline.
@@ -985,6 +1051,43 @@ def _build_row_payload(
     subscores = metrics.get("subscores") or {} if metrics else {}
     explanation = metrics.get("score_explanation") or {} if metrics else {}
     score_explanation_full = compose_score_explanation(metrics) if metrics else None
+
+    # AUDIT 2026-07-13 (HIGH-5) : reconcilier les flags exportes avec le
+    # quality_report DEJA dans le scope (miroir de
+    # history_support._enrich_plan_payload). Sinon le rapport JSON/CSV/HTML livre
+    # un faux subtitle_missing_<lang> sur les films dont la piste est muxee (non
+    # vue au scan), en contradiction directe avec l'ecran Verification du meme run.
+    from cinesort.domain.subtitle_helpers import _normalize_iso639
+    from cinesort.ui.api.run_read_support import full_langs_from_embedded, reconcile_subtitle_flags
+
+    present_langs: set = set()
+    for _lang in getattr(row, "subtitle_languages", None) or []:
+        _n = _normalize_iso639(str(_lang)) or str(_lang).strip().lower()
+        if _n:
+            present_langs.add(_n)
+    _embedded = metrics.get("subtitles_embedded") if metrics else None
+    if isinstance(_embedded, list):
+        for _track in _embedded:
+            if isinstance(_track, dict):
+                _n = _normalize_iso639(str(_track.get("language") or "").strip().lower())
+                if _n:
+                    present_langs.add(_n)
+    # AUDIT 2026-07-13 (H4/LOW) : soustraire les alertes IGNOREES (film_modal) AVANT la
+    # reconciliation sous-titres. Sinon une alerte que l'utilisateur a "Ignoree" reste dans
+    # l'export alors qu'elle a disparu de l'ecran Verification (qui passe par
+    # _subtract_ignored_flags -> _enrich_plan_payload). Order-preserving comme
+    # _subtract_ignored_flags (filtre de liste, PAS effective_flags qui renvoie un set non trie).
+    _ignored_codes = {str(_c) for _c in (ignored_alerts or ())}
+    _raw_flags = [str(_f) for _f in (getattr(row, "warning_flags", None) or []) if str(_f) not in _ignored_codes]
+    # F12 (2026-08-03) : un `subtitle_forced_only_<lang>` n'est perime que si une
+    # piste MUXEE COMPLETE existe -> `full_langs_from_embedded` (qui lit `forced`),
+    # surtout pas `present_langs` (qui contient deja la langue du fichier force).
+    _flags = reconcile_subtitle_flags(_raw_flags, present_langs, full_langs_from_embedded(_embedded))
+    _missing = [
+        str(_l)
+        for _l in (getattr(row, "subtitle_missing_langs", None) or [])
+        if (_normalize_iso639(str(_l)) or str(_l).strip().lower()) not in present_langs
+    ]
 
     payload = {
         "run_id": run_id,
@@ -1018,11 +1121,11 @@ def _build_row_payload(
         # suggestions + applied_rule_ids + narrative + top_positive/negative).
         # None si pas d'explanation disponible (backward compat frontend).
         "score_explanation_full": score_explanation_full,
-        "warning_flags": "|".join(row.warning_flags) if row.warning_flags else "",
+        "warning_flags": "|".join(_flags),
         "nfo_present": bool(row.nfo_path),
         "subtitle_count": int(getattr(row, "subtitle_count", 0) or 0),
         "subtitle_languages": "|".join(getattr(row, "subtitle_languages", None) or []),
-        "subtitle_missing": "|".join(getattr(row, "subtitle_missing_langs", None) or []),
+        "subtitle_missing": "|".join(_missing),
         "subtitle_orphans": int(getattr(row, "subtitle_orphans", 0) or 0),
         "notes": str(row.notes or ""),
     }
@@ -1066,6 +1169,14 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
             if row_id:
                 quality_by_row[row_id] = report
 
+    # AUDIT 2026-07-13 (H4/LOW) : alertes IGNOREES en BULK (1 requete/chunk, PAS 1/row) pour que
+    # _build_row_payload livre les flags EFFECTIFS (bruts - ignores) = miroir exact de l'ecran
+    # Verification (get_plan). Le store n'est pas dans le scope de _build_row_payload -> on le
+    # resout ici (seul appelant) et on transmet le set par row. Best-effort : {} si indisponible.
+    from cinesort.ui.api.run_read_support import ignored_alerts_by_row as _ignored_alerts_by_row
+
+    ignored_by_row = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
+
     rows_payload: List[Dict[str, Any]] = []
     validated_ok = 0
     quality_tiers: Counter[str] = Counter()
@@ -1076,6 +1187,7 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
             row,
             decisions.get(row.row_id, {}),
             quality_by_row.get(row.row_id, {}),
+            ignored_by_row.get(str(row.row_id)),
         )
         rows_payload.append(payload)
         if decision_ok:
@@ -1190,7 +1302,9 @@ def write_run_report_file(
 
     out_path = run_paths.run_dir / f"{report_stem}.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(report_to_csv_text(report), encoding="utf-8-sig")
+    # LOTD-EXP-01 : csv.writer emet deja \r\n ; sans newline="" l'OS retraduit
+    # \n -> \r\n (=> \r\r\n sur disque, une ligne vide par enregistrement).
+    out_path.write_text(report_to_csv_text(report), encoding="utf-8-sig", newline="")
     return out_path
 
 
@@ -1222,6 +1336,17 @@ def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any
             export_format=export_format,
             report=report,
         )
+        # LOTD-EXP-02 : l'UI (#/logs) telecharge via Blob et exige "content" ;
+        # on renvoie le texte exact ecrit sur disque (lecture utf-8 stricte :
+        # le BOM du CSV reste en tete -> le download demeure lisible par Excel).
+        # LOTD-EXP-04 : on veut le texte EXACT du disque, sans traduction
+        # universal-newlines (sinon le \r\n du CSV, fix EXP-01, est retraduit en
+        # \n). AUDIT 2026-07-13 (vague 2) : l'ancien `read_text(newline="")` levait
+        # un TypeError sur Python 3.12 (le kwarg newline de Path.read_text n'existe
+        # qu'en 3.13) -> avale par l'except -> export JSON/CSV/HTML mort ({ok:False})
+        # pour l'utilisateur. read_bytes().decode preserve les CRLF ET le BOM UTF-8
+        # (decode "utf-8" strict, pas "utf-8-sig") et marche sur 3.12+.
+        content = out_path.read_bytes().decode("utf-8")
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(f"Echec export rapport: {exc}", category="runtime", level="error", log_module=__name__)
 
@@ -1231,6 +1356,7 @@ def export_run_report(api: Any, run_id: str, fmt: str = "json") -> Dict[str, Any
         "run_id": run_id,
         "format": export_format,
         "path": str(out_path),
+        "content": content,
         "rows_total": int(counts.get("rows_total") or 0),
     }
 
@@ -1284,6 +1410,21 @@ def _compute_health_trend(timeline: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"arrow": arrow, "delta": delta, "message": msg, "current": current}
 
 
+def _is_low_confidence_identification(row: Any) -> bool:
+    """Film identifie mais a confiance BASSE : 0 < confidence < CONF_MEDIUM (60).
+
+    AUDIT 2026-07-15 (M3) : seuil unifie sur le canonique
+    domain.confidence_thresholds.CONF_MEDIUM (60), auparavant 50 ici alors que
+    tout le reste (label "low", _row_unidentified, compute_confidence) borne a
+    60. `conf == 0` reste VOLONTAIREMENT exclu : ces films sont "non identifies"
+    (couverts par films_not_identified / row_unidentified), pas "basse
+    confiance". Le drill-down Bibliotheque (bibliotheque.js, filtre low_confidence)
+    est aligne sur ce meme intervalle [1, CONF_MEDIUM - 1].
+    """
+    conf = int(getattr(row, "confidence", 0) or 0)
+    return 0 < conf < CONF_MEDIUM
+
+
 def _compute_librarian_suggestions(
     api: Any,
     store: Any,
@@ -1302,13 +1443,19 @@ def _compute_librarian_suggestions(
         )
         rows = api._load_rows_from_plan_jsonl(run_paths)
         reports = store.quality.list_quality_reports(run_id=latest_run_id)
+        # LIMITE CONNUE (revue vague 4B R2, differee) : generate_suggestions resout
+        # le tmdb_id depuis les CANDIDATS (parite chip fermee, cas courant), mais
+        # n'applique PAS l'override TMDb MANUEL (film_tmdb_overrides). Un film
+        # identifie a la main mais sans candidat fiable reste donc "non identifie"
+        # sur la carte Accueil alors que le chip Bibliotheque le montre identifie.
+        # Non ferme ici car overlay_tmdb_override opere sur des dict et rows est
+        # une liste de PlanRow -> le cabler proprement demande d'unifier le format
+        # (chantier separe, pas une duplication de la logique d'override).
         result = generate_suggestions(rows, reports, settings)
         # R8-049 (F5) : compte des films basse-confiance d'identification, source de
         # l'insight métier `films_low_confidence` (le librarian n'émet pas ce type).
         if isinstance(result, dict):
-            result["low_confidence_count"] = sum(
-                1 for r in rows if 0 < int(getattr(r, "confidence", 0) or 0) < 50
-            )
+            result["low_confidence_count"] = sum(1 for r in rows if _is_low_confidence_identification(r))
         return result
     except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
         logger.debug("librarian suggestions error: %s", exc)
@@ -1495,6 +1642,7 @@ def _compute_active_insights(
     run_ids: List[str],
     settings: Dict[str, Any],
     librarian_data: Optional[Dict[str, Any]] = None,
+    latest_scan_rid: str = "",
 ) -> List[Dict[str, Any]]:
     """v7.6.0 Vague 2 : insights proactifs affiches sur la Home.
 
@@ -1516,7 +1664,7 @@ def _compute_active_insights(
     # 1. Run actif en cours
     try:
         for r in store.run.list_runs(limit=1):
-            if r.get("status") == "running":
+            if str(r.get("status") or "").upper() == "RUNNING":
                 insights.append(
                     {
                         "type": "run_in_progress",
@@ -1532,8 +1680,13 @@ def _compute_active_insights(
         pass
 
     # 2. Nouveaux Reject sur le dernier run
-    if run_ids:
-        latest_rid = run_ids[0]
+    # Revue vague 3 R2 : `latest_scan_rid` (resolu par get_latest_run, exclut les
+    # runs utilitaires de bulk-rescan) doit primer sur run_ids[0] brut ; sinon,
+    # apres un re-scan groupe, run_ids[0] = run parasite (0 perceptual_report) ->
+    # reject_count=0 -> l'insight Reject disparait, desynchronise du reste du
+    # payload (deja passe a latest_scan_rid).
+    if run_ids or latest_scan_rid:
+        latest_rid = latest_scan_rid or run_ids[0]
         try:
             reports = store.perceptual.list_perceptual_reports(run_id=latest_rid)
             reject_count = sum(1 for r in reports if str(r.get("global_tier_v2") or "").lower() == "reject")
@@ -1691,6 +1844,20 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         error_counts = store.run.get_error_counts_for_runs(run_ids)
         anomaly_counts = store.anomaly.get_anomaly_counts_for_runs(run_ids)
 
+        # AUDIT 2026-07-13 (HIGH-8 residu) : le "dernier run" pour les KPI globaux
+        # + les distributions de tiers (page Qualite) doit EXCLURE les runs
+        # utilitaires de bulk re-scan (config rescan_run_id). Sinon, apres un
+        # re-scan groupe, run_ids[0] pointe le run de tracking parasite (sans plan
+        # ni quality_reports) -> total_films / avg_score / tier_distribution a 0,
+        # en divergence avec la Bibliotheque. MEME resolution que la vague 2
+        # (get_latest_run filtre deja les rescans). Fallback run_ids[0] si
+        # get_latest_run ne renvoie rien.
+        try:
+            _latest_scan_row = store.run.get_latest_run()
+        except (OSError, AttributeError, TypeError, ValueError):
+            _latest_scan_row = None
+        latest_scan_rid = str((_latest_scan_row or {}).get("run_id") or "") or (run_ids[0] if run_ids else "")
+
         # 3. Global tier distribution
         # AUDIT 2026-06-14 (R6-F) : distribution "etat courant" = DERNIER run
         # SEULEMENT (limit_runs=1). Avant, l'agregation sur `lim` runs (20)
@@ -1708,7 +1875,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # run est un snapshot complet independant -> un film present dans N scans
         # etait compte N fois (KPI gonfles). On scope au DERNIER run, comme la
         # distribution par tier (limit_runs=1) et la Bibliotheque.
-        latest_rid = run_ids[0] if run_ids else None
+        latest_rid = latest_scan_rid or None
         latest_summary = next((r for r in runs_summary if r.get("run_id") == latest_rid), None)
         total_films = int(latest_summary.get("total_rows", 0)) if latest_summary else 0
         latest_qc = quality_counts.get(latest_rid, {}) if latest_rid else {}
@@ -1723,7 +1890,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # 7. Unscored films count (from latest run)
         unscored = 0
         if run_ids:
-            latest_rid = run_ids[0]
+            latest_rid = latest_scan_rid
             latest_total = next((r["total_rows"] for r in runs_summary if r["run_id"] == latest_rid), 0)
             latest_scored = quality_counts.get(latest_rid, {}).get("scored_movies", 0)
             unscored = max(0, latest_total - latest_scored)
@@ -1769,18 +1936,20 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             )
 
         # 10. Space analysis (depuis les quality reports du dernier run)
-        space = _compute_space_analysis(store, run_ids[0] if run_ids else "")
+        space = _compute_space_analysis(store, latest_scan_rid)
 
         # 11. Librarian suggestions
-        librarian_data = _compute_librarian_suggestions(api, store, run_ids[0] if run_ids else "", settings)
+        librarian_data = _compute_librarian_suggestions(api, store, latest_scan_rid, settings)
 
         # 12. v7.6.0 Vague 2 — Home overview-first payloads
         # AUDIT 2026-06-14 (R6-F) : V2 perceptuel du DERNIER run uniquement
         # (run_ids[:1]). Avant, le cumul sur 20 runs donnait ~1265 lignes quasi
         # toutes "bronze" (perceptuel partiel/ancien) -> faux "Sante 0% / tout Bronze".
-        v2_tier_distribution = _compute_v2_tier_distribution(store, run_ids[:1])
+        v2_tier_distribution = _compute_v2_tier_distribution(store, [latest_scan_rid] if latest_scan_rid else [])
         trend_30days = _compute_trend_30days(store)
-        insights = _compute_active_insights(api, store, run_ids, settings, librarian_data)
+        insights = _compute_active_insights(
+            api, store, run_ids, settings, librarian_data, latest_scan_rid=latest_scan_rid
+        )
 
         # 13. Spec 10 Qualite — by_decade distribution top-level (best-effort).
         # Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
@@ -1788,7 +1957,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         try:
             from cinesort.ui.api.library_audit_support import compute_by_decade
 
-            by_decade = compute_by_decade(api, run_id=run_ids[0] if run_ids else None)
+            by_decade = compute_by_decade(api, run_id=latest_scan_rid or None)
         except (OSError, AttributeError, ImportError, KeyError, TypeError, ValueError) as exc:
             logger.debug("get_global_stats by_decade fallback (err=%s)", exc)
             by_decade = {}
@@ -1837,10 +2006,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
             "ok": False,
             "error": "global_stats_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de calculer les statistiques globales. "
-                "Relance un scan ou redemarre l'app."
-            ),
+            "user_message": ("Impossible de calculer les statistiques globales. Relance un scan ou redemarre l'app."),
         }
 
 
@@ -1859,6 +2025,39 @@ def _row_needs_review(row: Any) -> bool:
         return True
     flags = getattr(row, "warning_flags", None) or []
     return any(f in _SIDEBAR_CRITICAL_FLAGS for f in flags)
+
+
+def _count_duplicate_films(rows: Any) -> int:
+    """Nombre de films dans un groupe de doublons (meme titre+annee, >= 2 films).
+
+    AUDIT 2026-07-15 (M4) : EXCLUT les episodes TV, miroir EXACT du detecteur
+    reel (duplicate_support.find_duplicate_targets qui skip kind == "tv_episode").
+    Sans ce filtre, le badge "Doublons" promettait des doublons que l'ecran
+    Doublons ne montre JAMAIS (plusieurs episodes d'une serie partagent le meme
+    titre+annee mais sont exclus de la detection). Le filtre s'applique AVANT le
+    comptage des cles ET a l'iteration finale, sinon un film unique partageant
+    son titre+annee avec des episodes TV serait compte a tort.
+    """
+    dup_rows = [r for r in rows if str(getattr(r, "kind", "") or "") != "tv_episode"]
+    dup_keys: Counter = Counter()
+    for r in dup_rows:
+        title = str(getattr(r, "proposed_title", "") or "").strip().lower()
+        if not title:
+            continue
+        year = int(getattr(r, "proposed_year", 0) or 0)
+        dup_keys[(title, year)] += 1
+    return sum(
+        1
+        for r in dup_rows
+        if str(getattr(r, "proposed_title", "") or "").strip()
+        and dup_keys[
+            (
+                str(getattr(r, "proposed_title", "") or "").strip().lower(),
+                int(getattr(r, "proposed_year", 0) or 0),
+            )
+        ]
+        >= 2
+    )
 
 
 def get_sidebar_counters(api: Any) -> Dict[str, int]:
@@ -1904,30 +2103,57 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
 
         validation = sum(1 for r in rows if _row_needs_review(r) and str(getattr(r, "row_id", "")) not in approved_ids)
         application = 0 if last_batch else len(approved_ids)
-        quality = sum(1 for r in rows if getattr(r, "warning_flags", None))
+        # AUDIT 2026-07-13 (HIGH-4) : badge "Qualite" sur les flags EFFECTIFS
+        # (bruts - alertes ignorees - subtitle_missing_<lang> perimes), MEME
+        # chaine que l'ecran Verification (history_support._enrich_plan_payload)
+        # et le KPI "Cas a verifier" (_build_dashboard_section). Sans ca le badge
+        # comptait tout flag BRUT (le FR muxe non vu au scan pose un faux
+        # subtitle_missing_fr) -> ~898 alors que l'ecran annonce ~186.
+        from cinesort.ui.api.history_support import (
+            _full_langs_from_payload,
+            _present_langs_from_payload,
+        )
+        from cinesort.ui.api.run_read_support import (
+            build_qr_by_id,
+            reconcile_subtitle_flags,
+        )
+        from cinesort.ui.api.run_read_support import (
+            effective_flags as _effective_flags,
+        )
+        from cinesort.ui.api.run_read_support import (
+            ignored_alerts_by_row as _ignored_alerts_by_row,
+        )
+
+        qr_by_id: Dict[str, Dict[str, Any]] = {}
+        if hasattr(store, "quality"):
+            try:
+                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+            except (OSError, AttributeError, TypeError, ValueError):
+                qr_by_id = {}
+        _ignored_q = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
+
+        quality = 0
+        for r in rows:
+            rid = str(getattr(r, "row_id", ""))
+            eff = _effective_flags(getattr(r, "warning_flags", None), _ignored_q.get(rid))
+            present = _present_langs_from_payload(
+                {"row_id": rid, "subtitle_languages": getattr(r, "subtitle_languages", None) or []},
+                qr_by_id,
+            )
+            # F12 (2026-08-03) : meme reconciliation que l'ecran Verification, y
+            # compris pour `subtitle_forced_only_<lang>`. Sans le 3e argument, une
+            # row dont l'unique alerte est un forced_only DEMENTI par une piste
+            # muxee complete gonflerait ce badge sans apparaitre a l'ecran — la
+            # divergence exacte que HIGH-4 a corrigee.
+            if reconcile_subtitle_flags(eff, present, _full_langs_from_payload({"row_id": rid}, qr_by_id)):
+                quality += 1
 
         # AUDIT 2026-06-13 (R5-E) : badge "Doublons" = films dans un groupe de
         # doublons (meme titre+annee >= 2 occurrences). Meme semantique que le
         # chip biblio "Dans doublons" (library_support._count_duplicates_and_sagas).
-        dup_keys: Counter = Counter()
-        for r in rows:
-            title = str(getattr(r, "proposed_title", "") or "").strip().lower()
-            if not title:
-                continue
-            year = int(getattr(r, "proposed_year", 0) or 0)
-            dup_keys[(title, year)] += 1
-        duplicates = sum(
-            1
-            for r in rows
-            if str(getattr(r, "proposed_title", "") or "").strip()
-            and dup_keys[
-                (
-                    str(getattr(r, "proposed_title", "") or "").strip().lower(),
-                    int(getattr(r, "proposed_year", 0) or 0),
-                )
-            ]
-            >= 2
-        )
+        # AUDIT 2026-07-15 (M4) : delegue a _count_duplicate_films, qui EXCLUT les
+        # episodes TV (miroir du detecteur reel duplicate_support.py).
+        duplicates = _count_duplicate_films(rows)
 
         return {
             "validation": int(validation),
