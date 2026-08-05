@@ -66,6 +66,51 @@ _LEGACY_KEY_ALIASES: Dict[str, str] = {
     "faible": "bronze",
 }
 
+# ---------------------------------------------------------------------------
+# Bandes de tiers pour les agregats KPI (#472)
+# ---------------------------------------------------------------------------
+#
+# Pourquoi des ENSEMBLES DE TIERS et pas des seuils de score : les agregats
+# "premium" / "low" du dashboard etaient calcules en dur sur le SCORE
+# (``score >= 85`` / ``score < 55``, infra/db/repositories/quality.py et
+# ui/api/dashboard_support.py). 85 etait le seuil Platinum de l'echelle
+# PRE-v1.5.5 (85/68/54/30, cf. le commentaire de ``default_quality_profile``) :
+# la recalibration vers 70/66/55/40 a laisse ces deux litteraux derriere elle.
+# Resultat, un film affiche Platinum (score 75) n'etait PAS compte premium, et
+# le profil ``remux_strict`` (90/76/60/40) decalait tout dans l'autre sens.
+#
+# Le ``tier`` est PERSISTE dans ``quality_reports`` et il a ete calcule avec le
+# profil actif AU MOMENT du scoring. Agreger dessus rend le KPI coherent PAR
+# CONSTRUCTION avec le tier affiche film par film — ce qu'aucun seuil de score
+# recalcule apres coup ne peut garantir (les scores d'un run peuvent venir d'un
+# autre profil que celui actif aujourd'hui).
+#
+# Les valeurs sont en MINUSCULES pour une comparaison ``LOWER(tier) IN (...)``
+# cote SQL, et incluent les alias legacy (Premium/Bon/Faible/Mauvais) derives de
+# ``_LEGACY_LABEL_ALIASES`` : une base ou la migration 011 n'aurait pas tourne
+# ne doit pas voir ses films disparaitre SILENCIEUSEMENT des deux compteurs.
+
+
+def _tier_band(*canonical: str) -> frozenset:
+    """Noms acceptes (minuscules) pour une bande : canoniques + alias legacy.
+
+    Derive de ``_LEGACY_LABEL_ALIASES`` plutot que recopie : ajouter un alias
+    la-bas le propage ici, les deux ne peuvent pas diverger.
+    """
+    names = {name.lower() for name in canonical}
+    names.update(legacy.lower() for legacy, canon in _LEGACY_LABEL_ALIASES.items() if canon in canonical)
+    return frozenset(names)
+
+
+#: Bande "haut de gamme" — meme definition que :func:`is_premium_tier`.
+PREMIUM_TIERS_LOWER: frozenset = _tier_band("Platinum", "Gold")
+
+#: Bande "basse" = STRICTEMENT sous Silver. Conserve le perimetre historique
+#: (``score < 55`` == sous le seuil Silver du profil par defaut) : on corrige la
+#: desynchronisation, on ne redefinit pas le KPI. L'issue #472 suggerait
+#: ``tier = 'reject'``, ce qui aurait retire Bronze du compte sans justification.
+LOW_TIERS_LOWER: frozenset = _tier_band("Bronze", "Reject")
+
 # Libelles FR longs (utilises par l'UI si besoin de phrases). Le label affiche
 # reste le nom canonique anglais (Platinum...) - cf tokens.css invariants.
 _TIER_LABEL_FR: Dict[str, str] = {
@@ -220,8 +265,11 @@ def tier_label_fr(tier: Any) -> str:
 def is_premium_tier(tier: Any) -> bool:
     """True si le tier est Platinum ou Gold (haut de gamme).
 
-    Sert pour les decisions UI ou les badges "premium". Les alias legacy sont
-    aussi acceptes (Premium -> Platinum).
+    Sert aux badges "premium" de l'UI ET au KPI ``premium_count`` du dashboard
+    (#472) : la bande est celle de ``PREMIUM_TIERS_LOWER``, pour que le compteur
+    et le badge ne puissent pas diverger.
+
+    Les alias legacy sont aussi acceptes (Premium -> Platinum).
 
     >>> is_premium_tier("Platinum")
     True
@@ -232,7 +280,7 @@ def is_premium_tier(tier: Any) -> bool:
     >>> is_premium_tier("Bon")
     True
     """
-    return normalize_tier_string(tier) in ("Platinum", "Gold")
+    return (normalize_tier_string(tier) or "").lower() in PREMIUM_TIERS_LOWER
 
 
 def tier_min_score(tier: Any, profile_tiers: Optional[Dict[str, Any]] = None) -> int:
@@ -961,8 +1009,9 @@ def apply_tier_hierarchy(
 # encore en v7.7.0. Ils seront re-exposes quand la Vague S (UI premium badges,
 # affichage seuils dynamiques, plafonnement custom_rules) les consommera :
 #   - tier_label_fr   : libelle FR long ("Platine"/"Or"/...) - future UI badges
-#   - is_premium_tier : decision rapide Platinum/Gold - future UI premium badge
 #   - tier_min_score  : seuil dynamique d'un tier - future UI parametres
+# `is_premium_tier` a QUITTE cette liste (#472) : le KPI premium du dashboard
+# (ui/api/dashboard_support) en est desormais un caller de production.
 #   - cap_tier        : plafonnement explicite (utilise en INTERNE par
 #                       apply_tier_hierarchy ligne 749, donc fonction conservee)
 # Backward compat ABSOLUE : les fonctions restent inchangees, seul __all__
@@ -973,6 +1022,8 @@ __all__ = [
     "TIER_ORDER_WORST_FIRST",
     "TIER_V2_CANONICAL",
     "DEFAULT_TIER_THRESHOLDS",
+    "PREMIUM_TIERS_LOWER",
+    "LOW_TIERS_LOWER",
     "DEFAULT_HIERARCHY_DIMENSIONS_ORDER",
     "DEFAULT_HIERARCHY_RESOLUTION_FLOORS",
     "DEFAULT_HIERARCHY_RESOLUTION_CEILINGS",
@@ -984,8 +1035,8 @@ __all__ = [
     "normalize_tiers",
     "tier_order",
     "tier_ordinal",
+    "is_premium_tier",
     # tier_label_fr : reservee future Vague S (UI badges FR)
-    # is_premium_tier : reservee future Vague S (UI premium badge)
     # tier_min_score : reservee future Vague S (UI parametres)
     "determine_tier",
     # cap_tier : utilisee en INTERNE par apply_tier_hierarchy mais aucun
