@@ -803,8 +803,19 @@ __emit({ items: M.__h.dangerOpts()[0].items, itemsSansPlan: M.__h.dangerOpts()[1
 """
         )
         # 1. La ligne d'operations elle-meme doit porter le compte.
+        # Assertion BORNEE sur le texte de l'operation, pas sur « 50 » nu.
+        #
+        # Une revue a signale ces deux assertions comme VIDES : « 250 » contient
+        # « 50 », donc elles passeraient meme sans quarantaine. MESURE : le
+        # repli affiche « 200 films approuves », pas 250 — `opCount` compte les
+        # APPROUVES, soit 250 lignes moins 50 rejetees. La sous-chaine « 50 »
+        # n'y est donc pas, et les assertions n'etaient PAS vides.
+        #
+        # On borne quand meme : elles le DEVIENDRAIENT si le scenario changeait
+        # de facon a afficher un nombre contenant « 50 ». C'est une fragilite
+        # latente qui ne coute rien a supprimer.
         self.assertIn(
-            "50",
+            "50 mises en quarantaine",
             res["items"][0],
             f"les 50 mises en quarantaine doivent etre annoncees dans la ligne d'operations : {res['items'][0]}",
         )
@@ -816,7 +827,7 @@ __emit({ items: M.__h.dangerOpts()[0].items, itemsSansPlan: M.__h.dangerOpts()[1
         # 3. Meme sans plan backend, la quarantaine est connue COTE CLIENT : le
         #    repli ne doit pas la perdre.
         self.assertIn(
-            "50",
+            "50 mises en quarantaine",
             res["itemsSansPlan"][0],
             f"repli sans plan : la quarantaine reste annoncable cote client : {res['itemsSansPlan'][0]}",
         )
