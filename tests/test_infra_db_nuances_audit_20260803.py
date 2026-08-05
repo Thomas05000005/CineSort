@@ -203,16 +203,24 @@ class SchemaCheckMemoTests(_TmpDbTestCase):
         self.assertIsNone(store.film_modal.get_tmdb_override(run_id="R1", row_id="row0"))
 
     def test_memo_does_not_survive_an_initialize_that_rolled_the_db_back(self) -> None:
-        """initialize() peut faire RECULER le contenu de la base, en place.
+        """initialize() peut faire RECULER le contenu de la base sous le memo.
 
-        `restore_backup` ecrit via l'API de sauvegarde SQLite dans le fichier
-        existant : l'inode ne change pas, seul le CONTENU recule. Un memo pris
-        avant ce rollback serait donc a la fois obsolete et indetectable par
-        l'identite du fichier — d'ou le vidage du memo en tete d'initialize().
+        Le rollback pre_migration remplace le contenu du `.sqlite` : un memo
+        pris avant lui est obsolete, et rien dans les DONNEES ne le signale.
+
+        Instrument (#669/#468) : ce test injectait sa panne en s'appuyant sur le
+        fait que `restore_backup` ecrivait DANS le fichier existant, donc a
+        identite inchangee. Depuis la publication atomique, le restore passe par
+        `os.replace` et l'identite du fichier change — le memo tomberait alors
+        par `_db_identity()`, et la mutation « retirer le `clear()` en tete
+        d'initialize() » restait VERTE (mesure faite des deux cotes : rouge sur
+        `main`, verte apres fusion). On fige donc l'identite du fichier pour
+        isoler la garde reellement visee, ce qui est aussi le cas reel d'un
+        systeme de fichiers qui recycle son numero d'inode. Les assertions
+        metier sont inchangees.
         """
         store = SQLiteStore(self.db_path)
         store.initialize()
-        store.field_locks.list_locks("film-1")  # memoise le groupe field_locks
 
         # Backup "d'avant la feature" : meme base, mais sans film_field_locks.
         backup_dir = self.db_path.parent / "backups"
@@ -227,16 +235,19 @@ class SchemaCheckMemoTests(_TmpDbTestCase):
         def _boom(_self) -> int:
             raise sqlite3.DatabaseError("migration boom (test)")
 
-        with mock.patch.object(SQLiteStore, "_apply_schema_migrations", _boom):
-            with self.assertRaises(RuntimeError):
-                store.initialize()
+        with mock.patch.object(SQLiteStore, "_db_identity", lambda _self: (1, 1)):
+            store.field_locks.list_locks("film-1")  # memoise le groupe field_locks
 
-        with closing(sqlite3.connect(str(self.db_path))) as conn:
-            names = {str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.assertNotIn("film_field_locks", names, "le rollback pre_migration n'a pas eu lieu")
+            with mock.patch.object(SQLiteStore, "_apply_schema_migrations", _boom):
+                with self.assertRaises(RuntimeError):
+                    store.initialize()
 
-        # Le store doit re-verifier et se reparer, pas faire confiance a son memo.
-        self.assertEqual(store.field_locks.list_locks("film-1"), [])
+            with closing(sqlite3.connect(str(self.db_path))) as conn:
+                names = {str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("film_field_locks", names, "le rollback pre_migration n'a pas eu lieu")
+
+            # Le store doit re-verifier et se reparer, pas faire confiance a son memo.
+            self.assertEqual(store.field_locks.list_locks("film-1"), [])
 
 
 # ---------------------------------------------------------------------------

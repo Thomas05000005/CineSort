@@ -2564,7 +2564,17 @@ def apply_single(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
         return
 
-    if core_mod._single_folder_is_conform(folder.name, title, year, naming_template=cfg.naming_movie_template):
+    # #469 : memes entrees de contexte que `_naming_ctx` ci-dessus (edition +
+    # separator), sinon cette garde NOOP compare le dossier a un nom que ce
+    # meme bloc n'ecrira jamais.
+    if core_mod._single_folder_is_conform(
+        folder.name,
+        title,
+        year,
+        naming_template=cfg.naming_movie_template,
+        edition=edition or "",
+        separator=getattr(cfg, "separator", " "),
+    ):
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
 
@@ -2749,9 +2759,33 @@ def apply_collection_item(
     # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
     # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
     # peut exceder 260 chars meme si sub_dir reste valide.
-    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit.
+    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit. Le
+    # helper `_video_name_with_ext_case` (ITER7), qui rebatissait le nom avec un
+    # suffixe force en minuscules, a ete SUPPRIME du module : mesurer le
+    # kill-switch sur un nom reconstruit reviendrait a mesurer un chemin que
+    # l'apply n'ecrira jamais.
+    #
+    # Issue #661 : les SIDECARS etaient exclus de ce kill-switch alors que la
+    # branche TV les couvre (GATE 3 / TV-MAXPATH). En collection les sidecars
+    # GARDENT leur nom source (`sub_dir / sidecar.name`), et une chaine de
+    # suffixes (.fr.forced.srt, .en.sdh.sup) depasse couramment la longueur de
+    # la video. L'item echouait donc EN COURS DE ROUTE (OSError obscur au
+    # premier sidecar trop long, puis rollback intra-row) au lieu d'etre
+    # proprement saute en amont avec SKIP_PATH_TOO_LONG. On calcule donc les
+    # cibles sidecars AVANT tout deplacement et on les soumet au meme gate.
+    # La liste calculee ici est ensuite REUTILISEE par la boucle de move : un
+    # second classify_sidecars donnerait une reponse potentiellement differente
+    # (le dossier a bouge entre-temps) et ferait mentir le gate.
     _candidate_video_path = sub_dir / video.name
-    _path_err = check_path_length_killswitch(str(_candidate_video_path))
+    _sidecar_targets: list[Tuple[Path, Path]] = [
+        (sidecar, sub_dir / sidecar.name)
+        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+    ]
+    _path_err: Optional[str] = None
+    for _cp in [str(_candidate_video_path)] + [str(_dst) for (_, _dst) in _sidecar_targets]:
+        _path_err = check_path_length_killswitch(_cp)
+        if _path_err is not None:
+            break
     if _path_err is not None:
         log("WARN", _path_err)
         try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
@@ -2811,8 +2845,7 @@ def apply_collection_item(
                 dedup_seen_ops.discard(k)
 
     try:
-        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-            dst = sub_dir / sidecar.name
+        for sidecar, dst in _sidecar_targets:
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
                 op_key = (
