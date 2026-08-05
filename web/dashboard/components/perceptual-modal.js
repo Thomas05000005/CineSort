@@ -27,7 +27,7 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
-import { humanize, severityForTier, SCORE_V2_COMPONENTS } from "../core/perceptual-labels.js";
+import { humanize, humanizeMelVerdict, isMelMeasured, severityForTier, SCORE_V2_COMPONENTS } from "../core/perceptual-labels.js";
 import { setSections as rpSetSections, setExpandedWidth as rpSetExpandedWidth, isExpandedWidth as rpIsExpandedWidth } from "./right-panel.js";
 import { openDuplicateComparatorModal } from "./duplicate-comparator-modal.js";
 // Fix audit 2026-05-24 a11y : reutilisation du trapFocus exporte par modal.js
@@ -336,6 +336,34 @@ function _renderVideoSection(d) {
   `;
 }
 
+/* #381 — les quatre sous-detections mel etaient calculees, scorees (15 % du
+ * sous-score audio, AUDIO_WEIGHT_MEL) et persistees... puis jamais montrees :
+ * `grep -rn "spectral_flatness" web/` rendait 0 resultat. Le backend les sert
+ * pourtant deja au top-level : `_flatten_perceptual_for_modal` remonte
+ * `metrics.audio_perceptual` (perceptual_support.py), dont `to_dict()` porte le
+ * bloc `mel` (domain/perceptual/models.py).
+ *
+ * Le verdict s'affiche toujours ; les GRANDEURS ne s'affichent que si la mesure
+ * a abouti (cf. MEL_MEASURED_VERDICTS) — sinon on montrerait les valeurs par
+ * defaut du dataclass (0.0 / false) comme si elles avaient ete mesurees.
+ */
+function _renderMelRows(d) {
+  const audio = d && typeof d.audio_perceptual === "object" && d.audio_perceptual !== null ? d.audio_perceptual : null;
+  const mel = audio && typeof audio.mel === "object" && audio.mel !== null ? audio.mel : null;
+  if (!mel) return "";  // rapport anterieur a §12 v7.5.0 : rien a dire.
+  const verdict = mel.verdict;
+  const rows = [`<dt>Analyse spectrale (mel)</dt><dd>${escapeHtml(humanizeMelVerdict(verdict))}</dd>`];
+  if (!isMelMeasured(verdict)) return rows.join("\n");
+  if (mel.score != null) {
+    rows.push(`<dt>Score mel</dt><dd>${Math.round(Number(mel.score) || 0)}/100</dd>`);
+  }
+  rows.push(`<dt>Soft clipping</dt><dd>${escapeHtml(_fmtNumber(mel.soft_clipping_pct, 1))} % des frames</dd>`);
+  rows.push(`<dt>Shelf MP3 16 kHz</dt><dd>${mel.mp3_shelf_detected ? "détecté" : "absent"}</dd>`);
+  rows.push(`<dt>Trous AAC</dt><dd>${escapeHtml(_fmtNumber(Number(mel.aac_holes_ratio) * 100, 1))} % des bandes</dd>`);
+  rows.push(`<dt>Aplatissement spectral</dt><dd>${escapeHtml(_fmtNumber(mel.spectral_flatness, 3))}</dd>`);
+  return rows.join("\n");
+}
+
 function _renderAudioSection(d) {
   const fp = d.audio_fingerprint || "";
   // Spec 02 fix : on stocke la valeur complete pour copie
@@ -385,6 +413,7 @@ function _renderAudioSection(d) {
         ${dynamicRange != null ? `
           <dt>Dynamique</dt>
           <dd>${escapeHtml(_fmtNumber(dynamicRange, 1))} dB</dd>` : ""}
+        ${_renderMelRows(d)}
       </dl>
     </section>
   `;
