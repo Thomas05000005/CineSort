@@ -160,6 +160,75 @@ class MetadataExtractionTests(unittest.TestCase):
         self.assertEqual(meta["name"], "")
         self.assertEqual(meta["author"], "")
 
+    def test_extract_metadata_rejects_oversized_content(self):
+        """Issue #664 : la borne MAX_JSON_BYTES manquait ici alors que la
+        fonction sœur `parse_and_validate_import` l'applique.
+
+        Le contenu ci-dessous est du JSON *parfaitement valide* : sans la
+        garde, `json.loads` reussit et `meta["name"]` vaut "Trop gros". Le
+        test distingue donc bien « la garde a coupe avant le parse » de
+        « le parse a echoue tout seul » — un contenu invalide ne prouverait
+        rien.
+        """
+        filler = "a" * (MAX_JSON_BYTES + 4096)
+        content = json.dumps(
+            {
+                "schema": SCHEMA_NAME,
+                "schema_version": 1,
+                "name": "Trop gros",
+                "author": "Bob",
+                "description": "Charge utile hors borne",
+                "filler": filler,
+            }
+        )
+        self.assertGreater(len(content.encode("utf-8")), MAX_JSON_BYTES)
+
+        meta = extract_import_metadata(content)
+
+        self.assertEqual(meta["name"], "")
+        self.assertEqual(meta["author"], "")
+        self.assertEqual(meta["description"], "")
+        self.assertEqual(meta["schema_version"], "")
+
+    def test_extract_metadata_rejects_oversized_multibyte_content(self):
+        """La borne se compte en OCTETS, pas en caracteres.
+
+        Ce contenu tient en moins de MAX_JSON_BYTES *caracteres* mais pese le
+        double en UTF-8 : seule la mesure encodee le refuse. C'est ce cas qui
+        rend le test `len(content.encode("utf-8"))` indispensable — le
+        pre-test sur `len(content)` n'est, lui, qu'un court-circuit qui evite
+        d'allouer la copie encodee sur les entrees enormes.
+        """
+        filler = "é" * (MAX_JSON_BYTES // 2 + 200)
+        content = json.dumps({"name": "Accents", "filler": filler}, ensure_ascii=False)
+        self.assertLessEqual(len(content), MAX_JSON_BYTES)
+        self.assertGreater(len(content.encode("utf-8")), MAX_JSON_BYTES)
+
+        meta = extract_import_metadata(content)
+
+        self.assertEqual(meta["name"], "")
+
+    def test_extract_metadata_at_the_limit_still_parses(self):
+        """La garde ne doit pas devenir un refus de contenus legitimes :
+        exactement MAX_JSON_BYTES octets passent encore."""
+        skeleton = json.dumps({"name": "Juste sous la borne", "author": "Bob", "filler": ""})
+        pad = MAX_JSON_BYTES - len(skeleton.encode("utf-8"))
+        self.assertGreater(pad, 0)
+        content = json.dumps({"name": "Juste sous la borne", "author": "Bob", "filler": "a" * pad})
+        self.assertEqual(len(content.encode("utf-8")), MAX_JSON_BYTES)
+
+        meta = extract_import_metadata(content)
+
+        self.assertEqual(meta["name"], "Juste sous la borne")
+        self.assertEqual(meta["author"], "Bob")
+
+    def test_extract_metadata_non_string_input(self):
+        """Non-regression : l'entree non-str rendait deja le dict vide (via
+        `except TypeError`), le nouveau `isinstance` ne change rien."""
+        meta = extract_import_metadata(None)  # type: ignore[arg-type]
+        self.assertEqual(meta["name"], "")
+        self.assertEqual(meta["schema_version"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

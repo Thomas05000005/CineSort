@@ -183,7 +183,24 @@ class DbAutoRestoreIterationTests(unittest.TestCase):
         self.assertIsNone(raised)
         self.assertEqual(store.integrity_status, "ok")
         self.assertIsNone(store.integrity_event)
-        # DB existante saine -> le backup pre_migration reste bien cree
+        # Nuance N28 : un boot nominal (schema deja a jour) ne pousse plus de
+        # backup — c'est ce qui evincait les backups riches par rotation.
+        self.assertEqual(self._pre_migration_backups(), [])
+
+    def test_db_saine_avec_migration_en_attente_backuppe(self) -> None:
+        """Contrepartie de `test_db_saine_boot_normal_inchange` (nuance N28).
+
+        Des qu'une migration est reellement en attente — l'etat d'une base
+        apres une mise a jour de l'application — le backup pre_migration doit
+        revenir : c'est le filet de `_restore_from_pre_migration_backup`.
+        """
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
+            current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            conn.execute(f"PRAGMA user_version = {max(0, current - 1)}")
+            conn.commit()
+
+        store = SQLiteStore(self.db_path)
+        self.assertIsNone(self._initialize_tolerant(store))
         self.assertGreaterEqual(len(self._pre_migration_backups()), 1)
 
 

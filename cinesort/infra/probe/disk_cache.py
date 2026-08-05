@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from cinesort.infra.state import default_state_dir
+from cinesort.infra.state import atomic_write_json, default_state_dir, is_atomic_tmp_name
 
 logger = logging.getLogger(__name__)
 
@@ -181,26 +181,23 @@ def upsert_disk_cache(
             "normalized_json": normalized_json,
             "ts": float(ts if ts is not None else time.time()),
         }
-        # Ecriture atomique : tmp + os.replace pour eviter fichier corrompu
-        # si interruption (kill process, panne disque) en cours d'ecriture.
-        tmp = entry.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-            # fsync avant os.replace : garantit la durabilite physique sur disque
-            # (parite avec tmdb/omdb _save_cache_atomic) pour eviter une entree
-            # tronquee promue si crash kernel / panne courant.
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, entry)
+        # Fix #692 (et #694, fusionne en premier sur main le 2026-08-03) :
+        # l'ecriture etait atomique (tmp + os.replace) mais PAS durable — aucun
+        # fsync avant le rename. Un crash systeme entre le `json.dump` et le
+        # `os.replace` promouvait une entree vide ou tronquee que
+        # `get_disk_cache` relisait ensuite en boucle.
+        #
+        # #694 avait deja apporte le fsync, en ligne. On passe ici par le helper
+        # partage, qui ajoute deux choses que la version en ligne n'avait pas :
+        #   - le CONTROLE DE TAILLE apres fsync (un fichier ecrit court mais
+        #     correctement fsync'e etait quand meme promu) ;
+        #   - un nom de .tmp unique par (pid, THREAD, nanoseconde, uuid) : la
+        #     version en ligne n'avait que pid + time_ns, insuffisant sous le
+        #     ThreadingHTTPServer ou deux threads du meme processus ecrivent.
+        atomic_write_json(entry, payload, indent=None)
         return True
     except (OSError, TypeError, ValueError) as exc:
         logger.debug("Cache probe disque ecriture echouee path=%s err=%s", path, exc)
-        # Best-effort cleanup tmp si os.replace a echoue mais tmp existe.
-        try:
-            if "tmp" in locals() and tmp.exists():  # type: ignore[has-type]
-                tmp.unlink()  # type: ignore[has-type]
-        except OSError:
-            pass
         return False
 
 
@@ -217,7 +214,12 @@ def clear_disk_cache() -> int:
         cache_dir = _cache_dir()
         if not cache_dir.is_dir():
             return 0
-        for entry in cache_dir.glob("*.json"):
+        for entry in cache_dir.iterdir():
+            # Le glob historique `*.json` laissait DEFINITIVEMENT derriere lui
+            # les `.tmp` orphelins d'un crash : leur nom etant unique, ils ne
+            # sont jamais reutilises ni ecrases. On les balaie ici aussi.
+            if entry.suffix != ".json" and not is_atomic_tmp_name(entry.name):
+                continue
             try:
                 entry.unlink()
                 removed += 1
@@ -242,7 +244,11 @@ def prune_disk_cache(*, retention_days: int = 90) -> int:
         cache_dir = _cache_dir()
         if not cache_dir.is_dir():
             return 0
-        for entry in cache_dir.glob("*.json"):
+        for entry in cache_dir.iterdir():
+            # Idem clear_disk_cache : les `.tmp` orphelins de crash entrent
+            # dans la retention, sinon ils s'accumulent sans limite.
+            if entry.suffix != ".json" and not is_atomic_tmp_name(entry.name):
+                continue
             try:
                 if entry.stat().st_mtime < cutoff:
                     entry.unlink()
