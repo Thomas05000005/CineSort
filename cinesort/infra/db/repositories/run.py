@@ -24,6 +24,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
 
 # AUDIT 2026-07-13 (HIGH-8) : predicat partage pour EXCLURE les runs utilitaires
 # de bulk re-scan (library_actions_support.rescan_rows_bulk pose un marqueur
@@ -450,22 +451,31 @@ class RunRepository(_BaseRepository):
             return out
 
     def get_error_counts_for_runs(self, run_ids: List[str]) -> Dict[str, int]:
-        """Retourne {run_id: nb_erreurs} pour la liste de runs donnee (agregation bulk)."""
+        """Retourne {run_id: nb_erreurs} pour la liste de runs donnee (agregation bulk).
+
+        Issue #448 : decoupe en paquets. Le `GROUP BY run_id` rend une ligne par
+        run, donc l'union des paquets redonne exactement le meme dictionnaire —
+        y compris si l'appelant repete un run_id, puisque la valeur reecrite est
+        identique.
+        """
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]
         if not ids:
             return {}
-        placeholders = ",".join("?" for _ in ids)
+        out: Dict[str, int] = {}
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT run_id, COUNT(*) AS cnt
-                FROM errors
-                WHERE run_id IN ({placeholders})
-                GROUP BY run_id
-                """,
-                tuple(ids),
-            )
-            return {str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()}
+            for chunk in chunked(ids, SQL_CHUNK):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT run_id, COUNT(*) AS cnt
+                    FROM errors
+                    WHERE run_id IN ({placeholders})
+                    GROUP BY run_id
+                    """,
+                    tuple(chunk),
+                )
+                out.update({str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()})
+        return out
 
     def delete_run(self, run_id: str) -> int:
         """Supprime un run de la DB.
@@ -510,24 +520,23 @@ class RunRepository(_BaseRepository):
             # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
             # AVANT de supprimer le run pour pouvoir compter les operations
             # rattachees (apply_operations CASCADE sur batch_id).
+            #
+            # Issue #448 : la version precedente lisait les batch_id en Python
+            # puis rejouait la liste ENTIERE en parametres lies, dans un `IN` non
+            # borne — au-dela de SQLITE_MAX_VARIABLE_NUMBER la suppression levait
+            # « too many SQL variables ». Le sous-requetage garde exactement le
+            # meme ensemble de lignes (meme predicat `run_id=?`, meme instant
+            # dans la transaction) avec DEUX parametres au total, quel que soit
+            # le nombre de batches. Sur ce chemin destructif c'est aussi le sens
+            # restrictif : une seule instruction, donc pas d'etat mi-supprime.
             cur = conn.execute(
-                "SELECT batch_id FROM apply_batches WHERE run_id=?",
+                "SELECT COUNT(*) AS n FROM apply_operations"
+                " WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
                 (rid,),
             )
-            batch_ids = [str(r["batch_id"]) for r in cur.fetchall()]
-            apply_ops_deleted = 0
-            if batch_ids:
-                placeholders = ",".join("?" for _ in batch_ids)
-                cur = conn.execute(
-                    f"SELECT COUNT(*) AS n FROM apply_operations WHERE batch_id IN ({placeholders})",
-                    tuple(batch_ids),
-                )
-                apply_ops_deleted = int(cur.fetchone()["n"] or 0)
-                conn.execute(
-                    f"DELETE FROM apply_batches WHERE batch_id IN ({placeholders})",
-                    tuple(batch_ids),
-                )
-            batches_deleted = len(batch_ids)
+            apply_ops_deleted = int(cur.fetchone()["n"] or 0)
+            cur = conn.execute("DELETE FROM apply_batches WHERE run_id=?", (rid,))
+            batches_deleted = int(cur.rowcount or 0)
 
             cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
             run_deleted = int(cur.rowcount or 0)

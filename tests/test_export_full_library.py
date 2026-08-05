@@ -20,6 +20,7 @@ from cinesort.ui.api.export_support import (
     _UnsafeRunId,
     export_full_library,
 )
+from cinesort.ui.api.settings_support import _mask_secrets
 
 _IS_WINDOWS = os.name == "nt"
 
@@ -74,9 +75,33 @@ class SanitizeSettingsTests(unittest.TestCase):
             self.assertEqual(out[k], "***REDACTED***", f"{k} pas masque")
         self.assertEqual(out["jellyfin_url"], "http://j")
 
+    def test_masking_upstream_does_not_turn_an_absent_secret_into_a_present_one(self) -> None:
+        """#526 (volet ECARTE) : un secret ABSENT reste distinguable d'un secret pose.
+
+        L'issue affirmait que `_mask_secrets` (applique en amont par
+        `get_settings_payload`) rend TOUTES les valeurs truthy — un secret vide
+        deviendrait alors `***REDACTED***`, faisant croire a une cle configuree.
+        C'est faux : `_mask_secrets` ne substitue le masque que si la valeur est
+        non vide apres `strip()`. Ce test enchaine les deux etages exactement
+        comme la production, pour que l'affirmation ne se re-fabrique pas.
+        """
+        payload = _mask_secrets({"tmdb_api_key": "", "plex_token": None, "smtp_password": "hunter2"})
+        out = _sanitize_settings(payload)
+        self.assertEqual(out["tmdb_api_key"], "")
+        self.assertEqual(out["plex_token"], "")
+        self.assertEqual(out["smtp_password"], "***REDACTED***")
+
 
 class ExportFullLibraryShapeTests(unittest.TestCase):
-    """Forme du payload retourne par export_full_library."""
+    """Forme du payload retourne par export_full_library.
+
+    #526 : ces tests mockaient `get_settings()` avec une enveloppe
+    `{"data": {...}}` que la production ne renvoie PAS — `_get_settings_impl`
+    rend le dict de settings A PLAT. Le mock FABRIQUAIT donc la forme que le
+    code deballait, et la seule forme reellement servie par l'application
+    n'etait couverte par aucun test. Les mocks disent desormais ce que
+    `get_settings()` dit.
+    """
 
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_export_"))
@@ -90,7 +115,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Meme sans aucun run, l'export doit retourner un payload bien forme."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
+        api.settings.get_settings.return_value = {"tmdb_enabled": True}
         # Mock store with no runs
         store = MagicMock()
         store.run.get_runs_summary.return_value = []
@@ -109,11 +134,9 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         api = MagicMock()
         api._state_dir = self.state_dir
         api.settings.get_settings.return_value = {
-            "data": {
-                "tmdb_api_key": "MY-REAL-KEY",
-                "tmdb_enabled": True,
-                "jellyfin_url": "http://lan.local:8096",
-            }
+            "tmdb_api_key": "MY-REAL-KEY",
+            "tmdb_enabled": True,
+            "jellyfin_url": "http://lan.local:8096",
         }
         store = MagicMock()
         store.run.get_runs_summary.return_value = []
@@ -124,11 +147,40 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         self.assertEqual(out["settings"]["tmdb_api_key"], "***REDACTED***")
         self.assertEqual(out["settings"]["jellyfin_url"], "http://lan.local:8096")
 
+    def test_a_settings_key_named_data_does_not_hijack_the_export(self) -> None:
+        """#526 : l'export rend les REGLAGES, jamais le contenu d'une cle `data`.
+
+        `get_settings()` rend le dict de settings a plat. L'ancien
+        `settings_resp.get("data", settings_resp)` deballait une enveloppe qui
+        n'existe pas — et `settings.json` n'etant filtre par aucune whitelist,
+        une cle utilisateur nommee `data` prenait sa place : l'export RGPD
+        repartait avec le contenu de cette cle, `ok: True`, sans avertissement.
+        Mutation de controle : reintroduire le `.get("data", ...)` fait tomber
+        ce test sur `KeyError: 'root'`.
+        """
+        api = MagicMock()
+        api._state_dir = self.state_dir
+        api.settings.get_settings.return_value = {
+            "tmdb_api_key": "MY-REAL-KEY",
+            "root": "C:\\Films",
+            "data": {"piege": 1},
+        }
+        store = MagicMock()
+        store.run.get_runs_summary.return_value = []
+        api._get_or_create_infra.return_value = (store, MagicMock())
+
+        out = export_full_library(api)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["settings"]["root"], "C:\\Films")
+        self.assertEqual(out["settings"]["tmdb_api_key"], "***REDACTED***")
+        # La cle homonyme est exportee comme n'importe quel reglage non secret.
+        self.assertEqual(out["settings"]["data"], {"piege": 1})
+
     def test_films_extracted_from_last_done_run(self) -> None:
         """Si un run DONE existe, ses films sont serialises avec decisions + scores."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.settings.get_settings.return_value = {"data": {}}
+        api.settings.get_settings.return_value = {}
 
         # Creer un run DONE avec plan.jsonl + validation.json
         run_id = "test_run_001"
@@ -184,7 +236,7 @@ class ExportFullLibraryShapeTests(unittest.TestCase):
         """Le payload doit etre serialisable JSON sans erreur."""
         api = MagicMock()
         api._state_dir = self.state_dir
-        api.settings.get_settings.return_value = {"data": {"tmdb_enabled": True}}
+        api.settings.get_settings.return_value = {"tmdb_enabled": True}
         store = MagicMock()
         store.run.get_runs_summary.return_value = []
         api._get_or_create_infra.return_value = (store, MagicMock())
