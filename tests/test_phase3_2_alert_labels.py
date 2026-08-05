@@ -45,6 +45,7 @@ class AlertLabelsApiTests(unittest.TestCase):
             "integrity_header_invalid",
             "subtitle_missing_fr",
             "subtitle_missing",
+            "subtitle_forced_only_fr",
             "subtitle_orphan",
             "subtitle_duplicate_lang",
             "duplicate_cross_root",
