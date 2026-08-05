@@ -1675,6 +1675,33 @@ def move_marked_for_deletion_to_bucket(
     return abandoned_row_ids
 
 
+def _is_library_root(cfg: "Config", folder: Path) -> bool:
+    """True si *folder* designe la racine de la bibliotheque elle-meme.
+
+    Comparaison lexicale normalisee (meme critere que `ensure_inside_root` et
+    `is_under_collection_root`), doublee d'une comparaison sur chemins resolus
+    pour couvrir jonction NTFS / lien symbolique / chemin relatif.
+    """
+    try:
+        if core_mod._norm_win_path(folder) == core_mod._norm_win_path(cfg.root):
+            return True
+    except (TypeError, ValueError):
+        return False
+    try:
+        return folder.resolve() == Path(cfg.root).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _target_inside_source(target: Path, source: Path) -> bool:
+    """True si *target* est *source* elle-meme ou un de ses descendants."""
+    try:
+        core_mod._norm_win_path(target).relative_to(core_mod._norm_win_path(source))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def move_collection_folder(
     cfg: "Config",
     folder: Path,
@@ -1696,6 +1723,23 @@ def move_collection_folder(
 
     target = cfg.root / cfg.collection_root_name / core_mod.windows_safe(folder.name)
     core_mod.ensure_inside_root(cfg, target)
+
+    # REVUE 2026-08-03 : REFUS explicite quand la cible serait la source ou un
+    # de ses DESCENDANTS — ce qui arrive des que `folder` est la racine de la
+    # bibliotheque (films poses en vrac a la racine : rows kind='collection'
+    # avec folder == cfg.root). shutil.move levait alors "Cannot move a
+    # directory into itself", comptee comme erreur d'apply : les films de la
+    # racine n'etaient JAMAIS ranges, identiquement a chaque relance, et un
+    # dossier <collection_root_name> VIDE restait a la racine (le mkdir
+    # ci-dessous precede le move). Derniere ligne de defense : le predicat
+    # is_under_collection_root couvre deja la racine en amont.
+    if _target_inside_source(target, folder):
+        log(
+            "WARN",
+            "REFUS deplacement collection: la cible est sous la source "
+            f"(racine de bibliotheque ?): {folder} -> {target}",
+        )
+        return folder
 
     if target.exists():
         log("WARN", f"Collection dest exists, skip move: {target}")
@@ -1869,7 +1913,27 @@ def apply_rows(
         # F10 : cette pre-passe deplace des DOSSIERS entiers hors du try per-row.
         # Un verrou Windows y faisait avorter tout le batch avec un message brut.
         try:
-            if cfg.enable_collection_folder and (not core_mod.is_under_collection_root(cfg, old_folder)):
+            if _is_library_root(cfg, old_folder):
+                # REVUE 2026-08-03 : la RACINE de la bibliotheque ne passe
+                # JAMAIS par la pre-passe collection. Les films poses en vrac a
+                # la racine produisent des rows kind='collection' avec
+                # folder == cfg.root (plan_support_core, flag
+                # 'root_level_source') : les deux issues de la branche
+                # ci-dessous sont destructrices pour ce cas.
+                #  - cible absente -> move_collection_folder -> shutil "Cannot
+                #    move a directory into itself" : apply bloque a l'identique
+                #    a chaque relance, films jamais ranges ;
+                #  - cible <root>/<collection>/<nom de la racine> DEJA presente
+                #    -> merge_dir_safe deplacait la racine ENTIERE fichier par
+                #    fichier (root.exists() devenait False, toute la
+                #    bibliotheque expediee dans _review/_leftovers, y compris
+                #    des films etrangers a la racine) en retournant errors=0.
+                # Le rangement correct est celui de la boucle apply normale :
+                # apply_collection_item cree <root>/<Titre (Annee)>/ et y
+                # deplace la video, sans jamais toucher a la racine.
+                log("INFO", f"Racine de bibliotheque: pre-passe collection ignoree (rangement sur place): {old_folder}")
+                ctx.folder_map[str(original_folder)] = str(old_folder)
+            elif cfg.enable_collection_folder and (not core_mod.is_under_collection_root(cfg, old_folder)):
                 target = cfg.root / cfg.collection_root_name / core_mod.windows_safe(old_folder.name)
                 core_mod.ensure_inside_root(cfg, target)
                 if target.exists():

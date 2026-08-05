@@ -643,7 +643,15 @@ def _build_library_rows(rows: list, reports: list) -> list:
                 "row_id": rid,
                 "proposed_title": str(row.proposed_title or ""),
                 "proposed_year": int(row.proposed_year or 0),
-                "resolution": str(detected.get("resolution_label") or ""),
+                # Issue #866 : la cle ecrite par le producteur unique de
+                # `metrics.detected` (quality_score._build_metrics:1960) est
+                # `resolution`, pas `resolution_label` -- ce dernier n'est qu'un
+                # nom de variable LOCAL dans le scoring. `resolution_label`
+                # n'existant dans aucun `detected` produit, le `.get()` rendait
+                # None sur 100% des films et la colonne Resolution de ces rows
+                # etait vide par construction. `_classify_resolution` (l.448)
+                # lit deja la bonne cle sur le meme dict, dans ce meme fichier.
+                "resolution": str(detected.get("resolution") or ""),
                 "score": q.get("score"),
                 "confidence": int(getattr(row, "confidence", 0) or 0),
                 "source": str(row.proposed_source or ""),

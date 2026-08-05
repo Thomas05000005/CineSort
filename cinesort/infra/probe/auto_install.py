@@ -431,9 +431,15 @@ def _extract_member(
     - taille declaree > plafond par membre : refus AVANT toute lecture ;
     - la copie consomme un budget partage, chunk par chunk : elle s'arrete DES
       le depassement, et aucun octet au-dela n'est ecrit ;
-    - l'ecriture passe par un fichier `.part` renomme atomiquement : un
+    - l'ecriture passe par un fichier de travail renomme atomiquement : un
       executable partiel n'apparait JAMAIS au chemin final, ou `tools_manager`
-      le detecterait comme disponible et le LANCERAIT.
+      le detecterait comme disponible et le LANCERAIT ;
+    - ce fichier de travail porte un nom UNIQUE par appel, jamais un nom deduit
+      de `dest` : `auto_install_probe_tools` est un endpoint servi par
+      `ThreadingHTTPServer`, donc deux appels concurrents extraient vers la
+      MEME `dest`. Avec un `<dest>.part` partage ils ecrivaient dans le meme
+      fichier, et c'est un EXECUTABLE au contenu entrelace qui etait bascule
+      puis lance. Meme famille que #712/#718 (poster_proxy).
 
     Cas de l'en-tete mensonger : `zipfile` borne lui-meme la sortie de
     `ZipExtFile.read(n)` a la taille declaree (a un chunk pres) puis leve
@@ -450,9 +456,15 @@ def _extract_member(
             f"Entree '{entry}' refusee pour {label} : taille declaree {declared} octets > plafond "
             f"{_MAX_MEMBER_UNCOMPRESSED_BYTES}. Install refuse (fail-closed)."
         )
-    tmp_dest = dest.with_name(dest.name + ".part")
+    # `mkstemp` dans le repertoire de `dest` : nom unique (donc aucun partage
+    # entre ecrivains concurrents) et meme volume, condition d'un `os.replace`
+    # atomique.
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix=dest.name + ".", suffix=".part")
     try:
-        with zf.open(entry) as src, open(tmp_dest, "wb") as out:
+        # `os.fdopen` EN PREMIER dans le `with` : les gestionnaires de contexte
+        # sont entres de gauche a droite, donc le descripteur est possede — et
+        # donc ferme — meme si `zf.open()` leve ensuite sur une entree illisible.
+        with os.fdopen(tmp_fd, "wb") as out, zf.open(entry) as src:
             while True:
                 chunk = src.read(_EXTRACT_CHUNK_BYTES)
                 if not chunk:
@@ -460,12 +472,12 @@ def _extract_member(
                 # Borne evaluee AVANT l'ecriture du chunk.
                 budget.consume(len(chunk), label=label)
                 out.write(chunk)
-        os.replace(tmp_dest, dest)
+        os.replace(tmp_name, dest)
     finally:
-        # Apres un os.replace reussi le .part n'existe plus ; sur abandon il est
-        # efface ici. Dans tous les cas rien de tronque ne survit.
+        # Apres un os.replace reussi le fichier de travail n'existe plus ; sur
+        # abandon il est efface ici. Dans tous les cas rien de tronque ne survit.
         with suppress(OSError):
-            os.remove(tmp_dest)
+            os.remove(tmp_name)
 
 
 def get_tools_dir() -> Path:
