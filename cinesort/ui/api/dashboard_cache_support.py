@@ -142,7 +142,7 @@ def load_dashboard_cache(
     expected_signature = api._dashboard_cache_signature(run_row=run_row, run_paths=run_paths, store=store)
     try:
         raw = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError):
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
     if not isinstance(raw, dict):
         return None

@@ -703,4 +703,49 @@ découplage réel, pas de la conversion mécanique — extraire
 par l'issue) casserait à lui seul le cluster n°2 (`run_read_support` ×2,
 `history_support` ×2), et arbitrer le couple `film_support`/`history_support` en
 réglerait un de plus.
+
+### 11.3 Vague 2 de #779 (2026-08-05) — le reliquat, remesuré
+
+La vague 1 (§11.1) annonçait « 32 restants ». Remesure sur l'arbre courant, en
+comptant les **statements** `import` situés dans un corps de fonction dont la
+cible est un module `cinesort.ui.api.*` : **31**. L'écart d'une unité vient du
+mode de comptage (un `from pkg import a, b` est un statement mais deux arêtes) —
+c'est exactement pourquoi ce journal exige une mesure et refuse une soustraction.
+
+Le graphe a été reconstruit de zéro. **Correction de méthode au passage** : la
+première version du script résolvait `from cinesort.ui.api import run_data_support`
+vers le **package** `cinesort.ui.api` au lieu du module `run_data_support`, et
+concluait donc à tort que `reset_support → cinesort_api` n'était pas un cycle. La
+cible d'un `from pkg import mod` est `pkg.mod` dès que celui-ci est un module.
+Après correction, on retrouve bien les **4** arêtes de retour de §11.1.
+
+| | nb |
+|---|---:|
+| imports différés intra-`ui/api` (avant vague 2) | 31 |
+| dont sur une vraie arête de retour | 4 |
+| dont sous un `except ImportError` / `except Exception` englobant | 8 |
+| dont référence mutuelle `film_support` ↔ `history_support` | 2 |
+| **convertis par cette vague** | **7** |
+| restants après vague 2 | 24 |
+
+Les 8 sites laissés pour leur garde méritent d'être nommés, parce que la raison
+n'est pas « un cycle » mais **un contrat de dégradation** :
+
+- `facades/run_facade` ×3 (`schemas`) et `apply_support` ×2 — `except ImportError`
+  explicite : pydantic absent ou build EXE amputé doivent dégrader, pas tuer le boot.
+- `runtime_support` ×3 — `except Exception`, qui **attrape aussi `ImportError`**.
+  Le cas le plus net est `_safe_read_settings_for_diag` : un diagnostic doit
+  survivre à un `settings_support` cassé, c'est même sa seule raison d'être.
+
+**Ce qui n'a PAS été prouvé par cette vague.** Le choix module-style
+(`library_support._get_store(...)`) a été muté vers un import de symbole pour
+vérifier qu'un test le rattrapait : la suite est restée **VERTE**. Ce n'est pas un
+mutant équivalent — c'est un **test manquant**. `test_get_plan_ignored_alerts_v77`
+patche bien `library_support._get_store`, mais il exerce le chemin
+`history_support`, pas `run_read_support` ; et `test_atomic_write_durability`
+patche `run_data_support.resync_run_state_rows` sans que ses assertions dépendent
+du mock. Le module-style reste le bon choix (§11.2 documente le mode de panne
+silencieux), mais il est ici tenu par la convention, **pas par un garde-fou**.
+Poser ce garde-fou est le premier candidat pour une vague 3.
 | 2026-08-05 | — | inchangées | Issue #923 (« mesure a 0 » vs « non mesure », perceptuel vidéo). **Aucune borne touchée** : le lot n'ajoute ni ne convertit d'import différé — les cinq fichiers modifiés (`domain/perceptual/{models,video_analysis,composite_score,composite_score_v2,comparison}.py`) n'utilisent que des symboles déjà importés en tête. Mesure de contrôle **refaite après fusion** avec le lot #554/#595/#779, pas recopiée : `__root__` 3, `app` 19, `domain` 15, `infra` 11, `ui` 66, `data` 0 — total **114**, chaque couche exactement sur sa borne. La valeur annoncée avant fusion (172) était juste à son moment et périmée à l'arrivée : c'est la raison même pour laquelle ce journal exige une mesure, pas un report. |
+| 2026-08-05 | `ui` | 63 → **56** | Issue #779 **vague 2**, −7 : conversions, pas relèvement. Mesure de départ prise sur l'arbre courant (`ui` = 63, total 111), **pas** sur les 66/114 qu'annonçait la ligne précédente — deux lots ont fusionné entre-temps. Les 7 sites convertis n'avaient **ni cycle ni contrat de dégradation** : `perceptual_support._build_tmdb_client` (`normalize_user_path` était déjà importé en tête du même module — alias purement redondant), `library_actions_support._build_cfg_for_row` (`settings_support` était déjà une dépendance de tête, différer un second symbole du même module ne différait rien), `run_read_support` ×2 (`library_support._get_store`, le cluster n°2 de l'issue), `library_actions_support` + `tmdb_support` (`run_data_support`), `facades/settings_facade.get_confidence_thresholds`. Toutes les cibles `ui/api` sont écrites **module-style**, cf. §11.2. Nouveau total mesuré : **104**. |

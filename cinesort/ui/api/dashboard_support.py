@@ -17,6 +17,7 @@ from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
 from cinesort.domain.probe_models import probe_quality_is_failed, probe_quality_is_partial_or_failed
+from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
 from cinesort.domain.subtitle_helpers import _normalize_iso639
 from cinesort.domain.tiers_helpers import is_premium_tier
 from cinesort.infra.db import SQLiteStore
@@ -25,7 +26,13 @@ from cinesort.infra.db import SQLiteStore
 # les tests patchent `cinesort.ui.api.<module>.<fonction>` et un import de
 # symbole figerait le binding au chargement, rendant le patch inoperant en
 # silence. Cf. la convention « module-style imports pour tests mockes ».
-from cinesort.ui.api import history_support, library_audit_support, notifications_support, run_read_support
+from cinesort.ui.api import (
+    film_support,
+    history_support,
+    library_audit_support,
+    notifications_support,
+    run_read_support,
+)
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.run_data_support import compute_total_fallback, count_plan_rows
@@ -667,8 +674,10 @@ def _build_library_rows(rows: list, reports: list) -> list:
     return out
 
 
-# Spec 08 §3.5 : delai d'annulation post-apply propose par l'UI Traitement.
-_UNDO_DEADLINE_SECONDS = 24 * 3600
+# Issue #491 : le delai d'annulation post-apply (Spec 08 §3.5) etait recopie
+# ici ET dans `apply_support`. Le compte a rebours affiche par la vue Traitement
+# et le refus HTTP 410 du backend decrivent la MEME promesse : ils lisent
+# maintenant la meme constante, `domain.run_models.UNDO_DEADLINE_SECONDS`.
 
 
 def _build_pending_undo_payload(store: SQLiteStore, run_id: str) -> Optional[Dict[str, Any]]:
@@ -689,7 +698,7 @@ def _build_pending_undo_payload(store: SQLiteStore, run_id: str) -> Optional[Dic
     batch_id = str(batch.get("batch_id") or "")
     apply_ts = float(batch.get("started_ts") or 0.0)
     now = time.time()
-    deadline_ts = apply_ts + _UNDO_DEADLINE_SECONDS if apply_ts > 0 else 0.0
+    deadline_ts = apply_ts + UNDO_DEADLINE_SECONDS if apply_ts > 0 else 0.0
     expired = bool(apply_ts > 0 and now >= deadline_ts)
 
     reversible_count = 0
@@ -707,7 +716,7 @@ def _build_pending_undo_payload(store: SQLiteStore, run_id: str) -> Optional[Dic
         "batch_id": batch_id,
         "apply_ts": apply_ts,
         "deadline_ts": deadline_ts,
-        "deadline_seconds_total": _UNDO_DEADLINE_SECONDS,
+        "deadline_seconds_total": UNDO_DEADLINE_SECONDS,
         "remaining_seconds": max(0, int(deadline_ts - now)) if deadline_ts > 0 else 0,
         "expired": expired,
         "reversible_count": int(reversible_count),
@@ -1028,6 +1037,53 @@ def compose_score_explanation(
     }
 
 
+def _report_row_tmdb_id(row: Any, override: Optional[Dict[str, Any]]) -> int:
+    """Identifiant TMDb du film d'une `PlanRow`, ou 0 s'il n'est pas etabli.
+
+    Issue #612 : l'export NFO sait ecrire un `<uniqueid type="tmdb">` — sans lui
+    Jellyfin et Kodi re-scrapent tout le film — mais les rows du rapport ne
+    portaient AUCUN `tmdb_id`, si bien que `export_nfo_for_run` lisait une clef
+    absente et produisait invariablement un .nfo sans identifiant. Le correctif
+    d'origine n'avait touche que le constructeur XML, en aval du trou.
+
+    `PlanRow` n'a pas de champ `tmdb_id` : l'identifiant vit sur les
+    `Candidate`, et le choix MANUEL de l'utilisateur vit, lui, dans la table
+    `film_tmdb_overrides` (parametre `override`, deja lu par l'appelant). On ne
+    reimplemente ni la priorite (`chosen_tmdb_id` > `tmdb_id` > candidat) ni la
+    selection du candidat : ce sont `film_support` et
+    `library_audit_support._plan_row_tmdb_id` qui les portent, sur une row
+    SERIALISEE — d'ou la vue dict construite ici.
+
+    Le detour par `_plan_row_tmdb_id` n'est pas cosmetique : prendre
+    `candidates[0]` a l'aveugle rendrait l'identifiant d'un AUTRE film, la liste
+    n'etant pas triee (cf. #714). Ecrire ce mauvais identifiant dans un .nfo
+    ferait telecharger a Jellyfin les metadonnees du mauvais film.
+    """
+    candidates: List[Dict[str, Any]] = []
+    for cand in getattr(row, "candidates", None) or []:
+        if isinstance(cand, dict):
+            candidates.append(cand)
+            continue
+        candidates.append(
+            {
+                "title": getattr(cand, "title", "") or "",
+                "year": getattr(cand, "year", None),
+                "tmdb_id": getattr(cand, "tmdb_id", None),
+                "score": getattr(cand, "score", 0.0),
+            }
+        )
+    view: Dict[str, Any] = {
+        "row_id": str(getattr(row, "row_id", "") or ""),
+        "proposed_title": str(getattr(row, "proposed_title", "") or ""),
+        "proposed_year": int(getattr(row, "proposed_year", 0) or 0),
+        "candidates": candidates,
+    }
+    # L'override manuel prime sur le match automatique : meme regle, meme code
+    # que la Bibliotheque et la fiche film (`film_support.apply_tmdb_override`).
+    film_support.apply_tmdb_override(view, override)
+    return int(library_audit_support._plan_row_tmdb_id(view) or 0)  # noqa: SLF001
+
+
 def _build_row_payload(
     run_id: str,
     row: Any,
@@ -1138,12 +1194,12 @@ def _read_report_meta(run_paths: Any) -> Tuple[str, List[str]]:
     """Lit le resume et les derniers logs d'un run."""
     try:
         summary_text = state.read_text_safe(run_paths.summary_txt).strip()
-    except (KeyError, OSError, PermissionError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         summary_text = ""
     try:
         all_logs = run_paths.ui_log_txt.read_text(encoding="utf-8").splitlines()
         log_tail = all_logs[-200:]
-    except (KeyError, OSError, PermissionError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         log_tail = []
     return summary_text, log_tail
 
@@ -1177,6 +1233,18 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
     # resout ici (seul appelant) et on transmet le set par row. Best-effort : {} si indisponible.
     ignored_by_row = run_read_support.ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
 
+    # Issue #612 : identifiants TMDb, pour que l'export NFO puisse ecrire un
+    # `<uniqueid>`. UNE requete pour tout le run (`list_tmdb_overrides_bulk`),
+    # pas deux connexions SQLite par film.
+    #
+    # `None` = les overrides manuels sont ILLISIBLES (store absent, table
+    # inaccessible, lecture partielle). On n'ecrit alors AUCUN `tmdb_id` : sans
+    # savoir si l'utilisateur a corrige le match a la main, publier le match
+    # automatique dans un .nfo ferait scraper le mauvais film par Jellyfin. Un
+    # .nfo sans identifiant se re-scrape ; un .nfo qui affirme le mauvais
+    # identifiant se croit sur parole. Le doute va donc dans le sens restrictif.
+    tmdb_overrides = film_support.list_tmdb_overrides_bulk(store, run_id)
+
     rows_payload: List[Dict[str, Any]] = []
     validated_ok = 0
     quality_tiers: Counter[str] = Counter()
@@ -1189,6 +1257,8 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
             quality_by_row.get(row.row_id, {}),
             ignored_by_row.get(str(row.row_id)),
         )
+        if tmdb_overrides is not None:
+            payload["tmdb_id"] = _report_row_tmdb_id(row, tmdb_overrides.get(str(row.row_id)))
         rows_payload.append(payload)
         if decision_ok:
             validated_ok += 1

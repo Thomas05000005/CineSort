@@ -7,6 +7,7 @@ import cinesort.domain.core as core
 from cinesort.app.cleanup import preview_cleanup_residual_folders as _preview_cleanup_fn
 from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.run_models import RunStatus
+from cinesort.ui.api import library_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 
@@ -185,9 +186,10 @@ def seed_auto_approve_decisions(
     # le KPI "Cas à vérifier" (dashboard) et la liste get_plan. Sinon la Validation ne pré-coche
     # PAS un film que TOUS les compteurs annoncent auto-approuvé (après un "Ignorer" sur une
     # alerte bloquante, à seuil < 85 où le fallback frontend conf≥85 ne masque plus l'écart).
-    from cinesort.ui.api.library_support import _get_store
-
-    _ignored = ignored_alerts_by_row(_get_store(api), [str(r.row_id) for r in rows])
+    # MODULE-STYLE volontaire (`library_support._get_store`) et non un import du
+    # symbole : un import par symbole fige la liaison a l'import du module, ce qui
+    # ferait rater les `patch("cinesort.ui.api.library_support._get_store")`.
+    _ignored = ignored_alerts_by_row(library_support._get_store(api), [str(r.row_id) for r in rows])
     for row in rows:
         rid = str(row.row_id)
         if rid in base:
@@ -224,7 +226,7 @@ def get_cleanup_residual_preview(api: Any, run_id: str) -> Dict[str, Any]:
     # un err_response propre (categorie state, niveau info).
     try:
         ctx = api._run_context_for_apply(run_id)
-    except (OSError, FileNotFoundError, KeyError, TypeError, ValueError):
+    except (OSError, KeyError, TypeError, ValueError):
         return _err_response("Plan introuvable.", category="state", level="info", log_module=__name__)
     if not ctx:
         return _err_response("Plan indisponible.", category="state", level="info", log_module=__name__)
@@ -260,7 +262,7 @@ def resolve_media_path_for_row(
                 if path.is_file() and path.name.lower() == video_name.lower():
                     candidates.append(path)
                     found_in_iterdir = True
-        except (OSError, PermissionError, TypeError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             if env_truthy_fn("CINESORT_DEBUG"):
                 api._debug_log(
                     state_dir=api._state_dir,
@@ -276,7 +278,7 @@ def resolve_media_path_for_row(
                     if path.is_file() and path.name.lower() == video_name.lower():
                         candidates.append(path)
                         break
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 if env_truthy_fn("CINESORT_DEBUG"):
                     api._debug_log(
                         state_dir=api._state_dir,
@@ -302,7 +304,7 @@ def resolve_media_path_for_row(
         videos = core.iter_videos(cfg, folder, min_video_bytes=min_bytes)
         if videos:
             return videos[0]
-    except (OSError, PermissionError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError):
         return None
     return None
 
@@ -315,7 +317,7 @@ def touched_top_level_dirs_for_rows(
     for row in rows:
         try:
             folder = Path(row.folder)
-        except (OSError, PermissionError, ValueError):
+        except (OSError, ValueError):
             continue
         if folder.parent == cfg.root:
             touched.add(folder)
@@ -373,9 +375,8 @@ def get_auto_approved_summary(
     # Flags EFFECTIFS (bruts − alertes ignorées) : cohérence avec le payload get_plan et le KPI
     # dashboard, sinon la carte "Auto-approuvables" et "Cas à vérifier" divergent de la liste
     # dès qu'une alerte bloquante est ignorée.
-    from cinesort.ui.api.library_support import _get_store
-
-    _ignored = ignored_alerts_by_row(_get_store(api), [str(r.row_id) for r in rows])
+    # MODULE-STYLE volontaire : cf. la note dans `seed_auto_approve_decisions`.
+    _ignored = ignored_alerts_by_row(library_support._get_store(api), [str(r.row_id) for r in rows])
     for row in rows:
         flags = effective_flags(row.warning_flags, _ignored.get(str(row.row_id)))
         has_integrity_issue = bool(flags & _AUTO_INTEGRITY_WARNINGS)

@@ -284,7 +284,7 @@ def _revert_one_op(
             # d'un fichier verrouille en lecture partagee.
             _move_back = shutil.move if op_type.endswith("_FILE") else _rename_or_cross_device_copy
             _move_back(str(dst), str(src))
-        except (OSError, PermissionError) as move_exc:
+        except OSError as move_exc:
             # HOTFIX data-loss : restauration du backup si on en a cree un.
             # Si on a renomme src -> backup_tmp puis que shutil.move a echoue,
             # le fichier user serait perdu sans cette restauration.
@@ -329,7 +329,7 @@ def _revert_one_op(
                         f"rollback_forward: backup cleanup FAILED op_id={op_id} "
                         f"backup={backup_tmp}: {cleanup_exc} (non-fatal)",
                     )
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _audit_log(
             audit_fn,
             "ERROR",

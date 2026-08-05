@@ -71,7 +71,7 @@ class InstanceLock:
             return True
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("InstanceLock: impossible de creer %s (%s)", self.state_dir, exc)
             return False
 
@@ -79,7 +79,7 @@ class InstanceLock:
             # Cf CodeQL py/overly-permissive-file : 0o600 (owner read/write only)
             # suffit largement pour un lock file (lu uniquement par le meme user).
             self._fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o600)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("InstanceLock: impossible d'ouvrir %s (%s)", self.lock_path, exc)
             return False
 

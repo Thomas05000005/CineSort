@@ -68,7 +68,29 @@ from cinesort.domain.naming import (
 class WindowsSafeProperties(unittest.TestCase):
     """Proprietes invariantes de windows_safe."""
 
-    @settings(max_examples=200, deadline=500)
+    # DELAI DESACTIVE SUR TOUT CE FICHIER (2026-08-05, 9 occurrences).
+    #
+    # `deadline` de hypothesis est un seuil de TEMPS D'HORLOGE par exemple. Sur
+    # un runner de CI PARTAGE, il ne distingue pas « la fonction est devenue
+    # lente » de « la machine a cale » : ce n'est pas une mesure, c'est un
+    # tirage — et il decide d'une FUSION.
+    #
+    # Mesure : `test_output_length_capped_at_180` a fait echouer `main` a 933 ms
+    # pour UN exemple, sur une chaine de 300 caracteres au plus, dans une
+    # fonction de manipulation de chaines PUREMENT CPU. Hypothesis l'a lui-meme
+    # etiquete `FlakyFailure`. Ce n'est pas `windows_safe` qui a ralenti.
+    #
+    # Ce depot a deja perdu des heures de CI sur un test de perf bati sur un
+    # rapport de durees (le seuil etait pose sur le plancher de bruit du
+    # runner). Le remede est le meme : ne jamais faire dependre une fusion d'un
+    # chronometre.
+    #
+    # Ce qui n'est PAS perdu : ces tests verifient des PROPRIETES (longueur
+    # bornee, caracteres interdits absents, idempotence), et elles restent
+    # verifiees a l'identique. Si une garde de PERFORMANCE est voulue sur
+    # `windows_safe`, elle doit compter quelque chose de DETERMINISTE — un
+    # nombre d'operations, pas des millisecondes — dans un test dedie.
+    @settings(max_examples=200, deadline=None)
     @given(st.text(min_size=1, max_size=300))
     def test_output_never_contains_forbidden_chars(self, name: str) -> None:
         """Quel que soit le nom d'entree, la sortie ne contient pas <>:\"/\\|?*."""
@@ -76,14 +98,37 @@ class WindowsSafeProperties(unittest.TestCase):
         for ch in '<>:"/\\|?*':
             self.assertNotIn(ch, out)
 
-    @settings(max_examples=100, deadline=500)
+    @settings(max_examples=100, deadline=None)
     @given(st.text(min_size=1, max_size=300))
     def test_output_length_capped_at_180(self, name: str) -> None:
-        """windows_safe coupe a 180 chars max."""
+        """windows_safe coupe a 180 chars max — cas GENERAL."""
         out = windows_safe(name)
         self.assertLessEqual(len(out), 180)
 
-    @settings(max_examples=100, deadline=500)
+    @settings(max_examples=100, deadline=None)
+    @given(st.text(min_size=181, max_size=400))
+    def test_la_troncature_est_REELLEMENT_exercee(self, name: str) -> None:
+        """Le test general ci-dessus n'atteint JAMAIS la borne.
+
+        `max_size=300` est un PLAFOND, pas une cible : hypothesis biaise
+        fortement vers les petits exemples. Mesure sur 100 tirages de
+        `st.text(min_size=1, max_size=300)` :
+
+            longueur MAX generee       : 45
+            longueur MEDIANE           : 5
+            exemples de plus de 180 ch : 0
+
+        Le test general ne pouvait donc pas exercer la troncature. Preuve par
+        mutation : en SUPPRIMANT `name[:180]` de `windows_safe`, les 9 tests du
+        fichier restaient VERTS.
+
+        `min_size=181` force la condition. C'est la difference entre « aucun
+        contre-exemple trouve » et « le chemin n'a jamais ete emprunte ».
+        """
+        out = windows_safe(name)
+        self.assertLessEqual(len(out), 180)
+
+    @settings(max_examples=100, deadline=None)
     @given(st.text(min_size=1, max_size=200))
     def test_idempotent(self, name: str) -> None:
         """windows_safe(windows_safe(x)) == windows_safe(x)."""
@@ -91,7 +136,7 @@ class WindowsSafeProperties(unittest.TestCase):
         twice = windows_safe(once)
         self.assertEqual(once, twice)
 
-    @settings(max_examples=100, deadline=500)
+    @settings(max_examples=100, deadline=None)
     @given(st.text(min_size=1, max_size=100))
     def test_output_never_empty(self, name: str) -> None:
         """Meme avec n'importe quel input, l'output n'est jamais vide (fallback _untitled)."""
@@ -103,7 +148,7 @@ class WindowsSafeProperties(unittest.TestCase):
 class FormatMovieFolderProperties(unittest.TestCase):
     """Proprietes invariantes de format_movie_folder."""
 
-    @settings(max_examples=100, deadline=500, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(
         title=st.text(min_size=1, max_size=80).filter(lambda s: s.strip()),
         year=st.integers(min_value=1900, max_value=2099),
@@ -115,7 +160,7 @@ class FormatMovieFolderProperties(unittest.TestCase):
         for ch in '<>:"/\\|?*':
             self.assertNotIn(ch, out)
 
-    @settings(max_examples=100, deadline=500, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(
         title=st.text(min_size=1, max_size=80).filter(lambda s: s.strip()),
         year=st.integers(min_value=1900, max_value=2099),
@@ -126,7 +171,7 @@ class FormatMovieFolderProperties(unittest.TestCase):
         out = format_movie_folder("{title} ({year})", ctx)
         self.assertLessEqual(len(out), 180)
 
-    @settings(max_examples=50, deadline=500, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(
         title=st.text(min_size=1, max_size=80).filter(lambda s: s.strip()),
         year=st.integers(min_value=1900, max_value=2099),
@@ -141,7 +186,7 @@ class FormatMovieFolderProperties(unittest.TestCase):
 class ValidateTemplateProperties(unittest.TestCase):
     """Proprietes invariantes de validate_template."""
 
-    @settings(max_examples=100, deadline=500)
+    @settings(max_examples=100, deadline=None)
     @given(st.text(min_size=0, max_size=200))
     def test_returns_tuple_bool_list(self, template: str) -> None:
         """Quel que soit l'input, retour (bool, list[str])."""
@@ -154,7 +199,7 @@ class ValidateTemplateProperties(unittest.TestCase):
         else:
             self.assertGreater(len(errors), 0)
 
-    @settings(max_examples=50, deadline=500)
+    @settings(max_examples=50, deadline=None)
     @given(st.text(min_size=0, max_size=10))
     def test_empty_or_whitespace_is_invalid(self, template: str) -> None:
         """Template vide ou whitespace-only doit etre invalide."""

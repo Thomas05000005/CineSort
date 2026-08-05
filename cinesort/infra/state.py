@@ -120,7 +120,7 @@ def new_run(state_dir: Path, run_id: str, *, exclusive: bool = False) -> RunPath
 def read_text_safe(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8")
-    except (OSError, PermissionError):
+    except OSError:
         return ""
 
 

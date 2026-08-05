@@ -1759,8 +1759,9 @@ def _build_tmdb_client(api: Any):
             return None
         import cinesort.infra.state as _state  # noqa: PLC0415
         from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
-        from cinesort.ui.api.settings_support import normalize_user_path  # noqa: PLC0415
 
+        # `normalize_user_path` est deja importe en tete de ce module : l'import
+        # differe qui existait ici n'etait qu'un alias redondant (#779).
         state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)

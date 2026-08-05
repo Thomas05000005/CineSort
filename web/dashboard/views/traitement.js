@@ -2589,8 +2589,8 @@ async function _handleApplyNow() {
       `Mode atomique : ${_applyOptions.apply_atomic ? "activé (rollback en cas d'echec)" : "désactivé"}`,
     ],
     // Fix audit 2026-05-26 (v1.5.6) Vague L (undo-1) :
-    // Le backend enforce un delai d'undo de 24h (cf cinesort/ui/api/apply_support.py:52,
-    // _UNDO_DEADLINE_SECONDS = 24 * 3600). La modale danger pre-apply affichait
+    // Le backend enforce un delai d'undo de 24h (cf cinesort/domain/run_models.py,
+    // UNDO_DEADLINE_SECONDS = 24 * 3600). La modale danger pre-apply affichait
     // erronement "7 jours" (heritage du doc 08-traitement.md), ce qui creait une
     // attente utilisateur incoherente avec la realite serveur. On aligne sur 24h
     // pour matcher le toast post-apply (ligne ~1317) et la carte annulation expiree.

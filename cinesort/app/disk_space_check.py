@@ -58,9 +58,9 @@ def _dir_tree_size(folder: Path) -> int:
                 if not entry.is_file():
                     continue
                 total += int(entry.stat().st_size)
-            except (OSError, PermissionError):
+            except OSError:
                 continue
-    except (OSError, PermissionError):
+    except OSError:
         return total
     return total
 
@@ -96,7 +96,7 @@ def _row_estimated_size(row: Any) -> int:
     if video_str:
         try:
             video_size = int((folder / video_str).stat().st_size)
-        except (OSError, PermissionError):
+        except OSError:
             video_size = 0
 
     if video_str and kind in _SHARED_FOLDER_KINDS:
@@ -160,7 +160,7 @@ def check_disk_space_for_apply(
     target_root = Path(getattr(cfg, "root", ".") or ".")
     try:
         usage = shutil.disk_usage(str(target_root))
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _logger.warning("disk_space_check: shutil.disk_usage echoue sur %s: %s", target_root, exc)
         # Si on ne peut meme pas lire l'espace, on laisse passer (mieux apply qui peut
         # echouer plus tard que blocage faux positif).

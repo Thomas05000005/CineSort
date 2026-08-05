@@ -351,7 +351,7 @@ def restore_watched(
         try:
             current_movies = client.get_all_movies_from_all_libraries(user_id)
         # LOTD-INT-01 : JellyfinError inclus, sinon l'exception s'echappe.
-        except (ConnectionError, OSError, TimeoutError, ValueError, JellyfinError) as exc:
+        except (OSError, ValueError, JellyfinError) as exc:
             _log.warning("Jellyfin sync : echec recuperation films (tentative %d) — %s", attempt, exc)
             continue
 
