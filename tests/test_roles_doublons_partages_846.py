@@ -43,9 +43,27 @@ class RolesEffectifsTests(unittest.TestCase):
         self.assertEqual(roles.get("r2"), "loser")
 
     def test_une_decision_sans_perdant_n_arbitre_rien(self) -> None:
-        """Sans ce garde, elle confererait une immunite a son « gagnant »."""
-        roles = resolve_duplicate_roles([_dec(100.0, "r1", ["r2"], "a"), _dec(200.0, "r1", [], "b")])
-        self.assertEqual(roles.get("r2"), "loser", "la decision vide a annule une decision legitime")
+        """Sans ce garde, elle confererait une IMMUNITE a son « gagnant ».
+
+        Le cas qui compte est celui-la : `r1` est declare PERDANT par une
+        decision ancienne, puis une decision RECENTE sans perdant le nomme
+        « gagnant ». Si la decision vide arbitrait, `r1` gagnerait cette
+        immunite et l'apply cesserait de le deplacer — annulant une decision
+        utilisateur legitime.
+
+        Premiere version de ce test : `r1` y etait DEJA gagnant dans la
+        decision ancienne, donc l'assertion (« r2 reste perdant ») restait
+        vraie meme si la decision vide avait attribue le role a tort. Mesure :
+        sous la mutation qui fait arbitrer la decision vide, l'ancienne version
+        restait VERTE et celle-ci rougit.
+        """
+        roles = resolve_duplicate_roles([_dec(100.0, "r2", ["r1"], "a"), _dec(200.0, "r1", [], "b")])
+        self.assertEqual(
+            roles.get("r1"),
+            "loser",
+            "la decision SANS PERDANT a confere une immunite a r1 : l'apply cesserait de le deplacer",
+        )
+        self.assertEqual(roles.get("r2"), "winner")
 
     def test_les_perdants_effectifs_sont_ceux_que_l_apply_deplacera(self) -> None:
         perdants = resolve_duplicate_loser_row_ids([_dec(100.0, "r1", ["r2"], "a"), _dec(200.0, "r3", ["r1"], "b")])
