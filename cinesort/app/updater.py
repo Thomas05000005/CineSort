@@ -54,6 +54,24 @@ CACHE_FILENAME = "update_cache.json"
 MAX_RELEASE_PAYLOAD_BYTES = 2 * 1024 * 1024
 
 
+def is_valid_github_repo(repo: str) -> bool:
+    """Vrai si `repo` a la forme `owner/name` acceptee par le verificateur de MAJ.
+
+    Issue #556 : la regex etait recopiee telle quelle dans
+    `ui/api/settings_support._save_section_advanced`, sous un commentaire
+    « meme regex que updater._GITHUB_REPO_PATTERN ». Le commentaire constatait
+    la duplication sans l'empecher : une evolution du motif d'un seul cote
+    donne une valeur acceptee a l'enregistrement puis refusee a l'appel — ou
+    l'inverse, c'est-a-dire une valeur persistee que la defense SSRF #240
+    croyait avoir ecartee.
+
+    C'est cette fonction — et non le motif compile — qui est le point d'entree
+    partage : la regle peut cesser d'etre une simple regex sans que l'appelant
+    `ui` ait a le savoir.
+    """
+    return bool(_GITHUB_REPO_PATTERN.fullmatch(str(repo or "")))
+
+
 @dataclass(frozen=True)
 class UpdateInfo:
     """Description d'une nouvelle version disponible."""
@@ -190,7 +208,7 @@ def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
 
 
 def _fetch_latest_release(github_repo: str, timeout_s: int) -> Optional[dict]:
-    if not _GITHUB_REPO_PATTERN.fullmatch(github_repo or ""):
+    if not is_valid_github_repo(github_repo):
         logger.warning("updater: format github_repo invalide (%r)", github_repo)
         return None
     url = f"{GITHUB_API_BASE}/repos/{github_repo}/releases/latest"
