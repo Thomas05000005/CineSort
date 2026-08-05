@@ -181,6 +181,10 @@ class RepeatedExceptionDedupFilter(logging.Filter):
     utilisees ici, suffisant pour notre usage best-effort.
     """
 
+    # Cap souple : au-dela, on balaie les cles inactives (liste vide apres
+    # fenetre). Evite la croissance non bornee de _counts sur process long.
+    _SWEEP_THRESHOLD = 512
+
     def __init__(self, max_per_minute: int = 5):
         super().__init__()
         self._max = int(max_per_minute)
@@ -201,6 +205,10 @@ class RepeatedExceptionDedupFilter(logging.Filter):
         if len(timestamps) >= self._max:
             return False
         timestamps.append(now)
+        # Purge opportuniste : sans elle, chaque cle unique (logger, type,
+        # msg[:80]) resterait a vie meme une fois l'erreur disparue -> fuite.
+        if len(self._counts) > self._SWEEP_THRESHOLD:
+            self._counts = {k: v for k, v in self._counts.items() if v}
         return True
 
 

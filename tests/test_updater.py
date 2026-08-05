@@ -142,6 +142,17 @@ class CompareVersionsTests(unittest.TestCase):
         self.assertEqual(_parse_version(""), (0,))
         self.assertEqual(_parse_version("not-a-version"), (0,))
 
+    def test_different_segment_counts_are_equal(self) -> None:
+        # '7.6' et '7.6.0' sont semantiquement identiques : aucune des deux
+        # directions ne doit signaler une mise a jour disponible.
+        self.assertFalse(_compare_versions("7.6", "7.6.0"))
+        self.assertFalse(_compare_versions("7.6.0", "7.6"))
+        self.assertFalse(_compare_versions("7", "7.0.0"))
+
+    def test_different_segment_counts_real_diff(self) -> None:
+        self.assertTrue(_compare_versions("7.6", "7.6.1"))
+        self.assertFalse(_compare_versions("7.6.1", "7.6"))
+
 
 class CheckForUpdatesTests(unittest.TestCase):
     def test_new_version_returns_update_info(self) -> None:
