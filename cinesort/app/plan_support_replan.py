@@ -1152,6 +1152,13 @@ def _plan_tv_episode(
     # AUCUN flag n'expliquait pourquoi : la chip d'alerte manquait a l'UI.
     warning_flags: List[str] = []
     _apply_year_missing_flag(warning_flags, int(year or 0))
+    # #613 : signal EN AMONT de l'apply. `apply_tv_episode` refuse desormais un
+    # episode dont la saison est indeterminee (il aurait ete range dans
+    # `Saison 00`, le dossier des specials). Sans ce flag, l'utilisateur ne
+    # decouvrait le refus qu'apres avoir lance l'application. `season is None`
+    # (indetermine) et non `not season` : la saison 0 est une saison legitime.
+    if season is None:
+        warning_flags.append("tv_season_unknown")
 
     result_row = core_mod.PlanRow(
         row_id=row_id,
