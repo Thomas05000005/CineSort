@@ -474,11 +474,33 @@ def discover_candidate_folders(
             # `empty_folders_folder_name` renomme sans `_` doit rester un
             # dossier utilisateur ordinaire, donc reellement scanne.
             if depth == 0 and nm.startswith("_"):
+                # `_retenir` AVANT le `continue`, et pour TOUS les dossiers
+                # ecartes — y compris les dossiers internes. Sans cet
+                # enregistrement (#917), le dossier n'entre jamais dans `vus`,
+                # et une jonction portant un AUTRE nom qui pointe dessus le fait
+                # rentrer par la fenetre :
+                #
+                #   Bibliotheque/_Collection/Deja Trie (2019)/...  (bac interne)
+                #   Bibliotheque/Raccourci -> _Collection          (jonction)
+                #   -> candidat : Raccourci\Deja Trie (2019)
+                #
+                # Un film DEJA trie redevenait candidat au tri. Le skip par NOM
+                # ne suffit pas : il faut interdire le dossier PHYSIQUE.
+                #
+                # Le COMPTAGE, lui, garde son exception : `_reject` nomme le
+                # dossier dans le journal, et accuser l'application d'avoir
+                # « ignore » ses propres bacs rendrait ce journal menteur. Les
+                # deux portees sont donc volontairement differentes — identite
+                # pour TOUS, comptage pour les dossiers de l'UTILISATEUR seuls.
+                _retenir(entry_path)
                 if nm.lower() not in internal_root_names:
                     _reject("ignore_prefix_underscore", str(entry_path))
                 continue
             if depth == 0 and nm.lower() == collection_name_lower:
-                # Skip le dossier _Collection au niveau 1 du root
+                # Skip le dossier _Collection au niveau 1 du root. Meme raison
+                # que ci-dessus : on enregistre son identite pour qu'aucun autre
+                # chemin ne le rende visible.
+                _retenir(entry_path)
                 continue
             # BUG 5 : fast-path — si le nom contient `(YYYY)`, on suppose
             # un dossier de film. SCAN-FIX (Opus 2026-06-11) : un dossier

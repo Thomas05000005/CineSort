@@ -24,6 +24,66 @@ _DEFAULT_SMTP_TIMEOUT_S = 30
 _MIN_SMTP_TIMEOUT_S = 5
 _MAX_SMTP_TIMEOUT_S = 120
 
+# Cf issue #563 (CWE-319). Port du TLS implicite : smtplib y ouvre directement
+# une session chiffree (SMTP_SSL). Partout ailleurs le chiffrement passe par
+# une negociation STARTTLS explicite.
+SMTP_IMPLICIT_TLS_PORT = 465
+
+# Message unique (log serveur + reponse du bouton "Tester l'envoi") pour que
+# l'utilisateur sache quoi corriger, et qu'il sache que rien n'a ete transmis.
+#
+# Les TROIS sorties sont nommees, pas deux. L'utilisateur que ce refus casse est
+# precisement celui pour qui les deux premieres echouent : un relais qui exige
+# AUTH sans offrir TLS (petit MTA de NAS, relais loopback). Chez lui, "activez
+# STARTTLS" leve SMTPNotSupportedError et rien n'ecoute en TLS implicite sur
+# 465 ; la seule issue est de retirer les identifiants — c'est leur presence qui
+# declenche le refus, cf. la garde 1. Un message qui ne la nomme pas transforme
+# le garde-fou en impasse. Les libelles cites ("Utilisateur", "Mot de passe")
+# sont ceux du formulaire Parametres > Notifications > Rapports email (SMTP).
+CLEARTEXT_REFUSAL_MESSAGE = (
+    "Envoi refuse : un mot de passe SMTP est configure mais la session ne serait pas "
+    "chiffree. Activez STARTTLS, utilisez le port 465, ou — si votre relais n'exige pas "
+    "d'authentification — videz les champs Utilisateur et Mot de passe. "
+    "Le mot de passe n'a pas ete transmis."
+)
+
+
+class SmtpCleartextRefused(smtplib.SMTPException):
+    """AUTH SMTP refuse faute de session chiffree (issue #563).
+
+    Herite de SMTPException pour rejoindre le meme chemin d'erreur que les
+    autres pannes SMTP : l'envoi retourne False, jamais un succes silencieux.
+    """
+
+
+def smtp_session_will_be_encrypted(port: Any, use_tls: Any) -> bool:
+    """Vrai si la session SMTP sera chiffree AVANT le moindre AUTH.
+
+    Cf issue #563. Deux chemins menent au chiffrement et deux seulement :
+    le TLS implicite du port 465, ou un STARTTLS demande juste apres
+    l'ouverture de la session. Demander STARTTLS ne peut pas retomber en
+    clair sans qu'on le sache : `smtplib.SMTP.starttls()` leve
+    `SMTPNotSupportedError` si le serveur ne l'annonce pas, et
+    `ssl.create_default_context()` verifie chaine et hostname. Le seul trou
+    etait donc bien le cas "pas de STARTTLS demande du tout".
+    """
+    try:
+        port_i = int(port)
+    except (TypeError, ValueError):
+        port_i = -1
+    return port_i == SMTP_IMPLICIT_TLS_PORT or bool(use_tls)
+
+
+def _socket_is_encrypted(smtp: smtplib.SMTP) -> bool:
+    """Vrai si la socket REELLEMENT etablie est une socket TLS.
+
+    Constat sur l'objet vivant, pas sur les reglages : c'est ce qui rend le
+    garde insensible a une derive future entre les drapeaux et le transport.
+    `SMTP_SSL` comme `starttls()` remplacent tous deux `smtp.sock` par le
+    retour de `SSLContext.wrap_socket`, donc une `ssl.SSLSocket`.
+    """
+    return isinstance(getattr(smtp, "sock", None), ssl.SSLSocket)
+
 
 def _resolve_smtp_timeout(settings: Dict[str, Any]) -> int:
     """Clamp la valeur settings dans [_MIN, _MAX]. Defaut si absent/invalide."""
@@ -114,6 +174,28 @@ def send_email_report(
         logger.warning("[email] SMTP host ou destinataire manquant — email non envoye.")
         return False
 
+    # GARDE 1/2 (issue #563) — refus AVANT d'ouvrir la moindre socket.
+    # `smtp.login()` n'est appele que si `user` ET `password` sont renseignes ;
+    # on calque exactement cette condition pour ne refuser que les envois qui
+    # transmettraient reellement un secret. Un relais sans authentification
+    # continue de fonctionner en clair : le mot de passe est le secret, pas le
+    # rapport de scan.
+    #
+    # Cas legitime que ce refus casse, assume : un relais qui exige AUTH sans
+    # offrir TLS (petit MTA de NAS, meme en loopback). Aucune exemption n'est
+    # prevue — une branche permissive sur un chemin qui transporte un secret,
+    # c'est exactement le defaut qu'on corrige. Pour CE relais, activer STARTTLS
+    # et passer en 465 echouent tous les deux ; la sortie qui aboutit est de
+    # vider les identifiants, et CLEARTEXT_REFUSAL_MESSAGE la nomme.
+    #
+    # Le log ne reprend NI l'hote NI le port : le message dit deja quoi
+    # corriger, la configuration est sous les yeux de l'utilisateur, et les
+    # logs CineSort partent en piece jointe des demandes de support. Rien de la
+    # configuration du compte mail n'a besoin d'y figurer.
+    if user and password and not smtp_session_will_be_encrypted(port, use_tls):
+        logger.error("[email] %s", CLEARTEXT_REFUSAL_MESSAGE)
+        return False
+
     subject = _build_subject(event, data)
     body = _build_body(event, data)
 
@@ -128,14 +210,23 @@ def send_email_report(
         # certificats. Sans cela, smtplib accepte les certs auto-signes/invalides
         # et MITM LAN pourrait intercepter le password SMTP.
         ssl_ctx = ssl.create_default_context()
-        if port == 465:
+        if port == SMTP_IMPLICIT_TLS_PORT:
             smtp = smtplib.SMTP_SSL(host, port, timeout=timeout_s, context=ssl_ctx)
         else:
             smtp = smtplib.SMTP(host, port, timeout=timeout_s)
         try:
-            if port != 465 and use_tls:
+            if port != SMTP_IMPLICIT_TLS_PORT and use_tls:
                 smtp.starttls(context=ssl_ctx)
             if user and password:
+                # GARDE 2/2 (issue #563) — on ne fait pas confiance aux
+                # drapeaux, on interroge la socket reellement negociee. La
+                # garde 1 raisonne sur la configuration ; celle-ci constate le
+                # transport. Elle rattrape tout ce qui pourrait desynchroniser
+                # les deux plus tard (nouveau port implicite, refactor du
+                # calcul de `use_tls`, sous-classe de smtplib).
+                if not _socket_is_encrypted(smtp):
+                    logger.error("[email] %s", CLEARTEXT_REFUSAL_MESSAGE)
+                    raise SmtpCleartextRefused(CLEARTEXT_REFUSAL_MESSAGE)
                 smtp.login(user, password)
             smtp.sendmail(from_addr, [to_addr], msg.as_string())
         finally:

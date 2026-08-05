@@ -346,11 +346,18 @@ def _build_resolved_row(
     is_already_conform = False
     if not is_collection and chosen.year:
         try:
+            # #469 : `edition` + `separator` sont les deux entrees de contexte
+            # que l'apply passe a build_naming_context en plus de title/year
+            # (apply_core.apply_single). Sans elles, un dossier deja ecrit par
+            # l'apply sous un template a edition/separateur etait juge non
+            # conforme et perdait le rehaussement de confiance.
             is_already_conform = core_mod._single_folder_is_conform(
                 folder_name,
                 chosen.title,
                 int(chosen.year),
                 naming_template=str(getattr(cfg, "naming_movie_template", "") or ""),
+                edition=str(detected_edition or ""),
+                separator=getattr(cfg, "separator", " "),
             )
         except (TypeError, ValueError, AttributeError):
             is_already_conform = False
@@ -1152,6 +1159,13 @@ def _plan_tv_episode(
     # AUCUN flag n'expliquait pourquoi : la chip d'alerte manquait a l'UI.
     warning_flags: List[str] = []
     _apply_year_missing_flag(warning_flags, int(year or 0))
+    # #613 : signal EN AMONT de l'apply. `apply_tv_episode` refuse desormais un
+    # episode dont la saison est indeterminee (il aurait ete range dans
+    # `Saison 00`, le dossier des specials). Sans ce flag, l'utilisateur ne
+    # decouvrait le refus qu'apres avoir lance l'application. `season is None`
+    # (indetermine) et non `not season` : la saison 0 est une saison legitime.
+    if season is None:
+        warning_flags.append("tv_season_unknown")
 
     result_row = core_mod.PlanRow(
         row_id=row_id,

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import io
 import json
 import logging
 import os
@@ -1211,12 +1212,20 @@ def export_films(
             # (dashboard_support.write_run_report_file / report_to_csv_text) :
             # BOM UTF-8 (`utf-8-sig`) + separateur ";". Sans BOM Excel FR casse
             # les accents ; avec le "," par defaut il ouvre tout en une colonne.
-            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
-                writer = csv.writer(fp, delimiter=";")
-                writer.writerow(list(_EXPORT_FIELDS))
-                for row in export_rows:
-                    writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01)
+            # et se transpose ici en `io.StringIO(newline="")` : aucune
+            # traduction de fin de ligne, donc exactement les memes octets.
+            #
+            # Issue #479 site 2 : c'etait la DERNIERE branche non atomique de
+            # cette fonction — JSON passait deja par `state.atomic_write_json`,
+            # NDJSON par `state.atomic_write_text`. L'export CSV ecrivait en
+            # place, donc Excel/LibreOffice pouvait ouvrir un fichier tronque.
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer, delimiter=";")
+            writer.writerow(list(_EXPORT_FIELDS))
+            for row in export_rows:
+                writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            state.atomic_write_text(file_path, buffer.getvalue(), encoding="utf-8-sig")
             return {
                 "ok": True,
                 "file_path": str(file_path),
