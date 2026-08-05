@@ -97,14 +97,32 @@ const _DOC_TOPICS = [
 
 const _SHORTCUTS = [
   { keys: ["Ctrl", "K"], label: "Palette de commandes / Recherche globale" },
-  { keys: ["Ctrl", "S"], label: "Lancer un nouveau scan" },
+  // Revue post-merge 2026-08-03 : le libelle annoncait « Lancer un nouveau scan »
+  // alors que Ctrl+S emet `cinesort:save-request` (core/keyboard.js) dont le SEUL
+  // auditeur est /parametres, ou il flushe le debounce de sauvegarde. Le meme
+  // libelle errone avait deja ete retire d'accueil.js (commit 650d1620, campagne
+  // R8) sans que /aide soit mis a jour. Cabler la touche sur un scan est exclu :
+  // un scan est une action couteuse qui doit rester derriere une confirmation.
+  { keys: ["Ctrl", "S"], label: "Enregistrer les réglages (Paramètres)" },
   { keys: ["Ctrl", "B"], label: "Replier ou déployer la sidebar" },
   { keys: ["Ctrl", "I"], label: "Afficher ou masquer l'inspecteur droit" },
   { keys: ["Ctrl", ","], label: "Aller à Paramètres" },
-  { keys: ["Ctrl", "Z"], label: "Annuler le dernier apply (depuis Bibliothèque)" },
+  // Revue post-merge 2026-08-03 : la ligne Ctrl+Z a ete RETIREE, en meme temps
+  // que le raccourci lui-meme (core/keyboard.js). Il dispatchait un evenement
+  // dont l'unique auditeur avait disparu a la migration ESM : la frappe ne
+  // faisait rien. Le libelle etait faux en prime — la Bibliotheque n'a aucun
+  // flux d'undo. Le rebrancher etait exclu : `run/undo_last_apply` redeplace des
+  // fichiers sur le disque, une action destructive qui doit rester derriere une
+  // confirmation explicite, ce qu'une frappe nue ne peut pas porter. L'undo est
+  // documente ci-dessous dans les rubriques d'aide, et reste accessible par ses
+  // boutons dans /traitement et /historique.
   { keys: ["Esc"], label: "Fermer modal / palette / drawer" },
   { keys: ["?"], label: "Afficher cette aide" },
-  { keys: ["↑", "↓"], label: "Navigation dans listes (films, doublons, runs)" },
+  // Revue post-merge 2026-08-03 : seule la vue Doublons implemente ArrowUp/
+  // ArrowDown (doublons.js). Bibliotheque ne gere que Enter/Space et Historique
+  // que Enter/Space sur [data-run-id] : annoncer « films, doublons, runs » etait
+  // faux a 2/3. Le libelle decrit desormais ce qui existe reellement.
+  { keys: ["↑", "↓"], label: "Navigation dans la liste des doublons" },
   { keys: ["Alt", "1..7"], label: "Navigation directe (1=Accueil ... 7=Aide)" },
 ];
 
