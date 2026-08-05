@@ -202,6 +202,17 @@ def to_optional_bool(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
+        # NaN n'est pas une mesure, c'est l'ABSENCE de mesure — or `bool(nan)`
+        # vaut True en Python. Sans cette garde, un `forced` a NaN se lisait
+        # « piste forcee », et le refus explicite decrit ci-dessus se
+        # transformait en affirmation.
+        #
+        # Le chemin est reel : `json.loads('{"x": NaN}')` fonctionne par defaut
+        # en Python, donc un sidecar ou une reponse d'outil externe peut en
+        # produire. On rend None — l'appelant retombe alors sur le bit de
+        # disposition, exactement comme quand le tag est absent.
+        if value != value:  # noqa: PLR0124 - test NaN sans importer math
+            return None
         return bool(value)
     s = str(value).strip().lower()
     if not s:
