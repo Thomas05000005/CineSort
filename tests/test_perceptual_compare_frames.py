@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,7 @@ def _write_settings(state_dir: Path, **fields) -> None:
 class CompareFramesValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cs_compare_frames_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.api = CineSortApi()
         self.api._state_dir = self._tmp
 
@@ -68,6 +70,7 @@ class CompareFramesEncodingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cs_compare_frames_enc_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.api = CineSortApi()
         self.api._state_dir = self._tmp
         _write_settings(self._tmp, perceptual_enabled=True, ffprobe_path="/fake/ffprobe")

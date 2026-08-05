@@ -48,7 +48,6 @@ Sequence d'echec/passage attendue (cf consigne iter4 etape 2b) :
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +58,7 @@ import cinesort.domain.core as core
 import cinesort.ui.api.run_flow_support as run_flow_support
 from cinesort.infra.tmdb_client import TmdbResult
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -210,7 +210,7 @@ class PlanTitreMatchablePeupleTmdbIdEtPosterUrlGuardTests(unittest.TestCase):
         self.addCleanup(p_tmdb.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _run_dir(self, run_id: str) -> Path:
         return self.state_dir / "runs" / f"tri_films_{run_id}"

@@ -25,7 +25,7 @@ sys.path.insert(0, ".")
 
 from cinesort.infra.db.migration_manager import MigrationManager
 from cinesort.infra.db.pragma_profile import apply_pragmas
-from tests._helpers import _project_migrations_dir, existing_db_fixture
+from tests._helpers import _project_migrations_dir, cleanup_test_tree, existing_db_fixture
 
 MIGRATION_FILENAME = "028_pragma_history.sql"
 TARGET_VERSION = 28
@@ -111,7 +111,7 @@ class Migration028FreshDbTests(unittest.TestCase):
         self.db_path = self.tmpdir / "store.sqlite3"
 
     def tearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        cleanup_test_tree(self.tmpdir)
 
     def test_fresh_db_applies_028(self):
         manager = MigrationManager(
@@ -156,6 +156,7 @@ class Migration028ExistingDbTests(unittest.TestCase):
 
     def test_existing_v27_then_apply_028(self):
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 27, "Pre-cond : DB doit etre v27")
@@ -176,6 +177,7 @@ class Migration028ExistingDbTests(unittest.TestCase):
     def test_idempotence_double_apply_028(self):
         """Rejouer 028 deux fois ne doit JAMAIS lever (IF NOT EXISTS partout)."""
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _exec_migration_028(conn)
             # Premier apply : la table doit etre vide.
@@ -196,6 +198,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
 
     def test_apply_pragmas_records_after_028(self):
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _exec_migration_028(conn)
 
@@ -228,6 +231,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
     def test_apply_pragmas_no_history_if_table_missing(self):
         """DB v27 sans 028 : apply_pragmas ne doit JAMAIS lever (audit best-effort)."""
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             # Table pragma_history n'existe pas (migration 028 non appliquee).
             snapshot = apply_pragmas(
@@ -245,6 +249,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
     def test_apply_pragmas_backward_compat_signature(self):
         """L'appel historique `apply_pragmas(conn, name)` continue de marcher."""
         db_path, conn = existing_db_fixture(0)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             snapshot = apply_pragmas(conn, "local_ssd")
             self.assertIsInstance(snapshot, dict)
@@ -255,6 +260,7 @@ class ApplyPragmasRecordsHistoryTests(unittest.TestCase):
     def test_apply_pragmas_record_history_false_skips_insert(self):
         """`record_history=False` : pas d'insert meme si 028 applique."""
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _exec_migration_028(conn)
             apply_pragmas(

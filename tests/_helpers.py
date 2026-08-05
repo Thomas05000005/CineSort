@@ -19,13 +19,21 @@ Usage :
 
 from __future__ import annotations
 
+import gc
 import os
+import shutil
 import socket
 import sqlite3
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Tuple
+
+# Budget par defaut pour attendre la fin des threads de fond de l'app. Mesure :
+# les threads `recompute_*` / `tmdb-enrich-*` se terminent en quelques dizaines
+# de millisecondes ; 5 s est une borne de securite, jamais atteinte en pratique.
+DEFAULT_THREAD_JOIN_TIMEOUT_S = 5.0
 
 
 def _budget(local_s: float) -> float:
@@ -54,6 +62,73 @@ def _budget(local_s: float) -> float:
         except ValueError:
             pass
     return local_s * 3.0 if os.environ.get("CI") else local_s
+
+
+def join_background_threads(timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S) -> list[str]:
+    """Attend la fin des threads de fond demarres par l'app. Retourne leurs noms.
+
+    Pourquoi (issue #960, MESURE) : les facades `api.run.*` demarrent des
+    threads DAEMON (`recompute_*`, `tmdb-enrich-*`) qui survivent a la fin du
+    test. Ils continuent d'ecrire dans le `state_dir` du test — au point de
+    RECREER l'arborescence juste apres que le `tearDown` l'a supprimee. Mesure
+    sur `tests/test_api_bridge_lot3.py` : 13 dossiers laisses dans %TEMP%, dont
+    12 recrees APRES une suppression pourtant reussie. Un `rmtree` seul ne peut
+    donc pas gagner cette course.
+
+    C'est aussi la source la plus vraisemblable des `PermissionError
+    [WinError 5/32]` attribues au « verrou de fichiers Windows » : le thread
+    d'un test tombe sur le dossier d'un test VOISIN en train d'etre renomme.
+
+    Ne joint jamais le thread principal ni le thread courant. Le budget total
+    est partage entre tous les threads : la fonction ne peut pas bloquer plus
+    de `timeout_s`.
+    """
+    deadline = time.monotonic() + float(timeout_s)
+    current = threading.current_thread()
+    main = threading.main_thread()
+    joined: list[str] = []
+    for thread in threading.enumerate():
+        if thread is current or thread is main or not thread.is_alive():
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        thread.join(remaining)
+        joined.append(thread.name)
+    return joined
+
+
+def cleanup_test_tree(
+    path: str | Path,
+    *,
+    timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S,
+    attempts: int = 4,
+) -> bool:
+    """Supprime un arbre temporaire de test, sans laisser de reste dans %TEMP%.
+
+    Trois etapes, dans cet ordre, chacune motivee par une mesure :
+      1. joindre les threads de fond, sinon ils recreent l'arborescence ;
+      2. `gc.collect()`, car une exception gardee vivante par un mock retient
+         son traceback, donc des frames, donc des connexions sqlite3 et des
+         fichiers d'audit ouverts — des cycles que seul le ramasse-miettes
+         casse (WinError 32 sinon) ;
+      3. `rmtree`, re-essaye : un handle peut etre relache quelques dizaines
+         de millisecondes plus tard.
+
+    Retourne True si le dossier a disparu. A utiliser dans les fichiers qui
+    pilotent l'API. Pour un test qui ne cree qu'un dossier inerte,
+    `self.addCleanup(shutil.rmtree, d, ignore_errors=True)` suffit et coute
+    moins cher.
+    """
+    target = str(path)
+    join_background_threads(timeout_s)
+    for attempt in range(max(1, attempts)):
+        gc.collect()
+        shutil.rmtree(target, ignore_errors=True)
+        if not os.path.exists(target):
+            return True
+        time.sleep(0.05 * (attempt + 1))
+    return not os.path.exists(target)
 
 
 def find_free_port() -> int:

@@ -6,7 +6,6 @@ sans toucher au filesystem.
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +13,7 @@ from unittest import mock
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -30,7 +30,7 @@ class BuildApplyPreviewTests(unittest.TestCase):
         self.addCleanup(_p_min_video.stop)
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _make_plan(self, n_films: int = 2) -> tuple[CineSortApi, str, list]:
         for i in range(n_films):

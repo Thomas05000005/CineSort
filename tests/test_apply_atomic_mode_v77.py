@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from cinesort.infra.db.migration_manager import MigrationManager
-from tests._helpers import _project_migrations_dir, existing_db_fixture
+from tests._helpers import _project_migrations_dir, cleanup_test_tree, existing_db_fixture
 
 MIGRATION_FILENAME = "029_apply_atomic_mode.sql"
 TARGET_VERSION = 29
@@ -102,7 +102,7 @@ class Migration029FreshDbTests(unittest.TestCase):
         self.db_path = self.tmpdir / "store.sqlite3"
 
     def tearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        cleanup_test_tree(self.tmpdir)
 
     def test_fresh_db_applies_029(self):
         manager = MigrationManager(
@@ -144,6 +144,7 @@ class Migration029ExistingDbV28Tests(unittest.TestCase):
 
     def test_existing_v28_then_apply_029(self):
         db_path, conn = existing_db_fixture(28)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 28, "Pre-cond : DB doit etre v28")
@@ -168,6 +169,7 @@ class Migration029ExistingDbV28Tests(unittest.TestCase):
     def test_idempotence_double_apply_029(self):
         """AC-2 : rejouer 029 deux fois ne doit JAMAIS lever."""
         db_path, conn = existing_db_fixture(28)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _exec_migration_029(conn)
             count_first = conn.execute("SELECT COUNT(*) FROM apply_batch_modes").fetchone()[0]
@@ -200,7 +202,7 @@ class ApplyRepositoryAtomicModeTests(unittest.TestCase):
         self.store.initialize()
 
     def tearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        cleanup_test_tree(self.tmpdir)
 
     def test_upsert_atomic_mode_default_disabled(self):
         self.store.apply.upsert_atomic_mode("batch-A", False)

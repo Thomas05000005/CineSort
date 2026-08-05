@@ -8,6 +8,7 @@ ni l'idempotence.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
     def test_target_version_5_apply_undo_journal_present(self):
         """A v5, les tables `apply_batches` + `apply_operations` doivent exister."""
         db_path, conn = existing_db_fixture(5)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             self.assertTrue(db_path.exists(), "DB sqlite doit etre cree sur disque")
             cur = conn.execute("PRAGMA user_version")
@@ -35,6 +37,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
     def test_target_version_0_returns_empty_db(self):
         """target=0 : DB vierge, aucune table applicative."""
         db_path, conn = existing_db_fixture(0)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             self.assertTrue(db_path.exists())
             cur = conn.execute("PRAGMA user_version")
@@ -59,6 +62,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         sont desormais le baseline post-Vague P.
         """
         db_path, conn = existing_db_fixture(31)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             user_version = int(cur.fetchone()[0])
@@ -88,6 +92,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         avoir arrete a v5. C'est l'ordre que P-04/P-05/O-06/R-04 vont suivre.
         """
         db_path, conn = existing_db_fixture(5)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             # ALTER TABLE EXTEND (ce que fera la migration 029 P-04 sur apply_operations)
             # Pour ce test on simule une simple colonne ajoutee.
@@ -115,6 +120,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         from tests._helpers import _project_migrations_dir
 
         db_path, conn = existing_db_fixture(28)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 28)
@@ -162,6 +168,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         from tests._helpers import _project_migrations_dir
 
         db_path, conn = existing_db_fixture(29)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 29)
@@ -224,6 +231,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         from tests._helpers import _project_migrations_dir
 
         db_path, conn = existing_db_fixture(30)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 30, "Fixture doit etre v30")
@@ -309,6 +317,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         from tests._helpers import _project_migrations_dir
 
         db_path, conn = existing_db_fixture(30)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             sql = (_project_migrations_dir() / "031_tri_etat_decisions.sql").read_text(encoding="utf-8")
             for _round in range(2):
@@ -337,6 +346,7 @@ class ExistingDbFixtureTests(unittest.TestCase):
         self.assertGreaterEqual(len(sql_files), 31, "Au moins 31 migrations attendues post-Vague P")
 
         db_path, conn = existing_db_fixture(3, migrations_dir=src)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 3)

@@ -19,7 +19,6 @@ apply_single, avant le bloc rename. Ce test verifie le comportement attendu.
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unicodedata
 import unittest
@@ -29,6 +28,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.app.apply_core import apply_single
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -57,7 +57,7 @@ class ApplySkipIdenticalRenameTests(unittest.TestCase):
         self.leftovers = self.review / "_leftovers"
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _make_apply_result(self):
         return core.ApplyResult()
@@ -193,7 +193,7 @@ class BuildPreviewSkipIdenticalRenameTests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_preview_does_not_count_rename_when_src_equals_dst(self):
         """3 films : 2 deja conformes (Title (Year)) + 1 a renommer.

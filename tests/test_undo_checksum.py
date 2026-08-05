@@ -8,7 +8,6 @@ Trois surfaces testées :
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +16,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.ui.api.apply_support import preverify_undo_operations
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -26,7 +26,7 @@ class PreverifyUndoOperationsPureTests(unittest.TestCase):
         self.base = Path(self._tmp)
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _make_op(self, id_: int, dst: Path, sha1: str | None = None, size: int | None = None) -> dict:
         return {
@@ -129,7 +129,7 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
         self.addCleanup(_p_min_video.stop)
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_atomic_undo_refuses_when_destination_file_replaced(self):
         # 1. Créer un film à la racine

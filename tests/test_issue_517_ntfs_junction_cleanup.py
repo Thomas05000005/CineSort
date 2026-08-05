@@ -15,7 +15,6 @@ hors-bibliotheque enumerable depuis le bac de nettoyage.
 from __future__ import annotations
 
 import os
-import shutil
 import stat
 import subprocess
 import tempfile
@@ -30,6 +29,7 @@ import cinesort.app.cleanup as cleanup
 import cinesort.domain.core as core
 from cinesort.app._dir_utils import is_reparse_point
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -73,7 +73,7 @@ class _SandboxCase(unittest.TestCase):
         self.outside.mkdir(parents=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _sidecar_tree(self, folder: Path, marker: str = "image") -> None:
         """Arborescence composee UNIQUEMENT d'extensions residuelles autorisees.

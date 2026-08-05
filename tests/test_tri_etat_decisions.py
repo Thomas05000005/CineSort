@@ -15,6 +15,7 @@ pas seulement sur fresh DB.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -122,6 +123,7 @@ class LegacyOkBoolHelperTests(unittest.TestCase):
 class DecisionsRepositoryCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_decisions_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         self.db_path = self.tmp_root / "store.sqlite3"
         conn = sqlite3.connect(str(self.db_path))
         try:
@@ -241,6 +243,7 @@ class TransitionDeferredToAcceptedTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_transitions_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         self.db_path = self.tmp_root / "store.sqlite3"
         # On a besoin des 2 tables : field_locks (030) ET decisions (031).
         conn = sqlite3.connect(str(self.db_path))
@@ -443,6 +446,7 @@ class ApplyAtomicCoexistenceTests(unittest.TestCase):
 class PersistenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_decisions_persist_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         self.db_path = self.tmp_root / "store.sqlite3"
         conn = sqlite3.connect(str(self.db_path))
         try:

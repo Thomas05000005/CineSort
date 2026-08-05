@@ -18,6 +18,7 @@ Couvre les 4 cas demandes :
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import time
 import unittest
@@ -119,6 +120,7 @@ class ReconcilePendingBatchesTests(unittest.TestCase):
     def setUp(self) -> None:
         # M-00 : DB pre-existante a v5 (apply_batches + apply_operations dispo)
         self.db_path, self.conn = existing_db_fixture(5)
+        self.addCleanup(shutil.rmtree, self.db_path.parent, ignore_errors=True)
         self.store = _StoreShim(self.conn)
         self.now = time.time()
         self.old_ts = self.now - (2.0 * 3600.0)  # 2h dans le passe -> zombi
@@ -323,6 +325,7 @@ class ReconcileBatchesAtBootTests(unittest.TestCase):
 
     def test_boot_wrapper_passes_through(self) -> None:
         db_path, conn = existing_db_fixture(5)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         store = _StoreShim(conn)
         try:
             report = reconcile_batches_at_boot(store)

@@ -81,7 +81,7 @@ from unittest import mock
 import pytest
 
 import cinesort.domain.core as core
-from tests._helpers import create_file, wait_run_done
+from tests._helpers import create_file, join_background_threads, wait_run_done
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -218,8 +218,10 @@ class _Chain:
     def stop(self) -> None:
         self._min_video_patch.stop()
         self._env_patch.stop()
-        # Le SQLiteStore garde un handle sur state/db/cinesort.sqlite ->
-        # ignore_cleanup_errors=True (le fichier vit dans %TEMP%, l'OS purge).
+        # #960 : l'OS ne purge PAS %TEMP% -- c'est ainsi que 26 059 dossiers
+        # residuels se sont accumules. On joint donc les threads de fond, qui
+        # tiennent le handle sur state/db/cinesort.sqlite, avant de supprimer.
+        join_background_threads()
         self.tmp.cleanup()
 
     def row_by_title_fragment(self, fragment: str) -> Dict[str, Any]:

@@ -31,7 +31,6 @@ Execution : .venv/Scripts/python.exe -X utf8 -m pytest \
 from __future__ import annotations
 
 import re
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +40,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.ui.api.apply_support import _undo_mkdir_ops
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -227,7 +227,7 @@ class UndoMkdirInterBatchE2ETests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _settings(self) -> Dict[str, object]:
         return {

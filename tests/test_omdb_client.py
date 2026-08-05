@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -149,6 +150,7 @@ class ParseOmdbResponseTests(unittest.TestCase):
 class OmdbClientTests(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="omdb_test_")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.cache_path = Path(self.tmp_dir) / "omdb_cache.json"
 
     def _make_client(self, api_key: str = "test-key") -> OmdbClient:
@@ -278,6 +280,7 @@ class OmdbCircuitBreakerTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="omdb_test_cb_")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.cache_path = Path(self.tmp_dir) / "omdb_cache.json"
 
     def _make_client(self, api_key: str = "test-key") -> OmdbClient:

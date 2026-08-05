@@ -15,6 +15,7 @@ Ce test verifie que :
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -59,6 +60,7 @@ class SaveValidationBackwardCompatTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_save_val_compat_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         # validation.json doit pouvoir etre cree par atomic_write_json.
 
     def _call_save(self, api, run_id, decisions):

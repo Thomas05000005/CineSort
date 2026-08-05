@@ -18,6 +18,7 @@ qu'a de la confidence / des warning_flags.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from dataclasses import dataclass, field
@@ -58,6 +59,7 @@ class ResolveFileRuntimeMinProbeFirstTests(unittest.TestCase):
 
         self.resolve = _resolve_file_runtime_min
         self.tmp_dir = tempfile.mkdtemp(prefix="h5_resolve_")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.video = Path(self.tmp_dir) / "Movie.mkv"
         self.video.write_bytes(b"\x00" * 1024)
 
@@ -122,6 +124,7 @@ class _FakeRow:
 class ProbeReconcilesNfoMismatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.mkdtemp(prefix="h5_probe_")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.video_path = Path(self.tmp_dir) / "Movie.mkv"
         self.video_path.write_bytes(b"\x00" * 1024)
         self.mock_store = MagicMock()

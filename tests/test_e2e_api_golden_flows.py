@@ -23,7 +23,6 @@ Scenarios (5) :
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,6 +32,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -53,7 +53,7 @@ class _GoldenFlowsBase(unittest.TestCase):
         self.addCleanup(p_min.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     # ---- Helpers ----
 

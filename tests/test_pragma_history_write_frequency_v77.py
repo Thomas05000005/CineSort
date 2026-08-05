@@ -22,6 +22,7 @@ fraiche dont la table n'existait pas encore a la premiere connexion).
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -76,6 +77,7 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
     def test_burst_of_connections_writes_a_single_history_row(self) -> None:
         """GATE : N ouvertures identiques -> UNE seule ligne d'audit, pas N."""
         db_path = _migrated_db()
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         reset_pragma_history_gate()
         self.assertEqual(_history(db_path), [], "pre-cond : table d'audit vide")
 
@@ -92,6 +94,7 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
     def test_profile_change_is_still_recorded(self) -> None:
         """NON-REGRESSION : le diagnostic survit — un changement de profil trace."""
         db_path = _migrated_db()
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         reset_pragma_history_gate()
 
         connect_sqlite(str(db_path), profile="local_ssd").close()
@@ -109,6 +112,7 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
     def test_source_change_is_still_recorded(self) -> None:
         """NON-REGRESSION : auto vs manual_settings restent distinguables."""
         db_path = _migrated_db()
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         reset_pragma_history_gate()
 
         # 1re connexion en autodetect (source='auto'), puis meme profil impose
@@ -130,6 +134,7 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
         perdu au moment ou il compte le plus (premier boot).
         """
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         conn.close()
         reset_pragma_history_gate()
 
@@ -150,7 +155,9 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
     def test_distinct_databases_are_tracked_independently(self) -> None:
         """NON-REGRESSION : le gate est par chemin DB, pas global."""
         first = _migrated_db()
+        self.addCleanup(shutil.rmtree, first.parent, ignore_errors=True)
         second = _migrated_db()
+        self.addCleanup(shutil.rmtree, second.parent, ignore_errors=True)
         reset_pragma_history_gate()
 
         connect_sqlite(str(first)).close()
@@ -162,6 +169,7 @@ class PragmaHistoryWriteFrequencyTests(unittest.TestCase):
     def test_connection_still_usable_and_pragmas_applied(self) -> None:
         """NON-REGRESSION : ne pas ecrire l'audit ne degrade rien d'autre."""
         db_path = _migrated_db()
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         reset_pragma_history_gate()
 
         connect_sqlite(str(db_path)).close()  # consomme le boot
