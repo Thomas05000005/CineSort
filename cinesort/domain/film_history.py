@@ -139,27 +139,24 @@ def identity_key_from_dict(data: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_film_timeline(
+# Meme defaut que `ApplyRepository.list_apply_batches_for_run(limit=10)` : la
+# timeline s'appuyait sur ce defaut implicite, la version groupee doit le rendre
+# explicite pour ne pas changer silencieusement le nombre de batches examines.
+_TIMELINE_BATCHES_PER_RUN = 10
+
+
+def _collect_timeline_matches(
     film_id: str,
     state_dir: Path,
-    store: Any,
-) -> Dict[str, Any]:
-    """Reconstruit la timeline complete d'un film a travers tous les runs.
+    runs: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Pour chaque run, retrouve la ligne de plan.jsonl qui porte `film_id`.
 
-    Retourne un dict avec film_id, title, year, events[], current_score, scan_count, apply_count.
+    Phase PURE FICHIERS, sans aucun acces DB : c'est elle qui fournit la liste
+    des couples (run_id, row_id) que les requetes groupees vont ensuite servir
+    en un nombre CONSTANT d'allers-retours SQLite (issue #577).
     """
-    # Recuperer tous les runs tries par date
-    runs = store.run.get_runs_summary(limit=100)
-    runs.sort(key=lambda r: float(r.get("start_ts") or r.get("created_ts") or 0))
-
-    events: List[Dict[str, Any]] = []
-    title = ""
-    year = 0
-    current_score: Optional[int] = None
-    previous_score: Optional[int] = None
-    scan_count = 0
-    apply_count = 0
-
+    matches: List[Dict[str, Any]] = []
     for run in runs:
         run_id = str(run.get("run_id") or "")
         run_ts = float(run.get("start_ts") or run.get("created_ts") or 0)
@@ -172,16 +169,74 @@ def get_film_timeline(
         plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
         # Chercher le film dans ce run
-        matched_row: Optional[Dict[str, Any]] = None
-        matched_row_id: Optional[str] = None
         for row_data in plan_rows:
             if identity_key_from_dict(row_data) == film_id:
-                matched_row = row_data
-                matched_row_id = str(row_data.get("row_id") or "")
+                matches.append(
+                    {
+                        "run_id": run_id,
+                        "run_ts": run_ts,
+                        "row": row_data,
+                        "row_id": str(row_data.get("row_id") or ""),
+                    }
+                )
                 break
+    return matches
 
-        if not matched_row:
-            continue
+
+def get_film_timeline(
+    film_id: str,
+    state_dir: Path,
+    store: Any,
+) -> Dict[str, Any]:
+    """Reconstruit la timeline complete d'un film a travers tous les runs.
+
+    Retourne un dict avec film_id, title, year, events[], current_score, scan_count, apply_count.
+
+    Issue #577 : le nombre de requetes SQLite ne depend plus du nombre de runs
+    ou de batches. Trois appels groupes (rapports qualite, batches, operations)
+    remplacent les `1 + 2 x runs + runs x batches` requetes unitaires d'avant.
+    """
+    # Recuperer tous les runs tries par date
+    runs = store.run.get_runs_summary(limit=100)
+    runs.sort(key=lambda r: float(r.get("start_ts") or r.get("created_ts") or 0))
+
+    matches = _collect_timeline_matches(film_id, state_dir, runs)
+
+    # --- Requetes groupees (nombre INDEPENDANT du nombre de runs) ------------
+    quality_pairs = [(m["run_id"], m["row_id"]) for m in matches if m["row_id"]]
+    reports = store.quality.get_quality_reports_for_pairs(pairs=quality_pairs)
+
+    run_ids_with_row = [m["run_id"] for m in matches if m["row_id"]]
+    batches_by_run = store.apply.list_apply_batches_for_runs(
+        run_ids=run_ids_with_row,
+        limit_per_run=_TIMELINE_BATCHES_PER_RUN,
+    )
+    wanted_batch_ids: List[str] = []
+    for run_id in run_ids_with_row:
+        for batch in batches_by_run.get(run_id) or []:
+            if batch.get("dry_run"):
+                continue
+            batch_id = str(batch.get("batch_id") or "")
+            if batch_id:
+                wanted_batch_ids.append(batch_id)
+    ops_by_batch_row = store.apply.list_apply_operations_for_rows(
+        batch_ids=wanted_batch_ids,
+        row_ids=[m["row_id"] for m in matches if m["row_id"]],
+    )
+
+    events: List[Dict[str, Any]] = []
+    title = ""
+    year = 0
+    current_score: Optional[int] = None
+    previous_score: Optional[int] = None
+    scan_count = 0
+    apply_count = 0
+
+    for match in matches:
+        run_id = str(match["run_id"])
+        run_ts = float(match["run_ts"])
+        matched_row: Dict[str, Any] = match["row"]
+        matched_row_id = str(match["row_id"])
 
         # Mettre a jour le titre/annee (derniere valeur connue)
         title = str(matched_row.get("proposed_title") or title)
@@ -202,7 +257,7 @@ def get_film_timeline(
 
         # Evenement score (quality report)
         if matched_row_id:
-            qr = store.quality.get_quality_report(run_id=run_id, row_id=matched_row_id)
+            qr = reports.get((run_id, matched_row_id))
             if qr:
                 score = int(qr.get("score") or 0)
                 delta = (score - previous_score) if previous_score is not None else 0
@@ -221,14 +276,14 @@ def get_film_timeline(
 
         # Evenements apply (operations sur ce row_id)
         if matched_row_id:
-            batches = store.apply.list_apply_batches_for_run(run_id=run_id)
+            batches = batches_by_run.get(run_id) or []
             for batch in batches:
                 if batch.get("dry_run"):
                     continue
                 batch_id = str(batch.get("batch_id") or "")
                 if not batch_id:
                     continue
-                ops = store.apply.list_apply_operations_by_row(batch_id=batch_id, row_id=matched_row_id)
+                ops = ops_by_batch_row.get((batch_id, matched_row_id)) or []
                 if ops:
                     apply_count += 1
                     op_list = [
@@ -293,14 +348,21 @@ def list_films_overview(
     plan_path = run_dir / "plan.jsonl"
     plan_rows = _load_plan_rows_from_jsonl(plan_path)
 
+    selected_rows = plan_rows[:limit]
+    # Issue #577 (meme defaut, meme fonction voisine) : une requete par film,
+    # jusqu'a 200 avec le plafond de l'endpoint. Une seule requete groupee ici.
+    reports = store.quality.get_quality_reports_for_pairs(
+        pairs=[(run_id, str(row_data.get("row_id") or "")) for row_data in selected_rows],
+    )
+
     films: List[Dict[str, Any]] = []
-    for row_data in plan_rows[:limit]:
+    for row_data in selected_rows:
         fid = identity_key_from_dict(row_data)
         row_id = str(row_data.get("row_id") or "")
         score: Optional[int] = None
         tier = ""
         if row_id:
-            qr = store.quality.get_quality_report(run_id=run_id, row_id=row_id)
+            qr = reports.get((run_id, row_id))
             if qr:
                 score = int(qr.get("score") or 0)
                 tier = str(qr.get("tier") or "")

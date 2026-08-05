@@ -7,7 +7,7 @@ Migration #85 phase B5 (2026-05-16) : meme pattern que B1-B4 :
 
 Methodes exposees :
     get_active_quality_profile, save_quality_profile, get_quality_report,
-    upsert_quality_report, list_quality_reports,
+    get_quality_reports_for_pairs, upsert_quality_report, list_quality_reports,
     insert_user_quality_feedback, list_user_quality_feedback,
     delete_user_quality_feedback, get_quality_report_stats,
     get_global_tier_distribution, get_unscored_film_count,
@@ -18,9 +18,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+
+# Nombre de couples (run_id, row_id) par requete de `get_quality_reports_for_pairs`.
+# Chaque couple pese 2 parametres lies et un niveau d'imbrication `OR` : 200 tient
+# tres en dessous de SQLITE_MAX_VARIABLE_NUMBER comme de SQLITE_MAX_EXPR_DEPTH.
+_SQL_PAIR_CHUNK = 200
 
 # AUDIT 2026-07-13 (HIGH-8) : exclut les runs utilitaires de bulk re-scan
 # (config_json {"rescan_run_id": ...}) de la resolution du "dernier run". Ces
@@ -134,6 +139,64 @@ class QualityRepository(_BaseRepository):
                 "profile_version": int(row["profile_version"]),
                 "ts": float(row["ts"]),
             }
+
+        return self._with_schema_group("quality", op)
+
+    def get_quality_reports_for_pairs(
+        self,
+        *,
+        pairs: Sequence[Tuple[str, str]],
+    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        """Version groupee de `get_quality_report` : {(run_id, row_id): rapport}.
+
+        Issue #577 : la timeline d'un film appelait `get_quality_report` une fois
+        par run (jusqu'a 100), et `list_films_overview` une fois par film (50).
+        Chaque appel ouvre sa propre connexion SQLite.
+
+        Les couples sans rapport sont ABSENTS du dict (l'appelant teste la
+        presence, comme il testait `None` avant).
+        """
+        wanted: List[Tuple[str, str]] = []
+        seen: set[Tuple[str, str]] = set()
+        for run_id, row_id in pairs or []:
+            key = (str(run_id), str(row_id))
+            if not key[0] or not key[1] or key in seen:
+                continue
+            seen.add(key)
+            wanted.append(key)
+        if not wanted:
+            return {}
+
+        def op(conn: Any) -> Dict[Tuple[str, str], Dict[str, Any]]:
+            out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            for start in range(0, len(wanted), _SQL_PAIR_CHUNK):
+                chunk = wanted[start : start + _SQL_PAIR_CHUNK]
+                predicate = " OR ".join("(run_id=? AND row_id=?)" for _ in chunk)
+                params: List[str] = []
+                for run_id, row_id in chunk:
+                    params.extend((run_id, row_id))
+                cur = conn.execute(
+                    f"""
+                    SELECT run_id, row_id, score, tier, reasons_json, metrics_json,
+                           profile_id, profile_version, ts
+                    FROM quality_reports
+                    WHERE {predicate}
+                    """,
+                    tuple(params),
+                )
+                for row in cur.fetchall():
+                    out[(str(row["run_id"]), str(row["row_id"]))] = {
+                        "run_id": str(row["run_id"]),
+                        "row_id": str(row["row_id"]),
+                        "score": int(row["score"]),
+                        "tier": str(row["tier"]),
+                        "reasons": self._decode_row_json(row, "reasons_json", default=[], expected_type=list),
+                        "metrics": self._decode_row_json(row, "metrics_json", default={}, expected_type=dict),
+                        "profile_id": str(row["profile_id"]),
+                        "profile_version": int(row["profile_version"]),
+                        "ts": float(row["ts"]),
+                    }
+            return out
 
         return self._with_schema_group("quality", op)
 

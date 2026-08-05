@@ -11,7 +11,10 @@ Findings refute:P1 de la revue adversaire (meme pattern que R4-P1) :
   virgule seule -> "fr;en" persistait ['fr;en'] (warnings sous-titres faux).
 - P12 file_extensions : split virgule (hint ';') ET aucun consommateur (le
   moteur lit video_exts que rien n'ecrivait) -> reglage fantome. Le save ecrit
-  desormais video_exts (format '.ext', additif via union VIDEO_EXTS_ALL).
+  desormais video_exts (format '.ext'). NB : depuis le lot « perimetre
+  destructif » du 2026-08-03, l'effet de video_exts est RESTRICTIF (l'union
+  avec VIDEO_EXTS_ALL ne s'applique plus qu'en l'ABSENCE de saisie) — cf.
+  tests/test_perimetre_destructif_20260803.py.
 """
 
 from __future__ import annotations
