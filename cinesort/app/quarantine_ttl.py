@@ -40,7 +40,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Iterator, TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional
 
 from cinesort.app._dir_utils import is_reparse_point
 from cinesort.infra import state
