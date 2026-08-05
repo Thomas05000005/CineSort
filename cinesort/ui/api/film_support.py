@@ -19,7 +19,12 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
-from cinesort.infra._http_utils import get_bounded
+
+# Import module-style (et non `from ... import TmdbClient`) : c'est la
+# convention du depot pour tout symbole que les tests substituent par
+# `patch("cinesort.infra.tmdb_client.TmdbClient", ...)` — une liaison par
+# `from` figerait la reference et rendrait le patch inoperant.
+from cinesort.infra import tmdb_client as _tmdb_client
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _SECRET_MASK, normalize_user_path
@@ -84,11 +89,6 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
     out: Dict[str, Any] = {"runtime": None, "director": None, "overview": None}
     if not tmdb_id or int(tmdb_id) <= 0:
         return out
-    # Import lazy : TmdbClient n'est pas necessaire si pas de cle TMDb.
-    try:
-        from cinesort.infra.tmdb_client import TmdbClient
-    except ImportError:
-        return out
     try:
         # AUDIT F20 : _internal_settings() -> secrets EN CLAIR. get_settings()
         # renvoie tmdb_api_key MASQUEE ("••••••••") depuis SEC-H2, et le masque
@@ -107,7 +107,7 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
         except (TypeError, ValueError):
             cache_ttl_days = 30
-        client = TmdbClient(
+        client = _tmdb_client.TmdbClient(
             api_key=api_key,
             cache_path=state_dir / "tmdb_cache.json",
             timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
@@ -123,74 +123,22 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
         # pas append_to_response=credits). Ils partaient donc en GET NON CACHE a
         # chaque appel : 1 par ouverture de fiche film, et surtout N en parallele
         # quand la vue Doublons hydrate N groupes (un library/get_film_full par
-        # groupe, Promise.allSettled). On range desormais le resultat dans le
-        # cache local du client (meme tmdb_cache.json, meme TTL configure) sous
-        # une cle dediee : le 2e appel et les suivants ne touchent plus le reseau.
-        extras_key = f"movie_extras|{int(tmdb_id)}"
-        cached_extras: Any = None
+        # groupe, Promise.allSettled). Le cache (meme tmdb_cache.json, meme TTL
+        # configure, cle `movie_extras|{id}`) est desormais tenu par le client.
+        #
+        # Issue #599 : cet appel etait un `requests` direct, donc hors du circuit
+        # breaker ET hors de la session a retry/backoff du client — la fiche
+        # film ne respectait pas le `Retry-After` de TMDb sur 429, alors que la
+        # vue Doublons l'ouvre en rafale. Il est maintenant porte par
+        # `TmdbClient.get_movie_extras`, comme tous les autres appels TMDb.
+        extras: Any = None
         with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
-            cached_extras = client._cache_get(extras_key)
-        if isinstance(cached_extras, dict):
-            out["director"] = cached_extras.get("director") or None
-            out["overview"] = cached_extras.get("overview") or None
+            extras = client.get_movie_extras(int(tmdb_id))
+        if isinstance(extras, dict):
+            out["director"] = extras.get("director") or None
+            out["overview"] = extras.get("overview") or None
             if not out.get("runtime"):
-                out["runtime"] = cached_extras.get("runtime") or None
-        else:
-            # Miss (ou cache indisponible) : appel HTTP frais avec
-            # append_to_response=credits pour recuperer crew -> Director.
-            try:
-                import requests as _req
-
-                # Meme famille que #753/#824 : ce GET direct etait la derniere
-                # lecture JSON non bornee du depot (il n'est dans aucun client,
-                # donc l'inventaire par client le manquait). `requests.get()`
-                # ouvre de toute facon une Session ephemere en interne : on la
-                # rend explicite pour pouvoir passer par le lecteur borne, sans
-                # changer la semantique reseau (pas de retry ajoute).
-                with _req.Session() as _session:
-                    r = get_bounded(
-                        _session,
-                        f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
-                        params={
-                            "api_key": api_key,
-                            "language": "fr-FR",
-                            "append_to_response": "credits",
-                        },
-                        timeout=float(settings.get("tmdb_timeout_s") or 10.0),
-                    )
-                if r.status_code == 200:
-                    data = r.json() or {}
-                    # Director : prend le premier crew member job=Director
-                    credits = data.get("credits") or {}
-                    crew = credits.get("crew") or []
-                    for c in crew:
-                        if str(c.get("job") or "").lower() == "director":
-                            out["director"] = str(c.get("name") or "").strip() or None
-                            break
-                    out["overview"] = str(data.get("overview") or "").strip() or None
-                    # Runtime aussi en fallback si pas deja recupere
-                    fresh_runtime: Optional[int] = None
-                    try:
-                        rt = int(data.get("runtime") or 0)
-                        fresh_runtime = rt if rt > 0 else None
-                    except (TypeError, ValueError):
-                        fresh_runtime = None
-                    if not out.get("runtime"):
-                        out["runtime"] = fresh_runtime
-                    # On ne memorise QUE les reponses 200 : une erreur reseau ou
-                    # un 401 doit etre reessaye au prochain appel, pas fige pour
-                    # la duree du TTL.
-                    with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
-                        client._cache_set(
-                            extras_key,
-                            {
-                                "director": out.get("director"),
-                                "overview": out.get("overview"),
-                                "runtime": out.get("runtime") or fresh_runtime,
-                            },
-                        )
-            except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
-                logger.debug("tmdb extras http fetch error: %s", exc)
+                out["runtime"] = extras.get("runtime") or None
         with contextlib.suppress(OSError, AttributeError):
             client.flush()
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:

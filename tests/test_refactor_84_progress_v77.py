@@ -102,7 +102,14 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # convertir isolement n'aurait pas de sens : c'est le motif entier qui
     # demande un nettoyage, et il depasse le perimetre de cette PR.
     # A reprendre dans le chantier de conversion de la couche `ui`.
-    "ui": 113,
+    #
+    # 113 -> 111 (issue #599, -2) : CONVERSION, pas relevement.
+    # `film_support._fetch_tmdb_extras` portait `from cinesort.infra.tmdb_client
+    # import TmdbClient` et `import requests as _req` a l'interieur de la
+    # fonction. Aucun cycle a contourner : `infra` ne remonte jamais vers `ui`
+    # (contrat `infra_bounded`). L'import de `requests` a purement disparu avec
+    # le GET direct, rapatrie sur `TmdbClient.get_movie_extras`.
+    "ui": 111,
 }
 
 # Borne globale = somme des bornes par couche (174 apres PR#847 et PR#852).

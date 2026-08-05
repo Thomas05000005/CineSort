@@ -346,11 +346,18 @@ def _build_resolved_row(
     is_already_conform = False
     if not is_collection and chosen.year:
         try:
+            # #469 : `edition` + `separator` sont les deux entrees de contexte
+            # que l'apply passe a build_naming_context en plus de title/year
+            # (apply_core.apply_single). Sans elles, un dossier deja ecrit par
+            # l'apply sous un template a edition/separateur etait juge non
+            # conforme et perdait le rehaussement de confiance.
             is_already_conform = core_mod._single_folder_is_conform(
                 folder_name,
                 chosen.title,
                 int(chosen.year),
                 naming_template=str(getattr(cfg, "naming_movie_template", "") or ""),
+                edition=str(detected_edition or ""),
+                separator=getattr(cfg, "separator", " "),
             )
         except (TypeError, ValueError, AttributeError):
             is_already_conform = False

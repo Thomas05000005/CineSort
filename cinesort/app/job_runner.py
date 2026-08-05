@@ -261,6 +261,77 @@ class JobRunner:
                 self._debug(f"_should_skip_terminal should_cancel_fn raised run_id={run_id}: {exc}")
         return True, db_status_before
 
+    def _ensure_run_left_running(
+        self,
+        run_id: str,
+        *,
+        error_message: Optional[str],
+        run_debug: Optional[Callable[[str], None]],
+    ) -> None:
+        """Issue #515 — filet de securite : un run ne reste JAMAIS sur RUNNING.
+
+        Appele depuis le `finally` de `_run_worker`, donc emprunte aussi le
+        chemin ou le gestionnaire d'echec a lui-meme leve : `mark_run_failed`
+        tape une DB verrouillee (antivirus Windows), un disque plein ou un
+        schema corrompu, l'exception secondaire se propage AVANT la transition
+        FAILED, et le run reste RUNNING en base ET en memoire pour toujours.
+        L'utilisateur voit un traitement eternellement en cours.
+
+        Un `except` de plus dans le gestionnaire d'echec ne suffirait pas : il
+        faudrait le repeter a chaque nouvelle ecriture DB de ce bloc. La
+        garantie est ici structurelle — c'est le `finally` qui la porte.
+
+        Ne touche a rien quand :
+        - le snapshot a deja transite (statut terminal) ;
+        - le run est sous controle operateur (PAUSED / SAVED /
+          AWAITING_VALIDATION), en memoire ou en base : la protection C4 prime ;
+        - la DB a bien transite et seul le snapshot memoire est en retard (on
+          s'aligne alors sur la DB au lieu d'inventer un FAILED).
+        """
+        with self._lock:
+            rt = self._runs.get(run_id)
+            snapshot_status = rt.snapshot.status if rt else None
+        if snapshot_status is None or snapshot_status in _TERMINAL:
+            return
+        if self._is_user_held_state(snapshot_status.value):
+            return
+
+        db_status = self._current_db_status(run_id)
+        if self._is_user_held_state(db_status):
+            return
+        try:
+            db_state = RunStatus(str(db_status)) if db_status else None
+        except (TypeError, ValueError):
+            db_state = None
+        if db_state in _TERMINAL:
+            with self._lock:
+                self._set_snapshot(run_id, status=db_state, running=False, done=True)
+            self._debug(f"worker safety net aligned snapshot on DB={db_status} run_id={run_id}", run_debug)
+            return
+
+        ended_ts = time.time()
+        message = error_message or "Run interrompu sans transition terminale (job_runner)"
+        try:
+            self._store.run.mark_run_failed(run_id, error_message=message, ended_ts=ended_ts)
+        # except Exception : la DB est peut-etre injoignable — c'est justement
+        # le scenario qui amene ici. On ne peut alors plus rien pour la ligne
+        # `runs` (le nettoyage des runs orphelins au boot la reprendra), mais
+        # l'etat memoire, lui, DOIT quitter RUNNING.
+        except Exception as exc:
+            _logger.error("job: transition FAILED impossible en base run_id=%s: %s", run_id, exc)
+            self._debug(f"worker safety net mark_run_failed failed run_id={run_id}: {exc}", run_debug)
+        with self._lock:
+            self._set_snapshot(
+                run_id,
+                status=RunStatus.FAILED,
+                ended_ts=ended_ts,
+                running=False,
+                done=True,
+                error=message,
+            )
+        _logger.warning("job: run force en FAILED par le filet de securite run_id=%s", run_id)
+        self._debug(f"worker safety net forced FAILED run_id={run_id}", run_debug)
+
     def _active_run_locked(self) -> Optional[_RuntimeRun]:
         if not self._active_run_id:
             return None
@@ -636,6 +707,18 @@ class JobRunner:
                         error=error_message,
                     )
         finally:
+            # Issue #515 : AVANT toute autre chose, garantir que le run a quitte
+            # RUNNING — y compris quand c'est le gestionnaire d'echec lui-meme
+            # qui a leve et que l'exception secondaire est en train de se
+            # propager a travers ce `finally`.
+            try:
+                self._ensure_run_left_running(run_id, error_message=error_message, run_debug=run_debug)
+            # except Exception : une exception levee ICI remplacerait celle qui
+            # est en cours de propagation — le diagnostic d'origine (la panne DB)
+            # serait perdu au profit d'un defaut du filet lui-meme, et la suite
+            # du `finally` (liberation du slot actif, ContextVar) serait sautee.
+            except Exception as exc:
+                _logger.exception("job: filet de securite en echec run_id=%s: %s", run_id, exc)
             with self._lock:
                 rt = self._runs.get(run_id)
                 # H15 fix (hotfix2) : ne pas liberer le slot actif si le run

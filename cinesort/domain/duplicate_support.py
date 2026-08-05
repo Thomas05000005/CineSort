@@ -100,12 +100,27 @@ def single_folder_is_conform(
     norm_for_tokens: Callable[[str], str],
     movie_dir_title_year: Callable[[str], Optional[Tuple[str, int]]],
     naming_template: str = "",
+    edition: str = "",
+    separator: Optional[str] = None,
 ) -> bool:
     # Check 1 : template actif (si fourni)
     if naming_template:
         # VQ-1 : ancien lazy import remplace par alias top-level
         # `_folder_matches_template` (cycle casse via path_utils).
-        if _folder_matches_template(folder_name, naming_template, title, year):
+        # #469 : `edition` et `separator` doivent etre transmis, ce sont les deux
+        # seules entrees de contexte que les ecrivains (apply_single,
+        # planned_target_folder) alimentent en plus de title/year. Sans eux, un
+        # template qui encode l'edition ({edition-tag}, {edition}...) ou le
+        # separateur ({sep}) jugeait non conforme le dossier que l'apply venait
+        # lui-meme d'ecrire.
+        if _folder_matches_template(
+            folder_name,
+            naming_template,
+            title,
+            year,
+            edition=edition,
+            separator=separator,
+        ):
             return True
 
     # Check 1bis : defense en profondeur — equivalence FS Windows/SMB.
