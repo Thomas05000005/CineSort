@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
 
 _PERCEPTUAL_TABLES = ("perceptual_reports",)
 
@@ -173,11 +174,17 @@ class PerceptualRepository(_BaseRepository):
 
         Renvoie {"platinum": N, "gold": N, ..., "reject": N, "unknown": N_non_scored}.
         Les rows sans global_tier_v2 (pre-v7.5) sont comptees comme "unknown".
+
+        Issue #448 : decoupe en paquets. Contrairement aux agregations par run,
+        celle-ci CUMULE (`+=`) : la deduplication prealable n'est donc pas une
+        coquetterie, c'est la condition pour que le resultat ne bouge pas. Un
+        `IN` unique dedoublonnait implicitement les run_id repetes ; deux
+        paquets contenant le meme run_id compteraient ses films DEUX fois.
         """
-        if not run_ids:
+        ids = list(dict.fromkeys(run_ids or []))
+        if not ids:
             return {}
         self._ensure_perceptual_tables()
-        placeholders = ",".join("?" * len(run_ids))
         result: Dict[str, int] = {
             "platinum": 0,
             "gold": 0,
@@ -187,21 +194,23 @@ class PerceptualRepository(_BaseRepository):
             "unknown": 0,
         }
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT global_tier_v2, COUNT(*) as n
-                FROM perceptual_reports
-                WHERE run_id IN ({placeholders})
-                GROUP BY global_tier_v2
-                """,
-                tuple(run_ids),
-            )
-            for row in cur.fetchall():
-                tier = str(row[0] or "").strip().lower() or "unknown"
-                if tier in result:
-                    result[tier] += int(row[1])
-                else:
-                    result["unknown"] += int(row[1])
+            for chunk in chunked(ids, SQL_CHUNK):
+                placeholders = ",".join("?" * len(chunk))
+                cur = conn.execute(
+                    f"""
+                    SELECT global_tier_v2, COUNT(*) as n
+                    FROM perceptual_reports
+                    WHERE run_id IN ({placeholders})
+                    GROUP BY global_tier_v2
+                    """,
+                    tuple(chunk),
+                )
+                for row in cur.fetchall():
+                    tier = str(row[0] or "").strip().lower() or "unknown"
+                    if tier in result:
+                        result[tier] += int(row[1])
+                    else:
+                        result["unknown"] += int(row[1])
         return result
 
     def get_global_score_v2_trend(self, *, since_ts: float, until_ts: Optional[float] = None) -> List[Dict[str, Any]]:
@@ -268,23 +277,32 @@ class PerceptualRepository(_BaseRepository):
         """Compte les rows dont le global_score_v2_json contient un warning matching `flag`.
 
         Scan naif via LIKE sur le JSON ; suffit pour 1000-10000 rows.
+
+        Issue #448 : decoupe en paquets, et deduplication prealable pour la
+        meme raison que `get_global_tier_v2_distribution` — le total est une
+        SOMME sur les paquets, un run_id present dans deux paquets serait
+        compte deux fois alors que le `IN` unique le dedoublonnait.
         """
-        if not run_ids:
+        ids = list(dict.fromkeys(run_ids or []))
+        if not ids:
             return 0
         self._ensure_perceptual_tables()
-        placeholders = ",".join("?" * len(run_ids))
         pattern = f"%{flag}%"
+        total = 0
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT COUNT(*) FROM perceptual_reports
-                WHERE run_id IN ({placeholders})
-                  AND global_score_v2_json LIKE ?
-                """,
-                (*run_ids, pattern),
-            )
-            row = cur.fetchone()
-            return int(row[0] or 0) if row else 0
+            for chunk in chunked(ids, SQL_CHUNK):
+                placeholders = ",".join("?" * len(chunk))
+                cur = conn.execute(
+                    f"""
+                    SELECT COUNT(*) FROM perceptual_reports
+                    WHERE run_id IN ({placeholders})
+                      AND global_score_v2_json LIKE ?
+                    """,
+                    (*chunk, pattern),
+                )
+                row = cur.fetchone()
+                total += int(row[0] or 0) if row else 0
+        return total
 
     def get_perceptual_report_stats(self, *, run_id: str) -> Dict[str, Any]:
         """Retourne {count, max_ts} pour les rapports perceptuels de ce run.
