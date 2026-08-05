@@ -48,6 +48,7 @@ from cinesort.domain.perceptual.upscale_detection import (
 )
 from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
 from cinesort.domain.probe_models import probe_quality_is_failed
+from cinesort.infra.log_context import clear_run_id, reset_run_id, set_run_id
 from cinesort.infra.probe import ProbeService
 from cinesort.infra.probe.tooling import safe_tool_path
 from cinesort.infra.subprocess_safety import tracked_run
@@ -225,7 +226,7 @@ def get_perceptual_details(
         if not report:
             return {
                 "ok": False,
-                "message": "Aucune analyse perceptuelle persistee pour ce film. Lancez l'analyse depuis l'inspecteur.",
+                "message": t("errors.perceptual_no_persisted_analysis"),
                 "missing": True,
             }
         # R8-056 (F5) : aplatit vers la forme canonique que la modale consomme
@@ -1036,7 +1037,9 @@ def get_perceptual_compare_frames(
             timeout_s=p_settings["comparison_timeout_s"],
         )
         if not aligned:
-            return _err_response("Aucune frame alignee extraite.", category="state", level="info", log_module=__name__)
+            return _err_response(
+                t("errors.perceptual_no_aligned_frame"), category="state", level="info", log_module=__name__
+            )
 
         # Rank par mean_diff descendant et prend les top N.
         ranked = []
@@ -1181,6 +1184,15 @@ def _run_perceptual_job(
             if cancel_event is not None and cancel_event.is_set():
                 cancelled = True
                 break
+            # #594 : `threading.Thread` ne copie pas le contexte du parent, les
+            # logs de ce worker (et ceux de tout `compare_perceptual` -> ffmpeg
+            # en dessous) sortaient donc avec `[run=-]`.
+            # L'estampille est posee PAR PAIRE et rendue juste apres :
+            # `_normalize_pairs` n'impose aucun run_id commun, prendre celui de
+            # `pairs[0]` pour tout le job attribuerait a un run des lignes qui
+            # appartiennent a un autre. Hors paire (garde-fou, `_trim`), le
+            # run_id reste absent — ces lignes decrivent le JOB, pas un run.
+            token = set_run_id(pair["run_id"])
             try:
                 res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
                 if isinstance(res, dict) and res.get("ok"):
@@ -1190,6 +1202,8 @@ def _run_perceptual_job(
                     errors.append({**pair, "ok": False, "message": msg})
             except (OSError, KeyError, TypeError, ValueError) as exc:
                 errors.append({**pair, "ok": False, "message": str(exc)})
+            finally:
+                reset_run_id(token)
             done_count += 1
             _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
 
@@ -1244,7 +1258,7 @@ def queue_perceptual_analyses(
     normalized = _normalize_pairs(pairs)
     if not normalized:
         return _err_response(
-            "Aucune paire valide. Format attendu : [{run_id, row_a, row_b}, ...]",
+            t("errors.perceptual_no_valid_pair"),
             category="validation",
             level="info",
             log_module=__name__,
@@ -1288,7 +1302,11 @@ def _run_perceptual_batch_job(
     progress_cb qui met a jour le snapshot du job (done/total) apres chaque film.
     Garde-fou large pour finaliser le job meme en cas de plantage (cf
     _run_perceptual_job pour la meme logique sur les paires).
+
+    #594 : contrairement aux paires, ce worker recoit UN run_id explicite —
+    l'estampille couvre donc tout le thread, y compris le garde-fou.
     """
+    set_run_id(run_id)
     try:
 
         def _cb(done: int, _total: int) -> None:
@@ -1324,6 +1342,7 @@ def _run_perceptual_batch_job(
             _trim_perceptual_jobs()
         except Exception:  # noqa: BLE001
             logger.exception("perceptual batch job %s : _trim a echoue", job_id)
+        clear_run_id()
 
 
 def queue_perceptual_batch(

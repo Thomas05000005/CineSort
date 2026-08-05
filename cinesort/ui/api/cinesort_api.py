@@ -2290,7 +2290,7 @@ class CineSortApi:
         report = built.get("report") if isinstance(built.get("report"), dict) else {}
         rows = report.get("rows") or []
         if not rows:
-            return _err_response("Aucune ligne dans le run.", category="state", level="info", log_module=__name__)
+            return _err_response(t("errors.no_rows_in_run"), category="state", level="info", log_module=__name__)
 
         return export_nfo_for_run(rows, overwrite=bool(overwrite), dry_run=bool(dry_run))
 
