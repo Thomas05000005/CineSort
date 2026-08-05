@@ -1767,6 +1767,19 @@ class ApplyResult:
     quarantined: int = 0
     skipped: int = 0
     errors: int = 0
+    #: Operations REELLEMENT effectuees sur le disque mais que le journal d'undo
+    #: n'a PAS pu enregistrer. Non nul => l'annulation sera INCOMPLETE.
+    #:
+    #: `record_apply_op` rend `False` en cas d'echec depuis toujours, mais AUCUN
+    #: de ses 14 sites d'appel ne lisait ce retour : un apply pouvait deplacer
+    #: des dossiers, ne rien journaliser, et se declarer `ok: True`. C'est le
+    #: symptome observe en #901 — batch cree, `counts.total = 0`, undo
+    #: indisponible sans qu'aucune erreur ne soit remontee.
+    #:
+    #: On ne fait PAS echouer l'apply pour autant : l'operation physique a deja
+    #: reussi, avorter laisserait un etat mixte sur le disque. On cesse
+    #: seulement de le taire.
+    journal_failures: int = 0
     merges_count: int = 0
     # AUDIT 2026-06-14 (R7-4) : compteur des films marques pour suppression
     # deplaces vers _review/_user_marked_for_deletion/ a l'apply.

@@ -127,8 +127,12 @@ class TestDetectSoftClipping(unittest.TestCase):
         samples = _white_noise(48000, seed=1)
         result = analyze_mel(samples)
         # Juste verifier que ca ne crashe pas, pas de valeur precise
+        # #381 : "degraded" fait partie des verdicts possibles d'une mesure
+        # ABOUTIE (score bas sans motif dominant). "insufficient_data" reste
+        # dans la liste car ce test ne pilote pas la longueur du signal.
         self.assertIn(
-            result.mel_verdict, ("clean", "insufficient_data", "soft_clipped", "mp3_encoded", "aac_low_bitrate")
+            result.mel_verdict,
+            ("clean", "degraded", "insufficient_data", "soft_clipped", "mp3_encoded", "aac_low_bitrate"),
         )
 
 
