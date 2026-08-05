@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cinesort.domain.i18n_messages import t
 from cinesort.ui.api._responses import err as _err_response
 
 logger = logging.getLogger(__name__)
@@ -448,7 +449,7 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "ok": True,
             "backup_path": "",
             "removed_db_path": str(db_path),
-            "message": "Aucune DB existante a supprimer.",
+            "message": t("danger_zone.no_database_to_delete"),
         }
 
     backup_dir = state_path / "db" / "backups"
