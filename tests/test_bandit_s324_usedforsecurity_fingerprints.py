@@ -56,7 +56,13 @@ _EXPECTED_ANNOTATED: Dict[str, Dict[str, int]] = {
     "cinesort/app/plan_support_core.py": {
         "cfg_signature_for_incremental": 1,
         "_nfo_signature": 1,
-        "folder_signature": 2,
+        # 2 -> 1 le 2026-08-05 (#696) : la branche `except OSError` ne hache
+        # PLUS. Elle rendait `sha1(b"")`, exactement la signature d'un dossier
+        # VIDE — un dossier peuple momentanement illisible heritait donc de
+        # cette signature et pouvait etre servi depuis le cache incremental,
+        # faisant DISPARAITRE ses films du plan sans aucun log. Le sentinel est
+        # devenu None : pas de hachage, donc plus de site a annoter ici.
+        "folder_signature": 1,
     },
 }
 
@@ -172,13 +178,23 @@ class Sha1FipsModeTests(unittest.TestCase):
             signature = folder_signature(cfg, folder, scan_index=None)
         self.assertEqual(len(signature), 40)
 
-    def test_folder_signature_fallback_scandir_survit_au_mode_fips(self) -> None:
-        """Branche `except OSError` -> `sha1(b"")`, le 5e site."""
+    def test_folder_signature_fallback_scandir_ne_hache_plus_du_tout(self) -> None:
+        """La branche `except OSError` ne hache plus : FIPS-safe par construction (#696).
+
+        Elle rendait `sha1(b"")` — le 5e site annote. Ce n'etait pas seulement
+        un site de hachage de trop, c'etait un BUG : cette valeur est aussi la
+        signature d'un dossier VIDE, donc « inaccessible » et « vide » etaient
+        indiscernables. Le sentinel est desormais None.
+
+        On garde le mode FIPS actif dans ce test : il prouve que le chemin
+        d'erreur n'appelle plus sha1 DU TOUT, pas seulement qu'il l'appelle
+        correctement.
+        """
         missing = self.tmp / "dossier_inexistant"
         cfg = self._cfg()
         with mock.patch.object(hashlib, "sha1", _fips_sha1):
             signature = folder_signature(cfg, missing, scan_index=None)
-        self.assertEqual(signature, "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+        self.assertIsNone(signature)
 
 
 class Sha1AnnotationSourceTests(unittest.TestCase):
@@ -205,16 +221,22 @@ class Sha1AnnotationSourceTests(unittest.TestCase):
             f"appel hashlib faible sans usedforsecurity=False : {sorted(bare - _TOLERATED_BARE)}",
         )
 
-    def test_total_annote_vaut_cinq(self) -> None:
+    def test_total_annote_vaut_quatre(self) -> None:
+        """Etait CINQ jusqu'au 2026-08-05 : #696 a supprime un site, pas une annotation.
+
+        La garde n'est pas affaiblie — elle compte toujours EXACTEMENT les
+        appels de hachage faible, et un nouveau site non annote la fait rougir.
+        Seule la valeur attendue suit la realite du code.
+        """
         total = sum(sum(counts.values()) for counts in _EXPECTED_ANNOTATED.values())
-        self.assertEqual(total, 5)
+        self.assertEqual(total, 4)
         measured = sum(
             1
             for relative in _EXPECTED_ANNOTATED
             for _name, is_annotated in _weak_hash_sites(_repo_root() / relative)
             if is_annotated
         )
-        self.assertEqual(measured, 5)
+        self.assertEqual(measured, 4)
 
 
 class Sha1DigestUnchangedTests(unittest.TestCase):
@@ -254,12 +276,22 @@ class Sha1DigestUnchangedTests(unittest.TestCase):
         nfo.write_bytes(b"<movie/>")
         self.assertEqual(_nfo_signature(nfo), _REAL_SHA1(b"<movie/>").hexdigest())
 
-    def test_folder_signature_fallback_reste_le_sha1_vide(self) -> None:
+    def test_folder_signature_fallback_ne_vaut_PLUS_le_sha1_vide(self) -> None:
+        """Ce test VERROUILLAIT le defaut #696 : il exigeait la collision.
+
+        Il affirmait que le repli d'erreur DOIT valoir `sha1(b"")` — soit
+        exactement la signature d'un dossier vide. Tant qu'il tenait, corriger
+        la confusion faisait rougir la CI.
+
+        Un dossier vide garde sa signature ; un dossier inaccessible n'en a
+        aucune. C'est la distinction que ce test protege desormais.
+        """
         cfg = core.Config(root=self.root).normalized()
-        self.assertEqual(
-            folder_signature(cfg, self.tmp / "absent", scan_index=None),
-            _REAL_SHA1(b"").hexdigest(),
-        )
+        vide = self.tmp / "vraiment_vide"
+        vide.mkdir()
+
+        self.assertEqual(folder_signature(cfg, vide, scan_index=None), _REAL_SHA1(b"").hexdigest())
+        self.assertIsNone(folder_signature(cfg, self.tmp / "absent", scan_index=None))
 
 
 if __name__ == "__main__":
