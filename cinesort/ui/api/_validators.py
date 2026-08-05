@@ -34,14 +34,26 @@ from cinesort.domain.i18n_messages import t
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
 
 
+def normalize_run_id(run_id: Any) -> str:
+    """Forme CANONIQUE d'un run_id. A utiliser partout ou l'on en valide un.
+
+    Ce helper existe pour qu'on ne puisse plus valider une valeur et en
+    utiliser une autre. `is_valid_run_id` normalisait deja (`strip()`), mais
+    les appelants recevaient ensuite la valeur BRUTE : un `run_id` avec des
+    espaces de bord etait donc ACCEPTE, puis servait a resoudre un run qui
+    n'existe pas — echec silencieux ou, pire, resolution d'un autre run.
+    """
+    return str(run_id or "").strip()
+
+
 def is_valid_run_id(run_id: Any) -> bool:
     """Valide un run_id contre `RUN_ID_RE`, apres la normalisation d'usage.
 
-    La normalisation (`str(x or "").strip()`) fait partie de l'invariant au
-    meme titre que le motif : elle est portee ici pour que tous les appelants
-    valident exactement la meme chose.
+    La normalisation fait partie de l'invariant au meme titre que le motif :
+    elle est portee par `normalize_run_id` pour que tous les appelants valident
+    ET utilisent exactement la meme valeur.
     """
-    return bool(RUN_ID_RE.fullmatch(str(run_id or "").strip()))
+    return bool(RUN_ID_RE.fullmatch(normalize_run_id(run_id)))
 
 
 def clamp_timeout(value: Any, default: float = 10.0, lo: float = 1.0, hi: float = 60.0) -> float:
@@ -126,13 +138,30 @@ def requires_valid_run_id(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapper(api: Any, *args: Any, **kwargs: Any) -> Any:
-        run_id = kwargs.get("run_id") if "run_id" in kwargs else (args[0] if args else None)
+        en_kwarg = "run_id" in kwargs
+        run_id = kwargs.get("run_id") if en_kwarg else (args[0] if args else None)
         if not api._is_valid_run_id(run_id):
             return {
                 "ok": False,
+                # Valeur BRUTE dans l'erreur, a dessein : l'appelant doit voir
+                # ce qu'il a REELLEMENT envoye, pas une version nettoyee.
                 "run_id": str(run_id or ""),
                 "message": t("errors.run_invalid_id"),
             }
+        # On transmet la valeur NORMALISEE, celle-la meme qui vient d'etre
+        # validee. Sans cela, `" run1 "` passait la validation (qui strippe) et
+        # partait BRUT en aval, ou il ne resolvait aucun run.
+        #
+        # Pourquoi normaliser plutot que REFUSER les espaces de bord : le
+        # contrat actuel les tolere deja — `is_valid_run_id` strippe depuis
+        # toujours, donc `" run1 "` est deja declare VALIDE. Les refuser
+        # changerait le comportement pour des appelants existants ; normaliser
+        # se contente de tenir la promesse que la validation faisait deja.
+        canonique = normalize_run_id(run_id)
+        if en_kwarg:
+            kwargs["run_id"] = canonique
+        elif args:
+            args = (canonique,) + tuple(args[1:])
         return fn(api, *args, **kwargs)
 
     return wrapper

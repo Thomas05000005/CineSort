@@ -143,5 +143,74 @@ class SharedRunIdInvariantTests(unittest.TestCase):
         self.assertFalse(is_valid_run_id(None))
 
 
+class RunIdNormaliseEnAvalTests(unittest.TestCase):
+    """La valeur VALIDEE doit etre celle qui part en aval.
+
+    Le decorateur validait `str(x or "").strip()` puis appelait la fonction
+    avec la valeur BRUTE. Un run_id borde d'espaces etait donc ACCEPTE, puis
+    servait a resoudre un run qui n'existe pas.
+    """
+
+    def _sonde(self):
+        """Fonction decoree qui MEMORISE le run_id qu'elle a reellement recu."""
+        recus = []
+
+        @requires_valid_run_id
+        def fn(api, run_id, *a, **kw):  # noqa: ARG001
+            recus.append(run_id)
+            return {"ok": True, "run_id": run_id}
+
+        return fn, recus
+
+    def _api(self):
+        api = MagicMock()
+        api._is_valid_run_id = staticmethod(is_valid_run_id)
+        return api
+
+    def test_positional_recoit_la_valeur_normalisee(self) -> None:
+        fn, recus = self._sonde()
+        res = fn(self._api(), "  20260803_141500_123  ")
+        self.assertTrue(res["ok"])
+        self.assertEqual(recus, ["20260803_141500_123"], "la fonction a recu la valeur BRUTE")
+
+    def test_kwarg_recoit_la_valeur_normalisee(self) -> None:
+        fn, recus = self._sonde()
+        res = fn(self._api(), run_id="  20260803_141500_123  ")
+        self.assertTrue(res["ok"])
+        self.assertEqual(recus, ["20260803_141500_123"])
+
+    def test_le_meme_run_est_atteint_avec_et_sans_espaces(self) -> None:
+        """LE FLUX COMPLET : c'est l'egalite des deux qui compte, pas la forme."""
+        fn, recus = self._sonde()
+        api = self._api()
+        fn(api, "20260803_141500_123")
+        fn(api, "  20260803_141500_123  ")
+        self.assertEqual(recus[0], recus[1], f"deux appels du meme run divergent : {recus}")
+
+    def test_l_erreur_montre_la_valeur_BRUTE(self) -> None:
+        """Un rejet doit dire ce que l'appelant a REELLEMENT envoye.
+
+        Renvoyer une version nettoyee lui ferait chercher un probleme
+        introuvable dans une chaine qu'il n'a jamais emise.
+        """
+        fn, recus = self._sonde()
+        res = fn(self._api(), "  pas valide!  ")
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["run_id"], "  pas valide!  ")
+        self.assertEqual(recus, [], "la fonction ne doit pas etre appelee du tout")
+
+    def test_les_autres_arguments_sont_intacts(self) -> None:
+        """La reecriture du 1er positionnel ne doit pas decaler les suivants."""
+        vus = {}
+
+        @requires_valid_run_id
+        def fn(api, run_id, row_id, *, mode="x"):  # noqa: ARG001
+            vus.update(run_id=run_id, row_id=row_id, mode=mode)
+            return {"ok": True}
+
+        fn(self._api(), "  run_1234  ", "ROW9", mode="strict")
+        self.assertEqual(vus, {"run_id": "run_1234", "row_id": "ROW9", "mode": "strict"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
