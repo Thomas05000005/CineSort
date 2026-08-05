@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -176,12 +176,29 @@ def collect_non_video_extensions(cfg: Any, folder: Path) -> Dict[str, int]:
 # le tri. Sur NAS SMB, chaque scandir evite = ~14ms de round-trip economise.
 _FILM_FOLDER_NAME_RE = re.compile(r"\(\s*(19|20)\d{2}\s*\)")
 
+# Nombre maximum de chemins retenus PAR RAISON dans `rejected_paths`. Le compteur
+# (`stats.analyse_ignores_par_raison`) reste exact quoi qu'il arrive : cet
+# echantillon ne sert qu'a NOMMER les dossiers ecartes dans le journal, et il est
+# borne pour qu'une racine pathologique (des milliers de dossiers '_') ne fasse
+# pas gonfler la memoire ni produire une ligne de log illisible.
+_REJECT_PATH_SAMPLE_MAX = 20
+
+# Dossiers de travail crees par CineSort LUI-MEME a la racine de la bibliotheque.
+# Ils sont prefixes '_' comme les dossiers de transit de l'utilisateur, mais les
+# ecarter n'est PAS une information a remonter : les compter ou les nommer dans
+# le journal rendrait le compteur « dossiers ecartes » menteur dans l'autre sens
+# (« 2 dossiers ignores » sur une bibliotheque ou l'utilisateur n'en a aucun).
+# `_Collection` et `_Vide` sont configurables (cfg), `_review` est en dur dans
+# apply_core.build_apply_context.
+_CINESORT_INTERNAL_ROOT_FOLDER = "_review"
+
 
 def discover_candidate_folders(
     cfg: Any,
     *,
     max_depth: int = 6,
     stats: Any = None,
+    rejected_paths: Optional[Dict[str, List[str]]] = None,
 ) -> List[Path]:
     """BUG 1 + BUG 5 : decouverte rapide des dossiers candidats, optimisee NAS.
 
@@ -208,15 +225,50 @@ def discover_candidate_folders(
     dans stats.analyse_ignores_par_raison['ignore_scandir_error'].
 
     Cible : < 2s sur NAS SMB pour ~1000 dossiers a majorite plate.
+
+    Args:
+        cfg: Config (root, video_exts, collection_root_name, empty_folders_folder_name).
+        max_depth: profondeur maximale de descente.
+        stats: objet `Stats` optionnel ; ses compteurs de rejet sont incrementes.
+        rejected_paths: dict optionnel `{raison: [chemins]}` ALIMENTE par cette
+            fonction. Sert a NOMMER les dossiers ecartes dans le journal
+            utilisateur (le domaine n'a pas acces au callback de log de l'UI).
+            Echantillon borne a `_REJECT_PATH_SAMPLE_MAX` par raison ; le compte
+            exact reste celui de `stats`.
+
+    Returns:
+        La liste des dossiers candidats.
     """
     root = Path(cfg.root)
     collection_name_lower = str(getattr(cfg, "collection_root_name", "") or "").lower()
+    empty_name_lower = str(getattr(cfg, "empty_folders_folder_name", "") or "").lower()
+    # Noms reserves a CineSort a la racine : ecartes SILENCIEUSEMENT (ni comptes,
+    # ni nommes), parce que ce ne sont pas des dossiers de l'utilisateur. Cet
+    # ensemble ne filtre QUE le comptage : il ne fait sortir aucun dossier du
+    # scan qui y serait entre, et n'y fait entrer aucun dossier qui en sortait.
+    internal_root_names = {n for n in (collection_name_lower, empty_name_lower, _CINESORT_INTERNAL_ROOT_FOLDER) if n}
     video_exts = set(getattr(cfg, "video_exts", set()) or set())
     candidates: List[Path] = []
     # Issue #888 : identites reelles des dossiers deja visites, pour ne pas
     # explorer deux fois le meme dossier physique atteint par deux chemins.
     # Voir `_identite_reelle` et la garde en tete de `_walk`.
     vus: set[tuple[int, int]] = set()
+
+    def _reject(key: str, path: str) -> None:
+        """Comptabilise un rejet ET en conserve le chemin pour le journal UI.
+
+        SEUL point de sortie des rejets de cette fonction : toute raison ecartee
+        ici est a la fois comptee (`stats`) et echantillonnee (`rejected_paths`).
+        Un rejet qui n'appellerait que `_bump_stats_reject` serait comptabilise
+        sans jamais pouvoir etre NOMME a l'utilisateur — soit exactement le
+        defaut corrige par cette PR, reintroduit sur une autre raison.
+        """
+        _bump_stats_reject(stats, key, path=path)
+        if rejected_paths is None:
+            return
+        bucket = rejected_paths.setdefault(key, [])
+        if len(bucket) < _REJECT_PATH_SAMPLE_MAX:
+            bucket.append(path)
 
     def _yyyy_folder_shape(path: Path) -> tuple[bool, bool]:
         """Inspecte un dossier `(YYYY)` en UN scandir.
@@ -231,7 +283,7 @@ def discover_candidate_folders(
             sub = os.scandir(str(path))
         except (OSError, PermissionError, FileNotFoundError) as exc:
             logger.warning("scan: scandir (YYYY)-shape failed on %s: %s", path, exc)
-            _bump_stats_reject(stats, "ignore_scandir_error", path=str(path))
+            _reject("ignore_scandir_error", str(path))
             return (False, False)
         has_direct_video = False
         has_subdirs = False
@@ -303,7 +355,7 @@ def discover_candidate_folders(
                 "scan: %s designe un dossier deja visite (jonction ou lien), ignore",
                 path,
             )
-            _bump_stats_reject(stats, "ignore_dossier_deja_visite", path=str(path))
+            _reject("ignore_dossier_deja_visite", str(path))
             return False
         vus.add(identite)
         return True
@@ -341,14 +393,14 @@ def discover_candidate_folders(
                 max_depth,
                 current,
             )
-            _bump_stats_reject(stats, "ignore_profondeur_max", path=str(current))
+            _reject("ignore_profondeur_max", str(current))
             return
         try:
             scandir_ctx = os.scandir(str(current))
         except (OSError, PermissionError, FileNotFoundError) as exc:
             # SCAN-1 (L160-L163) : tracer l'echec scandir pour diagnostic SMB.
             logger.warning("scan: scandir failed on %s: %s", current, exc)
-            _bump_stats_reject(stats, "ignore_scandir_error", path=str(current))
+            _reject("ignore_scandir_error", str(current))
             return
         subdirs: List[Path] = []
         # Sous-dossiers `(YYYY)` dont le film est imbrique (pas de video directe
@@ -401,25 +453,48 @@ def discover_candidate_folders(
             # legitimes ont des sous-dossiers prefixes '_' (snapshots,
             # versionnage manuel, etc.). On garde toujours le skip du
             # dossier collection (interne CineSort).
+            #
+            # Ce skip est SILENCIEUX cote utilisateur depuis toujours :
+            # `_A trier`, `_Nouveaux telechargements`, `_Films 2026` sont
+            # des noms de transit tres courants, et leurs films
+            # n'apparaissaient nulle part — ni dans le plan, ni dans le
+            # journal, ni dans le compteur (mesure : 3 dossiers avales,
+            # `folders_rejected_underscore = 0`). On enregistre donc le
+            # chemin en plus du compteur pour que l'appelant puisse
+            # NOMMER les dossiers ecartes.
+            #
+            # EXCEPTION au comptage (et au comptage SEUL — l'ensemble des
+            # dossiers reellement ecartes est rigoureusement inchange) :
+            # les dossiers de travail de CineSort lui-meme. Les compter
+            # rendrait le compteur menteur dans l'autre sens et le journal
+            # accuserait l'appli d'avoir ignore ses propres dossiers.
+            #
+            # Le test de prefixe passe AVANT le filtre par nom (issue #888 a
+            # deplace ce bloc dans la boucle triee, l'ordre est conserve) : un
+            # `empty_folders_folder_name` renomme sans `_` doit rester un
+            # dossier utilisateur ordinaire, donc reellement scanne.
             if depth == 0 and nm.startswith("_"):
-                # `_retenir` AVANT le `continue` : sans cet enregistrement, le
-                # dossier ecarte n'entre jamais dans `vus`, et une jonction
-                # portant un AUTRE nom qui pointe dessus le fait rentrer par la
-                # fenetre. Mesure sur `main` avant ce correctif :
+                # `_retenir` AVANT le `continue`, et pour TOUS les dossiers
+                # ecartes — y compris les dossiers internes. Sans cet
+                # enregistrement (#917), le dossier n'entre jamais dans `vus`,
+                # et une jonction portant un AUTRE nom qui pointe dessus le fait
+                # rentrer par la fenetre :
                 #
                 #   Bibliotheque/_Collection/Deja Trie (2019)/...  (bac interne)
                 #   Bibliotheque/Raccourci -> _Collection          (jonction)
                 #   -> candidat : Raccourci\Deja Trie (2019)
                 #
-                # Un film DEJA trie et quarantine redevenait candidat au tri, et
-                # l'apply pouvait le redeplacer. Le skip par NOM ne suffit pas :
-                # il faut interdire le dossier PHYSIQUE, pas l'un de ses chemins.
+                # Un film DEJA trie redevenait candidat au tri. Le skip par NOM
+                # ne suffit pas : il faut interdire le dossier PHYSIQUE.
+                #
+                # Le COMPTAGE, lui, garde son exception : `_reject` nomme le
+                # dossier dans le journal, et accuser l'application d'avoir
+                # « ignore » ses propres bacs rendrait ce journal menteur. Les
+                # deux portees sont donc volontairement differentes — identite
+                # pour TOUS, comptage pour les dossiers de l'UTILISATEUR seuls.
                 _retenir(entry_path)
-                _bump_stats_reject(
-                    stats,
-                    "ignore_prefix_underscore",
-                    path=str(entry_path),
-                )
+                if nm.lower() not in internal_root_names:
+                    _reject("ignore_prefix_underscore", str(entry_path))
                 continue
             if depth == 0 and nm.lower() == collection_name_lower:
                 # Skip le dossier _Collection au niveau 1 du root. Meme raison
@@ -493,7 +568,7 @@ def discover_candidate_folders(
             # `(YYYY)`, le comportement historique est strictement preserve.
             if depth >= 1 and any_file:
                 if in_year_descent and video_files and all(file_name_looks_bonus(v) for v in video_files):
-                    _bump_stats_reject(stats, "ignore_bonus_only_folder", path=str(current))
+                    _reject("ignore_bonus_only_folder", str(current))
                 else:
                     candidates.append(current)
 
