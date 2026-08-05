@@ -520,14 +520,29 @@ def folder_signature(
     *,
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
-) -> str:
+) -> Optional[str]:
+    """Signature du contenu d'un dossier, ou None s'il est INACCESSIBLE.
+
+    #696 : le sentinel d'erreur valait `sha1(b"")` — exactement la signature
+    d'un dossier VIDE. Un dossier peuple momentanement illisible (blip NAS/SMB,
+    permission, disparition transitoire) prenait donc la signature « vide », et
+    si le cache incremental portait deja cette signature pour ce chemin, le
+    scan concluait a un HIT : les films du dossier n'etaient PAS replanifies,
+    sans le moindre log distinguant « vide » de « inaccessible ».
+
+    None n'est pas une signature : c'est l'absence de signature. Les deux
+    appelants le traitent comme tel — miss force cote lecture, aucune ecriture
+    de cache cote persistance. Un dossier inaccessible ne peut donc ni etre
+    servi depuis le cache, ni y entrer.
+    """
     # BUG 3 : optimisation NAS via os.scandir (metadata cachees en 1 op systeme)
     items: List[Tuple[str, str]] = []  # (sort_key, payload_line)
     video_exts = cfg.video_exts or set()
     try:
         scandir_ctx = os.scandir(str(folder))
-    except (OSError, PermissionError, FileNotFoundError):
-        return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
+    except (OSError, PermissionError, FileNotFoundError) as exc:
+        _log.warning("folder_signature: dossier inaccessible, aucun cache possible: %s (%s)", folder, exc)
+        return None
     try:
         for entry in scandir_ctx:
             name = entry.name
@@ -864,6 +879,12 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
         scan_index=ctx.scan_index,
         run_hash_cache=ctx.run_hash_cache,
     )
+    if folder_sig is None:
+        # #696 : dossier inaccessible. On ne peut RIEN affirmer sur son contenu,
+        # donc surtout pas le servir depuis le cache. Miss force ; l'appelant
+        # replanifie, et persist_folder_cache n'ecrira rien (il no-ope sur None).
+        ctx.stats.incremental_cache_misses += 1
+        return folder_sig, False
     cache_entry = None
     if hasattr(ctx.scan_index, "get_incremental_folder_cache"):
         try:
