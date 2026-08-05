@@ -27,7 +27,8 @@ Strategie de mesure differentiel REST :
    et `separator=" "` produit `Title (Year)`. C'est le seul chemin pour faire
    bouger la sortie sans fork semantique.
 
-Pattern reference : test_lowercase_extensions_iter7.py.
+Pattern reference : test_never_rename_video_file.py (l ancien test_lowercase_extensions_iter7.py
+a ete supprime avec le reglage qu il verrouillait).
 """
 
 from __future__ import annotations

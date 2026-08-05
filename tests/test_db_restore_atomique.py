@@ -65,6 +65,12 @@ _REAL_MIGRATIONS = Path(backup_module.__file__).resolve().parent / "migrations"
 # SQLite, et l'analyse statique n'a pas a deviner que la valeur est sure).
 _PAGE_SIZE_SQL = {4096: "PRAGMA page_size=4096", 16384: "PRAGMA page_size=16384"}
 _JOURNAL_SQL = {True: "PRAGMA journal_mode=WAL", False: "PRAGMA journal_mode=DELETE"}
+# Recul de `user_version` utilise pour rendre une migration reellement en
+# attente (cf `_rendre_une_migration_en_attente`). Valeur ecrite en dur pour la
+# meme raison que les deux dictionnaires ci-dessus, et volontairement basse :
+# elle reste sous la derniere migration meme si le schema avance.
+_RECUL_VERSION = 20
+_RECUL_SQL = "PRAGMA user_version = 20"
 
 
 def _seed(path: Path, marker: str, rows: int, *, wal: bool = False, page_size: Optional[int] = None) -> None:
@@ -515,6 +521,29 @@ class RestoreParLaFacadeSQLiteStoreTests(unittest.TestCase):
         (mig_dir / "9999_migration_qui_echoue.sql").write_text("CREATE TABLE boom (;", encoding="utf-8")
         return mig_dir
 
+    def _rendre_une_migration_en_attente(self) -> None:
+        """Recule `user_version` pour que le prochain `initialize()` ait une
+        migration REELLEMENT en attente, et pousse donc son `.pre_migration.bak`.
+
+        Necessaire depuis la nuance N28 (ultra-audit 2026-08-03, sur `main`) :
+        `_backup_before_migrations` ne pousse plus de backup a chaque boot mais
+        uniquement quand le schema va bouger. Sans ce recul, un simple
+        `initialize()` ne cree plus aucun backup et ce test perdait son decor
+        (`IndexError` sur une liste vide) — c'est l'INSTRUMENT qui est perime,
+        pas la regle verifiee. On passe par la condition que `main` teste
+        elle-meme comme declencheur legitime du backup
+        (`test_backup_still_created_when_a_migration_is_pending`), plutot que
+        de fabriquer le `.bak` a la main hors du chemin de production.
+
+        La verification qui suit interdit que ce decor redevienne muet : si le
+        backup n'est pas cree, l'echec nomme la cause au lieu d'un `IndexError`.
+        """
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
+            avant = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            conn.execute(_RECUL_SQL)
+            conn.commit()
+        self.assertGreater(avant, _RECUL_VERSION, "aucune migration ne serait en attente apres le recul")
+
     def test_migration_ratee_avec_backup_partiel_ne_detruit_pas_la_bibliotheque(self) -> None:
         SQLiteStore(self.db_path, busy_timeout_ms=5000).initialize()
         with closing(sqlite3.connect(str(self.db_path))) as conn:
@@ -522,6 +551,7 @@ class RestoreParLaFacadeSQLiteStoreTests(unittest.TestCase):
             conn.execute("INSERT INTO films_marqueur VALUES ('AVANT_BACKUP')")
             conn.commit()
 
+        self._rendre_une_migration_en_attente()
         store = SQLiteStore(self.db_path, busy_timeout_ms=5000)
         store.initialize()  # cree le backup pre_migration
         bak = [p for p in store.list_db_backups() if ".pre_migration." in p.name][0]

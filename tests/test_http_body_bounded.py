@@ -1,0 +1,610 @@
+"""Issues #425 #753 #798 #824 #423 #433 #539 #664 — la borne anti-OOM doit
+etre appliquee A LA LECTURE du corps HTTP, pas apres.
+
+Le motif remplace etait copie-colle 18 fois dans tmdb/omdb/jellyfin/radarr :
+
+    _body = getattr(resp, "content", b"")
+    if _body and len(_body) > 10_000_000:
+        raise ValueError("Response too large")
+
+Il ne protegeait de RIEN : `requests` a deja telecharge et alloue tout le
+corps en RAM au retour de `session.get()`, `resp.content` ne fait que rendre
+ce buffer. Le garde-fou n'evitait que le `json.loads`.
+
+La preuve n'est donc PAS « une exception est levee » (l'ancien code la levait
+aussi) mais « combien d'octets ont reellement ete lus depuis le socket ».
+C'est ce que mesure `_CountingRaw.sent` dans tout ce fichier : avec l'ancienne
+mecanique il vaudrait la taille TOTALE du corps hostile ; avec la nouvelle il
+est plafonne a la borne + un chunk.
+"""
+
+from __future__ import annotations
+
+import json
+import unittest
+
+import requests
+from requests.structures import CaseInsensitiveDict
+
+from cinesort.infra._http_utils import (
+    DEFAULT_MAX_BODY_BYTES,
+    STREAM_CHUNK_BYTES,
+    ResponseTooLargeError,
+    enforce_body_limit,
+    get_bounded,
+)
+
+# Corps hostile : 5x la borne par defaut. Tout octet au-dela de la borne qui
+# arrive quand meme dans le processus est exactement le bug qu'on corrige.
+_HOSTILE_BYTES = 5 * DEFAULT_MAX_BODY_BYTES
+
+# Tolerance de sur-lecture : on detecte le depassement sur le chunk qui le
+# franchit, donc au plus un chunk au-dela de la borne.
+_OVERREAD_TOLERANCE = STREAM_CHUNK_BYTES
+
+
+class _CountingRaw:
+    """Faux flux urllib3 qui COMPTE les octets reellement remis au client.
+
+    Pas d'attribut `stream` : `requests.Response.iter_content` retombe alors
+    sur `self.raw.read(chunk_size)`, ce qui rend la lecture deterministe.
+    """
+
+    def __init__(self, total: int) -> None:
+        self.total = int(total)
+        self.sent = 0
+        self.closed = False
+        self.read_calls = 0
+
+    def read(self, amt: int | None = None, **_kwargs: object) -> bytes:
+        self.read_calls += 1
+        if self.closed:
+            return b""
+        remaining = self.total - self.sent
+        if remaining <= 0:
+            return b""
+        n = remaining if amt is None else min(int(amt), remaining)
+        self.sent += n
+        return b"x" * n
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _response(body_size: int, *, content_length: int | None = None, payload: object = None) -> requests.Response:
+    """Vraie `requests.Response` adossee a un flux comptabilise."""
+    resp = requests.Response()
+    resp.status_code = 200
+    resp.url = "https://api.example.test/x"
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if content_length is not None:
+        headers["Content-Length"] = str(content_length)
+    resp.headers = CaseInsensitiveDict(headers)
+    if payload is not None:
+        raw_body = json.dumps(payload).encode("utf-8")
+        resp.raw = _CountingRaw(len(raw_body))
+        # On veut un vrai contenu exploitable : on remplace read() par un
+        # debit du payload reel, tout en gardant le compteur.
+        raw = resp.raw
+        buf = {"data": raw_body}
+
+        def _read(amt: int | None = None, **_kw: object) -> bytes:
+            raw.read_calls += 1
+            if raw.closed or not buf["data"]:
+                return b""
+            n = len(buf["data"]) if amt is None else min(int(amt), len(buf["data"]))
+            chunk, buf["data"] = buf["data"][:n], buf["data"][n:]
+            raw.sent += len(chunk)
+            return chunk
+
+        raw.read = _read  # type: ignore[method-assign]
+    else:
+        resp.raw = _CountingRaw(body_size)
+    return resp
+
+
+class EnforceBodyLimitTests(unittest.TestCase):
+    """Le coeur du correctif : la borne agit pendant la lecture du flux."""
+
+    def test_oversized_stream_is_abandoned_before_full_download(self) -> None:
+        limit = 1_000_000
+        resp = _response(_HOSTILE_BYTES)
+        raw = resp.raw
+
+        with self.assertRaises(ResponseTooLargeError):
+            enforce_body_limit(resp, max_bytes=limit)
+
+        # LA preuve du correctif. Avec la borne post-materialisation, requests
+        # aurait deja lu les 50 Mo et `sent` vaudrait _HOSTILE_BYTES.
+        self.assertLessEqual(
+            raw.sent,
+            limit + _OVERREAD_TOLERANCE,
+            f"{raw.sent} octets lus pour une borne de {limit} : le corps a ete telecharge avant d'etre refuse",
+        )
+        self.assertLess(raw.sent, _HOSTILE_BYTES, "le corps hostile a ete lu en entier")
+
+    def test_oversized_stream_closes_the_connection(self) -> None:
+        resp = _response(_HOSTILE_BYTES)
+        raw = resp.raw
+        with self.assertRaises(ResponseTooLargeError):
+            enforce_body_limit(resp, max_bytes=1_000_000)
+        self.assertTrue(raw.closed, "la connexion doit etre coupee, sinon le reste du corps arrive quand meme")
+
+    def test_declared_content_length_refuses_before_reading_one_byte(self) -> None:
+        resp = _response(_HOSTILE_BYTES, content_length=_HOSTILE_BYTES)
+        raw = resp.raw
+        with self.assertRaises(ResponseTooLargeError) as ctx:
+            enforce_body_limit(resp, max_bytes=1_000_000)
+        self.assertTrue(ctx.exception.declared)
+        self.assertEqual(raw.sent, 0, "un Content-Length hors borne doit etre refuse sans lire le corps")
+
+    def test_lying_content_length_is_still_caught_by_the_counter(self) -> None:
+        """Content-Length menteur (ou taille compressee) : le compteur tranche."""
+        resp = _response(_HOSTILE_BYTES, content_length=12)
+        raw = resp.raw
+        with self.assertRaises(ResponseTooLargeError):
+            enforce_body_limit(resp, max_bytes=1_000_000)
+        self.assertLessEqual(raw.sent, 1_000_000 + _OVERREAD_TOLERANCE)
+
+    def test_body_under_the_limit_stays_fully_usable(self) -> None:
+        """Non-regression : une reponse normale se parse comme avant.
+
+        Cette assertion doit rester VERTE des deux cotes du correctif.
+        """
+        resp = _response(0, payload={"ServerName": "Test", "Version": "10.9"})
+        enforce_body_limit(resp, max_bytes=DEFAULT_MAX_BODY_BYTES)
+        self.assertEqual(resp.json(), {"ServerName": "Test", "Version": "10.9"})
+        self.assertEqual(resp.content, json.dumps({"ServerName": "Test", "Version": "10.9"}).encode("utf-8"))
+        self.assertIn("ServerName", resp.text)
+
+    def test_error_is_a_valueerror(self) -> None:
+        """Non-regression de contrat : les 18 sites remplaces levaient
+        `ValueError` et sont entoures de `except (..., ValueError, ...)`.
+        """
+        self.assertTrue(issubclass(ResponseTooLargeError, ValueError))
+        exc = ResponseTooLargeError(limit=10, observed=99)
+        self.assertIn("Response too large", str(exc))
+        self.assertEqual(exc.limit, 10)
+
+    def test_rejects_a_nonsense_limit(self) -> None:
+        with self.assertRaises(ValueError):
+            enforce_body_limit(_response(0, payload={}), max_bytes=0)
+
+
+class GetBoundedTests(unittest.TestCase):
+    def test_stream_is_requested(self) -> None:
+        """Sans `stream=True`, requests materialise tout avant de rendre la
+        main et la borne redeviendrait cosmetique."""
+        captured: dict = {}
+
+        class _Session:
+            def get(self, url: str, **kwargs: object) -> requests.Response:
+                captured["url"] = url
+                captured["kwargs"] = kwargs
+                return _response(0, payload={"ok": True})
+
+        resp = get_bounded(_Session(), "https://api.example.test/x", timeout=5.0)
+        self.assertEqual(resp.json(), {"ok": True})
+        self.assertIs(captured["kwargs"].get("stream"), True)
+        self.assertEqual(captured["kwargs"].get("timeout"), 5.0)
+
+    def test_oversized_response_closes_and_raises(self) -> None:
+        raw_holder: dict = {}
+
+        class _Session:
+            def get(self, url: str, **kwargs: object) -> requests.Response:
+                resp = _response(_HOSTILE_BYTES)
+                raw_holder["raw"] = resp.raw
+                return resp
+
+        with self.assertRaises(ResponseTooLargeError):
+            get_bounded(_Session(), "https://api.example.test/x", max_bytes=500_000)
+        self.assertTrue(raw_holder["raw"].closed)
+        self.assertLessEqual(raw_holder["raw"].sent, 500_000 + _OVERREAD_TOLERANCE)
+
+
+class _RecordingSession:
+    """Remplace `client._session.get/post/delete` en gardant un vrai flux."""
+
+    def __init__(self, *, hostile: bool, payload: object = None) -> None:
+        self.hostile = hostile
+        self.payload = payload
+        self.calls: list[dict] = []
+        self.raws: list[_CountingRaw] = []
+
+    def __call__(self, url: str, **kwargs: object) -> requests.Response:
+        self.calls.append({"url": url, "kwargs": kwargs})
+        resp = _response(_HOSTILE_BYTES) if self.hostile else _response(0, payload=self.payload)
+        self.raws.append(resp.raw)
+        return resp
+
+    @property
+    def bytes_read(self) -> int:
+        return sum(raw.sent for raw in self.raws)
+
+
+class ClientsAreRoutedThroughTheBoundedReadTests(unittest.TestCase):
+    """La grappe entiere : chaque client doit passer par le helper.
+
+    Un client qui redeviendrait un `session.get()` nu suivi d'un
+    `len(resp.content)` re-telechargerait tout le corps hostile : ces tests
+    mesurent les octets lus, pas la presence d'une exception.
+    """
+
+    def _assert_bounded(self, session: _RecordingSession) -> None:
+        self.assertGreater(session.bytes_read, 0, "aucune lecture : le test ne prouve rien")
+        self.assertLessEqual(
+            session.bytes_read,
+            len(session.raws) * (DEFAULT_MAX_BODY_BYTES + _OVERREAD_TOLERANCE),
+            f"{session.bytes_read} octets lus : le corps hostile a ete materialise avant d'etre refuse",
+        )
+        for call in session.calls:
+            self.assertIs(
+                call["kwargs"].get("stream"),
+                True,
+                f"appel sans stream=True, la borne redevient cosmetique : {call}",
+            )
+
+    # -- Jellyfin (#425) --------------------------------------------------
+
+    def test_jellyfin_validate_connection(self) -> None:
+        from cinesort.infra.jellyfin_client import JellyfinClient
+
+        client = JellyfinClient("http://jelly.local", "key", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        res = client.validate_connection()
+
+        self.assertFalse(res.get("ok"))
+        self._assert_bounded(session)
+
+    def test_jellyfin_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.jellyfin_client import JellyfinClient
+
+        client = JellyfinClient("http://jelly.local", "key", timeout_s=5.0)
+        self.addCleanup(client.close)
+        client._session.get = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False, payload={"Items": [{"Id": "a", "Name": "Films", "CollectionType": "movies"}]}
+        )
+
+        libs = client.get_libraries("u1")
+
+        self.assertEqual(libs, [{"id": "a", "name": "Films", "collection_type": "movies"}])
+
+    # -- Radarr (#433 / #753) ---------------------------------------------
+
+    def test_radarr_get_movies(self) -> None:
+        from cinesort.infra.radarr_client import RadarrClient, RadarrError
+
+        client = RadarrClient("http://radarr.local:7878", "key", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        with self.assertRaises(RadarrError):
+            client.get_movies()
+        self._assert_bounded(session)
+
+    def test_radarr_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.radarr_client import RadarrClient
+
+        client = RadarrClient("http://radarr.local:7878", "key", timeout_s=5.0)
+        self.addCleanup(client.close)
+        client._session.get = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False, payload=[{"id": 7, "title": "Heat", "year": 1995, "tmdbId": 949}]
+        )
+
+        movies = client.get_movies()
+
+        self.assertEqual(len(movies), 1)
+        self.assertEqual(movies[0]["title"], "Heat")
+        self.assertEqual(movies[0]["tmdb_id"], 949)
+
+    # -- TMDb (#798) ------------------------------------------------------
+
+    def test_tmdb_search_movie(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from cinesort.infra.tmdb_client import TmdbClient
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_tmdb_")
+        self.addCleanup(tmp.cleanup)
+        client = TmdbClient(api_key="k", cache_path=Path(tmp.name) / "c.json", timeout_s=5.0)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        # Fallback gracieux documente : la recherche rend une liste vide.
+        self.assertEqual(client.search_movie("Heat", 1995), [])
+        self._assert_bounded(session)
+        # Une reponse hors borne n'est PAS une panne serveur : le breaker ne
+        # doit pas se fermer sur elle (cf CircuitBreaker.call).
+        self.assertEqual(client._breaker.failures, 0)
+
+    def test_tmdb_nominal_response_still_parsed(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from cinesort.infra.tmdb_client import TmdbClient
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_tmdb_ok_")
+        self.addCleanup(tmp.cleanup)
+        client = TmdbClient(api_key="k", cache_path=Path(tmp.name) / "c.json", timeout_s=5.0)
+        client._session.get = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False,
+            payload={"results": [{"id": 949, "title": "Heat", "release_date": "1995-12-15", "popularity": 20.0}]},
+        )
+
+        results = client.search_movie("Heat", 1995)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].id, 949)
+        self.assertEqual(results[0].title, "Heat")
+
+    # -- OMDb (#824) ------------------------------------------------------
+
+    def test_omdb_find_by_imdb_id(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from cinesort.infra.omdb_client import OmdbClient
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_omdb_")
+        self.addCleanup(tmp.cleanup)
+        client = OmdbClient(api_key="k", cache_path=Path(tmp.name) / "c.json", timeout_s=5.0)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        self.assertIsNone(client.find_by_imdb_id("tt0113277"))
+        self._assert_bounded(session)
+
+    # -- Plex (#753 / #433) -----------------------------------------------
+    #
+    # PlexClient etait le DERNIER client sans borne : il n'importait meme
+    # aucun helper borne et gardait 4 `resp.json()` nus. Les tests ci-dessous
+    # portent sur le SITE D'APPEL (`PlexClient._get`), pas sur le helper : un
+    # correctif qui bornerait le helper sans router `_get` dessus les laisse
+    # ROUGES.
+
+    def test_plex_validate_connection(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        res = client.validate_connection()
+
+        self.assertFalse(res.get("ok"), "un corps hors borne ne doit jamais devenir un succes")
+        self._assert_bounded(session)
+
+    def test_plex_get_movies_raises_instead_of_returning_an_empty_library(self) -> None:
+        """Sens RESTRICTIF : sur un chemin qui alimente le scan, l'echec doit
+        remonter — surtout pas une liste vide qui ferait croire a 0 film."""
+        from cinesort.infra.plex_client import PlexClient, PlexError
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        with self.assertRaises(PlexError):
+            client.get_movies("4")
+        self._assert_bounded(session)
+
+    def test_plex_refresh_library_still_raises_plexerror(self) -> None:
+        """`refresh_library` n'attrape QUE PlexError : la borne ne doit pas y
+        faire fuir un `ValueError` brut jusqu'a l'UI."""
+        from cinesort.infra.plex_client import PlexClient, PlexError
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        with self.assertRaises(PlexError):
+            client.refresh_library("4")
+        self._assert_bounded(session)
+
+    def test_plex_get_movies_count(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        # Contrat historique de la methode : 0 en cas d'erreur.
+        self.assertEqual(client.get_movies_count("4"), 0)
+        self._assert_bounded(session)
+
+    def test_plex_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.plex_client import PlexClient
+
+        client = PlexClient("http://plex.local:32400", "token-test", timeout_s=5.0)
+        self.addCleanup(client.close)
+        client._session.get = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False,
+            payload={"MediaContainer": {"Directory": [{"key": "4", "title": "Films", "type": "movie"}]}},
+        )
+
+        libs = client.get_libraries("movie")
+
+        self.assertEqual(libs, [{"id": "4", "name": "Films", "type": "movie"}])
+
+    # -- Ollama (#824) ----------------------------------------------------
+
+    def test_ollama_invoke(self) -> None:
+        from cinesort.infra.integrations.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        session = _RecordingSession(hostile=True)
+        client._session.post = session  # type: ignore[method-assign]
+
+        res = client.generate_synopsis("Heat", 1995)
+
+        # La preuve principale : les octets reellement lus. Elle vient AVANT
+        # les assertions sur le payload, sinon un `reason` different masquerait
+        # le fait que le corps hostile a quand meme ete telecharge en entier.
+        self._assert_bounded(session)
+        self.assertLessEqual(session.bytes_read, MAX_RESPONSE_BYTES + _OVERREAD_TOLERANCE)
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("reason"), "response_too_large")
+        self.assertIs(res.get("ai_generated"), False)
+
+    def test_ollama_is_available_reads_a_bounded_body(self) -> None:
+        """`is_available` ne regarde que le status — mais en `stream=False`,
+        `requests` materialise quand meme TOUT le corps avant de rendre la main.
+
+        PORTEE EXACTE DE CE TEST : le double de session ne reproduit PAS cette
+        materialisation interne de `requests` (il rend une `Response` sans
+        toucher au flux). Ce que le test prouve reellement, c'est (1) que
+        l'appel est bien emis en `stream=True` et que le corps est lu par le
+        lecteur borne — `_assert_bounded` echoue sur `bytes_read == 0` si la
+        methode ne lit rien —, et (2) qu'un corps hors borne rend False au lieu
+        de True : un serveur qui inonde n'est pas « disponible ». Le contrat
+        « ne leve jamais » doit tenir en prime.
+        """
+        from cinesort.infra.integrations.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        self.assertFalse(client.is_available())
+        self._assert_bounded(session)
+        self.assertLessEqual(session.bytes_read, MAX_RESPONSE_BYTES + _OVERREAD_TOLERANCE)
+
+    def test_ollama_nominal_response_still_parsed(self) -> None:
+        from cinesort.infra.integrations.ollama_client import OllamaClient
+
+        client = OllamaClient("http://ollama.local:11434", timeout_s=5.0)
+        self.addCleanup(client._session.close)
+        client._session.post = _RecordingSession(  # type: ignore[method-assign]
+            hostile=False,
+            payload={"response": json.dumps({"synopsis": "Un braqueur et un flic s'observent a Los Angeles."})},
+        )
+
+        res = client.generate_synopsis("Heat", 1995)
+
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("generated"), "Un braqueur et un flic s'observent a Los Angeles.")
+        self.assertIs(res.get("ai_generated"), True)
+
+    # -- Fiche film : GET TMDb direct (hors client) -----------------------
+    #
+    # Site trouve en re-verifiant l'inventaire : il n'appartient a AUCUN des
+    # cinq clients, donc un audit « par client » le manquait. C'etait un
+    # `requests.get(...)` nu suivi d'un `r.json()`, sans session partagee.
+
+    @staticmethod
+    def _film_support_doubles(state_dir: str) -> tuple:
+        class _Api:
+            def _internal_settings(self) -> dict:
+                return {"tmdb_api_key": "REALKEY", "state_dir": state_dir, "tmdb_timeout_s": 1.0}
+
+        class _StubTmdb:
+            """Neutralise le chemin cache/runtime : seul le GET direct compte."""
+
+            def __init__(self, **_kwargs: object) -> None:
+                pass
+
+            def get_movie_runtime(self, _movie_id: int) -> None:
+                return None
+
+            def _cache_get(self, _key: str) -> None:
+                return None
+
+            def _cache_set(self, _key: str, _value: object) -> None:
+                return None
+
+            def flush(self) -> None:
+                return None
+
+        return _Api(), _StubTmdb
+
+    def test_film_detail_direct_tmdb_get_is_bounded(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
+        session = _RecordingSession(hostile=True)
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(api, 603)
+
+        # Degradation gracieuse documentee de ce helper (best-effort).
+        self.assertIsNone(out.get("director"))
+        self.assertIsNone(out.get("overview"))
+        self._assert_bounded(session)
+
+    def test_film_detail_nominal_response_survives_the_session_close(self) -> None:
+        """Le corps est lu DANS le `with requests.Session()`, mais `r.json()`
+        s'execute APRES sa fermeture.
+
+        Ca ne marche que parce que `enforce_body_limit` reinjecte les octets
+        lus dans la reponse (`_content` + `_content_consumed`). Sans ce test,
+        rien n'exercait ce couplage avec une VRAIE `requests.Response` : les
+        doubles de `test_film_detail_tmdb_extras.py` sont des objets maison
+        dont `.json()` ne touche jamais au flux.
+        """
+        import tempfile
+        from unittest.mock import patch
+
+        from cinesort.ui.api import film_support
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_film_ok_")
+        self.addCleanup(tmp.cleanup)
+        api, stub_tmdb = self._film_support_doubles(tmp.name)
+
+        session = _RecordingSession(
+            hostile=False,
+            payload={
+                "overview": "Un synopsis.",
+                "runtime": 148,
+                "credits": {"crew": [{"job": "Producer", "name": "Z"}, {"job": "Director", "name": "X"}]},
+            },
+        )
+        with (
+            patch("cinesort.infra.tmdb_client.TmdbClient", stub_tmdb),
+            patch("requests.Session.get", new=session),
+        ):
+            out = film_support._fetch_tmdb_extras(api, 603)
+
+        self.assertEqual(out.get("director"), "X")
+        self.assertEqual(out.get("overview"), "Un synopsis.")
+        self.assertEqual(out.get("runtime"), 148)
+
+    def test_omdb_test_connection_reports_invalid_response(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from cinesort.infra.omdb_client import OmdbClient
+
+        tmp = tempfile.TemporaryDirectory(prefix="cinesort_bounded_omdb_tc_")
+        self.addCleanup(tmp.cleanup)
+        client = OmdbClient(api_key="k", cache_path=Path(tmp.name) / "c.json", timeout_s=5.0)
+        session = _RecordingSession(hostile=True)
+        client._session.get = session  # type: ignore[method-assign]
+
+        res = client.test_connection()
+
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("error_code"), "invalid_resp")
+        self._assert_bounded(session)
+
+
+if __name__ == "__main__":
+    unittest.main()

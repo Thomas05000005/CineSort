@@ -443,6 +443,15 @@ def restore_backup(backup_path: Path, target_path: Path) -> Path:
         # garde-fou existe). Dans l'ordre inverse, une mort dans la meme fenetre
         # laisserait la NOUVELLE image avec le `-wal` de l'ANCIENNE, rejoue en
         # silence au boot suivant (#468) — corruption indetectable.
+        #
+        # C'est aussi ce qui remplace la purge de la PR #573 (mergee entretemps
+        # sur main), qui purgeait `-wal`/`-shm` en TETE de fonction. Cette
+        # position-la etait obligatoire tant que le restore ouvrait la cible ;
+        # elle est devenue nuisible depuis : la purge y precedait la validation
+        # de l'image, donc un backup partiel — restore qui doit etre REFUSE et
+        # rester un no-op — detruisait quand meme le `-wal` non checkpointe de
+        # la base vive SAINE. Ici la purge n'a lieu que sur le chemin qui va
+        # effectivement publier, et couvre `-journal` en plus.
         _purge_sidecars(target)
         _replace_with_retry(tmp, target)
     finally:
