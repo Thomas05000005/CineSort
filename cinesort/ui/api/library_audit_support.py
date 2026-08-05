@@ -9,13 +9,17 @@ Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from typing import Any, Dict, List, Optional
 
+import cinesort.infra.state as _state
 from cinesort.domain.core import windows_safe
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
+from cinesort.ui.api.library_actions_support import _build_tmdb_client_optional
+from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
@@ -296,45 +300,74 @@ def _load_plan_rows_with_collection(api: Any, run_id: str) -> List[Dict[str, Any
     return out
 
 
-def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[str, Any]]]:
+def _build_tmdb_client(api: Any) -> Optional[Any]:
+    """Construit UN client TMDb, destine a etre partage sur tout un appel.
+
+    Issue #467 : `_fetch_collection_parts` construisait son propre client a
+    CHAQUE saga. `TmdbClient.__init__` termine par `self._load_cache()`
+    (tmdb_client.py:169), donc N sagas = N lectures integrales de
+    `tmdb_cache.json` — et surtout N `CircuitBreaker` NEUFS
+    (tmdb_client.py:166). Le breaker (seuil 10 echecs consecutifs) ne pouvait
+    donc JAMAIS s'ouvrir : chaque saga repartait d'un compteur a zero et
+    repayait ses 3 retries avec backoff. Un client unique redonne au breaker
+    et au pool de connexions de la Session leur effet sur toute la boucle.
+
+    Retourne None si la cle TMDb est absente ou si la construction echoue
+    (best-effort : l'appelant traite None comme une absence de verite TMDb).
+
+    AUDIT 2026-06-10 (REAL 2/2), conserve : le lookup `getattr(api,
+    "_tmdb_client")` d'origine etait mort (aucun module ne pose cet attribut,
+    verifie sur tout le depot) et `TmdbClient(api_key=api_key)` OMETTAIT le
+    parametre requis `cache_path` -> TypeError avale -> `_fetch_collection_parts`
+    retournait toujours None -> `get_incomplete_sagas` toujours `sagas: []`
+    (feature 100% morte). La construction correcte est desormais celle,
+    unique, de `_build_tmdb_client_optional`.
+    """
+    try:
+        settings = api._internal_settings()
+        state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+        return _build_tmdb_client_optional(settings, state_dir)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("_build_tmdb_client error: %s", exc)
+        return None
+
+
+def _fetch_collection_parts(
+    api: Any,
+    collection_id: int,
+    *,
+    client: Any = None,
+) -> Optional[List[Dict[str, Any]]]:
     """Recupere la liste des films d'une collection TMDb (parts).
 
     Retourne None si erreur reseau (sera gere par l'appelant).
+
+    Issue #467 : deux changements.
+      - `client` peut etre fourni par l'appelant, pour qu'UN seul client serve
+        toute la boucle des sagas (cf _build_tmdb_client).
+      - le resultat passe par le cache TTL du client. Avant, l'appel tapait
+        `client._http_get` DIRECTEMENT, court-circuitant `_cache_get` /
+        `_cache_set` : le cache TMDb annonce par le reglage
+        `tmdb_cache_ttl_days` n'a jamais servi pour cet endpoint, chaque
+        ouverture de la vue « sagas incompletes » refaisait N appels reseau.
+        La cle `collection_parts|{id}` n'est pas dans `_DETERMINISTIC_PREFIXES`
+        (tmdb_client.py:63) : elle herite donc du TTL COURT, ce qui est voulu —
+        une collection peut gagner un film.
     """
     try:
-        # Eviter import dur de TmdbClient ici, le creer via api si possible.
-        # On reutilise le client TMDb existant sur api si dispo.
-        client = getattr(api, "_tmdb_client", None)
-        if client is None:
-            # AUDIT 2026-06-10 (REAL 2/2) : `getattr(api, "_tmdb_client")` est
-            # toujours None (attribut inexistant) et TmdbClient(api_key=api_key)
-            # OMETTAIT le parametre requis cache_path -> TypeError avale ->
-            # _fetch_collection_parts retournait toujours None ->
-            # get_incomplete_sagas retournait toujours sagas:[] (feature morte).
-            # On construit le client correctement, avec cle dé-masquee + cache_path.
-            import cinesort.infra.state as _state
-            from cinesort.infra.tmdb_client import TmdbClient
-            from cinesort.ui.api.settings_support import normalize_user_path
-
-            settings = api._internal_settings()
-            api_key = str(settings.get("tmdb_api_key") or "").strip()
-            if not api_key:
-                return None
-            state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
-            try:
-                cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
-            except (TypeError, ValueError):
-                cache_ttl_days = 30
-            client = TmdbClient(
-                api_key=api_key,
-                cache_path=state_dir / "tmdb_cache.json",
-                timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
-                cache_ttl_days=cache_ttl_days,
-            )
+        tmdb = client if client is not None else _build_tmdb_client(api)
+        if tmdb is None:
+            return None
+        cache_key = f"collection_parts|{int(collection_id)}"
+        cached = tmdb._cache_get(cache_key)
+        # isinstance(list) et pas `is not None` : une entree de cache corrompue
+        # (JSON venu du disque) ne doit pas etre servie telle quelle.
+        if isinstance(cached, list):
+            return cached
         # Appel direct collection/{id}
         url = f"https://api.themoviedb.org/3/collection/{int(collection_id)}"
-        params = {"api_key": getattr(client, "api_key", None), "language": "fr-FR"}
-        resp = client._http_get(url, params=params)
+        params = {"api_key": getattr(tmdb, "api_key", None), "language": "fr-FR"}
+        resp = tmdb._http_get(url, params=params)
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, dict):
@@ -353,6 +386,9 @@ def _fetch_collection_parts(api: Any, collection_id: int) -> Optional[List[Dict[
                     "year": year,
                 }
             )
+        tmdb._cache_set(cache_key, out)
+        with contextlib.suppress(OSError, PermissionError):
+            tmdb._save_cache_atomic()
         return out
     # except Exception large : best-effort, on retourne None
     except Exception as exc:  # noqa: BLE001
@@ -392,6 +428,10 @@ def get_incomplete_sagas(api: Any) -> Dict[str, Any]:
 
     grouped = _collect_owned_by_collection(plan_rows)
 
+    # Issue #467 : UN SEUL client TMDb pour toute la boucle (avant : un par
+    # saga, donc N chargements de tmdb_cache.json et N circuit breakers neufs).
+    tmdb_client = _build_tmdb_client(api)
+
     sagas_out: List[Dict[str, Any]] = []
     for key, bucket in grouped.items():
         cid = bucket.get("collection_id")
@@ -400,7 +440,7 @@ def get_incomplete_sagas(api: Any) -> Dict[str, Any]:
             # On l'ignore (saga inutile sans verite TMDb)
             continue
 
-        parts = _fetch_collection_parts(api, int(cid))
+        parts = _fetch_collection_parts(api, int(cid), client=tmdb_client)
         # Si echec reseau ou cache absent : on skip cette saga
         if parts is None:
             continue

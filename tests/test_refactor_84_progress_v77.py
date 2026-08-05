@@ -102,7 +102,14 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # convertir isolement n'aurait pas de sens : c'est le motif entier qui
     # demande un nettoyage, et il depasse le perimetre de cette PR.
     # A reprendre dans le chantier de conversion de la couche `ui`.
-    "ui": 113,
+    # 113 -> 110 (lot perf #448/#406/#467/#593, -3). `library_audit_support`
+    # construisait un TmdbClient DANS le corps de `_fetch_collection_parts`,
+    # avec 3 imports differes (infra.state, infra.tmdb_client.TmdbClient,
+    # settings_support.normalize_user_path). Le client est desormais construit
+    # une seule fois par appel via `_build_tmdb_client_optional`, deja present
+    # dans `library_actions_support` : les 3 imports remontent en tete, sans
+    # cycle (lint-imports : 3 contrats KEPT). Marge reprise immediatement.
+    "ui": 110,
 }
 
 # Borne globale = somme des bornes par couche (174 apres PR#847 et PR#852).
