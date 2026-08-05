@@ -36,6 +36,7 @@ from unittest import mock
 from cinesort.domain.core import PlanRow
 from cinesort.ui.api import library_support
 from cinesort.ui.api.cinesort_api import CineSortApi
+from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY
 
 _REPO_ROOT = pathlib.Path(library_support.__file__).resolve().parents[3]
 _PKG_ROOT = _REPO_ROOT / "cinesort"
@@ -47,6 +48,13 @@ _ENRICHMENT_KEYS = {
     # film_support.overlay_tmdb_override (choix manuel de candidat TMDb)
     "tmdb_id",
     "chosen_tmdb_id",
+    # Marqueur fail-closed pose par overlay_tmdb_override / apply_tmdb_overrides_bulk
+    # (PR #849). Ce n'est PAS un champ de PlanRow et ne doit pas le devenir : c'est
+    # un accuse de reception passe entre deux etages du pipeline, et son absence
+    # signifie « overlay pas applique », d'ou la relecture unitaire. Importe plutot
+    # que recopie en litteral : une renomme du marqueur casserait le contrat en
+    # silence si ce test en gardait sa propre copie.
+    TMDB_OVERLAY_DONE_KEY,
     # history_support._enrich_plan_payload
     "display_title",
     "auto_approvable",
