@@ -26,6 +26,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api._duplicate_roles import decision_matches_effective_roles, resolve_duplicate_roles
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
 from cinesort.ui.api.run_data_support import serialize_rows_for_payload, write_plan_jsonl
@@ -1728,6 +1729,20 @@ def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: An
     by_row_ids = _decisions_by_row_id_set(usable)
     if not by_key and not by_row_ids:
         return
+    # Roles EFFECTIFS, resolus exactement comme l'apply le fera : globalement,
+    # par recence. L'index de repli, lui, rattache par ENSEMBLE EXACT de rows —
+    # un critere LOCAL, qui peut retenir une decision qu'une plus recente a
+    # depuis contredite.
+    #
+    # Scenario mesure :
+    #   decision ancienne sur {r1, r2} : gagnant r1, perdant r2
+    #   decision recente  sur {r1, r3} : gagnant r3, perdant r1
+    #   groupe affiche = {r1, r2}  -> le repli annoncait « r1 garde »
+    #   l'apply, lui, resolvait r1 en PERDANT et le deplacait.
+    #
+    # L'utilisateur voyait une chose, le disque en subissait une autre. On
+    # refuse donc d'annoter quand les roles ont ete redistribues.
+    roles = resolve_duplicate_roles(usable)
     for group in data.get("groups") or []:
         dec = by_key.get(_group_key_for(group))
         stale_key = False
@@ -1735,6 +1750,11 @@ def _annotate_groups_with_decisions(data: Dict[str, Any], run_id: str, store: An
             dec = by_row_ids.get(_group_member_row_ids(group))
             stale_key = dec is not None
         if not dec:
+            continue
+        if not decision_matches_effective_roles(dec, roles):
+            # Mieux vaut aucun badge qu'un badge qui MENT sur ce que l'apply
+            # va faire : l'utilisateur relit le groupe au lieu de faire
+            # confiance a une decision perimee.
             continue
         _apply_decision_to_group(group, dec, stale_key=stale_key)
 
