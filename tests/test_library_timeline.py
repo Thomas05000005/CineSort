@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from cinesort.ui.api.library_timeline_support import (
@@ -10,6 +11,24 @@ from cinesort.ui.api.library_timeline_support import (
     _parse_iso_to_month,
     get_library_timeline,
 )
+
+
+def _recent_month(offset_back: int = 0) -> str:
+    """Mois UTC courant recule de `offset_back` mois, au format YYYY-MM.
+
+    Issue #583 : la fenetre de la timeline est ancree sur AUJOURD'HUI (contrat
+    « les N derniers mois »). Les dates en dur de ces tests (2024-12, 2025-06...)
+    sont sorties de la fenetre et n'exercaient plus l'agregation qu'elles
+    pretendaient verifier. Elles sont donc calculees relativement a maintenant,
+    et les fenetres sont choisies assez larges pour absorber un basculement de
+    mois pendant l'execution.
+    """
+    now = datetime.now(timezone.utc)
+    y, m = now.year, now.month - offset_back
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
 
 
 class ParseIsoToMonthTests(unittest.TestCase):
@@ -90,8 +109,9 @@ class GetLibraryTimelineTests(unittest.TestCase):
             {"path": "/m/Film2.mkv", "tmdb_id": "2"},
             {"path": "/m/Film3.mkv", "tmdb_id": "3"},
         ]
-        # mtime simule : 2 films en 2025-06, 1 en 2025-07
-        mock_mtime.side_effect = ["2025-06", "2025-06", "2025-07"]
+        # mtime simule : 2 films le mois dernier, 1 ce mois-ci
+        prev, cur = _recent_month(1), _recent_month(0)
+        mock_mtime.side_effect = [prev, prev, cur]
 
         result = get_library_timeline(self.mock_api, months=3, run_id="run-test")
         self.assertTrue(result["ok"])
@@ -99,10 +119,10 @@ class GetLibraryTimelineTests(unittest.TestCase):
         self.assertEqual(result["total_films"], 3)
         # 100% des films ont une date
         self.assertEqual(result["films_with_date_pct"], 100.0)
-        # 3 mois generates : on doit avoir 2025-05 (0), 2025-06 (2), 2025-07 (1)
+        # 3 mois generes, fenetre ancree sur aujourd'hui : M-2 (0), M-1 (2), M (1)
         months_dict = {m["month"]: m["count"] for m in result["months"]}
-        self.assertEqual(months_dict.get("2025-06"), 2)
-        self.assertEqual(months_dict.get("2025-07"), 1)
+        self.assertEqual(months_dict.get(prev), 2)
+        self.assertEqual(months_dict.get(cur), 1)
 
     @patch("cinesort.ui.api.library_timeline_support._get_jellyfin_date_map")
     @patch("cinesort.ui.api.library_timeline_support._file_mtime_to_month")
@@ -115,9 +135,10 @@ class GetLibraryTimelineTests(unittest.TestCase):
             {"path": "/m/Film2.mkv", "tmdb_id": "2"},
         ]
         # Jellyfin connait les 2 films
+        m1, m2 = _recent_month(2), _recent_month(1)
         mock_jelly.return_value = {
-            "1": "2024-12-15T10:00:00Z",
-            "2": "2025-01-20T10:00:00Z",
+            "1": f"{m1}-15T10:00:00Z",
+            "2": f"{m2}-20T10:00:00Z",
         }
         # mtime n'est pas appele car Jellyfin couvre tout
         mock_mtime.return_value = "2030-01"
@@ -125,8 +146,8 @@ class GetLibraryTimelineTests(unittest.TestCase):
         result = get_library_timeline(self.mock_api, months=6, run_id="run-test")
         self.assertEqual(result["source"], "jellyfin")
         months_dict = {m["month"]: m["count"] for m in result["months"]}
-        self.assertEqual(months_dict.get("2024-12"), 1)
-        self.assertEqual(months_dict.get("2025-01"), 1)
+        self.assertEqual(months_dict.get(m1), 1)
+        self.assertEqual(months_dict.get(m2), 1)
         # mtime ne doit pas avoir ete consulte
         mock_mtime.assert_not_called()
 
@@ -140,13 +161,14 @@ class GetLibraryTimelineTests(unittest.TestCase):
             {"path": "/m/Film1.mkv", "tmdb_id": "1"},
             {"path": "/m/Film2.mkv", "tmdb_id": "2"},  # pas dans Jellyfin
         ]
-        mock_jelly.return_value = {"1": "2024-12-15T10:00:00Z"}
-        mock_mtime.return_value = "2024-12"  # fallback pour film 2
+        shared = _recent_month(1)
+        mock_jelly.return_value = {"1": f"{shared}-15T10:00:00Z"}
+        mock_mtime.return_value = shared  # fallback pour film 2
 
         result = get_library_timeline(self.mock_api, months=6, run_id="run-test")
         self.assertEqual(result["source"], "mixed")
         months_dict = {m["month"]: m["count"] for m in result["months"]}
-        self.assertEqual(months_dict.get("2024-12"), 2)
+        self.assertEqual(months_dict.get(shared), 2)
 
     @patch("cinesort.ui.api.library_timeline_support._file_mtime_to_month")
     @patch("cinesort.ui.api.library_timeline_support._build_library_rows")

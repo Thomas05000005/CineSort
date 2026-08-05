@@ -119,6 +119,12 @@ class MultiSignalResult:
         groups: groupes de >=2 items (les singletons sont exclus).
         phases_used: liste effectivement appliquee.
         phase_counts: nombre de groupes crees ou augmentes par phase (debug).
+            Seule la Phase B peut AUGMENTER un groupe existant (elle absorbe des
+            candidats dans les groupes Phase A) ; les Phases A et C ne font que
+            creer, leur compteur vaut donc simplement leur nombre de groupes.
+            La somme des compteurs n'est PAS `len(groups)` : un groupe Phase A
+            augmente par la Phase B est compte par les deux phases, chacune
+            ayant bien travaille dessus.
     """
 
     groups: List[MultiSignalGroup] = field(default_factory=list)
@@ -218,7 +224,7 @@ def _phase_b_fuzzy_title(
     *,
     min_score: int = FUZZY_TITLE_MIN_SCORE,
     year_tolerance: int = FUZZY_YEAR_TOLERANCE,
-) -> Tuple[List[MultiSignalGroup], List[MultiSignalCandidate]]:
+) -> Tuple[List[MultiSignalGroup], List[MultiSignalCandidate], int]:
     """Phase B: fuzzy title + year +-1.
 
     Pour chaque candidat restant, on cherche d'abord parmi les groupes deja
@@ -228,15 +234,26 @@ def _phase_b_fuzzy_title(
 
     Indexation: les candidats restants sont indexes par (premiere lettre
     normalisee, plage d'annee) pour eviter le NxN naif sur 1000+ films.
+
+    Returns:
+        (nouveaux_groupes, candidats_restants, groupes_phase_a_augmentes).
+
+        Le 3e element (#724) compte les groupes Phase A DISTINCTS auxquels la
+        Pass 1 a ajoute au moins un membre. Ces augmentations sont invisibles
+        des deux autres compteurs : elles ne creent aucun groupe (donc pas dans
+        `nouveaux_groupes`) et `phase_counts[strict_metadata]` est fige avant
+        que la Phase B ne tourne. On compte des GROUPES, pas des ajouts : deux
+        candidats absorbes par le meme groupe valent 1, conformement au contrat
+        « nombre de groupes crees ou augmentes » de `MultiSignalResult`.
     """
     try:
         from rapidfuzz import fuzz
     except ImportError:
         logger.warning("rapidfuzz indisponible : phase B (fuzzy_title) sautee")
-        return [], list(candidates)
+        return [], list(candidates), 0
 
     if not candidates:
-        return [], []
+        return [], [], 0
 
     # Normalise pour matching
     norm_titles: Dict[str, str] = {c.item_id: _normalize_title_for_fuzzy(c.title) for c in candidates}
@@ -244,46 +261,55 @@ def _phase_b_fuzzy_title(
     new_groups: List[MultiSignalGroup] = []
     remaining: List[MultiSignalCandidate] = []
     consumed_ids: set[str] = set()
+    # #724 : positions (dans `existing_groups`) des groupes Phase A augmentes.
+    augmented_group_indexes: set[int] = set()
 
     # Indexer les groupes existants par (token-stable, annee)
     # pour Phase A -> Phase B (ajout d'un candidat a un groupe existant).
     # NB: la cle utilise `_index_token` (premier token apres tri) afin
     # d'etre invariante a l'ordre des mots, comme token_sort_ratio.
-    def _phase_a_index() -> Dict[Tuple[str, int], List[Tuple[str, MultiSignalGroup]]]:
-        idx: Dict[Tuple[str, int], List[Tuple[str, MultiSignalGroup]]] = {}
-        for g in existing_groups:
+    # L'index porte la POSITION du groupe dans `existing_groups` : c'est elle
+    # qui sert de cle d'unicite pour le compteur d'augmentations (#724).
+    # `MultiSignalGroup` est un dataclass mutable non hashable, et deux groupes
+    # distincts peuvent etre egaux au sens `__eq__` — un set de groupes ou une
+    # comparaison par valeur fusionneraient donc des groupes differents.
+    def _phase_a_index() -> Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]]:
+        idx: Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]] = {}
+        for gi, g in enumerate(existing_groups):
             rep_norm = _normalize_title_for_fuzzy(g.representative_title)
             if not rep_norm:
                 continue
             token = _index_token(rep_norm)
-            idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, g))
+            idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, gi, g))
         return idx
 
     a_index = _phase_a_index()
 
-    def _find_group_match(c: MultiSignalCandidate) -> Optional[MultiSignalGroup]:
+    def _find_group_match(c: MultiSignalCandidate) -> Optional[Tuple[int, MultiSignalGroup]]:
         norm = norm_titles[c.item_id]
         if not norm:
             return None
         token = _index_token(norm)
-        best_group: Optional[MultiSignalGroup] = None
+        best_group: Optional[Tuple[int, MultiSignalGroup]] = None
         best_score = -1.0
         for dy in range(-year_tolerance, year_tolerance + 1):
-            for rep_norm, g in a_index.get((token, c.year + dy), []):
+            for rep_norm, gi, g in a_index.get((token, c.year + dy), []):
                 score = fuzz.token_sort_ratio(norm, rep_norm)
                 if score >= min_score and score > best_score:
                     best_score = score
-                    best_group = g
+                    best_group = (gi, g)
         return best_group
 
     # Pass 1: tenter d'ajouter chaque candidat a un groupe Phase A existant
     for c in candidates:
         if c.item_id in consumed_ids:
             continue
-        group_match = _find_group_match(c)
-        if group_match is not None:
+        match = _find_group_match(c)
+        if match is not None:
+            group_index, group_match = match
             group_match.members.append(c.item_id)
             consumed_ids.add(c.item_id)
+            augmented_group_indexes.add(group_index)
             logger.debug(
                 "phase B (fuzzy_title -> group): item=%s ajoute au groupe '%s' (%d)",
                 c.item_id,
@@ -345,7 +371,7 @@ def _phase_b_fuzzy_title(
         else:
             remaining.append(c)
 
-    return new_groups, remaining
+    return new_groups, remaining, len(augmented_group_indexes)
 
 
 def _phase_c_audio_fingerprint(
@@ -495,15 +521,18 @@ def group_by_multi_signal(
         phase_counts[PHASE_STRICT_METADATA] = len(groups_a)
 
     if PHASE_FUZZY_TITLE in phases:
-        groups_b, remaining = _phase_b_fuzzy_title(
+        groups_b, remaining, augmented_a = _phase_b_fuzzy_title(
             remaining,
             all_groups,
             min_score=fuzzy_min_score,
             year_tolerance=fuzzy_year_tolerance,
         )
         all_groups.extend(groups_b)
-        # Compter aussi les ajouts a Phase A
-        phase_counts[PHASE_FUZZY_TITLE] = len(groups_b)
+        # #724 : groupes CREES par la Pass 2 + groupes Phase A AUGMENTES par la
+        # Pass 1. Le seul `len(groups_b)` annoncait 0 alors que la phase venait
+        # d'absorber des candidats dans des groupes existants — un diagnostic
+        # « la phase B ne sert a rien » que la mesure ne soutenait pas.
+        phase_counts[PHASE_FUZZY_TITLE] = len(groups_b) + augmented_a
 
     if PHASE_AUDIO_FINGERPRINT in phases:
         groups_c, remaining = _phase_c_audio_fingerprint(

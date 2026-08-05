@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -510,12 +511,10 @@ def folder_signature(
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
 ) -> str:
     # BUG 3 : optimisation NAS via os.scandir (metadata cachees en 1 op systeme)
-    import os as _os
-
     items: List[Tuple[str, str]] = []  # (sort_key, payload_line)
     video_exts = cfg.video_exts or set()
     try:
-        scandir_ctx = _os.scandir(str(folder))
+        scandir_ctx = os.scandir(str(folder))
     except (OSError, PermissionError, FileNotFoundError):
         return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
     try:
@@ -658,8 +657,6 @@ class _PlanLibraryContext:
             self.pause_logged = True
         # Boucle de pause cooperative — sleep court pour rester reactif au
         # resume ET a la cancellation.
-        import time as _time
-
         while True:
             if core_mod._is_cancel_requested(self.should_cancel):
                 return True
@@ -672,7 +669,7 @@ class _PlanLibraryContext:
                 self.pause_logged = False
                 self.log("INFO", "pause released")
                 return False
-            _time.sleep(poll_interval_s)
+            time.sleep(poll_interval_s)
 
     def persist_folder_cache(
         self,

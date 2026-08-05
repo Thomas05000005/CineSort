@@ -20,7 +20,9 @@ API :
     - clear_decision(film_id, run_id) -> bool removed
     - upgrade_deferred_to_accepted(film_id, run_id, *, locked_fields=None,
         decided_by='user') : transition specifique deferred -> accepted
-        qui RESPECTE les `field_locks` de VP-C (AC-3).
+        qui RESPECTE les `field_locks` de VP-C (AC-3). Issue #768 : refuse
+        un etat de depart `rejected` (inverser une decision utilisateur vers
+        un etat apply-able est un chemin destructif).
     - to_legacy_ok_bool(decision) : helper backward compat.
 
 Coordination Vague P :
@@ -46,6 +48,12 @@ DECISION_REJECTED = "rejected"
 DECISION_DEFERRED = "deferred"
 
 _VALID_DECISIONS = frozenset({DECISION_ACCEPTED, DECISION_REJECTED, DECISION_DEFERRED})
+
+# Issue #768 : etats de depart qu'`upgrade_deferred_to_accepted` accepte quand
+# une decision EXISTE deja. `rejected` en est volontairement absent (inversion
+# d'une decision utilisateur vers un etat apply-able = chemin destructif), et
+# l'absence de decision est traitee a part (contrat historique, cf docstring).
+_UPGRADABLE_TO_ACCEPTED = frozenset({DECISION_DEFERRED, DECISION_ACCEPTED})
 
 
 def to_legacy_ok_bool(decision: Any) -> bool:
@@ -306,6 +314,34 @@ class DecisionsRepository(_BaseRepository):
         des champs verrouilles dans la reponse pour que le caller (UI
         ou orchestration) puisse afficher la liste et eviter d'ecraser.
 
+        Etats de depart acceptes (issue #768) — `accepted` est le seul
+        aboutissement possible, donc la liste est FERMEE et le refus est le
+        defaut :
+
+        - `deferred` : la transition nominale ;
+        - aucune decision (`None`) : creation directe en `accepted`. Contrat
+          historique, explicitement teste
+          (`test_upgrade_without_previous_decision`) : le retirer casserait des
+          appelants qui poussent une acceptation sans passer par `deferred` ;
+        - `accepted` : rejoue a l'identique (double-clic UI), aucun changement
+          d'etat, aucune raison de rendre une erreur.
+
+        REFUSE en revanche `rejected` — et toute valeur inattendue qu'un jour
+        un ecrivain direct poserait dans la colonne. Un `rejected` bascule en
+        `accepted` redevient eligible a l'apply, donc au DEPLACEMENT du dossier
+        sur disque : c'est un chemin destructif, et l'erreur y va dans le sens
+        RESTRICTIF. Le refus est rendu comme `ok=False` sans aucune ecriture ;
+        `previous_decision` porte l'etat qui a motive le refus.
+
+        LIMITE CONNUE (TOCTOU) : la lecture d'etat et l'ecriture passent par
+        deux connexions distinctes. Une decision concurrente posee entre les
+        deux n'est pas vue par la garde. La fenetre est reelle mais non
+        elargie par cette garde, et la methode n'a aujourd'hui aucun appelant
+        de production (grep : docstrings + tests). Un futur cablage devra
+        soit sequentialiser par film_id (cf le verrou par run_id de
+        `save_validation`, BUG-011), soit porter la transition dans une seule
+        transaction.
+
         Args:
             film_id: cle stable.
             run_id: run d'origine.
@@ -320,7 +356,7 @@ class DecisionsRepository(_BaseRepository):
             {
                 ok: bool,
                 previous_decision: str | None,
-                new_decision: 'accepted',
+                new_decision: 'accepted' | None,
                 respected_locks: list[str],
                 warning: str | None,
             }
@@ -338,6 +374,22 @@ class DecisionsRepository(_BaseRepository):
             locked_fields_safe: List[str] = []
         else:
             locked_fields_safe = [_safe_str(f) for f in locked_fields if _safe_str(f)]
+
+        # Issue #768 : garde d'etat AVANT toute ecriture. Liste blanche fermee
+        # (cf docstring) — ce qui n'est pas explicitement autorise est refuse.
+        if prev_decision is not None and prev_decision not in _UPGRADABLE_TO_ACCEPTED:
+            return {
+                "ok": False,
+                "previous_decision": prev_decision,
+                "new_decision": None,
+                "respected_locks": locked_fields_safe,
+                "warning": (
+                    f"transition refusee : etat courant {prev_decision!r} — "
+                    f"seuls {sorted(_UPGRADABLE_TO_ACCEPTED)} (ou l'absence de "
+                    f"decision) peuvent passer en {DECISION_ACCEPTED!r}. "
+                    "Aucune ecriture effectuee."
+                ),
+            }
 
         res = self.set_decision(
             film_id,
