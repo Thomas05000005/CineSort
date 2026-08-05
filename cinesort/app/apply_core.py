@@ -304,6 +304,18 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     return digest.hexdigest()
 
 
+def quick_hash_cache_key_from_stat(path: Path, stat_result: Any) -> Tuple[str, int, int]:
+    """Clef de cache (path, size, mtime_ns) construite depuis un `stat` DEJA obtenu.
+
+    Issue #637 : `quick_hash_cache_key` refaisait systematiquement un `stat()`
+    alors que l'appelant venait d'en faire un. Le calcul de la clef est isole ici
+    pour que les deux chemins (stat frais / stat deja connu) produisent
+    strictement la MEME clef — sinon un cache se scinderait en deux silencieusement.
+    """
+    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
+    return (str(path), int(stat_result.st_size), mtime_ns)
+
+
 def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
     """Construit la clef de cache (path, size, mtime_ns) pour `sha1_quick_cached`.
 
@@ -313,8 +325,7 @@ def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
         stat_result = path.stat()
     except (OSError, PermissionError):
         return None
-    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
-    return (str(path), int(stat_result.st_size), mtime_ns)
+    return quick_hash_cache_key_from_stat(path, stat_result)
 
 
 def sha1_quick_cached(path: Path, cache: Optional[Dict[Tuple[str, int, int], str]]) -> str:
