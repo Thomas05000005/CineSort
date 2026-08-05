@@ -35,7 +35,9 @@ _MAGIC_WMV = bytes([0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11])
 
 # MPEG-TS : sync byte 0x47 repete a intervalle regulier.
 #
-# Ni la taille de paquet ni le decalage initial ne sont garantis :
+# #784 (main) avait fige DEUX layouts en dur — (offset 0, 188) et (offset 4,
+# 192) — ce qui suffisait a rattraper le defaut M2TS. On generalise ici :
+# ni la taille de paquet ni le decalage initial ne sont garantis.
 #  - 188 : MPEG-2 TS nu (ISO/IEC 13818-1), sync a l'offset 0 ;
 #  - 192 : source packet BDAV/M2TS = TP_extra_header de 4 octets (2 bits de
 #          copy permission + horodatage d'arrivee 30 bits a 27 MHz) SUIVI du
@@ -46,10 +48,12 @@ _MAGIC_WMV = bytes([0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11])
 # Ce sont exactement les trois tailles que FFmpeg sonde dans
 # libavformat/mpegts.c (TS_PACKET_SIZE / TS_DVHS_PACKET_SIZE /
 # TS_FEC_PACKET_SIZE) ; son `analyze()` totalise les sync par offset
-# `i % packet_size`, c.-a-d. cherche lui aussi le decalage initial.
+# `i % packet_size`, c.-a-d. cherche lui aussi le decalage initial. La table
+# `_TS_LAYOUTS` de #784 disparait donc au profit du balayage : elle etait
+# strictement incluse dedans (offset 0/188 et offset 4/192 en font partie).
 _TS_SYNC_BYTE = 0x47
 _TS_PACKET_SIZE = 188
-_TS_M2TS_PACKET_SIZE = 192
+_TS_M2TS_PACKET_SIZE = 192  # 188 + les 4 octets du TP_extra_header
 _TS_FEC_PACKET_SIZE = 204
 _TS_PACKET_SIZES = (_TS_PACKET_SIZE, _TS_M2TS_PACKET_SIZE, _TS_FEC_PACKET_SIZE)
 _TS_SYNC_COUNT = 3  # verifier 3 sync bytes
@@ -174,6 +178,9 @@ def _check_ts(data: bytes) -> Tuple[bool, str]:
                 break
             if all(data[base + i * size] == _TS_SYNC_BYTE for i in range(_TS_SYNC_COUNT)):
                 return True, "ok"
+    # Aucun layout ne correspond. Distinguer "trop petit pour verifier" de
+    # "octets presents mais invalides" (garde deja portee par #784) : n'affirmer
+    # header_mismatch que si le buffer permettait de tester TOUS les layouts.
     if not all_layouts_tested:
         return False, "file_too_small"
     return False, "header_mismatch"

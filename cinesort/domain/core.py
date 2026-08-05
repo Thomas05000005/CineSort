@@ -257,12 +257,14 @@ class Config:
     naming_movie_template: str = "{title} ({year})"
     naming_tv_template: str = "{series} ({year})"
 
-    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)"
-    # Persiste par _save_section_naming (ui/api/settings_support.py L1608-1609)
-    # Consomme par apply_core (ext_case_for_video) pour ajuster la casse de
-    # l'extension du fichier video cible (single, collection, TV, quarantine).
-    # True = .MKV source -> .mkv cible ; False = preservation casse source.
-    lowercase_extensions: bool = True
+    # ITER7 - Reglage UI "Extensions en minuscule (.mkv vs .MKV)" : SUPPRIME.
+    # Son seul effet etait de reconstruire le NOM DU FICHIER VIDEO cible avec un
+    # suffixe force en minuscules (`Film.MKV` -> `Film.mkv`), ce qui viole la
+    # regle inviolable n1 (« ne JAMAIS renommer le fichier video » : le nom doit
+    # rester synchrone avec le torrent, sinon le seeding casse). Aucun nom de
+    # DOSSIER n'en dependait. La cle peut subsister dans un settings.json
+    # existant : elle est simplement ignoree (le merge read-modify-write de
+    # save_settings_payload preserve les cles inconnues).
 
     # ITER7 etape 3 - Reglage UI "Separateur" (selecteur {".", " ", "_", "-"})
     # Persiste par _save_section_naming (ui/api/settings_support.py L1611-1613)
@@ -319,7 +321,6 @@ class Config:
             scan_max_workers=max(1, int(self.scan_max_workers or 1)),
             naming_movie_template=str(self.naming_movie_template or "{title} ({year})"),
             naming_tv_template=str(self.naming_tv_template or "{series} ({year})"),
-            lowercase_extensions=bool(self.lowercase_extensions),
             # ITER7 etape 3 : coerce-and-default identique a _save_section_naming
             # pour proteger les configs anciennes ou editees a la main contre une
             # valeur invalide qui sortirait du jeu {".", " ", "_", "-"}.
