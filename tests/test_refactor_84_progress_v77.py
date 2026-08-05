@@ -239,7 +239,33 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     #     moins doit rester differee.
     #
     # 56 est MESURE sur l'arbre final (walk AST, meme code que ce test), pas 63-7.
-    "ui": 56,
+    #
+    # 56 -> 54 (#779 vague 3, -2) : conversions, pas relevement. Le reliquat
+    # intra-`ui/api` a ete re-mesure sur l'arbre courant : 24 statements, dont 4
+    # sur une VRAIE arete de retour de tete. Deux seulement n'avaient ni cycle ni
+    # garde et sont convertis ici :
+    #   - `run_flow_support._get_status_impl` (`run_data_support`) : son
+    #     commentaire invoquait un cycle « run_flow <-> run_data » qui n'existe
+    #     pas — `run_data_support` est DEJA une dependance de tete du module
+    #     (ligne 31) et n'importe rien de `run_flow_support` en retour ;
+    #   - `reset_support._build_default_settings` (`settings_support`) : son
+    #     commentaire invoquait un « blast radius » inexistant — `cinesort_api.py`
+    #     importe DEJA les deux modules en tete (lignes 82 et 88), donc les deux
+    #     sont charges au boot quoi qu'il arrive. L'import FRERE de `cinesort_api`
+    #     dans la meme fonction reste differe : lui est un vrai cycle.
+    #
+    # NON converti apres mesure, et c'est le resultat le plus utile de la vague :
+    # `library_support` -> `film_support`. Aucun cycle ne le justifie AUJOURD'HUI,
+    # mais le remonter en tete cree l'arete `library_support -> film_support`, qui
+    # rend NECESSAIRES deux imports differes jusque-la libres (`film_support:62`
+    # vers `history_support`, `film_support:457` vers `library_actions_support`,
+    # tous deux refermes via `... -> library_support -> film_support`). Mesure
+    # avant/apres : 4 vraies aretes de retour -> 6. La conversion echangeait un
+    # import differe contre deux cycles de plus : refusee. Le site a quand meme
+    # ete reecrit en MODULE-STYLE au passage (cf. §11.2).
+    #
+    # 54 est MESURE sur l'arbre final (walk AST, meme code que ce test), pas 56-2.
+    "ui": 54,
 }
 
 # Borne globale = somme des bornes par couche (114 apres le lot #554/#595/#779).
