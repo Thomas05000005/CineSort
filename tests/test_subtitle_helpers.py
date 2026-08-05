@@ -44,13 +44,17 @@ class TestDetectLanguageFromSuffix(unittest.TestCase):
     def test_special_tags(self):
         self.assertEqual(detect_language_from_suffix("Movie.vostfr.srt"), "fr")
         self.assertEqual(detect_language_from_suffix("Movie.vf.srt"), "fr")
-        self.assertEqual(detect_language_from_suffix("Movie.vo.srt"), "en")
+        # #610 : 'vo' (version originale) n'est PAS l'anglais. Voir
+        # tests/test_subtitle_lang_vocab.py pour le contrat complet.
+        self.assertEqual(detect_language_from_suffix("Movie.vo.srt"), "")
 
     def test_non_language_tags(self):
         self.assertEqual(detect_language_from_suffix("Movie.forced.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.sdh.srt"), "")
-        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.cc.srt"), "")
+        # #679 : 'hi' seul est le code ISO du HINDI, pas un tag malentendant
+        # (la convention du projet pour le malentendant est 'sdh').
+        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "hi")
 
     def test_no_suffix(self):
         self.assertEqual(detect_language_from_suffix("Movie.srt"), "")
@@ -257,6 +261,66 @@ class TestBuildSubtitleReport(unittest.TestCase):
             report = build_subtitle_report(folder, video, [])
             self.assertEqual(report.count, 2)
             self.assertEqual(report.duplicate_languages, ["fr"])
+
+    def test_vobsub_pair_not_flagged_as_duplicate(self):
+        # Une paire VobSub (.idx + .sub) de meme langue = UN sous-titre en deux
+        # fichiers -> ne doit PAS etre signalee comme doublon de langue.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.idx").write_text("")
+            (folder / "Movie.fr.sub").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.count, 2)  # 2 fichiers listes
+            self.assertEqual(report.languages, ["fr"])
+            self.assertEqual(report.duplicate_languages, [])  # mais 1 seule langue reelle
+
+    def test_vobsub_plus_srt_same_lang_is_real_duplicate(self):
+        # VobSub FR + un .srt FR = deux vrais sous-titres FR -> doublon conserve.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.idx").write_text("")
+            (folder / "Movie.fr.sub").write_text("")
+            (folder / "Movie.french.srt").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.duplicate_languages, ["fr"])
+
+    def test_orphan_idx_without_sub_is_still_counted(self):
+        # Un `.idx` SANS son `.sub` frere n'est pas une paire : c'est un fichier
+        # a part entiere (cote apply, `classify_sidecars` le deplace comme tel).
+        # L'ecarter sur la seule extension ferait taire un VRAI doublon FR.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.idx").write_text("")  # pas de Movie.fr.sub
+            (folder / "Movie.french.srt").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.count, 2)
+            self.assertEqual(report.duplicate_languages, ["fr"])
+
+    def test_vobsub_pair_with_forced_tag_and_full_srt(self):
+        # Composition des DEUX exclusions du decompte : la paire VobSub forcee
+        # est ecartee par le tag (F12) ET par l'appairage (#749), le `.srt`
+        # complet reste seul compte -> aucun faux doublon.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            video = folder / "Movie.mkv"
+            video.write_bytes(b"\x00")
+            (folder / "Movie.fr.forced.idx").write_text("")
+            (folder / "Movie.fr.forced.sub").write_text("")
+            (folder / "Movie.fr.srt").write_text("")
+
+            report = build_subtitle_report(folder, video, [])
+            self.assertEqual(report.count, 3)
+            self.assertEqual(report.languages, ["fr"])
+            self.assertEqual(report.duplicate_languages, [])
 
     def test_no_expected_languages(self):
         with tempfile.TemporaryDirectory() as tmp:

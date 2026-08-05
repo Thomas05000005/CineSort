@@ -295,14 +295,20 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
             n_with_date += 1
 
     # 3. Genere le range de mois pour combler les trous (Janvier 0, Fevrier 0, ...)
-    if month_counter:
-        latest_month = max(month_counter.keys())
-        month_range = _generate_month_range(latest_month, n_months)
-    else:
-        # Aucune date dispo : timeline vide
-        now = datetime.now(timezone.utc)
-        latest_month = f"{now.year:04d}-{now.month:02d}"
-        month_range = _generate_month_range(latest_month, n_months)
+    # Issue #583 : l'ancrage etait `max(month_counter)`, donc le dernier mois
+    # AYANT eu de l'activite. Sur une bibliotheque mature (rien d'ajoute depuis
+    # un an), la fenetre se figeait sur ce mois fossile et ne repondait plus a la
+    # question posee par le contrat de cette fonction — « les N DERNIERS mois ».
+    # La branche `month_counter` vide utilisait deja `now`, les deux etaient donc
+    # incoherentes ; elles sont desormais une seule expression.
+    # `max` et non `today_month` seul : un fichier date dans le futur (mtime
+    # fausse par un NAS ou une copie) reste visible plutot que d'etre masque en
+    # silence. Les cles sont des `YYYY-MM` zero-padded, donc l'ordre
+    # lexicographique est l'ordre chronologique.
+    now = datetime.now(timezone.utc)
+    today_month = f"{now.year:04d}-{now.month:02d}"
+    latest_month = max([today_month, *month_counter.keys()])
+    month_range = _generate_month_range(latest_month, n_months)
 
     months_list = [{"month": m, "count": month_counter.get(m, 0)} for m in month_range]
 

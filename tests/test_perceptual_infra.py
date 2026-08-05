@@ -335,7 +335,18 @@ class ConstantsCoherenceTests(unittest.TestCase):
         self.assertGreater(len(MAJOR_STUDIOS), 10)
 
     def test_engine_version_set(self) -> None:
-        self.assertEqual(PERCEPTUAL_ENGINE_VERSION, "1.0")
+        # Bumpee a 1.1 le 2026-08-03 (lot verdicts perceptuels : #660 change le
+        # mel_score, donc le score global). Toute nouvelle regle de verdict ou de
+        # scoring doit bumper cette valeur, d'ou l'assertion exacte.
+        self.assertEqual(PERCEPTUAL_ENGINE_VERSION, "1.1")
+
+    def test_engine_version_is_stamped_on_the_result(self) -> None:
+        """L'estampille doit ARRIVER dans le rapport, sinon elle ne sert a rien."""
+        from cinesort.domain.perceptual.composite_score import build_perceptual_result
+
+        result = build_perceptual_result(None, None, None)
+        self.assertEqual(result.version, PERCEPTUAL_ENGINE_VERSION)
+        self.assertEqual(result.to_dict()["version"], PERCEPTUAL_ENGINE_VERSION)
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -185,9 +186,7 @@ class ProbeService:
         self.store = store
         self.runner = runner
         if which_fn is None:
-            from shutil import which as default_which
-
-            self.which_fn = default_which
+            self.which_fn = shutil.which
         else:
             self.which_fn = which_fn
         # PERF-1 (Phase 2 v7.8.0) : cache `get_tools_status` par signature

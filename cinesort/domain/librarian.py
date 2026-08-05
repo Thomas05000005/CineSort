@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Set
 # ignorait les embedded -> divergence de comptage entre les 2 vues (BUG 2 Vague I
 # faussement corrige).
 from cinesort.domain.confidence_thresholds import CONF_MEDIUM
-from cinesort.domain.subtitle_helpers import _normalize_iso639
+from cinesort.domain.subtitle_helpers import _normalize_expected_language, _normalize_iso639
 
 # Codecs video consideres comme obsoletes
 _OBSOLETE_CODECS = frozenset({"mpeg4", "xvid", "divx", "wmv", "mpeg2", "mpeg1"})
@@ -151,13 +151,19 @@ def generate_suggestions(
     if isinstance(expected_langs, str):
         expected_langs = [l.strip() for l in expected_langs.split(",") if l.strip()]
     # Fix audit 2026-05-26 (v1.5.6) Vague L (subs-3) : normaliser les langues
-    # ATTENDUES via _LANG_MAP avant comparaison (symetrie). Une saisie
+    # ATTENDUES avant comparaison (symetrie). Une saisie
     # 'french'/'francais'/'fra'/'fre' doit matcher 'fr'. On garde une version
     # brute (pour l'affichage du libelle) et une version normalisee (pour la
     # comparaison). Les tags non resolvables retombent sur leur forme lower().
+    #
+    # `_normalize_expected_language` et NON `_normalize_iso639` : c'est de la
+    # saisie utilisateur (champ « Langues attendues », texte libre), donc `vf`
+    # et `vostfr` doivent y valoir 'fr'. Ce site est le plus expose des deux :
+    # il normalise A LA LECTURE, donc une regression ici repeint la
+    # bibliotheque en rouge sans le moindre re-scan.
     expected_norm: List[str] = []
     for raw in expected_langs:
-        norm = _normalize_iso639(raw) or str(raw).strip().lower()
+        norm = _normalize_expected_language(raw) or str(raw).strip().lower()
         if norm and norm not in expected_norm:
             expected_norm.append(norm)
 

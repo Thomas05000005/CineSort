@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 import cinesort.infra.state as _state
 from cinesort.domain.core import windows_safe
+from cinesort.ui.api import library_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.film_support import _resolve_chosen_tmdb_id
 from cinesort.ui.api.library_actions_support import _build_tmdb_client_optional
@@ -34,8 +35,6 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
     # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
     # corrige (skip des runs utilitaires).
-    from cinesort.ui.api import library_support
-
     return library_support._resolve_run_id(api, None)
 
 
@@ -62,8 +61,6 @@ def compute_by_decade(api: Any, run_id: Optional[str] = None) -> Dict[str, int]:
         return {}
 
     try:
-        from cinesort.ui.api import library_support
-
         rows = library_support._build_library_rows(api, resolved_rid)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("compute_by_decade cannot build rows: %s", exc)
@@ -115,8 +112,6 @@ def _get_films_by_decade_impl(api: Any, filters: Optional[Dict[str, Any]] = None
         return {"ok": True, "run_id": None, "by_decade": {}, "total": 0}
 
     try:
-        from cinesort.ui.api import library_support
-
         rows = library_support._build_library_rows(api, resolved_rid)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("get_films_by_decade cannot build rows: %s", exc)
@@ -130,8 +125,6 @@ def _get_films_by_decade_impl(api: Any, filters: Optional[Dict[str, Any]] = None
     # Filtrage optionnel (reutilise la meme logique de matching que library_support)
     if filters:
         try:
-            from cinesort.ui.api import library_support
-
             rows = [r for r in rows if library_support._row_matches(r, filters)]
         except (AttributeError, TypeError) as exc:
             logger.debug("get_films_by_decade filter error: %s", exc)

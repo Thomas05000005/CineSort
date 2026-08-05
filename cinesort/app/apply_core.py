@@ -276,34 +276,44 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     NB : la signature publique reste retro-compatible (``max_seconds`` est
     kwarg-only avec un defaut), les callers existants ne changent pas.
     """
-    import time as _time_mod  # local pour eviter shadow du module ``time`` haut
-
     digest = hashlib.sha1(usedforsecurity=False)
-    start = _time_mod.monotonic()
+    start = time.monotonic()
     chunk_8m = 8 * 1024 * 1024
     try:
         size = path.stat().st_size
         with path.open("rb") as file_obj:
             if size < (2 * chunk_8m):
                 while True:
-                    if _time_mod.monotonic() - start > max_seconds:
+                    if time.monotonic() - start > max_seconds:
                         raise TimeoutError(f"sha1_quick timeout ({max_seconds}s) on {path}")
                     block = file_obj.read(1024 * 1024)
                     if not block:
                         break
                     digest.update(block)
             else:
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout head ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
                 file_obj.seek(max(0, size - chunk_8m))
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
     except (OSError, TimeoutError) as exc:
         _logger.warning("sha1_quick failed for %s: %s", path, exc)
         return ""
     return digest.hexdigest()
+
+
+def quick_hash_cache_key_from_stat(path: Path, stat_result: Any) -> Tuple[str, int, int]:
+    """Clef de cache (path, size, mtime_ns) construite depuis un `stat` DEJA obtenu.
+
+    Issue #637 : `quick_hash_cache_key` refaisait systematiquement un `stat()`
+    alors que l'appelant venait d'en faire un. Le calcul de la clef est isole ici
+    pour que les deux chemins (stat frais / stat deja connu) produisent
+    strictement la MEME clef — sinon un cache se scinderait en deux silencieusement.
+    """
+    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
+    return (str(path), int(stat_result.st_size), mtime_ns)
 
 
 def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
@@ -315,8 +325,7 @@ def quick_hash_cache_key(path: Path) -> Optional[Tuple[str, int, int]]:
         stat_result = path.stat()
     except (OSError, PermissionError):
         return None
-    mtime_ns = int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
-    return (str(path), int(stat_result.st_size), mtime_ns)
+    return quick_hash_cache_key_from_stat(path, stat_result)
 
 
 def sha1_quick_cached(path: Path, cache: Optional[Dict[Tuple[str, int, int], str]]) -> str:
@@ -2759,9 +2768,33 @@ def apply_collection_item(
     # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
     # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
     # peut exceder 260 chars meme si sub_dir reste valide.
-    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit.
+    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit. Le
+    # helper `_video_name_with_ext_case` (ITER7), qui rebatissait le nom avec un
+    # suffixe force en minuscules, a ete SUPPRIME du module : mesurer le
+    # kill-switch sur un nom reconstruit reviendrait a mesurer un chemin que
+    # l'apply n'ecrira jamais.
+    #
+    # Issue #661 : les SIDECARS etaient exclus de ce kill-switch alors que la
+    # branche TV les couvre (GATE 3 / TV-MAXPATH). En collection les sidecars
+    # GARDENT leur nom source (`sub_dir / sidecar.name`), et une chaine de
+    # suffixes (.fr.forced.srt, .en.sdh.sup) depasse couramment la longueur de
+    # la video. L'item echouait donc EN COURS DE ROUTE (OSError obscur au
+    # premier sidecar trop long, puis rollback intra-row) au lieu d'etre
+    # proprement saute en amont avec SKIP_PATH_TOO_LONG. On calcule donc les
+    # cibles sidecars AVANT tout deplacement et on les soumet au meme gate.
+    # La liste calculee ici est ensuite REUTILISEE par la boucle de move : un
+    # second classify_sidecars donnerait une reponse potentiellement differente
+    # (le dossier a bouge entre-temps) et ferait mentir le gate.
     _candidate_video_path = sub_dir / video.name
-    _path_err = check_path_length_killswitch(str(_candidate_video_path))
+    _sidecar_targets: list[Tuple[Path, Path]] = [
+        (sidecar, sub_dir / sidecar.name)
+        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True)
+    ]
+    _path_err: Optional[str] = None
+    for _cp in [str(_candidate_video_path)] + [str(_dst) for (_, _dst) in _sidecar_targets]:
+        _path_err = check_path_length_killswitch(_cp)
+        if _path_err is not None:
+            break
     if _path_err is not None:
         log("WARN", _path_err)
         try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
@@ -2821,8 +2854,7 @@ def apply_collection_item(
                 dedup_seen_ops.discard(k)
 
     try:
-        for sidecar in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
-            dst = sub_dir / sidecar.name
+        for sidecar, dst in _sidecar_targets:
             op_key: Optional[Tuple[str, str, str]] = None
             if dedup_seen_ops is not None:
                 op_key = (
