@@ -206,17 +206,22 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
         return _err_response("Plan introuvable pour ce run.", category="resource", level="info", log_module=__name__)
 
     all_rows: List[Dict[str, Any]] = []
-    with open(plan_jsonl, encoding="utf-8") as fp:
-        for line in fp:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(data, dict):
-                all_rows.append(data)
+    try:
+        with open(plan_jsonl, encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(data, dict):
+                    all_rows.append(data)
+    except (OSError, UnicodeDecodeError) as exc:
+        # Plan verrouille (AV Windows) ou encodage corrompu -> erreur propre
+        # plutot qu'un HTTP 500 (cet endpoint n'a pas de wrap global).
+        return _err_response(f"Plan illisible: {exc}", category="runtime", level="error", log_module=__name__)
 
     posters: Dict[str, str] = {}
     # AUDIT 2026-06-14 (R6-H) : on renvoie aussi le tmdb_id resolu par row_id.

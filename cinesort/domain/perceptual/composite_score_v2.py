@@ -635,8 +635,9 @@ def collect_warnings(
     # Runtime mismatch
     flag = str(runtime_vs_tmdb_flag or "").lower()
     if flag in ("mismatch", "runtime_mismatch"):
-        video_data = (normalized_probe or {}).get("video") or {}
-        dur_min = int(float(video_data.get("duration_s", 0) or 0) / 60)
+        # duration_s est au TOP-LEVEL de NormalizedProbe, pas dans video subdict.
+        # Cf cinesort/domain/probe_models.py:16 et cinesort/infra/probe/normalize.py:452.
+        dur_min = int(float((normalized_probe or {}).get("duration_s", 0) or 0) / 60)
         warnings.append(
             f"Duree fichier {dur_min} min different notablement de TMDb — possible Theatrical vs Extended Cut."
         )
