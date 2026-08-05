@@ -127,7 +127,10 @@ export const PARAMETRES_GROUPS = [
         // windows_safe() est appliquée INCONDITIONNELLEMENT (apply_core/duplicate_support,
         // aucun gate settings) -> l'échappement Windows est toujours actif (sécurité), le
         // toggle laissait croire qu'on pouvait le désactiver.
-        { key: "lowercase_extensions", label: "Extensions en minuscule (.mkv vs .MKV)", type: "toggle" },
+        // Toggle "lowercase_extensions" (.mkv vs .MKV) RETIRÉ : son seul effet était de
+        // RENOMMER le fichier vidéo cible, ce qu'interdit la règle inviolable n°1 (le nom
+        // du fichier doit rester synchrone avec le torrent, sinon le seeding casse).
+        // Aucun nom de DOSSIER n'en dépendait. Ne pas le réintroduire.
         { key: "separator", label: "Séparateur entre éléments", type: "select", options: [
           {v:" ",l:"Espace (Inception 2010)"},
           {v:".",l:"Point (Inception.2010)"},

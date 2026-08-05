@@ -41,7 +41,12 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import (
+    ResponseTooLargeError,
+    get_bounded,
+    make_session_with_retry,
+    request_bounded,
+)
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.network_utils import is_safe_external_url
 
@@ -50,6 +55,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
 ALT_OLLAMA_MODEL = "qwen2.5:7b"
+# Borne anti-OOM du corps de reponse (issue #824). `timeout_s` borne la DUREE
+# d'un appel, jamais sa TAILLE : un endpoint configurable (donc distant/LAN, ou
+# usurpe) peut repondre un corps de plusieurs Go que `resp.json()` alloue
+# integralement. Les reponses legitimes d'Ollama sont minuscules (un synopsis,
+# 5-8 tags, la liste des modeles installes) : 4 Mio est deja tres large.
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # Temperature=0 : reponses deterministes, requis pour reproductibilite
 # des enrichissements (un meme film doit produire le meme synopsis).
 DEFAULT_TEMPERATURE = 0.0
@@ -144,16 +155,22 @@ class OllamaClient:
         """Pingue Ollama via GET /api/tags. Retourne True si HTTP 200.
 
         Ne leve jamais : toute erreur (ConnectionError, timeout, status
-        != 200) renvoie False. Le caller utilise ce check pour decider
-        si l'enrichment doit etre tente (fail-soft).
+        != 200, corps hors borne) renvoie False. Le caller utilise ce check
+        pour decider si l'enrichment doit etre tente (fail-soft).
+
+        Le corps est borne (issue #824) alors meme qu'on ne lit que le
+        status : sans `stream=True`, `requests` materialise TOUT le corps
+        avant de rendre la main, y compris celui qu'on ne regardera jamais.
         """
         try:
-            resp = self._session.get(
+            resp = get_bounded(
+                self._session,
                 f"{self.endpoint}/api/tags",
+                max_bytes=MAX_RESPONSE_BYTES,
                 timeout=min(5.0, self.timeout_s),
             )
             return resp.status_code == 200
-        except (requests.RequestException, OllamaError) as exc:
+        except (ResponseTooLargeError, requests.RequestException, OllamaError) as exc:
             logger.debug("Ollama indisponible : %s", exc)
             return False
 
@@ -212,11 +229,20 @@ class OllamaClient:
             "options": {"temperature": self.temperature},
         }
         try:
-            resp = self._session.post(
+            # Borne appliquee A LA LECTURE du flux (issue #824) : le corps hors
+            # borne n'est jamais alloue, la connexion est coupee des le
+            # franchissement.
+            resp = request_bounded(
+                self._session,
+                "POST",
                 f"{self.endpoint}/api/generate",
+                max_bytes=MAX_RESPONSE_BYTES,
                 json=payload,
                 timeout=self.timeout_s,
             )
+        except ResponseTooLargeError as exc:
+            logger.warning("Ollama generate : corps hors borne (%s)", exc)
+            return {"ok": False, "reason": "response_too_large", "ai_generated": False}
         except requests.RequestException as exc:
             logger.warning("Ollama generate echec reseau : %s", exc)
             return {"ok": False, "reason": f"network_error: {exc}", "ai_generated": False}
