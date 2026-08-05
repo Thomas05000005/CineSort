@@ -801,6 +801,8 @@ def _detect_cross_root_duplicates(rows: List["PlanRow"]) -> int:
         roots_seen = sorted({r.source_root for r in group if r.source_root})
         if len(roots_seen) < 2:
             continue
+        # Un film duplique compte pour UN, quel que soit le nombre de rows qui
+        # le flaguent : c'est le compte que l'utilisateur lit.
         dup_films += 1
         for row in group:
             if "duplicate_cross_root" not in (row.warning_flags or []):
