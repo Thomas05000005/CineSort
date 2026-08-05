@@ -80,22 +80,37 @@ logger = logging.getLogger(__name__)
 
 
 def compute_visual_score(video: VideoPerceptual, grain: Optional[GrainAnalysis] = None) -> int:
-    """Score visuel composite pondere (0-100)."""
-    s_block = _score_val_inv(video.blockiness_mean, BLOCK_NONE, BLOCK_SLIGHT, BLOCK_MODERATE)
-    s_blur = _score_val_inv(video.blur_mean, BLUR_SHARP, BLUR_NORMAL, BLUR_SOFT)
-    s_banding = _score_val_inv(video.banding_mean, BANDING_NONE, BANDING_SLIGHT, BANDING_MODERATE)
-    s_bits = _score_bits(video.effective_bits_mean)
-    s_grain = grain.score if grain else 50
-    s_temporal = _score_temporal(video.temporal_stddev)
+    """Score visuel composite pondere (0-100).
 
-    total = (
-        s_block * VISUAL_WEIGHT_BLOCKINESS
-        + s_blur * VISUAL_WEIGHT_BLUR
-        + s_banding * VISUAL_WEIGHT_BANDING
-        + s_bits * VISUAL_WEIGHT_BIT_DEPTH
-        + s_grain * VISUAL_WEIGHT_GRAIN_VERDICT
-        + s_temporal * VISUAL_WEIGHT_TEMPORAL
-    ) / 100
+    #923 : les criteres NON MESURES sont exclus de la ponderation, qui est
+    renormalisee sur le poids restant. Sans cela, un fichier dont l'analyse
+    ffmpeg a echoue (run_filter_graph rend [] sur rc != 0) heritait de
+    `blockiness_mean = blur_mean = temporal_stddev = 0.0` — les MEILLEURES
+    valeurs possibles — et decrochait 95/95/90 sur 55 % du poids. Ce score
+    alimente `global_score`, sur lequel `comparison.compare_two_files`
+    departage les doublons : un fichier corrompu, precisement celui dont
+    l'analyse echoue, pouvait ainsi battre une copie saine.
+    """
+    # Le grain est toujours pris en compte : son propre defaut (50) est neutre,
+    # et il ne provient pas de VideoPerceptual.
+    weighted: List[tuple] = [(grain.score if grain else 50, VISUAL_WEIGHT_GRAIN_VERDICT)]
+    if video.is_measured("blockiness"):
+        weighted.append(
+            (_score_val_inv(video.blockiness_mean, BLOCK_NONE, BLOCK_SLIGHT, BLOCK_MODERATE), VISUAL_WEIGHT_BLOCKINESS)
+        )
+    if video.is_measured("blur"):
+        weighted.append((_score_val_inv(video.blur_mean, BLUR_SHARP, BLUR_NORMAL, BLUR_SOFT), VISUAL_WEIGHT_BLUR))
+    if video.is_measured("banding"):
+        weighted.append(
+            (_score_val_inv(video.banding_mean, BANDING_NONE, BANDING_SLIGHT, BANDING_MODERATE), VISUAL_WEIGHT_BANDING)
+        )
+    if video.is_measured("effective_bits"):
+        weighted.append((_score_bits(video.effective_bits_mean), VISUAL_WEIGHT_BIT_DEPTH))
+    if video.is_measured("temporal"):
+        weighted.append((_score_temporal(video.temporal_stddev), VISUAL_WEIGHT_TEMPORAL))
+
+    total_weight = sum(w for _, w in weighted)
+    total = sum(s * w for s, w in weighted) / max(total_weight, 1)
     return max(0, min(100, int(round(total))))
 
 
@@ -209,7 +224,18 @@ def detect_cross_verdicts(
         )
 
     # 4. Mastering reference
-    if block < BLOCK_NONE and blur < BLUR_THRESHOLD_MASTERING and banding < BANDING_NONE and bits > 9.0:
+    # #923 : meme motif que le verdict 2 ci-dessus, mais sur block/blur/banding.
+    # Ce verdict POSITIF ne se declenche que sur des « petites » valeurs : sans
+    # cette exigence de mesure, l'echec d'analyse (tout a 0.0) le declenchait de
+    # lui-meme des que le bit depth effectif, lui, avait ete mesure.
+    measured_visual = video.is_measured("blockiness") and video.is_measured("blur") and video.is_measured("banding")
+    if (
+        measured_visual
+        and block < BLOCK_NONE
+        and blur < BLUR_THRESHOLD_MASTERING
+        and banding < BANDING_NONE
+        and bits > 9.0
+    ):
         verdicts.append(
             {
                 "id": "excellent_mastering",

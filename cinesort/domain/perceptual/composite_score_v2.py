@@ -125,6 +125,17 @@ def _score_from_visual(video: Any) -> Tuple[float, float]:
         return 50.0, 0.0
     val = float(getattr(video, "visual_score", 0) or 0)
     conf = 1.0 if getattr(video, "frames_analyzed", 0) >= 5 else 0.5
+    # #923 : `frames_analyzed` ne compte que les frames PIXEL. Les filtres
+    # ffmpeg (blockiness / blur / consistance temporelle) sont une passe
+    # INDEPENDANTE, qui peut echouer entierement alors que les frames, elles,
+    # ont bien ete extraites — la confiance valait alors 1.0 sur un score dont
+    # plus de la moitie du poids n'avait jamais ete mesuree. `visual_confidence`
+    # porte la part reellement mesuree ; None = objet sans cette information
+    # (construit directement, ou relu d'une row anterieure a ce correctif), on
+    # laisse alors la confiance inchangee plutot que d'inventer une valeur.
+    coverage = getattr(video, "visual_confidence", None)
+    if coverage is not None:
+        conf *= max(0.0, min(1.0, float(coverage)))
     return val, conf
 
 
