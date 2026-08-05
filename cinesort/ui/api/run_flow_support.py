@@ -26,6 +26,7 @@ from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
 from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api import run_data_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
 from cinesort.ui.api.run_data_support import serialize_rows_for_payload, write_plan_jsonl
@@ -996,17 +997,14 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # logs (contournement de la pagination + valeur retournee dans next_log_index incoherente).
     # clamp_non_negative_int gere aussi None / str non-numerique / NaN proprement.
     last_log_index = clamp_non_negative_int(last_log_index)
-    # Fix audit 2026-05-25 (v1.5.5) Vague J : import local pour eviter cycle
-    # run_flow <-> run_data lors du chargement du module.
-    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. Import en plus de
-    # compute_total_fallback pour harmoniser le fallback total entre
-    # dashboard/history/run_flow (auparavant run_flow ne lisait que
+    # #779 : l'import differe invoquait un cycle « run_flow <-> run_data » qui
+    # n'existe pas — `run_data_support` est DEJA une dependance de tete de ce
+    # module (ligne 31) et n'importe rien de `run_flow_support` en retour.
+    # Remonte en tete, module-style (cf. REFACTOR_PLAN_84.md §11.2).
+    # Fix audit 2026-05-26 (v1.5.6) Vague L : count-2. `count_plan_rows` est lu
+    # en plus de `compute_total_fallback` pour harmoniser le fallback total
+    # entre dashboard/history/run_flow (auparavant run_flow ne lisait que
     # run_row.total, ignorant stats.planned_rows).
-    from cinesort.ui.api.run_data_support import (
-        compute_total_fallback,
-        count_plan_rows,
-    )
-
     rs = api._get_run(run_id)
     if not rs:
         found = api._find_run_row(run_id)
@@ -1026,7 +1024,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
                     stats_obj = parsed
             except (ValueError, json.JSONDecodeError):
                 stats_obj = {}
-        total = compute_total_fallback(run_row, stats_obj)
+        total = run_data_support.compute_total_fallback(run_row, stats_obj)
         cur = str(run_row.get("current_folder") or "")
         running = status_text in {RunStatus.PENDING.value, RunStatus.RUNNING.value}
         done = status_text in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
@@ -1044,7 +1042,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
                     run_id,
                     ensure_exists=False,
                 )
-                total = count_plan_rows(run_paths, fallback=total)
+                total = run_data_support.count_plan_rows(run_paths, fallback=total)
             except (OSError, AttributeError, KeyError, TypeError, ValueError):
                 # En cas d'erreur, on garde le total DB (best-effort)
                 pass
@@ -1145,7 +1143,7 @@ def _get_status_impl(api: Any, run_id: str, last_log_index: int = 0) -> Dict[str
     # discover_total comme cible attendue de la barre de progression.
     if done and not running:
         with contextlib.suppress(OSError, AttributeError, KeyError, TypeError, ValueError):
-            total = count_plan_rows(paths_snapshot, fallback=total)
+            total = run_data_support.count_plan_rows(paths_snapshot, fallback=total)
 
     speed, eta = _compute_speed_and_eta(idx, total, started, samples, ewma)
 

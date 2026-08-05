@@ -324,9 +324,14 @@ def _build_cache_hit_result(
 
 @requires_valid_run_id
 def get_quality_report(api: Any, run_id: str, row_id: str, options: Any = None) -> Dict[str, Any]:
-    if not run_id or not row_id:
+    # #526 : meme defaut que `probe_support._get_probe_impl`, jumeau ligne pour
+    # ligne. `@requires_valid_run_id` s'execute AVANT ce corps et rejette tout
+    # run_id falsy : `not run_id` ne pouvait pas etre vrai ici, et le message
+    # designait un champ (run_id) qui n'etait jamais en cause. Traite avec le
+    # meme correctif pour ne pas laisser un doublon connu ouvert derriere nous.
+    if not row_id or not str(row_id).strip():
         return _err_response(
-            "Les identifiants run_id et row_id sont requis.", category="validation", level="info", log_module=__name__
+            "Identifiant de ligne (row_id) requis.", category="validation", level="info", log_module=__name__
         )
     try:
         opts = options if isinstance(options, dict) else {}
