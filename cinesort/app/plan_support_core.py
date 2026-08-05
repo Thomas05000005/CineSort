@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -27,7 +28,7 @@ from cinesort.app._local_candidate import (
     parallel_extract_local_candidates,
     resolve_scan_max_workers,
 )
-from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
+from cinesort.app.apply_core import quick_hash_cache_key_from_stat, sha1_quick
 from cinesort.domain.scan_helpers import discover_candidate_folders, file_name_looks_bonus
 from cinesort.infra.fs_safety import safe_path_exists
 from cinesort.infra.tmdb_client import TmdbClient
@@ -422,26 +423,37 @@ def resolve_incremental_quick_hash(
     *,
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
+    known_stat: Optional[Tuple[int, int]] = None,
 ) -> str:
     # Cf #83 phase A4 : utilise apply_core.quick_hash_cache_key directement
     # au lieu de l'alias backward-compat core._quick_hash_cache_key (supprime).
-
-    try:
-        stat_result = path.stat()
-    except (OSError, PermissionError, FileNotFoundError):
-        return ""
-    cache_key = quick_hash_cache_key(path)
-    if cache_key and run_hash_cache is not None and cache_key in run_hash_cache:
+    #
+    # Issue #637 : deux `stat()` etaient faits ici pour rien — un pour lire
+    # size/mtime, un second cache dans `quick_hash_cache_key(path)`. Sur SMB/NAS
+    # chacun est un aller-retour reseau. `known_stat=(size, mtime_ns)` permet a
+    # l'appelant qui vient DEJA de stater le fichier (folder_signature, via
+    # `os.scandir`) de n'en payer aucun.
+    if known_stat is not None:
+        cache_key: Tuple[str, int, int] = (str(path), int(known_stat[0]), int(known_stat[1]))
+    else:
+        try:
+            stat_result = path.stat()
+        except (OSError, PermissionError, FileNotFoundError):
+            return ""
+        cache_key = quick_hash_cache_key_from_stat(path, stat_result)
+    size = cache_key[1]
+    mtime_ns = cache_key[2]
+    if run_hash_cache is not None and cache_key in run_hash_cache:
         return str(run_hash_cache.get(cache_key) or "")
     if scan_index is not None and hasattr(scan_index, "get_incremental_file_hash"):
         try:
             cached = scan_index.get_incremental_file_hash(
                 path=str(path),
-                size=int(stat_result.st_size),
-                mtime_ns=int(stat_result.st_mtime_ns),
+                size=size,
+                mtime_ns=mtime_ns,
             )
             if cached:
-                if cache_key and run_hash_cache is not None:
+                if run_hash_cache is not None:
                     run_hash_cache[cache_key] = str(cached)
                 return str(cached)
         except (OSError, TypeError, ValueError):
@@ -457,11 +469,11 @@ def resolve_incremental_quick_hash(
         with contextlib.suppress(OSError, TypeError, ValueError):
             scan_index.upsert_incremental_file_hash(
                 path=str(path),
-                size=int(stat_result.st_size),
-                mtime_ns=int(stat_result.st_mtime_ns),
+                size=size,
+                mtime_ns=mtime_ns,
                 quick_hash=quick_hash,
             )
-    if quick_hash and cache_key and run_hash_cache is not None:
+    if quick_hash and run_hash_cache is not None:
         run_hash_cache[cache_key] = quick_hash
     return quick_hash
 
@@ -524,12 +536,10 @@ def folder_signature(
     servi depuis le cache, ni y entrer.
     """
     # BUG 3 : optimisation NAS via os.scandir (metadata cachees en 1 op systeme)
-    import os as _os
-
     items: List[Tuple[str, str]] = []  # (sort_key, payload_line)
     video_exts = cfg.video_exts or set()
     try:
-        scandir_ctx = _os.scandir(str(folder))
+        scandir_ctx = os.scandir(str(folder))
     except (OSError, PermissionError, FileNotFoundError) as exc:
         _log.warning("folder_signature: dossier inaccessible, aucun cache possible: %s (%s)", folder, exc)
         return None
@@ -537,6 +547,16 @@ def folder_signature(
         for entry in scandir_ctx:
             name = entry.name
             name_lower = name.lower()
+            # Issue #637 : `known_stat` n'est transmis que si ce stat-ci a REUSSI
+            # et que l'entree n'est PAS un lien symbolique. Deux pieges evites :
+            #  - sur echec, size/mtime valent 0 : les propager fabriquerait une
+            #    clef de cache de quick-hash bidon, partagee par tous les
+            #    fichiers illisibles du disque ;
+            #  - `entry.stat(follow_symlinks=False)` est un LSTAT (metadonnees du
+            #    LIEN), alors que le quick-hash lit la CIBLE. Reutiliser le lstat
+            #    d'un lien figerait le hash de la cible sur le mtime du lien :
+            #    une cible modifiee ne serait plus jamais rehachee.
+            known_stat: Optional[Tuple[int, int]] = None
             try:
                 is_dir = entry.is_dir(follow_symlinks=False)
                 st = entry.stat(follow_symlinks=False)
@@ -546,6 +566,13 @@ def folder_signature(
                 is_dir = False
                 size = 0
                 mtime_ns = 0
+            else:
+                # `is_symlink()` peut lever (permissions) : dans le doute on ne
+                # transmet rien et `resolve_incremental_quick_hash` refait son
+                # propre `stat()` — l'erreur va dans le sens restrictif.
+                with contextlib.suppress(OSError):
+                    if not entry.is_symlink():
+                        known_stat = (size, mtime_ns)
             kind = "d" if is_dir else "f"
             parts = [kind, name_lower, str(size), str(mtime_ns)]
             if not is_dir:
@@ -556,6 +583,7 @@ def folder_signature(
                         Path(entry.path),
                         scan_index=scan_index,
                         run_hash_cache=run_hash_cache,
+                        known_stat=known_stat,
                     )
                     if quick_hash:
                         parts.append(quick_hash)
@@ -673,8 +701,6 @@ class _PlanLibraryContext:
             self.pause_logged = True
         # Boucle de pause cooperative — sleep court pour rester reactif au
         # resume ET a la cancellation.
-        import time as _time
-
         while True:
             if core_mod._is_cancel_requested(self.should_cancel):
                 return True
@@ -687,7 +713,7 @@ class _PlanLibraryContext:
                 self.pause_logged = False
                 self.log("INFO", "pause released")
                 return False
-            _time.sleep(poll_interval_s)
+            time.sleep(poll_interval_s)
 
     def persist_folder_cache(
         self,

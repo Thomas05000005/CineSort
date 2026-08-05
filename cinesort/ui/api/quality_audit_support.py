@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.conversions import to_bool
 from cinesort.infra import state
+from cinesort.ui.api import library_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
 
@@ -35,8 +36,6 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     # l'ancien list_runs(limit=1) prenait le run utilitaire d'un bulk
     # Re-scanner (sans plan) => '0 films' sur la vue. Delegation au resolveur
     # corrige (skip des runs utilitaires).
-    from cinesort.ui.api import library_support
-
     return library_support._resolve_run_id(api, None)
 
 
@@ -114,9 +113,6 @@ def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) ->
         return {"ok": True, "run_id": None, "tier": tier_norm, "films": [], "total": 0}
 
     try:
-        # Import paresseux car library_support importe deja state/settings
-        from cinesort.ui.api import library_support
-
         rows = library_support._build_library_rows(api, resolved_rid)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("get_films_by_tier cannot build rows for %s: %s", resolved_rid, exc)

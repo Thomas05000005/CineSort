@@ -16,6 +16,27 @@ from pathlib import Path
 _IS_WINDOWS = os.name == "nt"
 
 
+def stat_is_reparse_point(st: os.stat_result) -> bool:
+    """Meme verdict que `is_reparse_point`, mais sur un `stat_result` DEJA obtenu.
+
+    Existe pour les boucles d'enumeration qui ont besoin, pour la meme entree, du
+    type ET de la taille : elles font alors un seul `lstat()` et posent toutes
+    leurs questions dessus (cf issue #567). `is_reparse_point` reste le point
+    d'entree normal pour un appel isole ; les deux partagent ce corps unique afin
+    que la semantique NTFS ne puisse pas diverger entre les deux chemins.
+
+    `st` doit provenir d'un `lstat()` (sans suivi de lien) : sur un `stat()`
+    ordinaire, les attributs decrivent la CIBLE et le point d'analyse est invisible.
+    """
+    if not _IS_WINDOWS:
+        return bool(stat.S_ISLNK(st.st_mode))
+    try:
+        attributes = int(st.st_file_attributes)  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        return True
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def is_reparse_point(path: Path) -> bool:
     """True si `path` redirige ailleurs : lien symbolique OU point d'analyse NTFS.
 
@@ -45,16 +66,11 @@ def is_reparse_point(path: Path) -> bool:
     dans la traversee ; ici une sur-detection ne fait que refuser un nettoyage,
     refus visible dans le preview (`symlink_count`, `sample_symlink_dirs`).
     """
-    if not _IS_WINDOWS:
-        try:
-            return bool(stat.S_ISLNK(path.lstat().st_mode))
-        except (OSError, ValueError):
-            return True
     try:
-        attributes = int(path.lstat().st_file_attributes)  # type: ignore[attr-defined]
-    except (AttributeError, OSError, ValueError):
+        st = path.lstat()
+    except (OSError, ValueError):
         return True
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return stat_is_reparse_point(st)
 
 
 def is_dir_empty(path: Path) -> bool:
