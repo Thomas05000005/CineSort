@@ -23,6 +23,7 @@ from .constants import (
     CREST_FACTOR_COMPRESSED,
     CREST_FACTOR_EXCELLENT,
     CREST_FACTOR_GOOD,
+    DRC_CONFIDENCE_SINGLE_METRIC,
     DRC_CREST_CINEMA,
     DRC_CREST_STANDARD,
     DRC_LRA_CINEMA,
@@ -586,6 +587,14 @@ def classify_drc(
           "unknown"              : crest et lra non disponibles
 
     Strategie : somme des scores crest (0/1/2) et LRA (0/1/2), seuillee.
+
+    Issue #752 — le score 0 d'une metrique ABSENTE etait indiscernable du score 0
+    d'une metrique MESUREE basse : `astats` en echec (crest=None) suffisait a
+    renvoyer ("broadcast_compressed", 0.85), soit un verdict penalisant ferme
+    rendu sur une seule mesure. Quand une seule des deux metriques est presente,
+    la categorie reste indicative mais la confiance est plafonnee a
+    DRC_CONFIDENCE_SINGLE_METRIC : elle ne peut pas atteindre le niveau d'un
+    consensus a deux mesures concordantes.
     """
     if crest_factor is None and lra is None:
         return ("unknown", 0.0)
@@ -605,6 +614,17 @@ def classify_drc(
             score_lra = 1
 
     combined = score_crest + score_lra
+
+    if crest_factor is None or lra is None:
+        # Une seule metrique mesuree : `combined` vaut au plus 2 et le zero de
+        # la metrique manquante n'est pas une mesure. Categorie conservee,
+        # confiance basse.
+        if combined == 2:
+            return ("cinema", DRC_CONFIDENCE_SINGLE_METRIC)
+        if combined == 1:
+            return ("standard", DRC_CONFIDENCE_SINGLE_METRIC)
+        return ("broadcast_compressed", DRC_CONFIDENCE_SINGLE_METRIC)
+
     if combined >= 3:
         return ("cinema", 0.95)
     if combined == 2:

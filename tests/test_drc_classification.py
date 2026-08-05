@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from cinesort.domain.perceptual.audio_perceptual import analyze_audio_perceptual, classify_drc
+from cinesort.domain.perceptual.constants import DRC_CONFIDENCE_SINGLE_METRIC
 
 
 class TestClassifyDrc(unittest.TestCase):
@@ -45,14 +46,18 @@ class TestClassifyDrc(unittest.TestCase):
         self.assertAlmostEqual(c, 0.85)
 
     def test_crest_only_cinema(self):
+        # Issue #752 : la categorie tient sur le seul crest mesure, mais la
+        # confiance ne peut pas egaler celle d'un accord a deux mesures.
         v, c = classify_drc(crest_factor=18.0, lra=None)
         self.assertEqual(v, "cinema")
-        self.assertAlmostEqual(c, 0.75)  # seul crest +2 = combined 2
+        self.assertAlmostEqual(c, DRC_CONFIDENCE_SINGLE_METRIC)
+        self.assertLess(c, 0.75)
 
     def test_lra_only_cinema(self):
         v, c = classify_drc(crest_factor=None, lra=22.0)
         self.assertEqual(v, "cinema")
-        self.assertAlmostEqual(c, 0.75)
+        self.assertAlmostEqual(c, DRC_CONFIDENCE_SINGLE_METRIC)
+        self.assertLess(c, 0.75)
 
     def test_both_none_unknown(self):
         v, c = classify_drc(crest_factor=None, lra=None)
@@ -65,10 +70,13 @@ class TestClassifyDrc(unittest.TestCase):
         self.assertEqual(v, "cinema")
 
     def test_edge_crest_just_below_standard(self):
-        # crest 9.99 (0) + LRA None -> unknown? non : lra None seul gere le None total
-        v, _ = classify_drc(crest_factor=9.99, lra=None)
-        # lra None mais crest present -> score_lra 0, score_crest 0, combined 0 -> broadcast
+        # crest 9.99 (0) + LRA absente : la categorie reste broadcast_compressed,
+        # mais c'est un verdict penalisant rendu sur UNE seule mesure (#752) ->
+        # confiance plafonnee, strictement sous celle des deux mesures.
+        v, c = classify_drc(crest_factor=9.99, lra=None)
         self.assertEqual(v, "broadcast_compressed")
+        self.assertAlmostEqual(c, DRC_CONFIDENCE_SINGLE_METRIC)
+        self.assertLess(c, 0.85)
 
     def test_low_values_broadcast(self):
         v, _ = classify_drc(crest_factor=4.0, lra=3.0)

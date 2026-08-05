@@ -68,7 +68,6 @@ USE_ROOTS = ("cinesort", "tests", "app.py")
 # ---------------------------------------------------------------------------
 KNOWN_DEAD: Dict[str, str] = {
     "cinesort/app/apply_rollback.py::ROLLBACK_NONE": "constante module-level jamais lue",
-    "cinesort/app/duplicate_pipeline.py::compute_fusion_for_pair": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/enrichment_facade.py::enrichment_for_film": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/enrichment_facade.py::get_enrichment_status": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/app/move_journal.py::safe_move": "fonction/classe sans aucun lecteur dans le depot",
@@ -81,7 +80,6 @@ KNOWN_DEAD: Dict[str, str] = {
     "cinesort/domain/duplicate_compare.py::_RESOLUTION_RANK": "constante module-level jamais lue",
     "cinesort/domain/duplicate_compare.py::_WEIGHT_FILE_SIZE": "constante module-level jamais lue",
     "cinesort/domain/film_history.py::film_identity_key": "fonction/classe sans aucun lecteur dans le depot",
-    "cinesort/domain/mkv_title_check.py::_is_scene_title": "fonction/classe sans aucun lecteur dans le depot",
     "cinesort/domain/perceptual/audio_perceptual.py::_RE_OVERALL_BLOCK": "constante module-level jamais lue",
     "cinesort/domain/perceptual/audio_perceptual.py::_RE_OVERALL_LINE": "constante module-level jamais lue",
     "cinesort/domain/perceptual/constants.py::BANDING_SEVERE": "constante module-level jamais lue",
