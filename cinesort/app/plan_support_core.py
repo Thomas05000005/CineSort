@@ -767,16 +767,57 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     # BUG 1 : Phase 1 — decouverte rapide (< 2s sur NAS SMB). UN SEUL scandir par
     # niveau (VN-F.3 : l'ancien chemin os.walk via stream_scan_targets a ete
     # supprime, plan_library passe exclusivement par discover_candidate_folders).
+    #
+    # `stats=ctx.stats` est OBLIGATOIRE : sans lui, scan_helpers._walk compte ses
+    # rejets dans le vide (`_bump_stats_reject` sort immediatement sur stats=None)
+    # et le report QW07 de _dedup_and_finalize_phase lit un dict vide. Mesure
+    # avant ce correctif : 3 dossiers `_A trier` / `_Nouveaux telechargements` /
+    # `_Films 2026` avales, `folders_rejected_underscore = 0` au dashboard, et
+    # aucune ligne de journal. Le commentaire QW07 pretendait deja corriger ce 0 :
+    # il ne pouvait pas, la source ne remplissait rien.
+    _rejected_paths: Dict[str, List[str]] = {}
     _discover_t0 = time.monotonic()
     try:
-        ctx.candidate_folders = discover_candidate_folders(ctx.cfg)
+        ctx.candidate_folders = discover_candidate_folders(
+            ctx.cfg,
+            stats=ctx.stats,
+            rejected_paths=_rejected_paths,
+        )
     except (OSError, PermissionError, FileNotFoundError) as exc:
         raise RuntimeError(f"Impossible de lister ROOT: {exc}") from exc
     discover_total = len(ctx.candidate_folders)
     _discover_dt = time.monotonic() - _discover_t0
     _log.info("scan: phase 1 decouverte = %d dossiers en %.2fs", discover_total, _discover_dt)
     ctx.log("INFO", f"Decouverte : {discover_total} dossiers trouves ({_discover_dt:.1f}s)")
+    _log_underscore_rejections(ctx, _rejected_paths)
     return True
+
+
+def _log_underscore_rejections(ctx: _PlanLibraryContext, rejected_paths: Dict[str, List[str]]) -> None:
+    """Journalise, en les NOMMANT, les dossiers racine ecartes pour cause de prefixe '_'.
+
+    `_A trier`, `_Nouveaux telechargements`, `_Films 2026`... sont des noms de
+    dossiers de transit tres courants. Leurs films etaient ecartes du plan sans
+    qu'AUCUNE trace ne le dise (aucun log contenant « ignor »/« rejet »/« exclu »),
+    ce qui les rendait indefiniment non tries sans explication.
+
+    Les dossiers de travail de CineSort (`_Collection`, `_Vide`, `_review`) ne
+    passent pas par ce compteur (cf. scan_helpers.discover_candidate_folders) :
+    cette ligne ne parle donc que de dossiers de l'utilisateur.
+    """
+    total = int((ctx.stats.analyse_ignores_par_raison or {}).get("ignore_prefix_underscore", 0))
+    if total <= 0:
+        return
+    sample = rejected_paths.get("ignore_prefix_underscore") or []
+    noms = ", ".join(Path(p).name for p in sample)
+    reste = total - len(sample)
+    if reste > 0:
+        noms = f"{noms} … et {reste} autre(s)"
+    ctx.log(
+        "WARN",
+        f"Ignoré : {total} dossier(s) préfixé(s) « _ » à la racine, non analysé(s) — {noms}. "
+        "Renommez-les (sans le « _ ») pour que leurs films soient triés.",
+    )
 
 
 def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Optional[str], bool]:
