@@ -28,6 +28,65 @@ def _extract_local_tmdb_id(row: Any) -> Optional[str]:
     return None
 
 
+def _match_under_folder(
+    jf_by_path: Dict[str, List[int]],
+    local_folder_norm: str,
+    video_norm: str,
+) -> Optional[int]:
+    """Cherche l'item Jellyfin indexe SOUS le dossier local, sans ambiguite.
+
+    Sert quand Jellyfin n'indexe pas le fichier video tel quel : rip BDMV /
+    VIDEO_TS indexe par un fichier interne, remux dont l'extension a change...
+
+    Issue #544 — deux garde-fous :
+
+    1. La comparaison se fait sur une FRONTIERE DE SEGMENT (le `/` de garde) et
+       jamais sur un simple prefixe de chaine : un dossier « …/Dune » ne peut
+       pas capturer « …/Dune 2 ».
+    2. Le premier candidat rencontre n'est plus retenu d'office. Si plusieurs
+       medias Jellyfin vivent sous le dossier (saga dans un dossier commun,
+       edition Theatrical + Director's Cut, film pose a la RACINE de la
+       bibliotheque), on tente de departager par le nom du fichier video ; a
+       defaut on ne matche PAS et on laisse la main aux niveaux tmdb_id puis
+       titre+annee, bien plus surs. Attribuer les metadonnees d'un autre film
+       coute plus cher que de le signaler absent : sur un chemin qui peut
+       tromper, l'erreur va dans le sens restrictif.
+
+    Rend l'index du film dans `jellyfin_movies`, ou None si aucun candidat
+    certain.
+    """
+    prefix = local_folder_norm + "/"
+    target = os.path.basename(video_norm) if video_norm else ""
+
+    total = 0
+    first_idx: Optional[int] = None
+    named_count = 0
+    named_idx: Optional[int] = None
+
+    for p, indexes in jf_by_path.items():
+        if not p.startswith(prefix):
+            continue
+        is_named = bool(target) and os.path.basename(p) == target
+        for idx in indexes:
+            total += 1
+            if first_idx is None:
+                first_idx = idx
+            if is_named:
+                named_count += 1
+                if named_idx is None:
+                    named_idx = idx
+        # Sortie anticipee : des que l'ambiguite est acquise des deux cotes,
+        # continuer a balayer ne changerait plus le verdict.
+        if total > 1 and (named_count > 1 or not target):
+            break
+
+    if total == 1:
+        return first_idx
+    if named_count == 1:
+        return named_idx
+    return None
+
+
 def build_sync_report(
     local_rows: List[Any],
     jellyfin_movies: List[Dict[str, Any]],
@@ -36,33 +95,42 @@ def build_sync_report(
 
     Matching 3 niveaux : chemin normalise → tmdb_id → titre+annee.
     """
-    # Index Jellyfin par chemin normalise
-    jf_by_path: Dict[str, Dict[str, Any]] = {}
-    jf_by_tmdb: Dict[str, Dict[str, Any]] = {}
-    jf_by_title_year: Dict[str, Dict[str, Any]] = {}
+    # Index Jellyfin par chemin normalise. Les index portent la POSITION du film
+    # dans `jellyfin_movies` et non le dict lui-meme : c'est cette position qui
+    # sert ensuite a marquer les films apparies (cf. issue #452 plus bas).
+    # `jf_by_path` est multi-valeur : deux items Jellyfin peuvent porter le meme
+    # chemin (doublon d'indexation) — les ecraser rendrait l'appariement muet.
+    jf_by_path: Dict[str, List[int]] = {}
+    jf_by_tmdb: Dict[str, int] = {}
+    jf_by_title_year: Dict[str, int] = {}
     # Cf issue #29 : pre-index Jellyfin par annee avec titres normalises
     # pour fuzzy vectorise dans la boucle d'identification.
-    jf_by_year_normalized: Dict[int, List[tuple[str, Dict[str, Any]]]] = {}
+    jf_by_year_normalized: Dict[int, List[tuple[str, int]]] = {}
 
-    for movie in jellyfin_movies:
+    for jf_pos, movie in enumerate(jellyfin_movies):
         norm_p = _normalize_path(movie.get("path") or "")
         if norm_p:
-            jf_by_path[norm_p] = movie
+            jf_by_path.setdefault(norm_p, []).append(jf_pos)
         tid = movie.get("tmdb_id")
         if tid:
-            jf_by_tmdb[str(tid)] = movie
+            jf_by_tmdb[str(tid)] = jf_pos
         name = (movie.get("name") or "").strip().lower()
         year = int(movie.get("year") or 0)
         if name and year:
-            jf_by_title_year[f"{name}|{year}"] = movie
+            jf_by_title_year[f"{name}|{year}"] = jf_pos
             norm = normalize_for_fuzzy(movie.get("name") or "")
             if norm:
-                jf_by_year_normalized.setdefault(year, []).append((norm, movie))
+                jf_by_year_normalized.setdefault(year, []).append((norm, jf_pos))
 
     matched: List[Dict[str, Any]] = []
     missing_in_jellyfin: List[Dict[str, Any]] = []
     metadata_mismatch: List[Dict[str, Any]] = []
-    matched_jf_ids: Set[str] = set()
+    # Issue #452 : on marque les films apparies par leur POSITION, pas par leur
+    # id. Un id Jellyfin vide ("" — Plex sans ratingKey, ou fallback
+    # get_all_movies quand get_libraries echoue) entrait dans le set et
+    # excluait ensuite TOUS les films sans id de la detection des fantomes.
+    # La position identifie chaque film de facon certaine, meme sans id.
+    matched_jf_indexes: Set[int] = set()
 
     for row in local_rows:
         folder = str(getattr(row, "folder", "") or "")
@@ -74,26 +142,28 @@ def build_sync_report(
         # Niveau 1 : match par chemin
         local_video_path = _normalize_path(os.path.join(folder, video)) if video else ""
         local_folder_norm = _normalize_path(folder)
-        jf_match = None
+        jf_idx: Optional[int] = None
 
-        if local_video_path and local_video_path in jf_by_path:
-            jf_match = jf_by_path[local_video_path]
-        elif local_folder_norm:
-            # Chercher un film Jellyfin dont le chemin contient le dossier local
-            for p, m in jf_by_path.items():
-                if p.startswith(local_folder_norm + "/") or p.startswith(local_folder_norm + "\\"):
-                    jf_match = m
-                    break
+        # 1a : chemin de FICHIER exact. Un chemin porte par plusieurs items
+        # Jellyfin ne designe personne : on ne devine pas (issue #544).
+        if local_video_path:
+            exact = jf_by_path.get(local_video_path) or []
+            if len(exact) == 1:
+                jf_idx = exact[0]
+        # 1b : media indexe SOUS le dossier local, si et seulement si le
+        # candidat est unique ou departage par le nom du fichier video.
+        if jf_idx is None and local_folder_norm:
+            jf_idx = _match_under_folder(jf_by_path, local_folder_norm, local_video_path)
 
         # Niveau 2 : fallback tmdb_id
-        if not jf_match and local_tmdb_id and local_tmdb_id in jf_by_tmdb:
-            jf_match = jf_by_tmdb[local_tmdb_id]
+        if jf_idx is None and local_tmdb_id and local_tmdb_id in jf_by_tmdb:
+            jf_idx = jf_by_tmdb[local_tmdb_id]
 
         # Niveau 3 : fallback titre+annee (exact puis fuzzy)
-        if not jf_match and local_title and local_year:
+        if jf_idx is None and local_title and local_year:
             key = f"{local_title.lower()}|{local_year}"
             if key in jf_by_title_year:
-                jf_match = jf_by_title_year[key]
+                jf_idx = jf_by_title_year[key]
             else:
                 # Fallback fuzzy vectorise (cf issue #29 : remplace boucle O(n*m)).
                 # rapidfuzz.process.extractOne compare en C natif sur tous les
@@ -113,11 +183,12 @@ def build_sync_report(
                         )
                         if best is not None:
                             _, _, idx = best
-                            jf_match = candidates[idx][1]
+                            jf_idx = candidates[idx][1]
 
-        if jf_match:
+        if jf_idx is not None:
+            jf_match = jellyfin_movies[jf_idx]
             jf_id = jf_match.get("id", "")
-            matched_jf_ids.add(jf_id)
+            matched_jf_indexes.add(jf_idx)
             matched.append(
                 {
                     "local_title": local_title,
@@ -158,16 +229,17 @@ def build_sync_report(
                 }
             )
 
-    # Fantomes : films Jellyfin sans match local
+    # Fantomes : films Jellyfin sans match local. Issue #452 : le test porte sur
+    # la POSITION, donc un film sans id est juge sur son appariement reel et non
+    # sur une chaine vide partagee avec tous les autres films sans id.
     ghost_in_jellyfin: List[Dict[str, Any]] = []
-    for movie in jellyfin_movies:
-        jf_id = movie.get("id", "")
-        if jf_id not in matched_jf_ids:
+    for ghost_pos, movie in enumerate(jellyfin_movies):
+        if ghost_pos not in matched_jf_indexes:
             ghost_in_jellyfin.append(
                 {
                     "title": movie.get("name", ""),
                     "year": int(movie.get("year") or 0),
-                    "jellyfin_id": jf_id,
+                    "jellyfin_id": movie.get("id", ""),
                     "jellyfin_path": movie.get("path", ""),
                 }
             )

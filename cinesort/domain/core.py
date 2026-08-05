@@ -1556,8 +1556,21 @@ def is_under_collection_root(cfg: Config, folder: Path) -> bool:
     )
 
 
-def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_template: str = "") -> bool:
-    """Wrapper conserve : 5 callers externes (plan_support, cleanup, tests)."""
+def _single_folder_is_conform(
+    folder_name: str,
+    title: str,
+    year: int,
+    naming_template: str = "",
+    *,
+    edition: str = "",
+    separator: Optional[str] = None,
+) -> bool:
+    """Wrapper conserve : 5 callers externes (plan_support, cleanup, tests).
+
+    `edition` / `separator` (#469) : a transmettre par tout appelant qui les
+    transmet aussi a l'ecrivain, sinon la conformance est evaluee contre un
+    nom que l'apply n'ecrit pas.
+    """
     return core_duplicate_support.single_folder_is_conform(
         folder_name,
         title,
@@ -1566,6 +1579,8 @@ def _single_folder_is_conform(folder_name: str, title: str, year: int, naming_te
         norm_for_tokens=_norm_for_tokens,
         movie_dir_title_year=core_duplicate_support.movie_dir_title_year,
         naming_template=naming_template,
+        edition=edition,
+        separator=separator,
     )
 
 

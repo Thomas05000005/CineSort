@@ -149,6 +149,12 @@ class TmdbClient:
         self._dirty = False
         self._last_save_ts = 0.0
 
+        # Issue #413 : trace des replis sur cache EXPIRE (cf `_note_stale_fallback`).
+        self._stale_fallbacks = 0
+        self._last_stale_key: Optional[str] = None
+        self._last_stale_cached_at: Optional[float] = None
+        self._last_stale_ts: Optional[float] = None
+
         # V2-09 (audit ID-ROB-001) : Session avec retry automatique sur 5xx + 429
         # et backoff exponentiel. Respecte Retry-After (rate-limiting TMDb).
         self._session = make_session_with_retry(
@@ -279,6 +285,18 @@ class TmdbClient:
         (mieux qu'aucun resultat). Relit depuis disque car _cache_get a
         peut-etre deja retire l'entree de la memoire.
         """
+        return self._cache_get_stale_with_ts(key)[0]
+
+    def _cache_get_stale_with_ts(self, key: str) -> Tuple[Any, Optional[float]]:
+        """Comme `_cache_get_stale`, mais rend aussi la DATE de mise en cache.
+
+        Issue #413 : servir une donnee de secours sans dire de quand elle date
+        rend le repli indistinguable d'une reponse fraiche. L'age est la seule
+        information qui permette a l'appelant (et donc a l'utilisateur) de
+        trancher. `None` pour les entrees en ancien format, qui n'ont pas de
+        `_cached_at` — l'absence de date est alors dite telle quelle, pas
+        remplacee par une valeur plausible.
+        """
         with self._lock:
             entry = self._cache.get(key)
         # Si l'entree a ete purgee de la memoire par _cache_get, on tente de
@@ -289,12 +307,50 @@ class TmdbClient:
                     raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
                     entry = raw.get(key)
             except (OSError, PermissionError, json.JSONDecodeError, ValueError):
-                return None
+                return None, None
         if entry is None:
-            return None
+            return None, None
         if isinstance(entry, dict) and "_cached_at" in entry and "value" in entry:
-            return entry.get("value")
-        return entry
+            try:
+                cached_at: Optional[float] = float(entry.get("_cached_at") or 0.0) or None
+            except (TypeError, ValueError):
+                cached_at = None
+            return entry.get("value"), cached_at
+        return entry, None
+
+    def _note_stale_fallback(self, key: str, cached_at: Optional[float]) -> None:
+        """Enregistre qu'une reponse a ete servie depuis du cache EXPIRE (#413).
+
+        Le repli sur cache expire est un bon comportement offline-first, mais il
+        etait invisible : l'appelant recevait une valeur ordinaire et ne pouvait
+        pas savoir que TMDb etait injoignable ni de quand datait la donnee. Un
+        echec presente comme un succes est proscrit dans ce depot ; on garde
+        donc trace du repli, consultable via `stale_fallback_report()`.
+        """
+        with self._lock:
+            self._stale_fallbacks += 1
+            self._last_stale_key = key
+            self._last_stale_cached_at = cached_at
+            self._last_stale_ts = time.time()
+
+    def stale_fallback_report(self) -> Dict[str, Any]:
+        """Etat des replis sur cache expire depuis la creation de ce client (#413).
+
+        `count` = nombre de reponses servies depuis du cache expire.
+        `last_cached_at` = date de mise en cache de la derniere de ces reponses
+        (epoch), ou None si l'entree n'en portait pas.
+
+        Portee : l'instance. Le depot construit un `TmdbClient` par usage, donc
+        un rapport ne couvre que les appels de l'appelant courant — c'est
+        precisement ce qu'il faut pour qualifier UNE reponse rendue a l'UI.
+        """
+        with self._lock:
+            return {
+                "count": int(self._stale_fallbacks),
+                "last_key": self._last_stale_key,
+                "last_cached_at": self._last_stale_cached_at,
+                "last_ts": self._last_stale_ts,
+            }
 
     def _cache_set(self, key: str, value: Any) -> None:
         """Ecrit une entree avec timestamp pour le TTL (H1).
@@ -474,11 +530,12 @@ class TmdbClient:
             logger.debug("TMDb: echec search '%s' (%s) — %s", q_norm, year or "?", exc)
             self._debug(f"search_movie warning query={q_norm} year={year} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
-            stale = self._cache_get_stale(cache_key)
+            stale, stale_at = self._cache_get_stale_with_ts(cache_key)
             if isinstance(stale, list):
                 logger.info(
                     "TMDb: search '%s' (%s) — fallback cache expire (%d items)", q_norm, year or "?", len(stale)
                 )
+                self._note_stale_fallback(cache_key, stale_at)
                 return [TmdbResult(**x) for x in stale]
             return []
         if not isinstance(data, dict):
@@ -569,9 +626,10 @@ class TmdbClient:
             logger.debug("TMDb: echec /movie/%d — %s", mid, exc)
             self._debug(f"_get_movie_detail_cached warning movie_id={mid} error={exc}")
             # V5-03 polish v7.7.0 : fallback graceful — utiliser cache meme expire
-            stale = self._cache_get_stale(cache_key)
+            stale, stale_at = self._cache_get_stale_with_ts(cache_key)
             if isinstance(stale, dict):
                 logger.info("TMDb: /movie/%d — fallback cache expire", mid)
+                self._note_stale_fallback(cache_key, stale_at)
                 return stale
             return None
         if not isinstance(data, dict):
@@ -653,6 +711,80 @@ class TmdbClient:
         except (TypeError, ValueError):
             return None
         return value if value > 0 else None
+
+    def get_movie_extras(self, movie_id: int) -> Optional[Dict[str, Any]]:
+        """Issue #599 — runtime + realisateur + synopsis pour la fiche film.
+
+        `/movie/{id}?append_to_response=credits`. Ces trois champs ne sont dans
+        AUCUN champ de `_get_movie_detail_cached` (qui ne demande meme pas les
+        credits), d'ou un endpoint distinct et une cle de cache distincte.
+
+        Cet appel vivait dans `ui/api/film_support.py` sous forme d'un
+        `requests` direct : hors du circuit breaker, hors de la session a retry
+        (donc sans respect du `Retry-After` que TMDb renvoie sur 429, alors que
+        la fiche film est justement ouverte en rafale par la vue Doublons), et
+        hors de l'inventaire des lectures HTTP bornees — c'est ainsi qu'il avait
+        echappe a l'audit par client de #798/#824.
+
+        Retourne `None` quand TMDb ne repond pas, quand le circuit est ouvert ou
+        quand la reponse n'est pas exploitable. Un echec n'est jamais memorise :
+        seules les reponses 200 vont au cache, pour qu'un 401 ou un 5xx soit
+        reessaye au prochain appel au lieu d'etre fige pour la duree du TTL.
+        """
+        try:
+            mid = int(movie_id or 0)
+        except (TypeError, ValueError):
+            return None
+        if mid <= 0:
+            return None
+
+        cache_key = f"movie_extras|{mid}"
+        cached = self._cache_get(cache_key)
+        if isinstance(cached, dict):
+            return dict(cached)
+
+        url = f"{TMDB_API_BASE}/movie/{mid}"
+        params = {
+            "api_key": self.api_key,
+            "language": "fr-FR",
+            "append_to_response": "credits",
+        }
+        try:
+            r = self._http_get(url, params=params)
+            if r.status_code != 200:
+                self._debug(f"get_movie_extras warning movie_id={mid} status={r.status_code}")
+                return None
+            data = r.json()
+        except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
+            logger.debug("TMDb: echec extras /movie/%d — %s", mid, exc)
+            self._debug(f"get_movie_extras warning movie_id={mid} error={exc}")
+            return None
+        if not isinstance(data, dict):
+            self._debug(f"get_movie_extras warning movie_id={mid} error=payload_non_dict")
+            return None
+
+        director: Optional[str] = None
+        credits = data.get("credits")
+        crew = credits.get("crew") if isinstance(credits, dict) else None
+        for member in crew or []:
+            if not isinstance(member, dict):
+                continue
+            if str(member.get("job") or "").lower() == "director":
+                director = str(member.get("name") or "").strip() or None
+                break
+        try:
+            runtime_min: Optional[int] = int(data.get("runtime") or 0) or None
+        except (TypeError, ValueError):
+            runtime_min = None
+        entry: Dict[str, Any] = {
+            "director": director,
+            "overview": str(data.get("overview") or "").strip() or None,
+            "runtime": runtime_min,
+        }
+        self._cache_set(cache_key, entry)
+        with contextlib.suppress(OSError, PermissionError):
+            self._save_cache_atomic()
+        return dict(entry)
 
     def get_movie_poster_thumb_url(
         self, movie_id: int, size: str = "w92", force_refresh: bool = False
@@ -801,9 +933,10 @@ class TmdbClient:
             except (requests.RequestException, CircuitOpenError, KeyError, TypeError, ValueError) as exc:
                 logger.debug("TMDb: echec alternative_titles /movie/%d — %s", mid, exc)
                 self._debug(f"get_alternative_titles warning movie_id={mid} error={exc}")
-                stale = self._cache_get_stale(cache_key)
+                stale, stale_at = self._cache_get_stale_with_ts(cache_key)
                 if isinstance(stale, list):
                     logger.info("TMDb: alternative_titles /movie/%d — fallback cache expire", mid)
+                    self._note_stale_fallback(cache_key, stale_at)
                     titles = stale
                 else:
                     return []
