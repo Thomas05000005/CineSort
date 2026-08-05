@@ -225,7 +225,7 @@ def get_perceptual_details(
         if not report:
             return {
                 "ok": False,
-                "message": "Aucune analyse perceptuelle persistee pour ce film. Lancez l'analyse depuis l'inspecteur.",
+                "message": t("errors.perceptual_no_persisted_analysis"),
                 "missing": True,
             }
         # R8-056 (F5) : aplatit vers la forme canonique que la modale consomme
@@ -1036,7 +1036,9 @@ def get_perceptual_compare_frames(
             timeout_s=p_settings["comparison_timeout_s"],
         )
         if not aligned:
-            return _err_response("Aucune frame alignee extraite.", category="state", level="info", log_module=__name__)
+            return _err_response(
+                t("errors.perceptual_no_aligned_frame"), category="state", level="info", log_module=__name__
+            )
 
         # Rank par mean_diff descendant et prend les top N.
         ranked = []
@@ -1244,7 +1246,7 @@ def queue_perceptual_analyses(
     normalized = _normalize_pairs(pairs)
     if not normalized:
         return _err_response(
-            "Aucune paire valide. Format attendu : [{run_id, row_a, row_b}, ...]",
+            t("errors.perceptual_no_valid_pair"),
             category="validation",
             level="info",
             log_module=__name__,
