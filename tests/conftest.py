@@ -38,6 +38,15 @@ from typing import Any, Callable
 
 import pytest
 
+# Garde-fou anti-fuite de dossiers temporaires (issue #960). Les deux fixtures
+# sont `autouse`, donc les importer ici suffit a les activer pour toute la
+# suite. Le detail (et les variables d'environnement de reglage) est dans
+# `tests/_temp_leak_guard.py`.
+from tests._temp_leak_guard import (
+    _temp_leak_attribution,  # noqa: F401
+    _temp_leak_guard,  # noqa: F401
+)
+
 # -----------------------------------------------------------------------------
 # Datastructures de support
 # -----------------------------------------------------------------------------

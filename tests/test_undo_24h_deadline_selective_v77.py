@@ -12,7 +12,6 @@ expiree (l'UI doit pouvoir afficher l'apercu).
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +20,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.ui.api import apply_support
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -41,7 +41,7 @@ class UndoSelective24hDeadlineTests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _apply_one(self):
         src = self.root / "Dead.Line.2021.1080p"

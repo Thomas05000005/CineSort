@@ -8,7 +8,6 @@ desactive -> aucune resolution (pas d'appels API surprises).
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import time
 import unittest
@@ -18,6 +17,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.ui.api import tmdb_support
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -34,7 +34,7 @@ class TmdbEnrichOnScanTests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _scan(self, tmdb_enabled: bool):
         calls = {"n": 0, "ids": [], "run_id": None}

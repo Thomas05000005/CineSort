@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,7 @@ def _write_settings(state_dir: Path, **fields) -> None:
 class RefreshJellyfinNowTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cs_refresh_jf_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.api = CineSortApi()
         self.api._state_dir = self._tmp
 
@@ -75,6 +77,7 @@ class RefreshJellyfinNowTests(unittest.TestCase):
 class RefreshPlexNowTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cs_refresh_plex_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.api = CineSortApi()
         self.api._state_dir = self._tmp
 
@@ -111,6 +114,7 @@ class RefreshFacadeIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp(prefix="cs_refresh_facade_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.api = CineSortApi()
         self.api._state_dir = self._tmp
 

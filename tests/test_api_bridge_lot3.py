@@ -16,6 +16,7 @@ import cinesort.app.plan_support as plan_support
 import cinesort.domain.core as core
 import cinesort.ui.api.cinesort_api as backend
 from cinesort.ui.api import cinesort_api as api_mod
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_terminal
 
@@ -42,7 +43,9 @@ class ApiBridgeLot3Tests(unittest.TestCase):
         self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        # #960 : joindre les threads de fond AVANT de supprimer, sinon ils
+        # recreent l'arborescence juste apres (mesure : 12 dossiers sur 13).
+        cleanup_test_tree(self._tmp)
 
     def _read_saved_settings_json(self) -> dict:
         path = self.state_dir / "settings.json"

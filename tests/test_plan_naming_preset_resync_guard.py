@@ -32,7 +32,6 @@ Pattern reference : 7df3af3e + a37852aa (ii.b durcissement + tmdb hydration).
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +41,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
 from cinesort.ui.api.settings_support import build_cfg_from_settings as _real_build_cfg
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -63,7 +63,7 @@ class NamingPresetResyncCallSiteGuardTests(unittest.TestCase):
         _create_file(self.root / "Inception.2010.1080p" / "Inception.2010.1080p.mkv")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _run_dir(self, run_id: str) -> Path:
         return self.state_dir / "runs" / f"tri_films_{run_id}"

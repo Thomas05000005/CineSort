@@ -34,7 +34,6 @@ compte les appels reellement injectes pour interdire toute vacuite future.
 from __future__ import annotations
 
 import logging
-import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -47,6 +46,7 @@ from cinesort.app import cleanup as cleanup_mod
 from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
 from cinesort.infra.db.repositories.apply import ApplyRepository
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -226,7 +226,7 @@ class UndoResteReellementPossibleTests(unittest.TestCase):
         self.appels: Dict[str, int] = {"insert": 0, "delete": 0}
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _panne_sur_le_nettoyage(self) -> Any:
         """Patch les 2 methodes du journal : compte les INSERT, casse les DELETE."""

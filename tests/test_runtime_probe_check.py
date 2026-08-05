@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from dataclasses import dataclass, field
@@ -86,6 +87,7 @@ class GetChosenTmdbIdTests(unittest.TestCase):
 class CrossCheckRowsWithProbeTests(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="probe_test_")
+        self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         # Cree un fichier video factice
         self.video_path = Path(self.tmp_dir) / "Inception.mkv"
         self.video_path.write_bytes(b"\x00" * 1024)
@@ -269,8 +271,6 @@ class NonNumericDurationTests(unittest.TestCase):
         self.settings = {"probe_backend": "auto"}
 
     def tearDown(self):
-        import shutil
-
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _rows(self):

@@ -73,6 +73,7 @@ import pytest
 import cinesort.domain.core as core
 from cinesort.app.apply_core import files_identical_quick
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import join_background_threads
 from tests._helpers import wait_run_done as _wait_done
 
 _MB = 1024 * 1024
@@ -116,6 +117,9 @@ class LotDChainDoublonsTests(unittest.TestCase):
         # dossier temp est purge par l'OS.
         self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_dup_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
+        # LIFO : joindre les threads de fond AVANT que cleanup() ne tente la
+        # suppression, sinon ils recreent l'arborescence (#960).
+        self.addCleanup(join_background_threads)
         base = Path(self._tmpdir.name)
         self.root_a = base / "rootA"
         self.root_b = base / "rootB"
@@ -298,6 +302,9 @@ class LotDDupBucketViewerGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_viewer_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
+        # LIFO : joindre les threads de fond AVANT que cleanup() ne tente la
+        # suppression, sinon ils recreent l'arborescence (#960).
+        self.addCleanup(join_background_threads)
         base = Path(self._tmpdir.name)
         self.root = base / "root"
         self.state_dir = base / "state"
@@ -397,6 +404,9 @@ class LotDDupTitleYearIdentityGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="cinesort_lotd_titleyear_", ignore_cleanup_errors=True)
         self.addCleanup(self._tmpdir.cleanup)
+        # LIFO : joindre les threads de fond AVANT que cleanup() ne tente la
+        # suppression, sinon ils recreent l'arborescence (#960).
+        self.addCleanup(join_background_threads)
         base = Path(self._tmpdir.name)
         self.root_a = base / "rootA"
         self.root_b = base / "rootB"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -11,6 +10,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -28,7 +28,7 @@ class CriticalFlowIntegrationTests(unittest.TestCase):
         self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _configured_api(self) -> CineSortApi:
         api = CineSortApi()

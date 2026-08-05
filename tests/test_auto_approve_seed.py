@@ -16,6 +16,7 @@ Invariants :
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import types
 import unittest
@@ -92,6 +93,7 @@ class LoadValidationSeedTests(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp(prefix="cinesort_autoapprove_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
         self.validation_json = Path(self._tmp) / "validation.json"
 
     def _api(self, enabled: bool, rows):

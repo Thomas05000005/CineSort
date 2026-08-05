@@ -10,6 +10,7 @@ get_lock pour valider que le lock survit a close/reopen.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -65,6 +66,7 @@ class _FakeStore:
 class FieldLocksPersistenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_locks_persist_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         self.db_path = self.tmp_root / "store.sqlite3"
         # Fresh DB : on cree juste la table 030.
         conn = sqlite3.connect(str(self.db_path))
@@ -159,6 +161,7 @@ class FieldLocksMigration030PersistenceTests(unittest.TestCase):
     def test_v29_to_v30_real_migration_030(self):
         """AC-1 : DB pre-existante v29 (post-VP-A) + apply 030 reelle."""
         db_path, conn = existing_db_fixture(29)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 29, "Fixture doit etre v29")
@@ -218,6 +221,7 @@ class FieldLocksMigration030PersistenceTests(unittest.TestCase):
     def test_migration_030_idempotent(self):
         """Rejouer 030 deux fois doit etre safe (IF NOT EXISTS)."""
         db_path, conn = existing_db_fixture(29)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             sql = (_project_migrations_dir() / "030_field_locks.sql").read_text(encoding="utf-8")
             for _round in range(2):

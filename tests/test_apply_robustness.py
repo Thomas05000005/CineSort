@@ -19,6 +19,7 @@ import cinesort.domain.core as core
 from cinesort.app.apply_core import record_apply_op
 from cinesort.ui.api.apply_support import _execute_undo_ops
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import create_file as _create_file
 from tests._helpers import wait_run_done as _wait_done
 
@@ -82,7 +83,7 @@ class _ApplyRobustnessBase(unittest.TestCase):
         self.addCleanup(_p_min_video.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _scan_to_done(self, api: CineSortApi) -> str:
         start = api.run.start_plan(
@@ -314,7 +315,7 @@ class UndoEdgeCasesTests(unittest.TestCase):
         self.run_paths = _FakeRunPaths(self.run_dir)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_undo_file_modified_after_apply(self) -> None:
         """Fichier existant mais contenu different : undo execute le move quand meme.
@@ -441,8 +442,8 @@ class CrossVolumeApplyTests(unittest.TestCase):
         self._tmp2 = tempfile.mkdtemp(prefix="cinesort_vol2_")
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp1, ignore_errors=True)
-        shutil.rmtree(self._tmp2, ignore_errors=True)
+        cleanup_test_tree(self._tmp1)
+        cleanup_test_tree(self._tmp2)
 
     def test_cross_volume_move_via_shutil(self) -> None:
         """shutil.move gere le cross-device via copy+delete. Test de base du behavior."""
@@ -467,7 +468,7 @@ class UndoEmptyDstPathTests(unittest.TestCase):
         self.run_dir.mkdir()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_undo_with_empty_dst_path_does_not_crash(self) -> None:
         """dst_path='' ne doit pas crasher l'undo (Path('') = Path('.'))."""

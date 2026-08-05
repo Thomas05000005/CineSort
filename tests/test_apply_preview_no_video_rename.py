@@ -11,7 +11,6 @@ renomme/deplace. Ce test verifie que la preview structuree expose :
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +18,7 @@ from unittest import mock
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -34,7 +34,7 @@ class ApplyPreviewNoVideoRenameTests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self):
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _make_single_film(self) -> tuple[CineSortApi, str, list]:
         folder = self.root / "Inception.2010.1080p.BluRay"

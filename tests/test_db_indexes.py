@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -16,7 +17,8 @@ from cinesort.infra.db.sqlite_store import SQLiteStore
 
 class QualityReportsIndexesTests(unittest.TestCase):
     def setUp(self) -> None:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(prefix="cinesort_db_indexes_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         self.db = Path(tmp) / "t.db"
         SQLiteStore(self.db).initialize()
         self.conn = sqlite3.connect(self.db)

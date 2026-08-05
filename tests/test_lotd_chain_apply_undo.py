@@ -55,7 +55,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,7 +65,7 @@ import pytest
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
-from tests._helpers import create_file, wait_run_done
+from tests._helpers import cleanup_test_tree, create_file, wait_run_done
 
 # ---------------------------------------------------------------------------
 # Helpers biblio virtuelle + snapshots
@@ -86,9 +85,10 @@ class ChainEnv:
 def env():
     """Tempdir jetable (biblio virtuelle) + MIN_VIDEO_BYTES abaisse a 1.
 
-    mkdtemp + rmtree(ignore_errors=True) plutot que TemporaryDirectory strict :
-    sur Windows le store SQLite du JobRunner peut garder un handle ouvert
-    quelques instants apres le test (pattern des tests apply/undo existants).
+    #960 : `cleanup_test_tree` joint d'abord les threads de fond du JobRunner.
+    Sans cela, `rmtree(ignore_errors=True)` echoue en silence (handle SQLite
+    encore ouvert) OU reussit puis se fait RECREER l'arborescence par le
+    thread survivant -- deux facons de laisser un dossier dans %TEMP%.
     """
     base = Path(tempfile.mkdtemp(prefix="cinesort_lotd42_"))
     root = base / "root"
@@ -101,7 +101,7 @@ def env():
         yield ChainEnv(base=base, root=root, state_dir=state_dir)
     finally:
         patcher.stop()
-        shutil.rmtree(base, ignore_errors=True)
+        cleanup_test_tree(base)
 
 
 def _settings(env: ChainEnv) -> Dict[str, object]:

@@ -15,7 +15,6 @@ empreinte absente (rapport anterieur) ou profil inserialisable => perime.
 
 from __future__ import annotations
 
-import shutil
 import sys
 import tempfile
 import unittest
@@ -29,6 +28,7 @@ from cinesort.domain.quality_score import SCORING_RULES_VERSION
 from cinesort.infra.db.sqlite_store import SQLiteStore
 from cinesort.ui.api import quality_report_support
 from cinesort.ui.api.quality_report_support import profile_fingerprint
+from tests._helpers import cleanup_test_tree
 
 
 def _profile(gold: int) -> Dict[str, Any]:
@@ -143,7 +143,7 @@ class QualityReportStaleProfileTests(unittest.TestCase):
             self.store.close()
         except Exception:  # noqa: BLE001 — teardown best effort
             pass
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _seed_report(self, profile: Dict[str, Any], *, with_fingerprint: bool = True) -> None:
         # `scoring_rules_version` : deuxieme garde du meme gate, arrivee par
@@ -278,7 +278,7 @@ class QualityReportFingerprintPersistenceTests(unittest.TestCase):
             self.store.close()
         except Exception:  # noqa: BLE001 — teardown best effort
             pass
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _score_once(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         """Execute le VRAI `_probe_and_score` avec une probe canned (pas ffprobe)."""

@@ -22,7 +22,6 @@ preview : ces tests-ci exercent l'APPLY REEL (facade de prod + apply_rows).
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,6 +31,7 @@ import cinesort.app.apply_core as apply_core
 import cinesort.domain.core as core
 import cinesort.domain.duplicate_support as dup
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -65,7 +65,7 @@ class RootFilmsRealApplyTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_real_apply_sorts_root_films_and_never_moves_the_root(self) -> None:
         (self.root / "Inception 2010.mkv").write_bytes(b"x" * 4096)
@@ -130,7 +130,7 @@ class MoveCollectionFolderRootGuardTests(unittest.TestCase):
         self.logs: list[tuple[str, str]] = []
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _log(self, level: str, msg: str) -> None:
         self.logs.append((level, msg))
@@ -183,7 +183,7 @@ class PrepassRootGuardTests(unittest.TestCase):
         self.logs: list[tuple[str, str]] = []
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _log(self, level: str, msg: str) -> None:
         self.logs.append((level, msg))
@@ -258,7 +258,7 @@ class IsUnderCollectionRootRootCaseTests(unittest.TestCase):
         self.root.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _cfg(self) -> core.Config:
         return core.Config(

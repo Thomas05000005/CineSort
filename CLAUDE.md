@@ -115,8 +115,30 @@ des mois. Toujours lire le resume complet, pas seulement les lignes `FAILED`.
 les deux doivent bouger ensemble.
 
 **Windows** : les verrous de fichiers (WinError 5/32) rendent instables les tests
-qui deplacent des dossiers sous charge. Un echec isole sur la chaine apply/undo
-en suite complete, qui passe en isolation, est presque toujours cela.
+qui deplacent des dossiers sous charge. **Cette phrase a longtemps servi de
+fourre-tout** : deux causes MESUREES se cachaient derriere (issue #960), et
+« rejouer en isolation » ne prouve rien contre elles — le test passe seul parce
+qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
+
+1. **`%TEMP%` sature.** La suite y laissait **259 dossiers par execution** et
+   rien ne les purge (26 059 avaient ete trouves). Au-dela de quelques milliers
+   d'entrees, la creation/le renommage de dossiers temporaires part en
+   `PermissionError [WinError 5]`. La CI ne le voit jamais : runner neuf a
+   chaque fois. `tests/_temp_leak_guard.py` compte desormais la fuite (il
+   redirige `%TEMP%` vers un bac a sable et compte ce qui reste) et fait
+   echouer la session au-dela de la borne.
+2. **Les threads de fond de l'app survivent au test.** Ils continuent d'ecrire
+   dans le `state_dir` du test, au point de le **recreer** juste apres le
+   `rmtree` du `tearDown` (12 dossiers sur 13 pour `test_api_bridge_lot3.py`),
+   et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
+   le tmpdir d'un test qui a pilote l'API passe par
+   `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
+3. **Une troisieme cause reste INEXPLIQUEE — ne pas reconduire le fourre-tout
+   sous un autre nom.** Le `WinError 5` survit dans un `%TEMP%` neuf et quasi
+   vide : sur la chaine apply/undo, 2 puis 2 echecs sur la branche corrigee,
+   0 puis 3 sur `main`, meme signature. Les deux causes ci-dessus sont mesurees
+   et corrigees ; celle-la ne l'est pas. Attribuer un nouvel echec a l'une des
+   deux premieres demande donc une MESURE, pas une ressemblance.
 
 ## Conventions
 
