@@ -20,6 +20,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from cinesort.domain.tiers_helpers import LOW_TIERS_LOWER, PREMIUM_TIERS_LOWER
 from cinesort.infra.db.repositories._base import _BaseRepository
 
 # Nombre de couples (run_id, row_id) par requete de `get_quality_reports_for_pairs`.
@@ -481,7 +482,16 @@ class QualityRepository(_BaseRepository):
         return max(0, int(total_rows) - scored)
 
     def get_quality_counts_for_runs(self, run_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Retourne {run_id: {tier: count, ...}} pour la liste de runs donnee (agregation bulk).
+        """Agregats qualite par run (bulk).
+
+        Retourne ``{run_id: {"scored_movies", "score_avg", "premium_count",
+        "low_count"}}``. Les runs sans aucun rapport qualite sont ABSENTS du
+        dict (``GROUP BY`` ne produit pas de ligne vide) — l'appelant doit donc
+        utiliser ``.get(run_id, {})``.
+
+        La docstring precedente annoncait ``{run_id: {tier: count, ...}}``,
+        c'est-a-dire une distribution PAR TIER : cette forme n'a JAMAIS ete
+        produite ici (c'est ``get_global_tier_distribution`` qui la rend).
 
         #472 — `premium_count` et `low_count` se calculaient en re-seuillant le
         `score` brut avec 85 et 55 ecrits dans le SQL. Or le tier d'un film n'est
@@ -512,6 +522,11 @@ class QualityRepository(_BaseRepository):
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
+        # Ordre des parametres = ordre d'APPARITION des `?` dans le SQL.
+        premium_bands = sorted(PREMIUM_TIERS_LOWER)
+        low_bands = sorted(LOW_TIERS_LOWER)
+        premium_ph = ",".join("?" for _ in premium_bands)
+        low_ph = ",".join("?" for _ in low_bands)
         with self._managed_conn() as conn:
             cur = conn.execute(
                 f"""
@@ -519,13 +534,13 @@ class QualityRepository(_BaseRepository):
                   run_id,
                   COUNT(*) AS scored_movies,
                   AVG(score) AS score_avg,
-                  SUM(CASE WHEN LOWER(tier) IN ('platinum', 'premium') THEN 1 ELSE 0 END) AS premium_count,
-                  SUM(CASE WHEN LOWER(tier) IN ('bronze', 'reject') THEN 1 ELSE 0 END) AS low_count
+                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({premium_ph}) THEN 1 ELSE 0 END) AS premium_count,
+                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({low_ph}) THEN 1 ELSE 0 END) AS low_count
                 FROM quality_reports
                 WHERE run_id IN ({placeholders})
                 GROUP BY run_id
                 """,
-                tuple(ids),
+                (*premium_bands, *low_bands, *ids),
             )
             out: Dict[str, Dict[str, Any]] = {}
             for row in cur.fetchall():
