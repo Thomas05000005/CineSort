@@ -126,6 +126,26 @@ const FLAG_MAP = {
     severity: "warning",
     action: { kind: "config_subs", label: "Configurer recherche subs" },
   },
+  // ARBITRAGE PRODUIT F12 (2026-08-03) : un « .fr.forced.srt » ne traduit que les
+  // passages en langue étrangère. La langue EST détectée (donc pas de
+  // subtitle_missing_fr, qui serait de toute façon effacé par les réconciliations
+  // backend), mais il n'existe aucune piste FR complète -> flag dédié.
+  subtitle_forced_only_fr: {
+    icon: "💬",
+    label: "Sous-titres FR forcés uniquement",
+    description:
+      "Seul un sous-titre FR « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste FR complète.",
+    severity: "warning",
+    action: { kind: "config_subs", label: "Configurer recherche subs" },
+  },
+  subtitle_forced_only_en: {
+    icon: "💬",
+    label: "Sous-titres EN forcés uniquement",
+    description:
+      "Seul un sous-titre EN « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste EN complète.",
+    severity: "warning",
+    action: { kind: "config_subs", label: "Configurer recherche subs" },
+  },
   subtitle_orphan: {
     icon: "💬",
     label: "Sous-titre orphelin",
@@ -197,6 +217,16 @@ const FLAG_MAP = {
     severity: "warning",
     action: { kind: "open_film", label: "Voir détail" },
   },
+  // #613 : episode TV dont la saison n'a pas ete resolue (nom de type
+  // "Episode 12" sans saison). L'apply REFUSE de le ranger : "Saison 00" est le
+  // dossier des specials, pas une poubelle pour les saisons inconnues.
+  tv_season_unknown: {
+    icon: "📺",
+    label: "Saison indéterminée",
+    description: "La saison de cet épisode n'a pas pu être déterminée. L'application refusera de le ranger (le mettre dans « Saison 00 » le confondrait avec les specials) : renseigner la saison avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
 };
 
 // AUDIT 2026-06-14 (R6-I) : map de langues pour les flags subtitle_missing_<lang>
@@ -231,6 +261,18 @@ export function labelForFlag(code) {
       icon: "💬",
       label: `Sous-titres ${lang.toUpperCase()} manquants`,
       description: `Aucun sous-titre ${langName} détecté pour ce film.`,
+      severity: "warning",
+      action: { kind: "config_subs", label: "Configurer recherche subs" },
+    };
+  }
+  // F12 (2026-08-03) : flags subtitle_forced_only_<lang> dynamiques (de/es/it/...).
+  if (!entry && c.startsWith("subtitle_forced_only_")) {
+    const lang = c.slice("subtitle_forced_only_".length);
+    const langName = _LANG_NAMES[lang] || lang.toUpperCase();
+    entry = {
+      icon: "💬",
+      label: `Sous-titres ${lang.toUpperCase()} forcés uniquement`,
+      description: `Seul un sous-titre ${langName} « forcé » a été détecté : il ne traduit que les passages en langue étrangère, pas les dialogues. Aucune piste ${lang.toUpperCase()} complète.`,
       severity: "warning",
       action: { kind: "config_subs", label: "Configurer recherche subs" },
     };

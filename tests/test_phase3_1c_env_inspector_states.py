@@ -181,9 +181,14 @@ globalThis.document = {
   querySelector: () => null,
   getElementById: () => null,
 };
-globalThis.window = {
-  dispatchEvent: (e) => { globalThis.__fx.events.push(e.type); return true; },
-};
+// Revue post-merge 2026-08-03 : `initKeyboard()` enregistre desormais un
+// auditeur `cinesort:refresh` sur window (F5 + palette Ctrl+K rafraichissent
+// reellement la vue). Un objet litteral sans addEventListener ne suffit plus :
+// on utilise un vrai EventTarget, en gardant la sonde sur dispatchEvent.
+globalThis.window = new EventTarget();
+globalThis.window.location = { hash: "#/accueil" };
+const _rawDispatch = globalThis.window.dispatchEvent.bind(globalThis.window);
+globalThis.window.dispatchEvent = (e) => { globalThis.__fx.events.push(e.type); return _rawDispatch(e); };
 """
 
 _KEYBOARD_EXTRA = ""

@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _JELLYFIN_CLIENT_NAME = "CineSort"
@@ -45,7 +45,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise JellyfinError(f"URL Jellyfin refusee : {reason}")
     return url
@@ -126,11 +136,17 @@ class JellyfinClient:
     # ------------------------------------------------------------------
 
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
-        """GET avec gestion d'erreurs standardisée."""
+        """GET avec gestion d'erreurs standardisée.
+
+        La borne anti-OOM du corps est appliquee ICI, au transport (cf
+        `request_bounded`) : aucun appelant ne peut plus l'oublier, et elle
+        s'applique A LA LECTURE et non apres materialisation du corps entier
+        (issue #425).
+        """
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -150,7 +166,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.post(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "POST", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: POST %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -170,7 +186,7 @@ class JellyfinClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.delete(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "DELETE", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Jellyfin: DELETE %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -210,9 +226,6 @@ class JellyfinClient:
         # requests.get directement ici sinon hang infini si le serveur freeze.
         try:
             resp = self._get("/System/Info/Public")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             server_info = resp.json()
         except JellyfinError as exc:
             return {"ok": False, "error": str(exc)}
@@ -227,9 +240,6 @@ class JellyfinClient:
         # utilisateur. GET /Users fonctionne avec une API key admin.
         try:
             resp = self._get("/Users")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             users = resp.json()
         except JellyfinError as exc:
             return {
@@ -281,9 +291,6 @@ class JellyfinClient:
         """
         try:
             resp = self._get(f"/Users/{user_id}/Views")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -307,9 +314,6 @@ class JellyfinClient:
                 f"/Users/{user_id}/Items",
                 params={"IncludeItemTypes": "Movie", "Limit": "0", "Recursive": "true"},
             )
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except JellyfinError:
             raise
@@ -370,9 +374,6 @@ class JellyfinClient:
                 params["ParentId"] = str(library_id)
             try:
                 resp = self._get(f"/Users/{user_id}/Items", params=params)
-                _body = getattr(resp, "content", b"")
-                if _body and len(_body) > 10_000_000:
-                    raise ValueError("Response too large")
                 data = resp.json()
             except JellyfinError:
                 raise

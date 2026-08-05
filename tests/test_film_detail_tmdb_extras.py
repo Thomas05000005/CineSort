@@ -8,6 +8,12 @@ pour tout utilisateur ayant enregistre une cle TMDb.
 
 Correctif : `api._internal_settings()` (secrets en clair) + garde explicite sur
 le masque residuel. Miroir de tmdb_support.py:103 et library_actions_support.py:661.
+
+Issue #599 : le GET `append_to_response=credits` a quitte ce module pour
+`TmdbClient.get_movie_extras` (circuit breaker + session a retry). Les doubles
+de ce fichier sont donc des SOUS-CLASSES du vrai client, pas des stubs : ce qui
+est verifie ici (cle en clair effectivement envoyee, cache, echec non memorise)
+doit l'etre sur le chemin reellement emprunte en production.
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
+from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api import film_support
 from cinesort.ui.api.settings_support import _SECRET_MASK
 
@@ -48,22 +55,14 @@ class _FakeApi:
         return dict(self._internal)
 
 
-class _FakeTmdbClient:
-    """Stub TmdbClient : aucune I/O reseau, memorise la cle recue."""
+class _RecordingTmdbClient(TmdbClient):
+    """VRAI client TMDb : seule la couche HTTP est doublee par les tests."""
 
     constructed_with: List[Dict[str, Any]] = []
 
     def __init__(self, **kwargs: Any) -> None:
-        _FakeTmdbClient.constructed_with.append(dict(kwargs))
-
-    def get_movie_runtime(self, movie_id: int) -> Optional[int]:
-        return None  # cache froid : le runtime viendra du GET HTTP
-
-    def _get_movie_detail_cached(self, movie_id: int) -> Optional[Dict[str, Any]]:
-        return None
-
-    def flush(self) -> None:
-        return None
+        _RecordingTmdbClient.constructed_with.append(dict(kwargs))
+        super().__init__(**kwargs)
 
 
 class _FakeResponse:
@@ -74,6 +73,9 @@ class _FakeResponse:
     def json(self) -> Dict[str, Any]:
         return self._payload
 
+    def raise_for_status(self) -> None:
+        return None
+
 
 _DETAIL_PAYLOAD = {
     "overview": "o",
@@ -82,24 +84,28 @@ _DETAIL_PAYLOAD = {
 }
 
 
+def _is_extras_call(params: Optional[Dict[str, Any]]) -> bool:
+    return "append_to_response" in dict(params or {})
+
+
 class FetchTmdbExtrasSecretTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory(prefix="cinesort_f20_")
         self.state_dir = str(Path(self._tmp.name))
-        _FakeTmdbClient.constructed_with = []
+        _RecordingTmdbClient.constructed_with = []
         self.captured: List[Dict[str, Any]] = []
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _fake_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: Any = None) -> _FakeResponse:
+    def _fake_get(self, url: str, params: Optional[Dict[str, Any]] = None, **_kw: Any) -> _FakeResponse:
         self.captured.append(dict(params or {}))
         return _FakeResponse(200, _DETAIL_PAYLOAD)
 
     def _run(self, api: _FakeApi) -> Dict[str, Any]:
         with (
-            patch("cinesort.infra.tmdb_client.TmdbClient", _FakeTmdbClient),
-            patch("requests.get", side_effect=self._fake_get),
+            patch("cinesort.infra.tmdb_client.TmdbClient", _RecordingTmdbClient),
+            patch("requests.Session.get", side_effect=self._fake_get),
         ):
             return film_support._fetch_tmdb_extras(api, _TMDB_ID)
 
@@ -112,13 +118,16 @@ class FetchTmdbExtrasSecretTests(unittest.TestCase):
 
         out = self._run(api)
 
-        self.assertEqual(len(self.captured), 1, "un seul GET detail attendu")
-        self.assertEqual(
-            self.captured[0].get("api_key"),
-            "REALKEY",
-            "la requete TMDb doit porter la cle EN CLAIR, pas le masque",
-        )
-        self.assertEqual(_FakeTmdbClient.constructed_with[0].get("api_key"), "REALKEY")
+        extras_calls = [p for p in self.captured if _is_extras_call(p)]
+        self.assertEqual(len(extras_calls), 1, "un seul GET extras attendu")
+        self.assertTrue(self.captured, "aucune requete TMDb emise")
+        for params in self.captured:
+            self.assertEqual(
+                params.get("api_key"),
+                "REALKEY",
+                "la requete TMDb doit porter la cle EN CLAIR, pas le masque",
+            )
+        self.assertEqual(_RecordingTmdbClient.constructed_with[0].get("api_key"), "REALKEY")
         self.assertEqual(out["director"], "X")
         self.assertEqual(out["overview"], "o")
         self.assertEqual(out["runtime"], 148)
@@ -133,7 +142,7 @@ class FetchTmdbExtrasSecretTests(unittest.TestCase):
         out = self._run(api)
 
         self.assertEqual(self.captured, [], "aucune requete HTTP ne doit partir avec le masque")
-        self.assertEqual(_FakeTmdbClient.constructed_with, [], "pas de TmdbClient construit avec le masque")
+        self.assertEqual(_RecordingTmdbClient.constructed_with, [], "pas de TmdbClient construit avec le masque")
         self.assertEqual(out, {"runtime": None, "director": None, "overview": None})
 
     # ---- non-regression (VERT des deux cotes de la mutation) ----
@@ -156,8 +165,8 @@ class FetchTmdbExtrasSecretTests(unittest.TestCase):
         )
 
         with (
-            patch("cinesort.infra.tmdb_client.TmdbClient", _FakeTmdbClient),
-            patch("requests.get", side_effect=self._fake_get),
+            patch("cinesort.infra.tmdb_client.TmdbClient", _RecordingTmdbClient),
+            patch("requests.Session.get", side_effect=self._fake_get),
         ):
             out = film_support._fetch_tmdb_extras(api, 0)
 
@@ -184,7 +193,7 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
         self._tmp = TemporaryDirectory(prefix="cinesort_f20r1_")
         self.state_dir = str(Path(self._tmp.name))
         self.detail_calls = 0
-        self.raw_calls = 0
+        self.extras_calls = 0
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -195,21 +204,15 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
             internal={"tmdb_api_key": "REALKEY", "state_dir": self.state_dir, "tmdb_timeout_s": 1.0},
         )
 
-    def _fake_http_get(self, _self: Any, url: str, params: Any = None, **_kw: Any) -> _FakeResponse:
-        """Couche HTTP interne du VRAI TmdbClient (endpoint /movie/{id})."""
-        self.detail_calls += 1
-        return _FakeResponse(200, _DETAIL_PAYLOAD)
-
-    def _fake_raw_get(self, url: str, params: Any = None, timeout: Any = None, **_kw: Any) -> _FakeResponse:
-        """GET direct de _fetch_tmdb_extras (append_to_response=credits)."""
-        self.raw_calls += 1
+    def _fake_get(self, url: str, params: Optional[Dict[str, Any]] = None, **_kw: Any) -> _FakeResponse:
+        if _is_extras_call(params):
+            self.extras_calls += 1
+        else:
+            self.detail_calls += 1
         return _FakeResponse(200, _DETAIL_PAYLOAD)
 
     def _call(self) -> Dict[str, Any]:
-        with (
-            patch("cinesort.infra.tmdb_client.TmdbClient._http_get", self._fake_http_get),
-            patch("requests.get", side_effect=self._fake_raw_get),
-        ):
+        with patch("requests.Session.get", side_effect=self._fake_get):
             return film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)
 
     def test_director_et_overview_ne_repartent_pas_en_http_a_chaque_appel(self) -> None:
@@ -217,9 +220,9 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
         outs = [self._call() for _ in range(3)]
 
         self.assertEqual(
-            self.raw_calls,
+            self.extras_calls,
             1,
-            f"director/overview refetches a chaque appel ({self.raw_calls} GET pour 3 appels)",
+            f"director/overview refetches a chaque appel ({self.extras_calls} GET pour 3 appels)",
         )
         for out in outs:
             self.assertEqual(out["director"], "X")
@@ -237,18 +240,18 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
     def test_un_echec_http_nest_pas_memorise(self) -> None:
         """Un 401/5xx doit etre reessaye au prochain appel, pas fige pour le TTL."""
 
-        def failing_get(url: str, params: Any = None, timeout: Any = None, **_kw: Any) -> _FakeResponse:
-            self.raw_calls += 1
-            return _FakeResponse(401, {})
+        def failing_get(url: str, params: Optional[Dict[str, Any]] = None, **_kw: Any) -> _FakeResponse:
+            if _is_extras_call(params):
+                self.extras_calls += 1
+                return _FakeResponse(401, {})
+            self.detail_calls += 1
+            return _FakeResponse(200, _DETAIL_PAYLOAD)
 
-        with (
-            patch("cinesort.infra.tmdb_client.TmdbClient._http_get", self._fake_http_get),
-            patch("requests.get", side_effect=failing_get),
-        ):
+        with patch("requests.Session.get", side_effect=failing_get):
             first = film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)
             second = film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)
 
-        self.assertEqual(self.raw_calls, 2, "un echec ne doit pas etre cache")
+        self.assertEqual(self.extras_calls, 2, "un echec ne doit pas etre cache")
         self.assertIsNone(first["director"])
         self.assertIsNone(second["director"])
 
@@ -258,7 +261,7 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
         out = self._call()
 
         self.assertEqual(out, {"runtime": 148, "director": "X", "overview": "o"})
-        self.assertEqual(self.raw_calls, 1)
+        self.assertEqual(self.extras_calls, 1)
 
 
 if __name__ == "__main__":

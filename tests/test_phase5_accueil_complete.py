@@ -15,6 +15,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from tests._jsexec import require_node, run_module_test
+from tests.test_revue_20260803_modales_et_payloads import ACCUEIL_STUBS
+
 _ROOT = Path(__file__).resolve().parents[1]
 _ACCUEIL_JS = _ROOT / "web" / "dashboard" / "views" / "accueil.js"
 _TRAITEMENT_JS = _ROOT / "web" / "dashboard" / "views" / "traitement.js"
@@ -74,9 +77,37 @@ class Timeline7DaysTests(unittest.TestCase):
         self.assertIn('aria-label="${escapeHtml(tooltip)}', self.js)
 
     def test_timeline_status_derivation_helper(self) -> None:
-        # Helper _deriveRunStatus expose APPLIED / PARTIAL / ERROR / DONE.
-        self.assertIn("_deriveRunStatus", self.js)
-        self.assertIn("APPLIED", self.js)
+        """La timeline derive bien un statut par run.
+
+        Revue adversaire PR #855 : ce test cherchait la CHAINE `_deriveRunStatus`
+        dans la source. Il est tombe le jour ou la derivation a ete extraite dans
+        `core/run-status.js` (partagee avec /historique pour que les deux ecrans
+        cessent de se contredire) — alors que le comportement s'ameliorait. Il
+        verifie desormais le HTML reellement produit, quel que soit le nom, le
+        fichier ou la forme du helper.
+        """
+        require_node(self)
+        res = run_module_test(
+            _ACCUEIL_JS,
+            stubs=ACCUEIL_STUBS,
+            extra="export const __t = { render: _renderRecentActivity };\n",
+            driver=r"""
+const ts = Math.floor(Date.now() / 1000) - 3600;
+const mk = (o) => Object.assign({ run_id: "r", status: "DONE", started_ts: ts,
+  total_rows: 10, applied_rows: 0, errors_count: 0 }, o);
+const out = {};
+for (const [k, o] of [
+  ["applied", { run_id: "applied", applied_rows: 10 }],
+  ["partial", { run_id: "partial", applied_rows: 4 }],
+  ["error",   { run_id: "error",   errors_count: 2 }],
+  ["done",    { run_id: "done" }],
+]) out[k] = M.__t.render([mk(o)]);
+__emit(out);
+""",
+        )
+        for expected, html in res.items():
+            self.assertIn(f"— {expected.upper()}", html, f"statut {expected} absent de l'infobulle")
+            self.assertIn(f"accueil-timeline-bullet--{expected}", html)
 
 
 # --------------------------------------------------------------------- #
