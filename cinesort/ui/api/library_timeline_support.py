@@ -258,7 +258,14 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
 
     # 1. Tente de recuperer les dates Jellyfin par tmdb_id
     jelly_dates = _get_jellyfin_date_map(api, settings)
-    using_jellyfin = bool(jelly_dates)
+    # Issue #683 : `source` est le badge de PROVENANCE des dates affichees, donc
+    # il doit se deduire des dates REELLEMENT retenues. Le figer a
+    # `bool(jelly_dates)` avant la boucle le rendait vrai des qu'un seul film,
+    # meme etranger a ce run, existait cote Jellyfin : sur une bibliotheque dont
+    # aucun tmdb_id ne matche (autre bibliotheque, films non identifies, merge
+    # partiel), 100 % des mois venaient du mtime filesystem et le badge annoncait
+    # quand meme « mixed ». `using_filesystem` etait deja derive des matchs, lui.
+    using_jellyfin = False
     using_filesystem = False
 
     # 2. Pour chaque film, resoud le mois
@@ -271,7 +278,12 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
         if tmdb_id and jelly_dates:
             iso = jelly_dates.get(str(tmdb_id))
             if iso:
+                # Une date Jellyfin illisible ou implausible (`_parse_iso_to_month`
+                # rend None) ne compte pas comme une date Jellyfin UTILISEE : la
+                # row retombe sur le mtime juste en dessous.
                 month = _parse_iso_to_month(iso)
+                if month is not None:
+                    using_jellyfin = True
         # Fallback filesystem
         if month is None:
             path = str(row.get("path") or "")
@@ -283,14 +295,20 @@ def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str]
             n_with_date += 1
 
     # 3. Genere le range de mois pour combler les trous (Janvier 0, Fevrier 0, ...)
-    if month_counter:
-        latest_month = max(month_counter.keys())
-        month_range = _generate_month_range(latest_month, n_months)
-    else:
-        # Aucune date dispo : timeline vide
-        now = datetime.now(timezone.utc)
-        latest_month = f"{now.year:04d}-{now.month:02d}"
-        month_range = _generate_month_range(latest_month, n_months)
+    # Issue #583 : l'ancrage etait `max(month_counter)`, donc le dernier mois
+    # AYANT eu de l'activite. Sur une bibliotheque mature (rien d'ajoute depuis
+    # un an), la fenetre se figeait sur ce mois fossile et ne repondait plus a la
+    # question posee par le contrat de cette fonction — « les N DERNIERS mois ».
+    # La branche `month_counter` vide utilisait deja `now`, les deux etaient donc
+    # incoherentes ; elles sont desormais une seule expression.
+    # `max` et non `today_month` seul : un fichier date dans le futur (mtime
+    # fausse par un NAS ou une copie) reste visible plutot que d'etre masque en
+    # silence. Les cles sont des `YYYY-MM` zero-padded, donc l'ordre
+    # lexicographique est l'ordre chronologique.
+    now = datetime.now(timezone.utc)
+    today_month = f"{now.year:04d}-{now.month:02d}"
+    latest_month = max([today_month, *month_counter.keys()])
+    month_range = _generate_month_range(latest_month, n_months)
 
     months_list = [{"month": m, "count": month_counter.get(m, 0)} for m in month_range]
 

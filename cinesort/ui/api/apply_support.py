@@ -2221,7 +2221,16 @@ def _cleanup_apply(
     run_id: str,
     dry_run: bool,
     rows: List[Any],
-) -> Tuple[Dict[str, int], int, int, Dict[str, Any]]:
+) -> Tuple[Dict[str, int], int, int, Dict[str, Any], bool]:
+    """Finalise le batch et resume l'apply.
+
+    Le 5e element du tuple, `journal_finalized`, dit si `close_apply_batch(DONE)`
+    a REELLEMENT abouti. Il vaut False des que la finalisation a echoue : le
+    batch reste alors `PENDING`, donc `get_last_reversible_apply_batch`
+    (filtre `status='DONE'`) ne le verra pas et l'undo de cet apply est perdu.
+    Le caller doit le remonter dans la reponse — un apply destructif dont le
+    filet de securite a disparu ne peut pas etre annonce comme un succes muet.
+    """
     cleanup_diag = result.cleanup_residual_diagnostic if isinstance(result.cleanup_residual_diagnostic, dict) else {}
     skip_reason_order = [
         core.SKIP_REASON_NON_VALIDE,
@@ -2236,6 +2245,7 @@ def _cleanup_apply(
     skip_counts = {reason: int((result.skip_reasons or {}).get(reason, 0)) for reason in skip_reason_order}
     applied_count = int(result.applied_count or 0)
     total_rows = int(result.considered_rows or len(rows))
+    journal_finalized = True
     if apply_batch_id is not None:
         try:
             store.apply.close_apply_batch(
@@ -2252,8 +2262,22 @@ def _cleanup_apply(
                     "ops_count": int(op_index),
                 },
             )
-        except (OSError, TypeError, ValueError) as exc:
-            log_fn("WARN", f"Journal apply non finalise: {exc}")
+        except (sqlite3.Error, OSError, TypeError, ValueError) as exc:
+            # F11 (suite) : sqlite3.Error n'herite PAS de OSError. `close_apply_batch`
+            # est appelee APRES que tous les deplacements ont ete faits sur disque —
+            # c'est exactement le cas ou l'invariant « un echec de journal n'empeche
+            # jamais un move » s'applique (contrairement a `insert_apply_batch`
+            # ci-dessus, volontairement fail-closed). Sans cette entree, un
+            # « database is locked » (ThreadingHTTPServer du dashboard + threads de
+            # fond concurrents, disque plein, disk I/O error) s'echappait de
+            # _cleanup_apply, faisait remonter un apply REUSSI en HTTP 500 et — en
+            # mode atomique — declenchait un rollback destructif.
+            journal_finalized = False
+            log_fn(
+                "WARN",
+                f"Journal apply non finalise ({type(exc).__name__}, batch_id={apply_batch_id}) : {exc} "
+                "— l'apply disque est termine, mais le batch reste PENDING donc l'undo peut etre indisponible.",
+            )
         except RuntimeError as exc:
             # MEGA-HOTFIX bug #1 : close_apply_batch leve ApplyBatchStateError
             # (sous-classe de RuntimeError, definie dans
@@ -2267,6 +2291,12 @@ def _cleanup_apply(
             # public API du module repositories) et on log un WARN explicite :
             # le batch est peut-etre deja finalise ailleurs, l'apply reel a
             # reussi, on preserve la backward compat.
+            #
+            # REVUE ADVERSAIRE PR#852 : ce chemin non plus n'a pas abouti a un
+            # batch `DONE` (transition refusee = batch absent, ou deja dans un
+            # etat terminal non reversible). L'undo n'est donc pas plus arme
+            # ici que dans l'except ci-dessus -> meme drapeau.
+            journal_finalized = False
             log_fn(
                 "WARN",
                 f"Journal apply non finalise (transition d'etat refusee, batch_id={apply_batch_id}) : {exc}",
@@ -2316,7 +2346,7 @@ def _cleanup_apply(
             f"video_blocked={int(cleanup_diag.get('has_video_count') or 0)} "
             f"ambiguous={int(cleanup_diag.get('ambiguous_count') or 0)}",
         )
-    return skip_counts, applied_count, total_rows, cleanup_diag
+    return skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized
 
 
 def _summarize_apply(
@@ -2698,6 +2728,15 @@ def _restore_jellyfin_watched(
         result = restore_watched(client, user_id, snapshot, operations)
         if result.restored > 0:
             log_fn("INFO", f"Jellyfin sync : {result.restored} statut(s) vu restauré(s).")
+        if result.counters_lost > 0:
+            # #535 : le statut vu est revenu, mais pas le nombre de lectures ni
+            # la date. Silencieux jusqu'ici, c'etait une perte de donnees
+            # invisible pour l'utilisateur.
+            log_fn(
+                "WARN",
+                f"Jellyfin sync : {result.counters_lost} film(s) restauré(s) SANS leur historique "
+                "(nombre de lectures et date perdus — serveur trop ancien pour l'API UserData ?).",
+            )
         if result.not_found > 0:
             log_fn("WARN", f"Jellyfin sync : {result.not_found} film(s) non retrouvé(s) après re-indexation.")
         if result.errors > 0:
@@ -2810,6 +2849,12 @@ def _apply_changes_body(
     if not dry_run:
         watched_ctx = _snapshot_jellyfin_watched(api, log_fn)
 
+    # Le rollback atomique ne doit rejouer QUE l'echec d'un apply incomplet. Ce
+    # drapeau passe a True des que `_execute_apply` a rendu la main : au-dela, le
+    # disque est dans l'etat voulu et toute exception ulterieure (finalisation du
+    # journal, resume, notifications, sync Jellyfin/Plex) ne justifie plus de
+    # defaire les deplacements — cf. le garde-fou plus bas.
+    apply_execution_completed = False
     try:
         try:
             result, batch_id, ops = _execute_apply(
@@ -2837,8 +2882,9 @@ def _apply_changes_body(
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
         apply_batch_id = batch_id
         op_index = ops
+        apply_execution_completed = True
 
-        skip_counts, applied_count, total_rows, cleanup_diag = _cleanup_apply(
+        skip_counts, applied_count, total_rows, cleanup_diag, journal_finalized = _cleanup_apply(
             result,
             apply_batch_id,
             op_index,
@@ -2930,7 +2976,65 @@ def _apply_changes_body(
                 rs.apply_end(error=None)
             except Exception:
                 _log.debug("apply_end OK a echoue", exc_info=True)
-        return {"ok": True, "result": result.__dict__, "apply_batch_id": apply_batch_id}
+        # REVUE ADVERSAIRE PR#852 — le silence etait le vrai defaut.
+        #
+        # Rendre `close_apply_batch` tolerante aux erreurs SQLite (F11) evite de
+        # transformer un apply reussi en HTTP 500 et de declencher un rollback
+        # destructif a tort. Mais elle transforme aussi un apply DONT L'UNDO EST
+        # MORT en un `{"ok": True}` totalement muet : le batch reste `PENDING`,
+        # `get_last_reversible_apply_batch` filtre `status='DONE'`, et
+        # l'utilisateur ne l'apprend qu'en cliquant « Annuler » (message
+        # generique « aucun apply annulable », sans lien avec l'apply qu'on
+        # vient de lui annoncer comme reussi). Un WARN dans le log technique
+        # n'est ni une information utilisateur ni une donnee exploitable par
+        # l'UI. Sur le chemin destructif, perdre l'annulation de 500 films DOIT
+        # etre une donnee de la reponse.
+        #
+        # `undo_available` couvre aussi le cas ou `insert_apply_batch` a echoue
+        # (OSError/TypeError/ValueError -> apply_batch_id None, apply poursuivi
+        # sans journal) et le dry-run (rien a annuler). Il exige EN PLUS au moins
+        # une operation journalisee (`op_index`) : un batch clos DONE mais vide
+        # n'est pas plus annulable qu'un batch PENDING, et annoncer
+        # `undo_available: True` a une UI qui proposerait alors un bouton
+        # « Annuler » inoperant serait le meme mensonge dans l'autre sens.
+        undo_available = bool(
+            not dry_run and apply_batch_id is not None and journal_finalized and int(op_index or 0) > 0
+        )
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "result": result.__dict__,
+            "apply_batch_id": apply_batch_id,
+            "journal_finalized": bool(journal_finalized),
+            "undo_available": undo_available,
+        }
+        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque :
+        # `applied_count` vient du resultat (donc reste vrai quand
+        # `insert_apply_batch` a echoue et que `op_index` est reste a 0), et
+        # `op_index` couvre les operations journalisees hors rows (nettoyage
+        # residuel). Un apply qui n'a rien deplace n'a rien perdu : crier au loup
+        # sur ce cas-la userait l'alerte exactement quand elle doit porter.
+        disk_touched = int(applied_count or 0) > 0 or int(op_index or 0) > 0
+        if not dry_run and disk_touched and not undo_available:
+            warning = t("errors.undo_unavailable_after_apply")
+            payload["journal_warning"] = warning
+            log_fn("WARN", warning)
+            # Un champ de payload que personne n'affiche serait un troisieme
+            # silence. Le centre de notifications (la cloche) est le seul canal
+            # qui SURVIT a la fermeture de l'ecran d'apply, et le miroir vers lui
+            # est inconditionnel (NotifyService.notify) : il ne depend d'aucun
+            # reglage de toasts desktop.
+            try:
+                api._notify.notify(
+                    "error",
+                    t("notifications.title_undo_unavailable"),
+                    warning,
+                    level="error",
+                )
+            except Exception:
+                # Un echec de notification ne doit pas transformer un apply
+                # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
+                _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
+        return payload
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
@@ -2947,7 +3051,11 @@ def _apply_changes_body(
                         "ops_count": int(op_index),
                     },
                 )
-            except (OSError, RuntimeError, TypeError, ValueError) as close_exc:
+            except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as close_exc:
+                # F11 (suite) : sans sqlite3.Error, un lock DB ici relevait une
+                # exception DEPUIS le handler d'erreur — elle sortait de
+                # _apply_changes_body avant meme le log « Echec application » et
+                # avant le rollback, ne laissant qu'un HTTP 500 generique.
                 log_fn(
                     "WARN",
                     f"Journal apply FAILED non finalise run_id={run_id} batch_id={apply_batch_id}: {close_exc}",
@@ -2960,7 +3068,19 @@ def _apply_changes_body(
         # dict synthese qu'on logge sans propager (le caller recoit l'erreur
         # initiale via _err_response).
         atomic_rollback_summary: Optional[Dict[str, Any]] = None
-        if bool(apply_atomic) and apply_batch_id is not None:
+        if bool(apply_atomic) and apply_batch_id is not None and apply_execution_completed:
+            # L'apply lui-meme est alle au bout : le disque est dans l'etat
+            # demande et defaire 500 deplacements reussis a cause d'un echec de
+            # finalisation (journal verrouille, ecriture du resume, notification)
+            # serait la pire issue possible. On le dit explicitement dans le log
+            # d'apply pour que l'utilisateur sache pourquoi le badge « rollback
+            # atomique » n'apparait pas.
+            log_fn(
+                "WARN",
+                f"Mode atomique : rollback NON declenche batch={apply_batch_id} — l'apply s'est "
+                f"execute jusqu'au bout, l'echec est posterieur aux deplacements ({exc}).",
+            )
+        elif bool(apply_atomic) and apply_batch_id is not None:
             try:
                 atomic_rollback_summary = _atomic_rollback_forward(
                     store,
@@ -3004,7 +3124,10 @@ def _apply_changes_body(
                             "rollback_counts": atomic_rollback_summary.get("counts"),
                         },
                     )
-                except (OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as st_exc:
+                    # F11 (suite) : meme raison qu'aux deux except ci-dessus — le FS
+                    # est deja restaure, un lock DB ne doit pas transformer ce simple
+                    # marquage de statut en exception non rattrapee.
                     log_fn(
                         "WARN",
                         f"apply_batches.status non mis a jour vers ROLLED_BACK_BY_ATOMIC "

@@ -539,6 +539,46 @@ class JellyfinClient:
             _log.warning("Jellyfin : échec mark_played(%s) — %s", item_id, exc)
             return False
 
+    def update_played_state(
+        self,
+        user_id: str,
+        item_id: str,
+        *,
+        play_count: int,
+        last_played_date: str,
+    ) -> bool:
+        """Ré-émet le compteur de lectures et la date de dernière lecture (#535).
+
+        `mark_played` ne sait affirmer QUE `Played=true` : le serveur repart
+        alors sur son propre compteur et sa propre date. Après un apply qui a
+        déplacé le fichier, Jellyfin ré-indexe un item NEUF (les items sont
+        clés par chemin) : un film vu 17 fois le 15/01 redescend à 1 vu
+        « à l'instant ». Seul l'endpoint UserData accepte `PlayCount` et
+        `LastPlayedDate`.
+
+        Corps volontairement MINIMAL : uniquement les trois champs que l'on
+        restaure. On n'invente aucune valeur pour `IsFavorite` / `Rating` —
+        l'appelant, lui, ne déclenche cet appel que s'il a la preuve que
+        l'historique a été perdu (cf `jellyfin_sync._counters_are_lost`).
+
+        `last_played_date` est renvoyée TELLE QUELLE, sans reformatage : c'est
+        la chaîne que le serveur a lui-même produite au snapshot. Vide, la clé
+        n'est pas émise (une date vide serait un rejet 400 ou un écrasement).
+
+        Retourne False sur échec (l'endpoint n'existe pas sur les serveurs
+        anciens) : l'appelant retombe alors sur le seul `mark_played` et le
+        signale, il ne fait jamais passer l'échec pour un succès.
+        """
+        payload: dict[str, Any] = {"Played": True, "PlayCount": int(play_count or 0)}
+        if last_played_date:
+            payload["LastPlayedDate"] = str(last_played_date)
+        try:
+            self._post(f"/Users/{user_id}/Items/{item_id}/UserData", json=payload)
+            return True
+        except JellyfinError as exc:
+            _log.warning("Jellyfin : échec update_played_state(%s) — %s", item_id, exc)
+            return False
+
     def mark_unplayed(self, user_id: str, item_id: str) -> bool:
         """Marque un film comme non vu. Retourne True si succès."""
         try:

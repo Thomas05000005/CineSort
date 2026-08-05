@@ -96,6 +96,7 @@ def run_parallel_tasks(
         Mapping {nom_tache: (succes, resultat_ou_exception)}.
         Taches annulees par cancel_event -> (False, CancelledError-like).
         Exceptions capturees et loggees, jamais propagees.
+        Taches en timeout -> (False, TimeoutError).
     """
     if not tasks:
         return {}
@@ -103,8 +104,17 @@ def run_parallel_tasks(
     workers = max(1, int(max_workers))
     results: dict[str, tuple[bool, Any]] = {}
 
-    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool)
-    if workers <= 1 or len(tasks) == 1:
+    # Fast path: 1 worker ou 1 tache -> execution sequentielle (evite le pool).
+    # Issue #836 : il n'est pris QUE si aucun timeout n'est demande. Un appel
+    # synchrone dans le thread courant ne peut pas etre interrompu ; seul
+    # `fut.result(timeout=...)` peut borner une tache qui hang, donc des qu'un
+    # timeout est demande on route TOUJOURS via le pool. Garder le fast path
+    # avec un `timeout_per_task_s` renseigne revenait a desactiver silencieusement
+    # le garde-fou anti-blocage — precisement dans les deux cas ou il sert le
+    # plus : une seule detection activee (len(tasks) == 1) et une machine sous
+    # PARALLELISM_MIN_CPU_CORES (resolve_max_workers -> 1, ce qui desactivait le
+    # timeout pour TOUTE l'analyse).
+    if timeout_per_task_s is None and (workers <= 1 or len(tasks) == 1):
         for name, fn in tasks.items():
             if cancel_event is not None and cancel_event.is_set():
                 results[name] = (False, _CancelledError("cancelled"))

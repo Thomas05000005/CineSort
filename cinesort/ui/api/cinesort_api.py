@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import datetime
+import io
 import json
 import logging
 import os
-import re
+import subprocess
+import sys
 import threading
 import time
 import traceback
+import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -39,7 +43,6 @@ from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_loc
 from cinesort.domain.naming import (
     PRESETS,
     PREVIEW_MOCK_CONTEXT,
-    build_naming_context,
     format_movie_folder,
     validate_template,
 )
@@ -87,7 +90,12 @@ from cinesort.ui.api import (
 )
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import clamp_non_negative_int, clamp_timeout
+from cinesort.ui.api._validators import (
+    RUN_ID_RE,  # noqa: F401  (back-compat re-export, cf issue #427)
+    clamp_non_negative_int,
+    clamp_timeout,
+    is_valid_run_id,
+)
 from cinesort.ui.api.facades import (
     IntegrationsFacade,
     LibraryFacade,
@@ -158,7 +166,9 @@ DEFAULT_RESIDUAL_CLEANUP_FOLDER_NAME = "_Dossier Nettoyage"
 DEFAULT_PROBE_BACKEND = "auto"
 MAX_RUN_LOG_ITEMS = 5000
 MAX_TERMINAL_RUNS_IN_MEMORY = 50
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
+# `RUN_ID_RE` n'est plus DEFINI ici : l'invariant vit dans `_validators`, seul
+# domicile ou tout le paquet `ui` peut le prendre en import top-level (cf #427).
+# Le nom reste accessible via le re-export en tete de fichier.
 
 
 def _cleanup_scope_label(scope: str) -> str:
@@ -279,8 +289,7 @@ class CineSortApi:
             pass  # Ne jamais bloquer pour un email
 
     def _is_valid_run_id(self, run_id: Any) -> bool:
-        rid = str(run_id or "").strip()
-        return bool(RUN_ID_RE.fullmatch(rid))
+        return is_valid_run_id(run_id)
 
     def _resolve_payload_state_dir(self, settings: Dict[str, Any]) -> Tuple[Path, bool]:
         return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._get_state_dir())
@@ -957,8 +966,6 @@ class CineSortApi:
 
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
-        import io
-
         _log = logging.getLogger(__name__)
 
         info = self._get_server_info_impl()
@@ -977,7 +984,12 @@ class CineSortApi:
 
             qr = segno.make(url)
             buf = io.BytesIO()
-            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=False)
+            # Cf issue #555 : `svgns=True` (namespace SVG present). Le frontend
+            # ne colle plus ce markup dans innerHTML, il le rend via
+            # <img src="data:image/svg+xml,...">. Un SVG charge en contexte
+            # IMAGE doit etre un document autonome : sans le xmlns, le
+            # navigateur refuse de l'afficher.
+            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=True)
             svg_str = buf.getvalue().decode("utf-8")
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             _log.warning("api: echec generation QR — %s", exc)
@@ -1322,6 +1334,22 @@ class CineSortApi:
                 level="info",
                 log_module=__name__,
             )
+        # Cf issue #563 : le refus cleartext vit dans send_email_report (garde
+        # de securite, elle doit tenir quel que soit l'appelant). On le rejoue
+        # ici uniquement pour REMONTER LE MOTIF a l'utilisateur : sinon le
+        # bouton "Tester l'envoi" affichait "Echec de l'envoi. Verifiez les
+        # parametres SMTP." sans dire lequel.
+        if str(settings.get("email_smtp_user") or "").strip() and str(settings.get("email_smtp_password") or ""):
+            if not _email_report_mod.smtp_session_will_be_encrypted(
+                settings.get("email_smtp_port") or 587,
+                settings.get("email_smtp_tls", True),
+            ):
+                return _err_response(
+                    _email_report_mod.CLEARTEXT_REFUSAL_MESSAGE,
+                    category="permission",
+                    level="error",
+                    log_module=__name__,
+                )
         mock_data = {
             "run_id": "test",
             "ts": time.time(),
@@ -1703,32 +1731,32 @@ class CineSortApi:
                 errors=errors,
             )
 
-        # Essayer de charger un vrai film depuis la BDD
-        context = None
-        rid = str(sample_row_id or "").strip()
-        if rid:
-            try:
-                state_dir = self._get_state_dir()
-                settings = _read_settings(state_dir)
-                store, _ = self._get_or_create_infra(state_dir, settings)
-                # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
-                probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
-                quality_data = store.quality.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
-                context = build_naming_context(
-                    title="Film",
-                    year=2020,
-                    probe_data=probe_data,
-                    quality_data=quality_data,
-                )
-            except (OSError, PermissionError, TypeError, ValueError):
-                context = None
-
-        # Fallback : mock hardcode (Inception)
-        if context is None:
-            context = dict(PREVIEW_MOCK_CONTEXT)
-
+        # #460 : la branche « charger un vrai film depuis la BDD » qui vivait ici
+        # etait morte depuis sa premiere ligne. `self._get_or_create_infra(state_dir,
+        # settings)` passait DEUX arguments a une methode qui n'en accepte qu'UN
+        # (cinesort_api.py:588) -> TypeError systematique, avale par un
+        # `except (OSError, PermissionError, TypeError, ValueError)` -> context=None
+        # -> repli sur le mock. Les deux appels suivants etaient casses eux aussi
+        # (`get_probe_cache` est keyword-only, et le `hasattr` testait `store` au
+        # lieu de `store.quality`).
+        #
+        # Supprimee plutot que reparee : meme reparee elle n'aurait PAS affiche le
+        # film demande (title="Film", year=2020 etaient codes en dur) et
+        # `get_quality_report` exige un `run_id` dont cet endpoint ne dispose pas.
+        # Un apercu de template sur un vrai film est une FEATURE a specifier, pas
+        # une reparation de ligne.
+        #
+        # `sample_row_id` reste dans la signature (compat de l'API REST), mais la
+        # reponse DIT desormais qu'il n'est pas honore au lieu de l'ignorer en
+        # silence.
+        context = dict(PREVIEW_MOCK_CONTEXT)
         result = format_movie_folder(tpl, context)
-        return {"ok": True, "result": result, "variables": context}
+        return {
+            "ok": True,
+            "result": result,
+            "variables": context,
+            "sample_row_id_applied": False,
+        }
 
     def _validate_dropped_path_impl(self, path: str = "") -> Dict[str, Any]:
         r"""Valide qu'un chemin droppe est un dossier existant.
@@ -2876,6 +2904,34 @@ class CineSortApi:
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
+        """Ouvre un dossier dans l'explorateur — caller LOCAL uniquement.
+
+        Cf issue #509. `history_support.open_path` finit par `os.startfile()`
+        sur la machine qui HEBERGE CineSort. Ses deux voisins immediats
+        (`_open_logs_folder_impl`, `_open_external_url_impl`) refusent deja les
+        requetes REST distantes ; celle-ci ne le faisait pas. Les protections
+        existantes (refus des symlinks, confinement dans `state_dir` + `root`)
+        valident le CHEMIN, jamais l'ORIGINE de l'appel.
+
+        Portee honnete : `open_path` est aujourd'hui hors d'atteinte du
+        dispatcher REST (`rest_server._EXCLUDED_METHODS`), verifie en
+        construisant le dispatcher — y compris avec la passe legacy forcee.
+        Le garde est donc de la defense en profondeur, pas la fermeture d'une
+        porte ouverte. Il n'est pas decoratif pour autant : `open_logs_folder`
+        a precisement ete RETIREE de cette liste d'exclusion (V2-09) pour
+        debloquer un bouton du dashboard, et c'est son garde local-only qui a
+        rattrape l'exposition. `open_path` a maintenant le sien.
+
+        `is_remote_request()` vaut False hors REST et pour 127.0.0.1/::1 : le
+        bridge pywebview natif et le dashboard local ne sont pas affectes.
+        """
+        if is_remote_request():
+            return _err_response(
+                "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
         return history_support.open_path(
             self,
             path,
@@ -2963,9 +3019,7 @@ class CineSortApi:
                 log_module=__name__,
             )
         try:
-            import webbrowser as _webbrowser
-
-            _webbrowser.open(u)
+            webbrowser.open(u)
             return {"ok": True, "opened": u}
         except (OSError, RuntimeError) as exc:
             return _err_response(str(exc), category="runtime", level="warning", log_module=__name__)
@@ -3012,12 +3066,6 @@ class CineSortApi:
         Returns:
             {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
         """
-        # Imports locaux : evite de polluer le top-level pour un endpoint
-        # ponctuel (subprocess lourd, sys/datetime non utilises au module-level).
-        import datetime as _dt  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-        import sys  # noqa: PLC0415
-
         version = str(getattr(self, "_app_version", "") or "unknown")
 
         # build_date : mtime du fichier VERSION (date ISO UTC). Best-effort.
@@ -3026,7 +3074,7 @@ class CineSortApi:
             version_file = Path(__file__).resolve().parents[3] / "VERSION"
             if version_file.is_file():
                 mtime = version_file.stat().st_mtime
-                build_date = _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
+                build_date = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).date().isoformat()
         except (OSError, ValueError):
             pass
 

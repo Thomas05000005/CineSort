@@ -9,7 +9,7 @@ import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
@@ -1065,6 +1065,100 @@ def apply_settings_defaults(
     return payload
 
 
+def normalize_video_exts_setting(raw: Any) -> Set[str]:
+    """Normalise la saisie « Extensions video acceptees » en set `.ext`.
+
+    Tolere une liste ou une chaine `;`/`,`-separee (le champ UI est un `text`,
+    mais `settings.json` peut avoir ete edite a la main), avec ou sans point de
+    tete, casse quelconque. Les entrees vides ou reduites a des points sont
+    droppees. Retourne un set vide si rien d'exploitable — l'appelant decide
+    alors du repli.
+    """
+    if raw is None:
+        return set()
+    if isinstance(raw, str):
+        items: Iterable[Any] = re.split(r"[;,\s]+", raw)
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = list(raw)
+    else:
+        return set()
+    out: Set[str] = set()
+    for item in items:
+        ext = str(item or "").strip().lower().lstrip(".").strip()
+        if not ext:
+            continue
+        out.add(f".{ext}")
+    return out
+
+
+def resolve_video_exts(raw_video_exts: Any) -> Set[str]:
+    """Set d'extensions video EFFECTIF du scan, depuis la saisie utilisateur.
+
+    Defaut (aucune saisie) : `VIDEO_EXTS_DEFAULT | VIDEO_EXTS_ALL` — c'est
+    l'union historique posee par SCAN-1 pour la parite avec `apply_core`
+    (`.iso` par exemple n'est que dans VIDEO_EXTS_ALL).
+
+    Saisie EXPLICITE : elle fait AUTORITE, sans union. L'union etait appliquee
+    dans les deux cas, ce qui rendait le reglage ADDITIF au lieu de RESTRICTIF —
+    mesure du 2026-08-03 sur un bac a sable de 5 films : `.avi` retire de la
+    liste, les deux dossiers `.avi` restaient planifies et comptaient dans les
+    5 renommages de dossier du dry-run. Un champ nomme « Extensions video
+    ACCEPTEES » qui ne sait pas refuser une extension est un perimetre en
+    trompe-l'oeil.
+
+    Garde anti-bibliotheque-vide : une saisie qui ne normalise vers RIEN
+    (champ vide, `";;;"`, `"..."`) retombe sur le defaut. Vider le champ =
+    revenir aux extensions par defaut, jamais « n'accepter aucune video ».
+
+    NB : on ne retombe volontairement PAS sur `file_extensions` (la cle du champ
+    UI) quand `video_exts` est absente. `_save_section_sources` ecrit les deux
+    ensemble depuis R4-P12 ; une install anterieure n'ayant que `file_extensions`
+    porte une valeur qui n'a JAMAIS filtre quoi que ce soit, et la restreindre
+    d'un coup au premier scan post-mise-a-jour serait la surprise que ce lot
+    cherche precisement a eviter.
+    """
+    default_exts = set(core.VIDEO_EXTS_DEFAULT) | set(core.VIDEO_EXTS_ALL)
+    explicit = normalize_video_exts_setting(raw_video_exts)
+    if not explicit:
+        return default_exts
+    if explicit != default_exts:
+        logger.info(
+            "scan: extensions video RESTREINTES par les reglages -> %s",
+            ";".join(sorted(explicit)),
+        )
+    return explicit
+
+
+def resolve_incremental_scan_enabled(requested: bool, excluded_patterns: Tuple[str, ...]) -> bool:
+    """`incremental_scan_enabled` effectif, desarme si des patterns sont actifs.
+
+    `cfg_signature_for_incremental` (app/plan_support_core.py) enumere les
+    reglages qui CHANGENT la sortie du plan : toute cle absente de sa charge
+    utile peut etre modifiee sans invalider les caches incrementaux. Les
+    patterns d'exclusion n'y figurent pas. Sans garde, la sequence « scan
+    incremental, puis ajout d'un pattern, puis re-scan » donnerait un cache
+    DOSSIER intact (`_try_apply_folder_cache`) qui rejoue les lignes d'AVANT
+    l'exclusion : le perimetre serait de nouveau muet, exactement le defaut que
+    ce lot corrige.
+
+    On desarme donc le cache incremental tant que des patterns sont actifs.
+    C'est le sens SUR (un scan complet est lent, jamais faux) et c'est
+    journalise, pas silencieux. Correctif durable, hors du perimetre de ce
+    module : ajouter `excluded_patterns` a la charge utile de
+    `cfg_signature_for_incremental` — ajouter une cle a ce payload suffit a
+    changer le sha1, donc a invalider le cache une seule fois (meme raisonnement
+    que F08, cf. le commentaire de `_PLAN_CACHE_VERSION`).
+    """
+    if requested and excluded_patterns:
+        logger.info(
+            "scan: cache incremental desarme — %d pattern(s) d'exclusion actif(s) "
+            "ne sont pas couverts par la signature de cache",
+            len(excluded_patterns),
+        )
+        return False
+    return bool(requested)
+
+
 def build_cfg_from_settings(
     settings: Dict[str, Any],
     *,
@@ -1092,18 +1186,16 @@ def build_cfg_from_settings(
     residual_scope = str(settings.get("cleanup_residual_folders_scope") or "touched_only").strip().lower()
     if residual_scope not in {"touched_only", "root_all"}:
         residual_scope = "touched_only"
-    # SCAN-1 : injecter explicitement video_exts pour garantir la parite avec
-    # apply_core (qui faisait deja l'union avec VIDEO_EXTS_ALL). Sans cela, le
-    # Config par defaut utilisait uniquement VIDEO_EXTS_DEFAULT, ce qui pouvait
-    # diverger du set effectif utilise lors de l'apply (extensions rares non
-    # reconnues lors du scan/plan). On prend l'union du set settings (si fourni)
-    # ou du DEFAULT avec VIDEO_EXTS_ALL pour mirroir apply_core.py:187.
-    settings_video_exts = settings.get("video_exts")
-    if settings_video_exts:
-        base_video_exts = {str(x).lower() for x in settings_video_exts}
-    else:
-        base_video_exts = set(core.VIDEO_EXTS_DEFAULT)
-    video_exts = base_video_exts | set(core.VIDEO_EXTS_ALL)
+    # Perimetre du pipeline destructif (revue 2026-08-03) : les deux reglages
+    # sont lus ICI, dans la fonction qui construit le Config du scan, pour rester
+    # visibles du contrat M3 (tests/test_contract_settings.py n'accepte une
+    # lecture de settings_support que dans ses CONSUMER_FUNCS).
+    video_exts = resolve_video_exts(settings.get("video_exts"))
+    excluded_patterns = core.normalize_excluded_patterns(settings.get("excluded_patterns"))
+    incremental_scan_enabled = resolve_incremental_scan_enabled(
+        to_bool(settings.get("incremental_scan_enabled"), False),
+        excluded_patterns,
+    )
     # VO-B-CONFIG : determine scan_max_workers effectif depuis le payload.
     # - mode="manual" -> on prend value clampe [1..64]
     # - mode="auto"  + state_dir fourni -> resolution via
@@ -1158,8 +1250,9 @@ def build_cfg_from_settings(
         cleanup_residual_include_subtitles=to_bool(settings.get("cleanup_residual_include_subtitles"), True),
         cleanup_residual_include_texts=to_bool(settings.get("cleanup_residual_include_texts"), True),
         video_exts=video_exts,
+        excluded_patterns=excluded_patterns,
         enable_tmdb=to_bool(settings.get("tmdb_enabled"), True),
-        incremental_scan_enabled=to_bool(settings.get("incremental_scan_enabled"), False),
+        incremental_scan_enabled=incremental_scan_enabled,
         enable_tv_detection=to_bool(settings.get("enable_tv_detection"), False),
         scan_max_workers=cfg_scan_workers,
         naming_movie_template=cfg_movie_template,
@@ -1414,7 +1507,8 @@ def _save_section_tmdb(payload: Dict[str, Any]) -> Dict[str, Any]:
     ttl_days = max(1, min(365, ttl_days))
     return {
         "tmdb_enabled": to_bool(payload.get("tmdb_enabled"), True),
-        "tmdb_timeout_s": to_float(payload.get("tmdb_timeout_s"), 10.0),
+        # Audit 2026-06-18 : clamp [1.0, 60.0] aligne sur jellyfin/plex/radarr (cf #602).
+        "tmdb_timeout_s": max(1.0, min(60.0, to_float(payload.get("tmdb_timeout_s"), 10.0))),
         "tmdb_cache_ttl_days": ttl_days,
     }
 
@@ -1760,18 +1854,25 @@ def _save_section_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if "excluded_patterns" in payload:
         raw = payload.get("excluded_patterns")
-        if isinstance(raw, list):
-            out["excluded_patterns"] = [str(p).strip() for p in raw if str(p).strip()]
-        elif isinstance(raw, str):
-            out["excluded_patterns"] = [p.strip() for p in raw.split(",") if p.strip()]
+        if isinstance(raw, (list, tuple, str)):
+            # Revue « perimetre destructif » 2026-08-03 : on persiste desormais
+            # la forme CANONIQUE (minuscules, `/`, sans doublon) produite par
+            # `core.normalize_excluded_patterns` — celle-la meme que
+            # `build_cfg_from_settings` applique au scan. Le persiste et
+            # l'effectif ne peuvent donc plus diverger, et les patterns non
+            # discriminants (`*`, `**/*`, `*.*`...) sont refuses ICI aussi :
+            # l'utilisateur voit immediatement, au retour du GET, que sa saisie
+            # n'a pas ete retenue, au lieu de croire sa bibliotheque protegee.
+            out["excluded_patterns"] = list(core.normalize_excluded_patterns(raw))
     if "file_extensions" in payload:
         raw = payload.get("file_extensions")
         # AUDIT 2026-06-11 (R4-P12) : split ';' ET ',' (le hint UI dit ';') —
         # ".mkv;.xyz" persistait ['mkv;.xyz'] (token poubelle). Et la cle
         # file_extensions n'avait AUCUN consommateur : le moteur lit video_exts
-        # (build_cfg_from_settings, union avec VIDEO_EXTS_ALL -> additif). On
-        # ecrit donc AUSSI video_exts (format '.ext') pour que le champ UI
-        # "Extensions video acceptees" ait enfin un effet sur le scan.
+        # (build_cfg_from_settings). On ecrit donc AUSSI video_exts (format
+        # '.ext') pour que le champ UI "Extensions video acceptees" ait un effet
+        # sur le scan. Depuis 2026-08-03 cet effet est RESTRICTIF (plus d'union
+        # avec VIDEO_EXTS_ALL quand la saisie existe) : cf. `resolve_video_exts`.
         exts: List[str] = []
         if isinstance(raw, list):
             exts = [str(e).strip().lower().lstrip(".") for e in raw if str(e).strip()]

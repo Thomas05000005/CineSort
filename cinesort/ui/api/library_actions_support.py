@@ -14,7 +14,9 @@ Persistance :
   additif, aucun chemin d'annulation) n'est plus ecrit : les marques deja sur
   disque sont migrees a la lecture (migrate_legacy_deletion_marks) puis le
   fichier est supprime.
-- Les exports sont ecrits dans `%LOCALAPPDATA%/CineSort/exports/`.
+- Les exports sont ecrits dans `<state_dir>/exports/` — le `state_dir` des
+  settings, pas le dossier par defaut (issue #522). Sans `state_dir` configure,
+  cela reste `%LOCALAPPDATA%/CineSort/exports/`.
 - Les rescans sont lances via JobRunner (job background).
 """
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import io
 import json
 import logging
 import os
@@ -34,6 +37,7 @@ from cinesort.app.merge_metadata import merge_metadata
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.infra import state
+from cinesort.ui.api import run_flow_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _build_library_rows, _resolve_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -476,8 +480,6 @@ def _rescan_single_row_full_pipeline(api: Any, run_id: str, row_id: str) -> Dict
       5. Met a jour le plan.jsonl : remplace l'ancienne row par la nouvelle
          (avec nouveau score / confidence / proposed_title / candidates).
     """
-    from cinesort.ui.api import run_flow_support  # noqa: PLC0415
-
     base_result = run_flow_support.rescan_row(api, run_id, row_id)
     if not isinstance(base_result, dict) or not base_result.get("ok"):
         return (
@@ -965,8 +967,6 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
     """
 
     def job_fn(should_cancel, should_pause=None) -> Dict[str, Any]:
-        import time as _time
-
         processed = 0
         skipped = 0
         for rid in row_ids:
@@ -976,7 +976,7 @@ def _build_rescan_job_fn(api: Any, run_id: str, row_ids: List[str]):
                     while bool(should_pause()):
                         if should_cancel():
                             break
-                        _time.sleep(0.5)
+                        time.sleep(0.5)
                 except Exception:  # noqa: BLE001
                     pass
             if should_cancel():
@@ -1117,9 +1117,26 @@ _EXPORT_FIELDS = (
 )
 
 
-def _exports_dir() -> Path:
-    """Repertoire des exports : `%LOCALAPPDATA%/CineSort/exports/`."""
-    base = state.default_state_dir() / "exports"
+def _exports_dir(api: Any) -> Path:
+    """Repertoire des exports : `<state_dir>/exports/`.
+
+    Issue #522 : cette fonction ecrivait toujours dans
+    `state.default_state_dir()/exports` (= `%LOCALAPPDATA%/CineSort/exports/`),
+    en ignorant le `state_dir` configure par l'utilisateur. Un user-data
+    deplace (NAS, 2e disque) laissait donc l'export dans l'ancien emplacement,
+    hors de la zone que le reste du produit lit et purge.
+
+    La zone d'ecriture reste BORNEE au dossier d'etat : on ne prend pas un
+    chemin quelconque, seulement `settings["state_dir"]`, resolu par le meme
+    `normalize_user_path` que les 5 autres sites du module. `state_dir` absent
+    ou vide retombe sur `state.default_state_dir()` : comportement actuel
+    inchange pour une configuration par defaut.
+    """
+    settings = api.settings.get_settings()
+    state_dir = normalize_user_path(
+        settings.get("state_dir") if isinstance(settings, dict) else None, state.default_state_dir()
+    )
+    base = state_dir / "exports"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -1200,7 +1217,7 @@ def export_films(
     count = len(export_rows)
 
     try:
-        exports_dir = _exports_dir()
+        exports_dir = _exports_dir(api)
         ts = time.strftime("%Y%m%d_%H%M%S")
         fname = f"library_export_{resolved}_{ts}.{fmt_norm}"
         file_path = exports_dir / fname
@@ -1211,12 +1228,20 @@ def export_films(
             # (dashboard_support.write_run_report_file / report_to_csv_text) :
             # BOM UTF-8 (`utf-8-sig`) + separateur ";". Sans BOM Excel FR casse
             # les accents ; avec le "," par defaut il ouvre tout en une colonne.
-            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01).
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as fp:
-                writer = csv.writer(fp, delimiter=";")
-                writer.writerow(list(_EXPORT_FIELDS))
-                for row in export_rows:
-                    writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            # `newline=""` reste requis (csv.writer emet deja \r\n, cf LOTD-EXP-01)
+            # et se transpose ici en `io.StringIO(newline="")` : aucune
+            # traduction de fin de ligne, donc exactement les memes octets.
+            #
+            # Issue #479 site 2 : c'etait la DERNIERE branche non atomique de
+            # cette fonction — JSON passait deja par `state.atomic_write_json`,
+            # NDJSON par `state.atomic_write_text`. L'export CSV ecrivait en
+            # place, donc Excel/LibreOffice pouvait ouvrir un fichier tronque.
+            buffer = io.StringIO(newline="")
+            writer = csv.writer(buffer, delimiter=";")
+            writer.writerow(list(_EXPORT_FIELDS))
+            for row in export_rows:
+                writer.writerow([_serialize_for_csv(row.get(k)) for k in _EXPORT_FIELDS])
+            state.atomic_write_text(file_path, buffer.getvalue(), encoding="utf-8-sig")
             return {
                 "ok": True,
                 "file_path": str(file_path),

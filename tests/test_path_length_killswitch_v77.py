@@ -249,6 +249,142 @@ class ApplyCollectionItemKillSwitchTests(unittest.TestCase):
         )
 
 
+class _SidecarConfig(_DummyConfig):
+    """`_DummyConfig` + le minimum requis par `classify_sidecars`."""
+
+    def __init__(self, root: Path):
+        super().__init__(root)
+        self.video_exts = {".mkv"}
+        self.side_exts = {".srt", ".nfo"}
+        self.generic_side_files = set()
+
+
+class ApplyCollectionSidecarKillSwitchTests(unittest.TestCase):
+    """Issue #661 — le kill-switch collection ignorait les SIDECARS.
+
+    En collection les sidecars gardent leur nom source (`sub_dir/sidecar.name`) :
+    une chaine de suffixes (.fr.forced.srt, .en.sdh.sup) produit couramment un
+    chemin plus long que celui de la video. Le gate ne regardait que la video,
+    donc l'item echouait EN COURS DE ROUTE (au premier move de sidecar) au lieu
+    d'etre refuse en amont avec SKIP_PATH_TOO_LONG. La branche TV couvre ses
+    sidecars depuis GATE 3 (TV-MAXPATH) : c'est cette asymetrie qu'on ferme.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_ks_coll_sc_")
+        self.root = Path(self._tmp) / "root"
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.review = self.root / "_review"
+        self.conflicts = self.review / "_conflicts"
+        self.conflicts_sidecars = self.review / "_conflicts_sidecars"
+        self.dup_identical = self.review / "_duplicates_identical"
+        self.folder = self.root / "Saga"
+        self.folder.mkdir()
+        self.sub_dir = self.folder / "Inception (2010)"
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _sidecar_name(self, target_len: int) -> str:
+        """Nom de sidecar tel que `sub_dir/nom` fasse exactement `target_len`."""
+        pad = target_len - (len(str(self.sub_dir)) + 1) - len("movie.") - len(".srt")
+        self.assertGreater(pad, 0, "dossier temporaire trop long pour construire le cas")
+        return "movie." + ("z" * pad) + ".srt"
+
+    def _apply(self, *, dry_run: bool):
+        res = core.ApplyResult()
+        logs: list[tuple[str, str]] = []
+        apply_collection_item(
+            _SidecarConfig(self.root),
+            self.folder,
+            video_name="movie.mkv",
+            title="Inception",
+            year=2010,
+            dry_run=dry_run,
+            log=lambda level, msg: logs.append((level, msg)),
+            res=res,
+            conflicts_root=self.conflicts,
+            conflicts_sidecars_root=self.conflicts_sidecars,
+            duplicates_identical_root=self.dup_identical,
+        )
+        return res, logs
+
+    def test_sidecar_trop_long_skip_avant_tout_deplacement(self):
+        """Video courte + sidecar > 259 chars : skip propre, aucun move amorce."""
+        video = self.folder / "movie.mkv"
+        video.write_bytes(b"x" * 2048)
+        sidecar_name = self._sidecar_name(265)
+        sidecar = self.folder / sidecar_name
+        sidecar.write_bytes(b"1\n00:00:01,000 --> 00:00:02,000\nbonjour\n")
+
+        # Le cas doit isoler le sidecar : la video cible, elle, passe le gate.
+        self.assertLessEqual(len(str(self.sub_dir / "movie.mkv")), 259, "la video ne doit PAS declencher le gate")
+        self.assertGreater(len(str(self.sub_dir / sidecar_name)), 259, "le sidecar doit, lui, le declencher")
+
+        res, logs = self._apply(dry_run=False)
+
+        self.assertEqual(
+            res.skip_reasons.get(core.SKIP_REASON_PATH_TOO_LONG, 0),
+            1,
+            f"SKIP_REASON_PATH_TOO_LONG attendu pour un sidecar trop long: res={vars(res)}",
+        )
+        self.assertTrue(
+            any("PATH_TOO_LONG" in str(m) for m in res.error_messages),
+            f"error_messages doit porter PATH_TOO_LONG: {res.error_messages}",
+        )
+        self.assertTrue(
+            any(level == "WARN" and "PATH_TOO_LONG" in msg for level, msg in logs),
+            f"log WARN PATH_TOO_LONG attendu: {logs}",
+        )
+        # « proprement saute » : rien n'a bouge sur le disque.
+        self.assertFalse(self.sub_dir.exists(), "le sous-dossier ne doit meme pas etre cree")
+        self.assertTrue(video.exists(), "la video doit rester en source")
+        self.assertTrue(sidecar.exists(), "le sidecar doit rester en source")
+        self.assertEqual(res.moves, 0, "aucun deplacement ne doit avoir ete amorce")
+
+    def test_sidecar_court_est_bien_deplace(self):
+        """Non-regression : sidecar de longueur normale -> pas de gate, ET move reel.
+
+        Le gate calcule desormais les cibles sidecars en amont et la boucle de
+        move REUTILISE cette liste : ce test verifie qu'elle deplace toujours.
+        """
+        (self.folder / "movie.mkv").write_bytes(b"x" * 2048)
+        (self.folder / "movie.fr.forced.srt").write_bytes(b"sous-titre")
+
+        res, _logs = self._apply(dry_run=False)
+
+        self.assertEqual(
+            res.skip_reasons.get(core.SKIP_REASON_PATH_TOO_LONG, 0),
+            0,
+            f"faux positif du kill-switch sur un sidecar court: res={vars(res)}",
+        )
+        self.assertTrue((self.sub_dir / "movie.mkv").is_file(), "la video doit avoir ete deplacee")
+        self.assertTrue(
+            (self.sub_dir / "movie.fr.forced.srt").is_file(),
+            f"le sidecar doit avoir ete deplace: {sorted(p.name for p in self.sub_dir.iterdir())}",
+        )
+        self.assertFalse((self.folder / "movie.fr.forced.srt").exists(), "plus rien en source")
+
+    def test_video_trop_longue_skip_toujours(self):
+        """Non-regression du gate historique (video seule) apres refonte."""
+        (self.folder / "movie.mkv").write_bytes(b"x" * 2048)
+        res = core.ApplyResult()
+        apply_collection_item(
+            _SidecarConfig(self.root),
+            self.folder,
+            video_name="movie.mkv",
+            title="B" * 250,
+            year=2010,
+            dry_run=True,
+            log=lambda _level, _msg: None,
+            res=res,
+            conflicts_root=self.conflicts,
+            conflicts_sidecars_root=self.conflicts_sidecars,
+            duplicates_identical_root=self.dup_identical,
+        )
+        self.assertEqual(res.skip_reasons.get(core.SKIP_REASON_PATH_TOO_LONG, 0), 1)
+
+
 class ApplyTvEpisodeKillSwitchTests(unittest.TestCase):
     """Verifier que apply_tv_episode skip quand target_file > 259 chars."""
 

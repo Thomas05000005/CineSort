@@ -45,6 +45,55 @@ Deux changements pour que le cliquet redevienne utile plutot que juste vert :
 
 Ces bornes constatent une dette, elles ne l'absolvent pas : 116 des 170 imports
 differes visent `cinesort.*` (donc des cycles internes, la cible reelle de #84).
+
+--- Lot #554 / #595 / #779 (2026-08-05) : 172 -> 114 ---
+
+Toutes les bornes ci-dessous ont ete RE-MESUREES apres conversion (walk AST du
+paquet, meme code que ce test), jamais calculees de tete a partir de la valeur
+precedente. Le 2026-08-05, deux PR avaient chacune derive leur chiffre de 113 :
+elles ne concordaient que par chance.
+
+Deux familles converties :
+
+1. STDLIB (#554, #595) — 24 imports differes de la bibliotheque standard
+   promus en tete. Un import differe de stdlib n'a jamais de justification par
+   cycle : la stdlib ne remonte jamais vers le projet. 6 subsistent, tous
+   justifies : `msvcrt`/`fcntl` (x4, specifiques a la plateforme : importer
+   `msvcrt` sur Linux leve ImportError) et `ctypes` (x2, sous `except
+   ImportError` explicite dans une detection best-effort du type de stockage —
+   un import de tete transformerait une degradation en echec de chargement).
+
+2. INTRA-`ui/api` (#779) — 34 imports differes internes convertis. Cartographie
+   AST prealable : sur les 59 imports differes intra-`ui/api`, seuls 4 sont
+   poses sur une VRAIE arete de retour de tete (`library_support` <->
+   `library_actions_support` x3, `reset_support` -> `cinesort_api`). Les 55
+   autres n'avaient aucun cycle a contourner. Le cout de demarrage invoque
+   n'existait pas non plus : `cinesort_api.py` importe DEJA en tete 26 modules
+   `*_support`, donc ils sont charges au boot de toute facon.
+
+Non convertis deliberement, avec leur raison :
+  * les sites dont le `try` englobant attrape `ImportError` en tete de tuple
+    (`run_flow_support` x5, `quality_audit_support` x1) : l'import differe y est
+    un contrat de degradation (post-scan best-effort), un import de tete le
+    transformerait en echec de boot sur un build EXE ampute ;
+  * `runtime_support._safe_read_settings_for_diag` : sa docstring invoque un
+    cycle qui n'existe PAS (mesure : aucune arete de retour), mais la fonction
+    est un DIAGNOSTIC entoure d'un `except Exception` — elle doit survivre a un
+    `settings_support` casse. Conserve pour cette raison-la, pas pour la raison
+    affichee ;
+  * `film_support` <-> `history_support` : reference mutuelle reelle, une des
+    deux directions doit rester differee ; arbitrer laquelle depasse ce lot.
+
+Piege rencontre pendant ce lot (trouve par MUTATION, pas par relecture) : un
+import differe `from X import f` ne se convertit PAS en
+`from X import f` de tete quand `X` est un module `ui/api`. Un import de
+symbole lie l'objet au chargement, donc un
+`patch("cinesort.ui.api.library_support._get_store")` pose par un test ne
+l'atteint plus. Premiere version de ce lot : `history_support` importait
+`_get_store` par symbole -> `tests/test_get_plan_ignored_alerts_v77.py` rouge.
+Corrige en MODULE-STYLE (`from cinesort.ui.api import library_support` +
+`library_support._get_store(...)`), qui garde la resolution tardive. Les imports
+par symbole ne restent que pour les helpers `domain.*` purs et les constantes.
 """
 
 from __future__ import annotations
@@ -62,18 +111,55 @@ EXCLUDED_DIRS = frozenset({"tests", "__pycache__"})
 # REFACTOR_PLAN_84.md. `__root__` = modules a la racine du paquet.
 MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     "__root__": 3,
-    # 24 -> 23 : la couche avait 1 de marge non reprise. Le cliquet ne vaut que
-    # s'il colle a la mesure ; une marge dormante laisse passer une recidive
-    # gratuite. Baissee ici parce qu'on y touchait de toute facon.
-    "app": 23,
+    # 23 -> 25 (PR#852, +2). Les DEUX imports differes ont ete verifies un par
+    # un, et ils ne sont pas du meme genre :
+    #   - `cleanup` -> `apply_core._append_error_message` : VRAI CYCLE.
+    #     `apply_core.py:15` importe deja `cinesort.app.cleanup`. Un import de
+    #     tete casserait l'import du paquet.
+    #   - `apply_batches_reconciliation` -> `apply_audit.read_apply_audit` : PAS
+    #     de cycle. MAJ a la fusion avec main : `apply_audit` n'importe plus
+    #     seulement la stdlib, il tire `infra.log_scrubber` (issue #414, scrub
+    #     des secrets du journal JSONL) qui tire `infra.log_context`. Le verdict
+    #     ne change pas — le contrat `infra_bounded` interdit a `infra` de
+    #     remonter vers `app`, donc toujours aucun cycle a contourner. Le
+    #     commentaire du code dit « eviter de charger au boot », mais la vraie
+    #     raison est le `except ImportError` juste en dessous : sur un build EXE
+    #     AMPUTE, un import de tete tuerait tout le module de reconciliation, la
+    #     ou l'import local ne degrade que la lecture du marqueur. Cette raison
+    #     se RENFORCE avec la chaine d'import allongee. Conserve pour elle, pas
+    #     pour la raison affichee.
+    #
+    # 25 -> 19 (#554/#595, -6) : CONVERSIONS stdlib. `apply_core.sha1_quick`
+    # portait `import time as _time_mod` alors que `time` est deja importe
+    # ligne 7 — le commentaire « local pour eviter shadow du module time haut »
+    # decrivait un shadow qui n'existe plus dans la fonction (verifie : aucun
+    # parametre ni variable locale nommee `time`). Idem `json` dans
+    # `apply_batches_reconciliation._close_batch` et `time` dans
+    # `plan_support_core.wait_while_paused` : deja en tete, alias redondant.
+    # Ajoutes en tete : `os` (plan_support_core), `contextlib`
+    # (plan_support_replan), `concurrent.futures.ThreadPoolExecutor`
+    # (_local_candidate).
+    "app": 19,
     "data": 0,
-    "domain": 16,
-    "infra": 17,
+    # 16 -> 15 (#554/#595, -1) : `lpips_compare._resolve_model_path` importait
+    # `sys` dans la fonction pour lire `sys.frozen`.
+    "domain": 15,
+    # 17 -> 11 (#554/#595, -6) : `tools_manager` x2 (`import sys as _sys`,
+    # les deux sites nommes par #554), `poster_proxy` x2 (`json`),
+    # `rest_server` (`urllib.parse.parse_qs`, le module importe deja `urlsplit`
+    # de la meme provenance en tete), `probe/service.__init__`
+    # (`shutil.which`). Restent 6 imports differes stdlib dans `infra`, tous
+    # justifies : `msvcrt`/`fcntl` x4 (specifiques a la plateforme) et
+    # `ctypes` x1 (sous garde `except ImportError`).
+    "infra": 11,
     # 110 -> 111 : +1 pour `history_support.get_plan_row`, importe tardivement
     # dans `film_support` (PR#853). Ce n'est pas un choix de confort : les deux
     # modules se referencent mutuellement, un import de tete cree un cycle a
     # l'import du paquet. Justification detaillee dans REFACTOR_PLAN_84.md.
-    # Le TOTAL reste a 170 : la couche `app` rend le point que `ui` prend.
+    # A cette date-la le TOTAL restait a 170, `app` rendant le point que `ui`
+    # prenait. Ce n'est plus vrai : PR#847 (+2 ici) et PR#852 (+2 sur `app`)
+    # l'ont porte a 174. La compensation etait une coincidence, pas une regle —
+    # seule la borne PAR COUCHE fait foi.
     # 111 -> 113 (PR#847, +2) : `quality_report_support` importe tardivement
     # `run_read_support.full_langs_from_embedded` et
     # `domain.subtitle_helpers._normalize_iso639`.
@@ -85,11 +171,35 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # convertir isolement n'aurait pas de sens : c'est le motif entier qui
     # demande un nettoyage, et il depasse le perimetre de cette PR.
     # A reprendre dans le chantier de conversion de la couche `ui`.
-    "ui": 113,
+    #
+    # 113 -> 111 (issue #599, -2) : CONVERSION, pas relevement.
+    # `film_support._fetch_tmdb_extras` portait `from cinesort.infra.tmdb_client
+    # import TmdbClient` et `import requests as _req` a l'interieur de la
+    # fonction. Aucun cycle a contourner : `infra` ne remonte jamais vers `ui`
+    # (contrat `infra_bounded`). L'import de `requests` a purement disparu avec
+    # le GET direct, rapatrie sur `TmdbClient.get_movie_extras`.
+    #
+    # 111 -> 66 (#554/#595/#779, -45) : le « chantier de conversion de la couche
+    # ui » que la note PR#847 ci-dessus renvoyait a plus tard.
+    #   - 11 stdlib (#595) : `cinesort_api` (io, webbrowser, datetime,
+    #     subprocess, sys), `perceptual_support` (base64 x3, io),
+    #     `library_actions_support` (time, deja en tete), `run_flow_support`
+    #     (threading, deja en tete).
+    #   - 34 internes (#779), dont les 13 de `dashboard_support` et les 10 de
+    #     `history_support` : ce sont les clusters 2 et 3 nommes par l'issue.
+    #     Aucun n'etait pose sur une arete de retour de tete (mesure AST) et
+    #     aucun ne coutait de temps de boot : `cinesort_api.py:60` importe deja
+    #     en tete les 26 modules `*_support`.
+    #     Ecrits en MODULE-STYLE (`from cinesort.ui.api import run_read_support`
+    #     + `run_read_support.effective_flags(...)`) et NON en import de symbole,
+    #     pour que les `patch("cinesort.ui.api.<mod>.<fn>")` des tests restent
+    #     operants — cf. le piege decrit dans le docstring.
+    "ui": 66,
 }
 
-# Borne globale = somme des bornes par couche (170). Gardee pour que le
-# message d'erreur donne l'ordre de grandeur, jamais saisie a la main.
+# Borne globale = somme des bornes par couche (114 apres le lot #554/#595/#779).
+# Gardee pour que le message d'erreur donne l'ordre de grandeur, jamais saisie
+# a la main : c'est la somme qui suit les bornes, jamais l'inverse.
 MAX_LAZY_IMPORTS = sum(MAX_LAZY_IMPORTS_BY_LAYER.values())
 
 

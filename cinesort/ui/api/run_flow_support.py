@@ -7,7 +7,6 @@ import threading
 import time
 import traceback
 from collections import Counter
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -29,6 +28,7 @@ from cinesort.infra.omdb_client import OmdbClient
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import clamp_non_negative_int, requires_valid_run_id
+from cinesort.ui.api.run_data_support import serialize_rows_for_payload, write_plan_jsonl
 from cinesort.ui.api.settings_support import (
     _SECRET_FIELDS,
     _SECRET_MASK,
@@ -642,8 +642,6 @@ def _build_plan_job_fn(
                         str(getattr(r, "row_id", "") or "") for r in rows if str(getattr(r, "row_id", "") or "").strip()
                     ]
                     if enrich_ids:
-                        import threading as _threading
-
                         from cinesort.ui.api import tmdb_support as _tmdb_support
 
                         def _bg_tmdb_enrich() -> None:
@@ -654,7 +652,7 @@ def _build_plan_job_fn(
                             except Exception as _exc:  # noqa: BLE001 - daemon best-effort
                                 dlog(f"job_fn post-scan tmdb enrich warning: {_exc}")
 
-                        _threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
+                        threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
                         dlog(f"job_fn post-scan tmdb enrich launched ({len(enrich_ids)} films)")
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")
@@ -702,11 +700,15 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     """Sauvegarde plan.jsonl et summary.txt apres un scan reussi."""
     dlog("job_fn writing plan.jsonl")
     try:
-        with open(rs.paths.plan_jsonl, "w", encoding="utf-8") as file_obj:
-            for row in rows:
-                data = asdict(row)
-                data["candidates"] = [asdict(c) for c in row.candidates]
-                file_obj.write(json.dumps(data, ensure_ascii=False) + "\n")
+        # Issue #479 site 1 : c'etait un `open(..., "w")` en place, donc une
+        # ecriture NON atomique du fichier que l'APPLY relit pour renommer et
+        # DEPLACER des dossiers. Une interruption (disque plein, kill, AV) y
+        # laissait un JSONL tronque ; `load_rows_from_plan_jsonl` saute les
+        # lignes invalides SANS le dire, donc des films disparaissaient en
+        # silence d'un plan destructif. Le helper canonique (nom de .tmp unique
+        # + fsync avant os.replace) laisse au contraire la cible INCHANGEE : au
+        # pire le plan est absent, jamais ampute.
+        write_plan_jsonl(rs.paths.plan_jsonl, serialize_rows_for_payload(rows))
     except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
         rs.log("WARN", f"Plan save failed: {exc}")
         dlog(f"job_fn writing plan.jsonl failed: {exc}")
@@ -714,7 +716,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     dlog("job_fn writing summary.txt")
     try:
         summary_text = _build_analysis_summary(rows, stats, root, state_dir, rs.paths)
-        rs.paths.summary_txt.write_text(summary_text, encoding="utf-8")
+        state.atomic_write_text(rs.paths.summary_txt, summary_text, mkdir=False)
     except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
         dlog(f"job_fn writing summary.txt failed: {exc}")
 

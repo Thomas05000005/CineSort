@@ -8,6 +8,7 @@ lookup helpers that bind runtime runs back to persisted rows.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import os
 import platform
@@ -33,6 +34,11 @@ from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST, get_doc_path, list_doc_ids
 from cinesort.ui.api.notifications_support import add_notification
+
+# Import de TETE (pas differe) : `run_data_support` ne reference pas
+# `runtime_support`, il n'y a donc pas de cycle a contourner, et le cliquet
+# `test_refactor_84_progress_v77` borne les imports differes a zero marge.
+from cinesort.ui.api.run_data_support import compute_total_fallback, count_plan_rows
 
 _logger = logging.getLogger(__name__)
 
@@ -355,13 +361,22 @@ def get_or_create_infra(
                 notify = getattr(api, "_notify", None)
                 report = reconcile_at_boot(store, notify=notify)
                 if report.get("examined", 0) > 0:
+                    # Issue #512 : la ligne de synthese doit compter AUSSI
+                    # `mismatched` (destination occupee par un AUTRE fichier,
+                    # verdict critique) et `unverified` (identite non verifiable).
+                    # Sans eux, une reconciliation qui detecte une incoherence
+                    # s'affichait « 1 examinee, 0 completed, 0 rolled_back,
+                    # 0 duplicated, 0 lost » : la synthese mentait.
                     _logger.info(
-                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
+                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, "
+                        "%d duplicated, %d lost, %d mismatched, %d unverified",
                         report["examined"],
                         report.get("completed", 0),
                         report.get("rolled_back", 0),
                         len(report.get("duplicated", [])),
                         len(report.get("lost", [])),
+                        len(report.get("mismatched", [])),
+                        len(report.get("unverified", [])),
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
@@ -375,11 +390,18 @@ def get_or_create_infra(
             # post-crash, ce qui est precisement le cas le plus frequent. On force
             # max_age_hours=0.0 pour capturer tous les PENDING avec started_ts<now.
             try:
-                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
+                # PR#852 : `state_dir` permet a la reconciliation de lire le
+                # marqueur `apply_end` du journal d'audit JSONL, seule preuve
+                # HORS SQLite qu'un apply reste PENDING parce que la DB etait
+                # indisponible et non parce qu'il a ete tue en cours de route.
+                # Sans elle, l'undo d'un tel apply reste mort a vie.
+                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0, state_dir=state_dir)
                 if batches_report.get("pending_found", 0) > 0:
                     _logger.info(
-                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned "
+                        "(%d finalized DONE, %d completed, %d rolled_back)",
                         batches_report["pending_found"],
+                        batches_report.get("finalized_done", 0),
                         batches_report.get("completed", 0),
                         batches_report.get("rolled_back", 0),
                     )
@@ -724,7 +746,21 @@ def _read_build_date() -> str:
 def _library_counts(api: Any) -> Tuple[int, int]:
     """Retourne (total_films, total_scored) ou (0, 0) si indispo.
 
-    Cf spec 12-aide.md : `lib_total` et `lib_scored` pour la section diagnostic.
+    Cf spec 12-aide.md : `lib_total` et `lib_scored` pour la section diagnostic
+    (« Lib total : 901 films · 853 classes »).
+
+    Issue #446 : les deux compteurs interrogeaient une table `library_items` et
+    une colonne `quality_reports.library_item_id` qui n'ont jamais existe dans
+    le schema. Le `sqlite3.OperationalError` etait avale par le `except` global
+    et le diagnostic COPIE POUR LE SUPPORT annoncait « 0 film · 0 classe » sur
+    toutes les bibliotheques, y compris entierement scorees.
+
+    Il n'y a pas de table de films : la bibliotheque, c'est le plan du dernier
+    run. On lit donc les memes sources que le reste de l'UI --
+    `count_plan_rows(plan.jsonl)` avec le fallback commun `compute_total_fallback`
+    (cf. `run_data_support`, source unique de verite du compteur de films), et
+    `quality_reports` RESTREINT a ce run pour les films classes. Sans le filtre
+    par run, le compte cumulait les rapports de tous les runs de l'historique.
     """
     try:
         state_dir = Path(getattr(api, "_state_dir", state.default_state_dir()))
@@ -734,19 +770,34 @@ def _library_counts(api: Any) -> Tuple[int, int]:
         if not existing:
             return 0, 0
         store, _runner = existing
-        # Compter films distincts dans library_items + ceux ayant un score
-        try:
-            with store._managed_conn() as conn:  # type: ignore[attr-defined]
-                cur = conn.execute("SELECT COUNT(*) AS cnt FROM library_items")
-                row = cur.fetchone()
-                lib_total = int((row["cnt"] if row else 0) or 0)
-                cur = conn.execute("SELECT COUNT(DISTINCT library_item_id) AS cnt FROM quality_reports")
-                row = cur.fetchone()
-                lib_scored = int((row["cnt"] if row else 0) or 0)
-                return lib_total, lib_scored
-        except Exception as exc:
-            _logger.debug("diag: library_counts SQL echec ignore: %s", exc)
+        runs = store.run.list_runs(limit=1)
+        if not runs:
             return 0, 0
+        run_row = runs[0] if isinstance(runs[0], dict) else dict(runs[0])
+        run_id = str(run_row.get("run_id") or "")
+        if not run_id:
+            return 0, 0
+
+        stats_obj: Dict[str, Any] = {}
+        raw_stats = run_row.get("stats_json")
+        if raw_stats:
+            try:
+                decoded = json.loads(raw_stats)
+                if isinstance(decoded, dict):
+                    stats_obj = decoded
+            except (TypeError, ValueError):
+                stats_obj = {}
+
+        # `ensure_exists=False` : le diagnostic ne cree jamais de dossier de run.
+        run_paths = run_paths_for(state_dir, run_id, ensure_exists=False)
+        lib_total = count_plan_rows(run_paths, fallback=compute_total_fallback(run_row, stats_obj))
+        lib_scored = int(store.quality.get_quality_report_stats(run_id=run_id).get("count") or 0)
+        # Deliberement PAS de max(lib_total, lib_scored) : si le plan est
+        # illisible et le fallback vide, « 0 film · 853 classes » est une
+        # incoherence VISIBLE, qui dit au support que le compte de films a
+        # echoue. Un max() rendrait « 853 films · 853 classes », plausible et
+        # indiscernable d'une mesure reussie.
+        return lib_total, lib_scored
     except Exception as exc:
         _logger.debug("diag: library_counts echec ignore: %s", exc)
         return 0, 0

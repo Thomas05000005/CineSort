@@ -11,8 +11,19 @@ Solution (meme pattern que `move_reconciliation.py` pour apply_pending_moves
 
 | Etat des operations associees                 | Verdict      | Status final              |
 |-----------------------------------------------|--------------|---------------------------|
+| marqueur `apply_end` + >=1 op journalisee     | termine      | DONE (undo re-arme)       |
 | total >= expected_ops ET aucune en erreur     | finalisable  | COMPLETED_BY_BOOT_CLEANUP |
 | incomplet / en erreur / completude non prouvee| inconsistant | ROLLED_BACK_BY_BOOT_CLEANUP |
+
+REVUE ADVERSAIRE PR#852 : la premiere ligne est nouvelle. Elle repare la moitie
+manquante du finding F11 — quand `close_apply_batch(DONE)` echoue (base
+verrouillee, disque plein), l'apply disque est termine mais le batch reste
+`PENDING` A VIE, et `get_last_reversible_apply_batch` filtre `status='DONE'` :
+l'undo etait definitivement mort. Le marqueur `apply_end` du journal d'audit
+JSONL (ecrit HORS SQLite, donc disponible meme quand SQLite ne l'etait pas)
+prouve que l'apply est alle au bout ; on rejoue alors au boot la cloture `DONE`
+que l'apply n'a pas pu ecrire. Un apply tue en cours de route n'a PAS ce
+marqueur et garde son traitement conservateur d'origine.
 
 Note : ici "applied" / "skipped" s'inferent des colonnes existantes :
 - `undo_status` reste a 'PENDING' tant que l'op n'a pas ete undo
@@ -48,6 +59,7 @@ import json
 import logging
 import sqlite3
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 _logger = logging.getLogger(__name__)
@@ -58,6 +70,15 @@ DEFAULT_MAX_AGE_HOURS = 1.0
 
 STATUS_COMPLETED_BY_BOOT = "COMPLETED_BY_BOOT_CLEANUP"
 STATUS_ROLLED_BACK_BY_BOOT = "ROLLED_BACK_BY_BOOT_CLEANUP"
+# REVUE ADVERSAIRE PR#852 : un batch PENDING dont l'apply est PROUVE termine doit
+# redevenir 'DONE' — c'est le SEUL statut que `get_last_reversible_apply_batch`
+# accepte (repositories/apply.py, filtre `status='DONE'`), donc le seul qui
+# rearme l'undo. `PENDING` -> `DONE` est une transition autorisee par la
+# whitelist `_ALLOWED_BATCH_TRANSITIONS`.
+STATUS_FINALIZED_BY_BOOT = "DONE"
+# Motif ecrit dans `summary_json._boot_cleanup.reason` pour tracer POURQUOI un
+# batch a ete re-arme (distinct du statut, qui doit rester 'DONE' nu).
+REASON_FINALIZED_BY_BOOT = "FINALIZED_BY_BOOT_APPLY_END_MARKER"
 
 
 def _list_pending_batches(store: Any, *, older_than_ts: float) -> List[Dict[str, Any]]:
@@ -137,6 +158,74 @@ def _read_expected_ops(summary_json: str) -> Optional[int]:
     return val if val > 0 else None
 
 
+def run_dir_for(state_dir: Any, run_id: str) -> Path:
+    """Chemin du run_dir d'un run_id (miroir de `cinesort.infra.state.new_run`).
+
+    Duplique volontairement la formule au lieu d'importer `infra.state` : `app`
+    ne doit pas dependre de `infra` (contrat import-linter `app_bounded` /
+    `infra_bounded`). La formule est figee depuis l'origine et couverte par un
+    test de parite avec `new_run`.
+    """
+    return Path(state_dir) / "runs" / f"tri_films_{run_id}"
+
+
+def _apply_end_marker(state_dir: Any, *, run_id: str, batch_id: str) -> Optional[Dict[str, Any]]:
+    """Preuve HORS SQLite que l'apply de ce batch est alle jusqu'au bout.
+
+    REVUE ADVERSAIRE PR#852. Le scenario a reparer est : l'apply a fini TOUS ses
+    deplacements, puis `close_apply_batch(DONE)` a echoue (base verrouillee,
+    disque plein, lecteur reseau tombe) — le batch reste `PENDING`, donc l'undo
+    est mort a vie. Toute preuve stockee dans SQLite serait inutilisable ici :
+    c'est precisement SQLite qui etait indisponible au moment ou il aurait fallu
+    l'ecrire. La preuve doit donc vivre AILLEURS.
+
+    Elle existe deja : `ApplyAuditLogger` ecrit `apply_audit.jsonl` dans le
+    run_dir et emet l'evenement `apply_end` a la toute fin de `_execute_apply`,
+    c'est-a-dire apres le dernier deplacement et AVANT la finalisation du
+    journal SQLite. Sa presence prouve exactement ce qu'il faut :
+
+    - apply tue en cours de route  -> pas de ligne `apply_end` -> non finalisable
+      (comportement inchange : ROLLED_BACK_BY_BOOT_CLEANUP) ;
+    - apply termine, DB indisponible -> ligne `apply_end` presente -> on rejoue
+      au boot la cloture `DONE` que l'apply n'a pas pu ecrire.
+
+    Retourne l'evenement `apply_end` (dict) ou None. Ne leve jamais.
+    """
+    if state_dir is None or not str(run_id or "").strip() or not str(batch_id or "").strip():
+        return None
+    try:
+        # Import local : evite de charger le module d'audit au boot pour rien.
+        from cinesort.app.apply_audit import read_apply_audit  # noqa: PLC0415
+
+        events = read_apply_audit(run_dir_for(state_dir, str(run_id)), batch_id=str(batch_id))
+    # ImportError est indispensable ici : cet import est LOCAL, donc il s'execute
+    # au boot, et il n'herite d'AUCUNE des autres entrees. Sans lui, un module
+    # d'audit absent (build EXE ampute, installation partielle) sortirait de
+    # `reconcile_pending_batches` par le haut et sauterait la reconciliation de
+    # TOUS les batches, y compris celle qui existait avant cette PR.
+    except (ImportError, OSError, ValueError, TypeError, AttributeError):
+        _logger.debug("apply_end marker: lecture impossible pour %s", batch_id, exc_info=True)
+        return None
+    for event in reversed(events or []):
+        if isinstance(event, dict) and str(event.get("event") or "") == "apply_end":
+            return event
+    return None
+
+
+def _count_ops(store: Any, batch_id: str) -> int:
+    """Nombre d'operations journalisees pour ce batch (0 si table absente)."""
+    with store._managed_conn() as conn:  # type: ignore[attr-defined]
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM apply_operations WHERE batch_id = ?",
+                (str(batch_id),),
+            )
+            row = cur.fetchone()
+        except sqlite3.OperationalError:
+            return 0
+    return int((row[0] if row else 0) or 0)
+
+
 def _classify_batch(store: Any, batch_id: str, summary_json: str = "") -> str:
     """Decide si un batch PENDING-zombi est completable ou doit etre rollback.
 
@@ -196,7 +285,15 @@ def _classify_batch(store: Any, batch_id: str, summary_json: str = "") -> str:
     return "completed"
 
 
-def _close_batch(store: Any, *, batch_id: str, status: str, now_ts: float) -> None:
+def _close_batch(
+    store: Any,
+    *,
+    batch_id: str,
+    status: str,
+    now_ts: float,
+    reason: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
     """Marque un batch avec un statut final et `ended_ts=now`.
 
     Utilise un UPDATE direct (pas via close_apply_batch) car on veut conserver
@@ -217,19 +314,19 @@ def _close_batch(store: Any, *, batch_id: str, status: str, now_ts: float) -> No
 
         # Annoter le summary avec la trace du cleanup (best-effort, on
         # n'echoue pas si JSON casse).
-        import json as _json
-
         try:
-            data = _json.loads(current_summary) if current_summary else {}
+            data = json.loads(current_summary) if current_summary else {}
             if not isinstance(data, dict):
                 data = {"_original": current_summary}
         except (TypeError, ValueError):
             data = {}
         data["_boot_cleanup"] = {
             "applied_at": float(now_ts),
-            "reason": status,
+            "reason": str(reason or status),
         }
-        new_summary = _json.dumps(data, ensure_ascii=False, sort_keys=True)
+        if extra:
+            data["_boot_cleanup"].update(extra)
+        new_summary = json.dumps(data, ensure_ascii=False, sort_keys=True)
 
         conn.execute(
             """
@@ -246,6 +343,7 @@ def reconcile_pending_batches(
     *,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
     now_ts: Optional[float] = None,
+    state_dir: Any = None,
 ) -> Dict[str, Any]:
     """Cleanup les apply_batches PENDING-zombi au boot.
 
@@ -254,10 +352,15 @@ def reconcile_pending_batches(
         max_age_hours : age minimum pour considerer un batch comme zombi.
             Defaut 1h. Doit etre > 0.
         now_ts : timestamp de reference (defaut time.time()). Utile pour tests.
+        state_dir : racine du state (contient `runs/tri_films_<run_id>/`). Fournie,
+            elle permet de RE-ARMER l'undo d'un batch dont l'apply est prouve
+            termine par le marqueur `apply_end` du journal d'audit JSONL
+            (cf. `_apply_end_marker`). Absente -> comportement historique.
 
     Retourne un rapport :
     {
         "pending_found": int,    # nombre de PENDING-zombi detectes
+        "finalized_done": int,   # remis en DONE (undo re-arme)
         "completed": int,        # marques COMPLETED_BY_BOOT_CLEANUP
         "rolled_back": int,      # marques ROLLED_BACK_BY_BOOT_CLEANUP
         "batches": List[dict],   # detail (batch_id, run_id, verdict)
@@ -267,6 +370,7 @@ def reconcile_pending_batches(
     """
     report: Dict[str, Any] = {
         "pending_found": 0,
+        "finalized_done": 0,
         "completed": 0,
         "rolled_back": 0,
         "batches": [],
@@ -298,6 +402,55 @@ def reconcile_pending_batches(
     for batch in pending:
         bid = batch["batch_id"]
         rid = batch["run_id"]
+
+        # REVUE ADVERSAIRE PR#852 — la moitie manquante du finding F11.
+        # Un batch reel (non dry-run) dont le marqueur `apply_end` existe et qui
+        # a au moins une operation journalisee a REELLEMENT fini son apply : la
+        # seule chose qui a manque est la cloture SQLite. On rejoue cette
+        # cloture ici, en 'DONE', ce qui est le seul statut qui rend le batch a
+        # nouveau annulable (`get_last_reversible_apply_batch`). Sans ce
+        # rattrapage, tolerer l'erreur SQLite dans `_cleanup_apply` reviendrait
+        # a rendre l'undo definitivement mort en silence.
+        if int(batch.get("dry_run") or 0) == 0:
+            marker = _apply_end_marker(state_dir, run_id=rid, batch_id=bid)
+            if marker is not None:
+                try:
+                    ops_count = _count_ops(store, bid)
+                except (sqlite3.Error, OSError, AttributeError):
+                    _logger.exception("reconcile_pending_batches: ops count failed for %s", bid)
+                    ops_count = 0
+                if ops_count > 0:
+                    try:
+                        _close_batch(
+                            store,
+                            batch_id=bid,
+                            status=STATUS_FINALIZED_BY_BOOT,
+                            now_ts=now,
+                            reason=REASON_FINALIZED_BY_BOOT,
+                            extra={"ops_count": ops_count, "audit_counts": marker.get("counts") or {}},
+                        )
+                    except (sqlite3.Error, OSError, AttributeError):
+                        _logger.exception("reconcile_pending_batches: finalize failed for %s", bid)
+                        continue
+                    report["finalized_done"] += 1
+                    _logger.warning(
+                        "reconcile_pending_batches: batch %s (run=%s) remis en DONE "
+                        "(marqueur apply_end present, %d operation(s) journalisee(s)) — undo re-arme",
+                        bid,
+                        rid,
+                        ops_count,
+                    )
+                    report["batches"].append(
+                        {
+                            "batch_id": bid,
+                            "run_id": rid,
+                            "started_ts": batch["started_ts"],
+                            "verdict": "finalized_done",
+                            "final_status": STATUS_FINALIZED_BY_BOOT,
+                        }
+                    )
+                    continue
+
         try:
             verdict = _classify_batch(store, bid, summary_json=batch.get("summary_json") or "")
         except (sqlite3.Error, OSError, AttributeError):
@@ -408,9 +561,13 @@ def reconcile_batches_at_boot(
     store: Any,
     *,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
+    state_dir: Any = None,
 ) -> Dict[str, Any]:
     """Wrapper boot : reprend les rollbacks IN_PROGRESS orphelins (R8-013) PUIS
     cleanup les PENDING-zombi + logue le rapport.
+
+    `state_dir` est propage a `reconcile_pending_batches` pour permettre le
+    re-armement `PENDING` -> `DONE` des batches prouves termines (PR#852).
 
     Tolere toutes les erreurs (n'empeche jamais le boot de continuer).
     """
@@ -420,11 +577,12 @@ def reconcile_batches_at_boot(
     except Exception:
         _logger.exception("reconcile_batches_at_boot: inprogress reconcile error (boot continues)")
     try:
-        report = reconcile_pending_batches(store, max_age_hours=max_age_hours)
+        report = reconcile_pending_batches(store, max_age_hours=max_age_hours, state_dir=state_dir)
     except Exception:
         _logger.exception("reconcile_batches_at_boot: unexpected error (boot continues)")
         return {
             "pending_found": 0,
+            "finalized_done": 0,
             "completed": 0,
             "rolled_back": 0,
             "batches": [],
@@ -436,8 +594,9 @@ def reconcile_batches_at_boot(
 
     if report["pending_found"] > 0:
         _logger.info(
-            "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
+            "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d finalized DONE, %d completed, %d rolled_back)",
             report["pending_found"],
+            report.get("finalized_done", 0),
             report["completed"],
             report["rolled_back"],
         )

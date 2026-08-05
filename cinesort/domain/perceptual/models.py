@@ -23,6 +23,18 @@ class FrameMetrics:
     skipped: bool = False
 
 
+# #923 : quelle valeur porte la mesure de chaque critere « mesurable » du
+# VideoPerceptual, et quel drapeau atteste qu'elle a bien ete MESUREE.
+# Cf VideoPerceptual.is_measured pour la regle de decision.
+_MEASURABLE_METRICS: Dict[str, tuple] = {
+    "blockiness": ("blockiness_mean", "blockiness_measured"),
+    "blur": ("blur_mean", "blur_measured"),
+    "banding": ("banding_mean", "banding_measured"),
+    "effective_bits": ("effective_bits_mean", "effective_bits_measured"),
+    "temporal": ("temporal_stddev", "temporal_measured"),
+}
+
+
 @dataclass
 class VideoPerceptual:
     """Resultat de l'analyse video perceptuelle (Phase 1)."""
@@ -46,6 +58,11 @@ class VideoPerceptual:
     effective_bits_mean: float = 0.0
     variance_mean: float = 0.0
     flat_ratio: float = 0.0
+    # #830 : variabilite inter-frames COMBINEE (blockiness + blur normalise),
+    # cf. `compute_temporal_consistency` -> `combined_stddev`. C'est la grandeur
+    # que `composite_score._score_temporal` compare a TEMPORAL_CONSISTENCY_*.
+    # Ne PAS y remettre le seul ecart-type de blockiness : `blockiness_stddev`
+    # le porte deja, et le score temporel redeviendrait un doublon de celui-ci.
     temporal_stddev: float = 0.0
 
     y_avg_mean: float = 0.0
@@ -56,8 +73,28 @@ class VideoPerceptual:
     dark_frame_count: int = 0
     dark_frame_pct: float = 0.0
 
+    # #923 — « mesure a 0 » vs « non mesure ». Les 5 champs ci-dessus valent 0.0
+    # tant qu'aucune mesure n'a abouti (run_filter_graph rend [] des que ffmpeg
+    # sort en rc != 0, cf video_analysis.py:117-122 ; l'analyse pixel rend des
+    # agregats vides si aucune frame n'est exploitable). Or 0.0 est la MEILLEURE
+    # valeur possible pour blockiness/blur/banding/temporal : _score_blockiness(0.0)
+    # et _score_blur(0.0) rendent 95/100. Un fichier dont l'analyse a ECHOUE —
+    # typiquement un fichier corrompu — heritait donc de notes de reference sur
+    # des criteres jamais mesures, et pouvait GAGNER le departage des doublons
+    # contre une copie saine (comparison.compare_two_files departage sur
+    # global_score). Ces drapeaux permettent a l'aval de separer les deux etats.
+    blockiness_measured: bool = False
+    blur_measured: bool = False
+    banding_measured: bool = False
+    effective_bits_measured: bool = False
+    temporal_measured: bool = False
+
     visual_score: int = 0
     visual_tier: str = "degrade"
+    # #923 — fraction (0..1) du poids de `visual_score` reellement adossee a une
+    # mesure. None = information indisponible (objet non issu de
+    # analyze_video_frames : construction directe, row historique relue en base).
+    visual_confidence: Optional[float] = None
 
     # §13 v7.5.0 — SSIM self-referential (detection fake 4K)
     ssim_self_ref: float = -1.0  # -1 = non applicable/non calcule
@@ -96,6 +133,24 @@ class VideoPerceptual:
 
     frames_detail: List[Dict[str, Any]] = field(default_factory=list)
 
+    def is_measured(self, metric: str) -> bool:
+        """#923 — le critere `metric` repose-t-il sur une mesure reelle ?
+
+        Une valeur NON NULLE ne peut provenir que d'une mesure : elle vaut
+        preuve, quel que soit le drapeau (ce qui laisse intacts les objets
+        construits directement, sans passer par `analyze_video_frames`).
+        Seul 0.0 est ambigu, et il se tranche alors sur le drapeau — donc
+        dans le sens RESTRICTIF : sans attestation de mesure, le critere est
+        « non mesure » et ne doit alimenter aucune note.
+
+        `metric` : une cle de `_MEASURABLE_METRICS` (KeyError sinon, pour que
+        toute faute de frappe casse bruyamment au lieu de rendre False).
+        """
+        value_field, flag_field = _MEASURABLE_METRICS[metric]
+        if getattr(self, flag_field):
+            return True
+        return float(getattr(self, value_field) or 0.0) != 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialise pour stockage JSON."""
         return {
@@ -106,24 +161,35 @@ class VideoPerceptual:
             "color_space": self.color_space,
             "bit_depth_nominal": self.bit_depth_nominal,
             "resolution": {"width": self.resolution_width, "height": self.resolution_height},
+            # #923 : `measured` accompagne chaque metrique dont 0.0 est ambigu,
+            # pour que l'aval (UI, comparaison de doublons, rapports) ne lise
+            # jamais un « non mesure » comme une mesure parfaite.
             "blockiness": {
                 "mean": round(self.blockiness_mean, 2),
                 "median": round(self.blockiness_median, 2),
                 "stddev": round(self.blockiness_stddev, 2),
+                "measured": self.is_measured("blockiness"),
             },
             "blur": {
                 "mean": round(self.blur_mean, 4),
                 "median": round(self.blur_median, 4),
                 "stddev": round(self.blur_stddev, 4),
+                "measured": self.is_measured("blur"),
             },
-            "banding": {"mean_score": round(self.banding_mean, 1)},
-            "effective_bit_depth": {"mean_bits": round(self.effective_bits_mean, 2)},
+            "banding": {"mean_score": round(self.banding_mean, 1), "measured": self.is_measured("banding")},
+            "effective_bit_depth": {
+                "mean_bits": round(self.effective_bits_mean, 2),
+                "measured": self.is_measured("effective_bits"),
+            },
             "local_variance": {
                 "mean_variance": round(self.variance_mean, 1),
                 "flat_ratio": round(self.flat_ratio, 3),
                 "detail_ratio": round(1.0 - self.flat_ratio, 3),
             },
-            "temporal_consistency": {"inter_frame_stddev": round(self.temporal_stddev, 2)},
+            "temporal_consistency": {
+                "inter_frame_stddev": round(self.temporal_stddev, 2),
+                "measured": self.is_measured("temporal"),
+            },
             "dark_scene_stats": {
                 "dark_frame_count": self.dark_frame_count,
                 "dark_frame_pct": round(self.dark_frame_pct, 1),
@@ -136,6 +202,8 @@ class VideoPerceptual:
             },
             "visual_score": self.visual_score,
             "visual_tier": self.visual_tier,
+            # #923 : part du score visuel reellement mesuree (None = inconnu).
+            "visual_confidence": (round(self.visual_confidence, 3) if self.visual_confidence is not None else None),
             "upscale_self_ref": {
                 "ssim_y": round(self.ssim_self_ref, 4),
                 "verdict": self.upscale_verdict,

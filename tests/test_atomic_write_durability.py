@@ -27,11 +27,13 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest import mock
 
 from cinesort.app import export_support, plan_support, quarantine_ttl, updater
-from cinesort.infra import tmdb_client
+from cinesort.domain import core
+from cinesort.infra import state, tmdb_client
 from cinesort.infra.integrations import poster_proxy
 from cinesort.infra.probe import disk_cache
 from cinesort.infra.state import (
@@ -44,7 +46,7 @@ from cinesort.infra.state import (
     is_atomic_tmp_name,
     sweep_atomic_tmp_orphans,
 )
-from cinesort.ui.api import library_actions_support, run_data_support, tmdb_support
+from cinesort.ui.api import library_actions_support, run_data_support, run_flow_support, tmdb_support
 
 
 @contextlib.contextmanager
@@ -55,18 +57,20 @@ def capture_atomic_io():
     simule pas. Un site qui n'appelle pas fsync, ou qui promeut un `.tmp` de nom
     fixe, est visible dans le journal retourne.
     """
-    journal: Dict[str, Any] = {"fsync": 0, "replace_sources": [], "order": []}
+    journal: Dict[str, Any] = {"fsync": 0, "replace_sources": [], "order": [], "sequence": []}
     real_fsync = os.fsync
     real_replace = os.replace
 
     def fake_fsync(fd):
         journal["fsync"] += 1
         journal["order"].append("fsync")
+        journal["sequence"].append(("fsync", None))
         return real_fsync(fd)
 
     def fake_replace(src, dst, *args, **kwargs):
         journal["replace_sources"].append(str(src))
         journal["order"].append("replace")
+        journal["sequence"].append(("replace", str(src)))
         return real_replace(src, dst, *args, **kwargs)
 
     with mock.patch("os.fsync", fake_fsync), mock.patch("os.replace", fake_replace):
@@ -120,6 +124,51 @@ class _AtomicAssertions(unittest.TestCase):
         self.assert_durable(journal, label)
         self.assert_tmp_unique(journal, label)
 
+    def assert_target_written_atomically(self, journal: Dict[str, Any], target_name: str, label: str) -> List[int]:
+        """Memes deux invariants, mais pour UNE cible dans un journal partage.
+
+        Necessaire des que l'appelant fait plusieurs ecritures (le scan ecrit
+        `plan.jsonl` PUIS `summary.txt`, `start_demo_mode` ecrit aussi en base
+        et dans les reglages) : un `assert_durable` global serait vert des
+        qu'UN SEUL des ecrivains est correct, et ne dirait rien sur celui qu'on
+        veut prouver.
+
+        L'ordre est juge sur la SEQUENCE observee — l'element qui precede
+        immediatement le `os.replace` de la cible doit etre un `os.fsync` —, pas
+        sur un compteur global ni sur un instant d'horloge.
+        """
+        prefix = f"{target_name}{ATOMIC_TMP_INFIX}"
+        indices = [
+            i
+            for i, (kind, src) in enumerate(journal["sequence"])
+            if kind == "replace" and Path(src).name.startswith(prefix)
+        ]
+        self.assertTrue(
+            indices,
+            f"{label} : aucun os.replace d'un `.tmp` derive de {target_name!r} -> "
+            f"l'ecriture ne passe pas par le helper atomique commun (elle est faite en place)",
+        )
+        for i in indices:
+            src_name = Path(journal["sequence"][i][1]).name
+            self.assertIn(
+                str(os.getpid()),
+                src_name,
+                f"{label} : nom de .tmp SANS pid -> deux ecrivains concurrents partagent le meme intermediaire",
+            )
+            self.assertIn(
+                str(threading.get_ident()),
+                src_name,
+                f"{label} : nom de .tmp SANS identifiant de thread -> collision entre threads du meme process",
+            )
+            self.assertGreater(i, 0, f"{label} : {target_name} promu sans aucun appel prealable")
+            self.assertEqual(
+                journal["sequence"][i - 1][0],
+                "fsync",
+                f"{label} : le os.replace de {target_name} n'est pas immediatement precede d'un os.fsync -> "
+                f"un crash entre l'ecriture et le rename peut promouvoir un fichier tronque",
+            )
+        return indices
+
 
 class TestHelperCanonique(_AtomicAssertions):
     """Le couple `atomic_write_bytes` / `atomic_write_json` lui-meme."""
@@ -144,8 +193,20 @@ class TestHelperCanonique(_AtomicAssertions):
         real_replace = os.replace
 
         def recording_replace(src, dst, *a, **kw):
-            with lock:
-                seen.append(str(src))
+            # `mock.patch("os.replace")` est GLOBAL au processus : il intercepte
+            # AUSSI les publications atomiques faites par un thread de fond
+            # survivant a un test anterieur (job runner, watcher, backup SQLite
+            # depuis #669). Un seul de ces `os.replace` etrangers ajoutait un
+            # 33e chemin distinct et faisait echouer l'assertion ci-dessous sans
+            # qu'aucun des 32 ecrivains ait fauté — faux rouge observe en suite
+            # complete, jamais en isolation. On ne retient donc que les
+            # publications vers LA cible du test. Le pouvoir discriminant est
+            # intact : tout `.tmp` des 32 ecrivains vise `target` et reste
+            # compte, donc deux d'entre eux qui partageraient un `.tmp` font
+            # toujours tomber le compte a 31.
+            if Path(dst) == target:
+                with lock:
+                    seen.append(str(src))
             return real_replace(src, dst, *a, **kw)
 
         # Aucune tolerance : un ecrivain qui echoue a basculer a PERDU son
@@ -840,6 +901,151 @@ class TestBalayageCable(unittest.TestCase):
         self.assertFalse(cache_tmdb.exists(), "orphelin de 20-100 Mo jamais balaye -> un par kill, a vie")
         self.assertFalse(poster.exists(), "le cache posters n'a aucun autre pruner")
         self.assertTrue(garde.exists(), "le balayage au boot a supprime le VRAI cache")
+
+
+# ---------------------------------------------------------------------------
+# Issue #479 : les 3 derniers ecrivains en place
+# ---------------------------------------------------------------------------
+
+
+class TestSitesIssue479(_AtomicAssertions):
+    """`plan.jsonl` du scan, `summary.txt`, export CSV : ecrits EN PLACE.
+
+    Le plus grave des trois est le premier. `plan.jsonl` n'est pas un cache :
+    c'est le fichier que l'APPLY relit pour renommer et DEPLACER des dossiers
+    de films. Une ecriture interrompue (disque plein, kill, antivirus) y
+    laissait un JSONL tronque, et `load_rows_from_plan_jsonl` saute les lignes
+    invalides SANS le dire : des films disparaissaient en silence d'un plan
+    destructif. Route par le helper canonique, un echec laisse la cible
+    INCHANGEE — sens restrictif.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_479_")
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _plan_row(self, row_id: str, title: str) -> core.PlanRow:
+        folder = self.root / "films" / f"{title} (2010)"
+        folder.mkdir(parents=True, exist_ok=True)
+        return core.PlanRow(
+            row_id=row_id,
+            kind="single",
+            folder=str(folder),
+            video="film.mkv",
+            proposed_title=title,
+            proposed_year=2010,
+            proposed_source="nfo",
+            confidence=90,
+            confidence_label="high",
+            candidates=[core.Candidate(title=title, year=2010, tmdb_id=27205, score=90, source="tmdb")],
+        )
+
+    # --- site 1 : run_flow_support._save_plan_artifacts ----------------------
+
+    def test_site_save_plan_artifacts(self) -> None:
+        run_paths = state.new_run(self.root, "20260805_101112_a1b2c3", exclusive=True)
+        rows = [self._plan_row("r1", "Inception"), self._plan_row("r2", "Heat")]
+        rs = mock.Mock()
+        rs.paths = run_paths
+        stats = SimpleNamespace(planned_rows=2, folders_scanned=2, collections_seen=0, singles_seen=2)
+
+        with capture_atomic_io() as journal:
+            run_flow_support._save_plan_artifacts(rs, rows, stats, "C:/films", self.root, lambda *_a: None)
+
+        rs.log.assert_not_called()  # sinon l'ecriture a echoue et le test ne prouve rien
+        self.assert_target_written_atomically(journal, "plan.jsonl", "run_flow_support._save_plan_artifacts")
+        self.assert_target_written_atomically(journal, "summary.txt", "run_flow_support._save_plan_artifacts")
+
+    def test_save_plan_artifacts_contenu_inchange(self) -> None:
+        """Non-regression : meme serialisation qu'avant (asdict + candidates)."""
+        run_paths = state.new_run(self.root, "20260805_101113_a1b2c4", exclusive=True)
+        rows = [self._plan_row("r1", "Inception"), self._plan_row("r2", "Heat")]
+        rs = mock.Mock()
+        rs.paths = run_paths
+        stats = SimpleNamespace(planned_rows=2, folders_scanned=2, collections_seen=0, singles_seen=2)
+
+        run_flow_support._save_plan_artifacts(rs, rows, stats, "C:/films", self.root, lambda *_a: None)
+
+        lignes = [json.loads(x) for x in run_paths.plan_jsonl.read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertEqual([r["row_id"] for r in lignes], ["r1", "r2"])
+        self.assertEqual([r["proposed_title"] for r in lignes], ["Inception", "Heat"])
+        self.assertEqual(lignes[0]["candidates"][0]["tmdb_id"], 27205)
+        self.assertTrue(run_paths.summary_txt.read_text(encoding="utf-8").startswith("=== RESUME ANALYSE ==="))
+        self.assertEqual(
+            sorted(p.name for p in run_paths.run_dir.iterdir()),
+            ["plan.jsonl", "summary.txt"],
+            "un .tmp orphelin subsiste dans le dossier du run",
+        )
+
+    # --- site 2 : library_actions_support.export_films(csv) ------------------
+
+    def test_site_export_films_csv(self) -> None:
+        exports = self.root / "exports"
+        exports.mkdir()
+        rows = [{"row_id": "a", "title": "Amelie Poulain", "year": 2001}]
+        with (
+            mock.patch.object(library_actions_support, "_exports_dir", return_value=exports),
+            mock.patch.object(library_actions_support, "_resolve_run_id", return_value="run_42"),
+            mock.patch.object(library_actions_support, "_build_library_rows", return_value=rows),
+            capture_atomic_io() as journal,
+        ):
+            res = library_actions_support.export_films(object(), [], fmt="csv")
+        self.assertTrue(res["ok"], res)
+        produit = Path(res["file_path"])
+        self.assert_target_written_atomically(journal, produit.name, "library_actions_support.export_films(csv)")
+
+        # Convention Excel-FR (M15) preservee a l'octet pres : BOM + ";" + CRLF.
+        raw = produit.read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"), "BOM UTF-8 perdu en passant par le helper")
+        texte = raw.decode("utf-8-sig")
+        self.assertIn("row_id;", texte.splitlines()[0])
+        self.assertIn(b"\r\n", raw, "csv.writer emet du CRLF : la traduction de fin de ligne a change")
+        self.assertEqual([p.name for p in exports.iterdir()], [produit.name], "un .tmp orphelin subsiste")
+
+
+class TestDemoPlanJsonlDurable(_AtomicAssertions):
+    """Site 3 de #479 : `start_demo_mode` ecrivait son `plan.jsonl` en place.
+
+    Le run demo n'est pas un decor : la Bibliotheque, les Doublons et l'Apply
+    le consomment par le meme chemin que n'importe quel run reel.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinesort_479_demo_")
+        self.root = Path(self._tmp.name)
+        self.state_dir = self.root / "state"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        import cinesort.ui.api.cinesort_api as backend  # noqa: PLC0415 - import lourd, borne au test
+
+        self.api = backend.CineSortApi()
+        saved = self.api.settings.save_settings(
+            {"root": str(self.root / "fake_root"), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
+        self.assertTrue(saved.get("ok"), saved)
+
+    def tearDown(self) -> None:
+        with contextlib.suppress(Exception):
+            self.api.runtime.stop_demo_mode()
+        self._tmp.cleanup()
+
+    def test_start_demo_mode_ecrit_le_plan_atomiquement(self) -> None:
+        with capture_atomic_io() as journal:
+            res = self.api.runtime.start_demo_mode()
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("count"), 15, "sans les 15 films le test serait vacant")
+        self.assert_target_written_atomically(journal, "plan.jsonl", "demo_support.start_demo_mode")
+
+        run_dir = self.state_dir / "runs" / f"tri_films_{res['run_id']}"
+        lignes = [json.loads(x) for x in (run_dir / "plan.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertEqual(len(lignes), 15)
+        self.assertNotIn(
+            ATOMIC_TMP_INFIX,
+            " ".join(p.name for p in run_dir.iterdir()),
+            "un .tmp orphelin subsiste dans le dossier du run demo",
+        )
 
 
 def _load_app_entry() -> Any:

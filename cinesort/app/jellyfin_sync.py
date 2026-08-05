@@ -82,12 +82,20 @@ class _MoveOp:
 
 @dataclass
 class RestoreResult:
-    """Resume de la restauration des statuts watched."""
+    """Resume de la restauration des statuts watched.
+
+    `counters_restored` et `counters_lost` (#535) sont des SOUS-ENSEMBLES de
+    `restored` : le statut vu a ete re-affirme dans les deux cas, seul
+    l'historique (nombre de lectures + date de derniere lecture) distingue une
+    restauration complete d'une restauration partielle.
+    """
 
     restored: int = 0
     skipped: int = 0
     not_found: int = 0
     errors: int = 0
+    counters_restored: int = 0
+    counters_lost: int = 0
     details: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -97,6 +105,8 @@ class RestoreResult:
             "skipped": self.skipped,
             "not_found": self.not_found,
             "errors": self.errors,
+            "counters_restored": self.counters_restored,
+            "counters_lost": self.counters_lost,
             "details": self.details,
         }
 
@@ -162,6 +172,75 @@ def _remap_path(path: str, sequence: List[_MoveOp]) -> Optional[str]:
             current = move.dst + current[len(move.src) :]
             touched = True
     return current if touched else None
+
+
+# -- Restauration des compteurs de lecture (#535) ----------------------
+#
+# `mark_played` ne restaure QUE `played=True`. `play_count` et
+# `last_played_date`, captures au snapshot, n'etaient jamais re-emis : un film
+# vu 17 fois le 15/01 revenait a « 1 lecture, il y a quelques secondes ».
+#
+# UNE seule garde encadre le rattrapage : `_counters_are_lost`. Elle repond a
+# « Jellyfin a-t-il REELLEMENT perdu l'historique ? » et couvre du meme coup le
+# cas « il n'y avait rien a restaurer » (un film vu sans lecture ni date ne peut
+# etre en retard sur rien). Une seconde garde « y a-t-il quelque chose a
+# restaurer ? » serait strictement subsumee par celle-ci : sa mutation resterait
+# VERTE faute de chemin qui l'emprunte seule — une garde qu'aucun test ne peut
+# mettre en defaut est une garde qui ment.
+#
+# Sa raison d'etre : si le serveur a conserve l'item (renommage de casse seule,
+# deplacement detecte), son historique est intact ; le re-ecrire n'apporterait
+# rien tout en exposant le reste de son UserData (favori, note) a un ecrasement
+# par un corps partiel. La comparaison se fait sur l'etat courant DEJA rapatrie
+# par la boucle — aucun appel reseau supplementaire.
+
+
+def _counters_are_lost(info: WatchedInfo, current_play_count: Any, current_last_played: Any) -> bool:
+    """True si l'etat COURANT de l'item a perdu l'historique du snapshot.
+
+    Deux motifs INDEPENDANTS, chacun suffisant :
+    - le compteur de lectures a recule ;
+    - la date de derniere lecture ne correspond plus a celle du snapshot.
+
+    `current_*` viennent de la liste Jellyfin rapatriee en debut de tentative,
+    donc AVANT le `mark_played` de cette tentative : on mesure bien l'etat
+    laisse par la re-indexation, pas celui que l'on vient d'ecrire.
+    """
+    try:
+        current_count = int(current_play_count or 0)
+    except (TypeError, ValueError):
+        current_count = 0
+    if int(info.play_count or 0) > current_count:
+        return True
+    return bool(info.last_played_date) and str(current_last_played or "") != info.last_played_date
+
+
+def _restore_counters(client: Any, user_id: str, item_id: str, info: WatchedInfo) -> bool:
+    """Re-emet play_count + last_played_date sur un item. False si perdu.
+
+    Un client sans `update_played_state` (serveur ancien, client duck-type)
+    rend False : l'historique EST perdu, on le compte comme tel plutot que de
+    laisser croire a une restauration complete.
+    """
+    updater = getattr(client, "update_played_state", None)
+    if not callable(updater):
+        _log.warning(
+            "Jellyfin sync : client sans update_played_state — item %s restaure sans son historique",
+            item_id,
+        )
+        return False
+    try:
+        return bool(
+            updater(
+                user_id,
+                item_id,
+                play_count=int(info.play_count or 0),
+                last_played_date=str(info.last_played_date or ""),
+            )
+        )
+    except JellyfinError as exc:
+        _log.warning("Jellyfin sync : echec restauration historique item %s — %s", item_id, exc)
+        return False
 
 
 # -- API publique ------------------------------------------------------
@@ -276,18 +355,46 @@ def restore_watched(
             _log.warning("Jellyfin sync : echec recuperation films (tentative %d) — %s", attempt, exc)
             continue
 
-        # Indexer par chemin normalise
-        jellyfin_by_path: Dict[str, str] = {}  # norm_path -> item_id
+        # Indexer par chemin normalise. Issue #566 : plusieurs items Jellyfin
+        # peuvent pointer le MEME chemin (doublon reste apres un refresh
+        # interrompu, recovery de base, « Force Refresh All Metadata »). Le dict
+        # simple ecrasait le premier id en silence — last-write-wins — et
+        # `mark_played` repartait alors sur un seul item, possiblement celui qui
+        # n'etait pas vu : l'utilisateur perdait le statut qu'il croyait
+        # restaurer. On MERGE par cle metier (le chemin) au lieu d'ecraser, et
+        # on re-affirme le statut sur TOUS les items du chemin — `mark_played`
+        # est idempotent cote Jellyfin, le faire deux fois ne coute rien.
+        jellyfin_by_path: Dict[str, List[str]] = {}  # norm_path -> [item_id]
+        # #535 : etat COURANT des compteurs, item_id -> (play_count, last_played_date).
+        # Preleve ici, donc avant tout mark_played de cette tentative.
+        current_counters: Dict[str, Any] = {}
+        duplicate_item_count = 0
         for movie in current_movies:
             p = _normalize_path(movie.get("path", ""))
-            if p:
-                jellyfin_by_path[p] = movie.get("id", "")
+            # Un id vide n'identifie aucun item : l'indexer ferait disparaitre
+            # l'item valide qui partage ce chemin (cf. issue #452, meme famille).
+            item_id = str(movie.get("id") or "")
+            if not p or not item_id:
+                continue
+            current_counters[item_id] = (movie.get("play_count", 0), movie.get("last_played_date", ""))
+            known = jellyfin_by_path.setdefault(p, [])
+            if item_id in known:
+                continue
+            if known:
+                duplicate_item_count += 1
+            known.append(item_id)
+        if duplicate_item_count:
+            _log.warning(
+                "Jellyfin sync : %d item(s) en doublon de chemin dans la bibliotheque "
+                "— le statut vu sera re-affirme sur chacun",
+                duplicate_item_count,
+            )
 
         # Tenter le match pour les pending
         still_pending: Dict[str, str] = {}
         for new_norm, old_norm in pending.items():
-            item_id = jellyfin_by_path.get(new_norm, "")
-            if not item_id:
+            item_ids = jellyfin_by_path.get(new_norm) or []
+            if not item_ids:
                 # FIX #15 : le film a DISPARU de l'index a cette tentative. Si une
                 # tentative anterieure avait laisse un mark_played en echec dans
                 # mark_failed, cet item_id est desormais perime : on le purge pour
@@ -299,16 +406,51 @@ def restore_watched(
                 still_pending[new_norm] = old_norm
                 continue
 
-            # Film trouve, restaurer le statut watched
-            ok = bool(client.mark_played(user_id, item_id))
-            if ok:
+            # Film trouve, restaurer le statut watched sur TOUS les items qui
+            # portent ce chemin (issue #566). Le chemin n'est considere restaure
+            # que si AUCUN des marquages n'a echoue : un echec partiel reste en
+            # attente et sera re-tente, il ne devient jamais un succes.
+            first_failed_id = ""
+            info = snapshot.get(old_norm)
+            counters_needed = False
+            counters_lost = False
+            for item_id in item_ids:
+                if not bool(client.mark_played(user_id, item_id)):
+                    first_failed_id = first_failed_id or item_id
+                    continue
+                # #535 : `mark_played` a re-affirme le statut vu, mais il a aussi
+                # remis le compteur a 1 et la date a maintenant. On rattrape
+                # l'historique uniquement quand Jellyfin l'a reellement perdu.
+                if info is None:
+                    continue
+                cur_count, cur_date = current_counters.get(item_id, (0, ""))
+                if not _counters_are_lost(info, cur_count, cur_date):
+                    continue
+                counters_needed = True
+                if not _restore_counters(client, user_id, item_id, info):
+                    counters_lost = True
+            if not first_failed_id:
                 result.restored += 1
+                # Un historique perdu ne remet PAS le chemin en attente : le
+                # statut vu — l'essentiel — est restaure, et re-tenter 5 fois un
+                # endpoint absent couterait 135 s pour rien. Il est compte et
+                # remonte, jamais tu.
+                if counters_lost:
+                    counters_state = "lost"
+                    result.counters_lost += 1
+                elif counters_needed:
+                    counters_state = "restored"
+                    result.counters_restored += 1
+                else:
+                    counters_state = "not_needed"
                 result.details.append(
                     {
                         "action": "restored",
                         "old_path": old_norm,
                         "new_path": new_norm,
-                        "item_id": item_id,
+                        "item_id": item_ids[0],
+                        "item_ids": list(item_ids),
+                        "counters": counters_state,
                     }
                 )
             else:
@@ -318,7 +460,7 @@ def restore_watched(
                 # idempotent cote Jellyfin). Erreur definitive seulement apres
                 # epuisement des tentatives (comptage en fin de fonction).
                 still_pending[new_norm] = old_norm
-                mark_failed[new_norm] = item_id
+                mark_failed[new_norm] = first_failed_id
 
         pending = still_pending
         if not pending:
@@ -358,8 +500,10 @@ def restore_watched(
             )
 
     _log.info(
-        "Jellyfin sync : restore termine — %d restaures, %d non trouves, %d erreurs",
+        "Jellyfin sync : restore termine — %d restaures (%d avec historique, %d sans), %d non trouves, %d erreurs",
         result.restored,
+        result.counters_restored,
+        result.counters_lost,
         result.not_found,
         result.errors,
     )

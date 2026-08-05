@@ -125,6 +125,17 @@ def _score_from_visual(video: Any) -> Tuple[float, float]:
         return 50.0, 0.0
     val = float(getattr(video, "visual_score", 0) or 0)
     conf = 1.0 if getattr(video, "frames_analyzed", 0) >= 5 else 0.5
+    # #923 : `frames_analyzed` ne compte que les frames PIXEL. Les filtres
+    # ffmpeg (blockiness / blur / consistance temporelle) sont une passe
+    # INDEPENDANTE, qui peut echouer entierement alors que les frames, elles,
+    # ont bien ete extraites — la confiance valait alors 1.0 sur un score dont
+    # plus de la moitie du poids n'avait jamais ete mesuree. `visual_confidence`
+    # porte la part reellement mesuree ; None = objet sans cette information
+    # (construit directement, ou relu d'une row anterieure a ce correctif), on
+    # laisse alors la confiance inchangee plutot que d'inventer une valeur.
+    coverage = getattr(video, "visual_confidence", None)
+    if coverage is not None:
+        conf *= max(0.0, min(1.0, float(coverage)))
     return val, conf
 
 
@@ -311,17 +322,25 @@ def _score_audio_spectral(audio: Any) -> Tuple[float, float, str]:
 
 
 def _score_audio_drc(audio: Any) -> Tuple[float, float]:
-    """Score derive de la classification DRC §14."""
+    """Score derive de la classification DRC §14.
+
+    La confiance rendue par `classify_drc` fait AUTORITE quand elle existe : le
+    plancher (`max(conf, ...)`) ne sert que de valeur par defaut lorsque le
+    producteur n'a rien renseigne (0.0, cas d'un rapport ancien ou d'un objet
+    partiel). Avec un plancher inconditionnel, la confiance basse rendue sur une
+    seule metrique mesuree (issue #752) etait remontee a 0.70, et la penalite
+    `broadcast_compressed` pesait de tout son poids sur donnee partielle.
+    """
     if audio is None:
         return 50.0, 0.0
     category = str(getattr(audio, "drc_category", "unknown") or "unknown")
     conf = float(getattr(audio, "drc_confidence", 0) or 0)
     if category == "cinema":
-        return 100.0, max(conf, 0.7)
+        return 100.0, conf if conf > 0 else 0.7
     if category == "standard":
-        return 85.0, max(conf, 0.6)
+        return 85.0, conf if conf > 0 else 0.6
     if category == "broadcast_compressed":
-        return 60.0, max(conf, 0.7)
+        return 60.0, conf if conf > 0 else 0.7
     return 70.0, 0.0
 
 
@@ -635,8 +654,9 @@ def collect_warnings(
     # Runtime mismatch
     flag = str(runtime_vs_tmdb_flag or "").lower()
     if flag in ("mismatch", "runtime_mismatch"):
-        video_data = (normalized_probe or {}).get("video") or {}
-        dur_min = int(float(video_data.get("duration_s", 0) or 0) / 60)
+        # duration_s est au TOP-LEVEL de NormalizedProbe, pas dans video subdict.
+        # Cf cinesort/domain/probe_models.py:16 et cinesort/infra/probe/normalize.py:452.
+        dur_min = int(float((normalized_probe or {}).get("duration_s", 0) or 0) / 60)
         warnings.append(
             f"Duree fichier {dur_min} min different notablement de TMDb — possible Theatrical vs Extended Cut."
         )

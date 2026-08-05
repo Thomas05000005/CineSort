@@ -129,6 +129,12 @@ def _sentinel_config(root: Path) -> core.Config:
         "separator": "_",
         "empty_folders_scope": "touched_only",
         "cleanup_residual_folders_scope": "root_all",
+        # Perimetre destructif (2026-08-03) : `excluded_patterns` est lui aussi
+        # coerce-and-default (`Config.normalized()` rejoue
+        # `normalize_excluded_patterns`). La sentinelle doit donc etre un
+        # pattern VALIDE et discriminant, sinon elle serait refusee a la
+        # normalisation et un champ PERDU deviendrait indiscernable.
+        "excluded_patterns": ("_sentinelle/*",),
     }
     kwargs: Dict[str, Any] = {}
     for f in dataclasses.fields(core.Config):

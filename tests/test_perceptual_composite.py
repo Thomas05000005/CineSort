@@ -260,6 +260,20 @@ class CrossVerdictsTests(unittest.TestCase):
         match = [v for v in verdicts if v["id"] == "fake_4k"][0]
         self.assertEqual(match["severity"], "error")
 
+    def test_fake_4k_unmeasured_bits_no_verdict(self) -> None:
+        """effective_bits_mean=0.0 (non mesure) ne doit PAS declencher fake_4k."""
+        video = VideoPerceptual(
+            blockiness_mean=10.0,
+            blur_mean=0.06,
+            banding_mean=5.0,
+            effective_bits_mean=0.0,  # non mesure (aucune frame pixel) -> sentinelle
+            resolution_height=2160,
+            bit_depth_nominal=10,
+        )
+        verdicts = detect_cross_verdicts(video, None, None)
+        ids = [v["id"] for v in verdicts]
+        self.assertNotIn("fake_4k", ids)
+
     def test_lossy_recompress(self) -> None:
         """Blockiness et banding eleves → re-compression destructrice."""
         video = VideoPerceptual(
