@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import requests
+from requests.structures import CaseInsensitiveDict
 
 from cinesort.infra.tmdb_client import TmdbClient
 
@@ -34,6 +35,31 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         if self._raise_exc is not None:
             raise self._raise_exc
+
+
+class _ChunkedRaw:
+    """Faux flux urllib3 qui debite un corps par morceaux.
+
+    Pas d'attribut `stream` : `requests.Response.iter_content` retombe alors sur
+    `self.raw.read(chunk_size)`, ce qui rend la lecture deterministe (meme
+    convention que tests/test_http_body_bounded.py).
+    """
+
+    def __init__(self, body: bytes) -> None:
+        self._buf = bytes(body)
+        self.read_calls = 0
+        self.closed = False
+
+    def read(self, amt: int | None = None, **_kwargs: object) -> bytes:
+        self.read_calls += 1
+        if self.closed or not self._buf:
+            return b""
+        n = len(self._buf) if amt is None else min(int(amt), len(self._buf))
+        chunk, self._buf = self._buf[:n], self._buf[n:]
+        return chunk
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class TmdbClientCacheTests(unittest.TestCase):
@@ -115,6 +141,68 @@ class TmdbClientHostileTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("HTTP 429", message)
         self.assertIn("rate limit exceeded", message)
+
+    def test_validate_key_scrubs_secret_straddling_the_200_char_cut(self) -> None:
+        # Revue PR#643 (sourcery-ai) : scrub_secrets(r.text[:200]) laissait fuir
+        # un secret coupe par la troncature. Les patterns « valeur entre
+        # guillemets » de log_scrubber exigent le guillemet FERMANT ; couper la
+        # valeur avant lui tue le match et le fragment de cle part en clair vers
+        # l'UI. Ici la cle commence au caractere 180 : 20 de ses caracteres sont
+        # dans la fenetre de 200, le guillemet fermant non.
+        # gitleaks:allow — fausse cle, present precisement pour PROUVER que
+        # le scrubbing la retire. La detecter est le comportement attendu de
+        # gitleaks ; l'annotation dit qu'ici c'est voulu.
+        leaked_key = "abcdef0123456789abcdef0123456789"  # gitleaks:allow
+        body = "x" * 163 + '{"tmdb_api_key":"' + leaked_key + '"}'
+        self.assertEqual(len(body[:200]), 200, "le corps doit depasser la fenetre de troncature")
+        self.assertNotIn('"}', body[:200], "le guillemet fermant doit tomber APRES la coupure")
+        response = _FakeResponse(status_code=500, payload=ValueError("bad json"), text=body)
+        with mock.patch.object(self.client._session, "get", return_value=response):
+            ok, message = self.client.validate_key()
+        self.assertFalse(ok)
+        self.assertNotIn(leaked_key[:20], message, "fragment de cle API en clair dans le message front")
+        self.assertIn("[REDACTED]", message)
+
+    def test_validate_key_scrubs_a_body_that_came_through_the_bounded_stream(self) -> None:
+        # FUSION PR#643 x PR#860. Le test ci-dessus utilise un double qui n'est
+        # PAS une requests.Response : `enforce_body_limit` le route alors vers sa
+        # branche de repli et le corps n'est jamais lu en flux. Il ne prouve donc
+        # RIEN sur le chemin reel depuis #860, ou `_http_get` passe par
+        # `get_bounded` (stream=True) et ou `r.text` n'existe que parce que les
+        # octets lus par chunks ont ete REINJECTES dans la reponse. Ici on
+        # traverse ce chemin de bout en bout : si la reinjection disparaissait,
+        # `r.text` serait vide et le secret ne serait pas le probleme — le
+        # diagnostic entier le serait. Si le scrub repassait apres la troncature,
+        # le fragment de cle ressortirait.
+        # gitleaks:allow — fausse cle, present precisement pour PROUVER que
+        # le scrubbing la retire. La detecter est le comportement attendu de
+        # gitleaks ; l'annotation dit qu'ici c'est voulu.
+        leaked_key = "abcdef0123456789abcdef0123456789"  # gitleaks:allow
+        body = ("x" * 163 + '{"tmdb_api_key":"' + leaked_key + '"}' + "y" * 200_000).encode("utf-8")
+        self.assertGreater(len(body), 64 * 1024, "le corps doit couvrir plusieurs chunks de lecture")
+
+        raw = _ChunkedRaw(body)
+        response = requests.Response()
+        response.status_code = 401  # 4xx : _do_get ne leve pas, la reponse est rendue telle quelle
+        response.url = "https://api.themoviedb.org/3/authentication"
+        response.headers = CaseInsensitiveDict({"Content-Type": "text/plain"})
+        response.raw = raw
+
+        captured: dict = {}
+
+        def _fake_get(url: str, **kwargs: object) -> requests.Response:
+            captured.update(kwargs)
+            return response
+
+        with mock.patch.object(self.client._session, "get", side_effect=_fake_get):
+            ok, message = self.client.validate_key()
+
+        self.assertIs(captured.get("stream"), True, "la requete doit passer par get_bounded (stream=True)")
+        self.assertGreater(raw.read_calls, 1, "le corps doit avoir ete lu par chunks, pas materialise d'un bloc")
+        self.assertFalse(ok)
+        self.assertIn("HTTP 401", message)
+        self.assertNotIn(leaked_key[:20], message, "fragment de cle API en clair dans le message front")
+        self.assertIn("[REDACTED]", message)
 
     def test_search_movie_returns_empty_list_on_http_5xx(self) -> None:
         response = _FakeResponse(

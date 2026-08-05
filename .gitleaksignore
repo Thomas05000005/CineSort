@@ -1,0 +1,25 @@
+# Empreintes que gitleaks doit ignorer, une par ligne.
+#
+# Format : <commit>:<fichier>:<regle>:<ligne>
+#
+# A n'utiliser QUE pour une chaine dont on a etabli qu'elle n'est pas un secret.
+# Une exception posee a la legere transforme un check REQUIS en decoration.
+#
+# ---------------------------------------------------------------------------
+# PR#643 — fausse cle d'un test de scrubbing.
+#
+# `tests/test_tmdb_client.py` construit une fausse cle TMDb pour PROUVER que
+# `validate_key` la retire du message rendu a l'UI. La detecter est le
+# comportement CORRECT de gitleaks : la chaine ressemble a une cle, c'est tout
+# l'interet du test.
+#
+# Le fichier courant porte deja un `# gitleaks:allow` sur les deux lignes
+# concernees, ce qui suffit pour tout scan du contenu. Mais l'action scanne les
+# COMMITS de la PR, pas seulement l'arbre de travail : l'annotation ajoutee
+# apres coup ne s'applique pas retroactivement au diff du commit qui a
+# introduit la ligne. D'ou cette empreinte.
+#
+# Elle porte sur un commit de BRANCHE : apres le squash-merge, ce SHA n'existera
+# pas dans `main` et cette ligne deviendra inerte. La supprimer alors est sans
+# risque — les `# gitleaks:allow` du fichier restent, eux, actifs.
+81ff6e032f77d203d0b7cace6c213617217f9e8e:tests/test_tmdb_client.py:generic-api-key:126

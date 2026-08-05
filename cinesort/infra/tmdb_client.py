@@ -17,6 +17,7 @@ import requests
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import get_bounded, make_session_with_retry
 from cinesort.infra.fs_safety import FileTooLargeError, read_text_bounded
+from cinesort.infra.log_scrubber import scrub_secrets
 from cinesort.infra.state import AtomicWriteError, atomic_write_json, atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -493,7 +494,14 @@ class TmdbClient:
             # TMDb retourne `status_message` en lowercase ; le fallback .upper()
             # precedent etait mort (le or short-circuit sur la 1re cle).
             msg = data.get("status_message")
-        return False, f"HTTP {r.status_code}: {msg or r.text[:200]}"
+        # Le corps tiers (r.text) peut refleter l'URL avec api_key=... : on le
+        # scrub avant de l'inserer dans un message retourne a l'UI (CWE-532).
+        # On scrub le corps ENTIER puis on tronque, jamais l'inverse : trois des
+        # patterns de log_scrubber (MediaBrowser Token="...", Bearer, cle JSON
+        # "..._api_key":"...") exigent le delimiteur FERMANT. Tronquer d'abord a
+        # 200 peut couper la valeur avant ce delimiteur -> plus aucun match, et
+        # le fragment de secret part en clair vers l'UI.
+        return False, f"HTTP {r.status_code}: {msg or scrub_secrets(r.text)[:200]}"
 
     def search_movie(
         self, query: str, year: Optional[int] = None, *, language: str = "fr-FR", max_results: int = 8
