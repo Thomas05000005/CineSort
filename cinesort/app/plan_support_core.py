@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -48,7 +49,50 @@ _log = logging.getLogger(__name__)
 # - v4 : LOTD-41-01 — les stats_json persistes avant le fix contiennent un
 #   incremental_cache_misses=+1 fantome rejoue a chaque hit ; on invalide pour
 #   reecrire des deltas propres (snapshot deplace apres _try_apply_folder_cache).
-_PLAN_CACHE_VERSION = 4
+# - v5 : HIGH-20 — le row_id passe de `hash(...) & 0xFFFFFFFF` (randomise,
+#   tronque a 32 bits) a blake2b/64 bits (_compute_row_id, plan_support_replan).
+#   Les deux caches persistants rejouent des PlanRow COMPLETES (row_id inclus)
+#   sans jamais rappeler _compute_row_id : incremental_row_cache (par video,
+#   `return [cached_row]` dans _plan_item) et incremental_scan_cache (par dossier,
+#   _try_apply_folder_cache). Aucun de leurs checks de validite ne porte sur le
+#   row_id -> sans bump, toute install avec incremental_scan_enabled=True
+#   garderait INDEFINIMENT ses row_id legacy 32 bits (fix = no-op la ou les
+#   collisions font mal : les grosses bibliotheques). Le bump change cfg_sig, qui
+#   est dans la cle de lecture des DEUX caches (WHERE ... AND cfg_sig=?) -> miss
+#   -> row recalculee avec le row_id 64 bits. Prix : un rescan complet unique.
+#   Les deux caches n'ont besoin d'AUCUNE migration (PK (root_path, video_path) /
+#   (root_path, folder_path) : l'upsert ecrase l'entree v4), MAIS l'etat
+#   utilisateur keye sur row_id, lui, est impacte :
+#     * film_marked_for_deletion / film_tmdb_overrides (023) et film_decisions_v2
+#       (031) : tous keyes AVEC le run_id et lus pour le run courant -> les lignes
+#       des runs anterieurs sont deja hors de portee, le bump ne change rien.
+#     * ignored_alerts (migration 023) : SEULE table keyee sur row_id SANS run_id
+#       (UNIQUE(row_id, alert_code)), sans aucun DELETE/prune/FK CASCADE. Cout
+#       ACTE et inevitable : des que le row_id change, les alertes explicitement
+#       acquittees par l'utilisateur REAPPARAISSENT une fois (elles sont relues
+#       par le row_id courant : plan.jsonl persiste garde ses row_id legacy et est
+#       relu SANS rescan, donc la reapparition survient des le rechargement de la
+#       vue Traitement du run en cours, pas seulement au rescan force). Les lignes
+#       legacy restent en base comme orphelines INOFFENSIVES (fail-open, non
+#       destructif) : on NE les purge PAS — une purge les rendrait irrecuperables
+#       et n'apporte rien (elles ne sont ni lues ni couteuses). Fix durable (hors
+#       de ce bump) : re-keyer ignored_alerts sur film_id (comme film_decisions_v2)
+#       pour l'immuniser contre tout changement de forme du row_id.
+#
+# NB (F08, revue post-merge 2026-07-18) : le PAYLOAD de
+# cfg_signature_for_incremental a gagne 4 cles (enable_tv_detection,
+# min_video_bytes, naming_movie_template, subtitle_expected_languages). Le
+# numero ci-dessous n'a PAS ete bumpe car ajouter une cle au payload change
+# deja le sha1 -> l'effet est exactement celui d'un bump (un rescan complet
+# unique), sans toucher au row_id (donc sans faire reapparaitre les
+# ignored_alerts acquittees, contrairement au bump v5).
+_PLAN_CACHE_VERSION = 5
+
+# Valeurs connues de PlanRow.kind. Sert au garde-fou du deserialiseur de cache
+# ci-dessous : le kind pilote des chemins d'apply differents (et l'invariant
+# destructif "granularite" repose sur une egalite EXACTE a "single"), donc un
+# kind inattendu doit etre visible dans les logs, pas absorbe en silence.
+_KNOWN_PLAN_KINDS = ("single", "collection", "tv_episode", "extra")
 
 # Seuil de films directement a la racine au-dela duquel on avertit l'utilisateur :
 # une racine contenant beaucoup de films non ranges signale probablement une
@@ -56,10 +100,65 @@ _PLAN_CACHE_VERSION = 4
 _ROOT_BULK_WARNING_THRESHOLD = 20
 
 
+# AUDIT 2026-07-13 (vague 2) — alerte "Annee introuvable" (flag `year_missing`,
+# mappe dans web/dashboard/core/alert-labels.js, membre de _CONFLICT_FLAGS). Le
+# fix H12 a retire la SEULE source du flag (une mutation NON DETERMINISTE des
+# warning_flags PARTAGES a la lecture de check_duplicates, cf. duplicate_support)
+# -> depuis, l'alerte etait MORTE (jamais reproduite). On la restaure ICI, au
+# moment DETERMINISTE du plan, dans le builder de PlanRow (plan_support_replan).
+#
+# Definition alignee A L'IDENTIQUE sur `has_year` de
+# run_read_support.is_auto_approvable_flags (`bool(proposed_year and
+# int(proposed_year or 0) >= 1900)`), pour ne PAS introduire une 3e definition
+# divergente de l'annee "utilisable". Consequence : year_missing <=> NOT has_year
+# -> l'alerte couvre EXACTEMENT les rows deja NON auto-approvables via has_year.
+# Aucun changement de comportement d'auto-approbation (has_year bloquait deja) :
+# seule l'alerte est re-affichee et ecrite dans plan.jsonl (via asdict).
+def _has_usable_year(proposed_year: Any) -> bool:
+    """Miroir EXACT de run_read_support.is_auto_approvable_flags.has_year."""
+    try:
+        return bool(proposed_year and int(proposed_year or 0) >= 1900)
+    except (TypeError, ValueError):
+        return False
+
+
+def _apply_year_missing_flag(warning_flags: List[str], proposed_year: Any) -> None:
+    """Pose (une seule fois) `year_missing` quand la row n'a pas d'annee UTILISABLE.
+
+    Appele par les builders de PlanRow avec la valeur qui devient `proposed_year`,
+    de sorte que le flag persiste dans plan.jsonl de facon deterministe. Dedup-safe :
+    ne double jamais le flag s'il est deja present.
+    """
+    if not _has_usable_year(proposed_year) and "year_missing" not in warning_flags:
+        warning_flags.append("year_missing")
+
+
 def plan_row_to_jsonable(row: "PlanRow") -> Dict[str, Any]:
     data = asdict(row)
     data["candidates"] = [asdict(candidate) for candidate in (row.candidates or [])]
     return data
+
+
+def _normalize_plan_kind(raw: Any) -> str:
+    """Kind d'une PlanRow relue depuis le cache incremental.
+
+    Meme defaut que `_str_with_default(data, "kind", "single")` cote
+    run_data_support (deserialiseur de plan.jsonl consomme par l'apply) : les
+    deux chemins de lecture d'une PlanRow doivent produire le MEME kind pour la
+    meme donnee. Un kind inconnu est conserve tel quel (on ne devine pas a la
+    place de l'appelant) mais logue en WARNING : il ferait silencieusement
+    basculer la granularite destructive de l'apply (`row.kind == "single"` =
+    dossier entier, sinon fichier seul).
+    """
+    kind = str(raw or "single")
+    if kind not in _KNOWN_PLAN_KINDS:
+        _log.warning(
+            "plan_row_from_jsonable: kind inconnu %r (attendu %s). Row relue depuis "
+            "le cache incremental : la granularite d'apply depend de ce champ.",
+            kind,
+            ", ".join(_KNOWN_PLAN_KINDS),
+        )
+    return kind
 
 
 def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
@@ -90,7 +189,15 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
                 )
         return core_mod.PlanRow(
             row_id=str(data.get("row_id") or ""),
-            kind=str(data.get("kind") or ""),
+            # LOW (revue R2, meme classe que le CRITICAL row_id) : ce deserialiseur
+            # (cache incremental) defaultait kind a "" alors que row_from_json
+            # (run_data_support, deserialiseur de plan.jsonl utilise par l'apply)
+            # defaulte a "single" -> deux valeurs DIFFERENTES pour le MEME champ
+            # selon le chemin de lecture. Or apply_core teste `row.kind == "single"`
+            # (deplacement du DOSSIER entier) vs `!= "single"` (fichier seul) : un
+            # kind vide fait basculer la granularite DESTRUCTIVE. On aligne le
+            # defaut sur "single" et on logue tout kind hors des 4 valeurs connues.
+            kind=_normalize_plan_kind(data.get("kind")),
             folder=str(data.get("folder") or ""),
             video=str(data.get("video") or ""),
             proposed_title=str(data.get("proposed_title") or ""),
@@ -140,7 +247,44 @@ def plan_row_from_jsonable(data: Dict[str, Any]) -> Optional["PlanRow"]:
         return None
 
 
-def cfg_signature_for_incremental(cfg: "Config") -> str:
+def _tmdb_api_key_fingerprint(api_key: Optional[str]) -> Optional[str]:
+    """Empreinte NON REVERSIBLE d'une cle TMDb (jamais la cle en clair).
+
+    F08 / revue adverse : `enable_tmdb` ne derive que de `tmdb_enabled`, jamais
+    de la presence d'une cle. Or `_init_tmdb_client` ne construit un client que
+    si `tmdb_enabled AND api_key` : coller sa cle apres un premier scan ne
+    bougeait NI cfg_sig NI folder_signature, donc l'enrichissement TMDb ne
+    reprenait jamais. Un simple booleen ne suffirait pas non plus — remplacer
+    une cle revoquee par une valide doit aussi invalider les caches.
+    """
+    key = (api_key or "").strip()
+    if not key:
+        return None
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
+
+def cfg_signature_for_incremental(
+    cfg: "Config",
+    *,
+    subtitle_expected_languages: Optional[List[str]] = None,
+    tmdb_api_key: Optional[str] = None,
+) -> str:
+    """Signature des reglages qui CHANGENT la sortie du plan.
+
+    Toute cle absente de ce payload = un reglage qu'on peut modifier sans
+    invalider les caches incrementaux -> le scan rejoue silencieusement
+    l'ancien resultat (F08).
+
+    `subtitle_expected_languages` n'est PAS un champ de Config (c'est un kwarg
+    de `plan_library`, pose par run_flow_support depuis les reglages) : il est
+    passe en keyword-only pour rester signable sans toucher a la dataclass
+    frozen. `None` (detection sous-titres desactivee) et `[]` (activee, aucune
+    langue attendue) doivent rester DISTINCTS.
+
+    `tmdb_api_key` idem : la cle n'est pas un champ de Config, `plan_library` la
+    lit sur le client TMDb effectivement construit. Seule son EMPREINTE entre
+    dans le payload.
+    """
     payload = {
         "root": str(cfg.root),
         "enable_collection_folder": bool(cfg.enable_collection_folder),
@@ -161,16 +305,45 @@ def cfg_signature_for_incremental(cfg: "Config") -> str:
         "detect_extras_in_single_folder": bool(cfg.detect_extras_in_single_folder),
         "extras_size_ratio": float(cfg.extras_size_ratio),
         "skip_tv_like": bool(cfg.skip_tv_like),
+        # F08 (revue post-merge 2026-07-18) : ces 4 entrees manquaient alors que
+        # chacune change la sortie du plan.
+        #  - enable_tv_detection : rows kind='tv_episode' vs 0 row + skipped_tv_like
+        #  - min_video_bytes     : filtre iter_videos (quelles videos existent)
+        #  - naming_movie_template : force confidence=90/'high' quand le dossier
+        #    est deja conforme (plan_support_replan._build_row_from_chosen)
+        #  - subtitle_expected_languages : flags subtitle_missing_* / langues
+        "enable_tv_detection": bool(cfg.enable_tv_detection),
+        # Revue adverse : signer `cfg.min_video_bytes` NU rendait la cle inerte —
+        # `build_cfg_from_settings` ne cable pas ce champ, il vaut donc toujours
+        # None et le seuil REELLEMENT applique au scan est la globale de module
+        # `core_mod.MIN_VIDEO_BYTES` (cf. _filter_dossiers_phase, qui retombe
+        # dessus). On signe donc le seuil EFFECTIF, celui qui filtre les videos.
+        "min_video_bytes": (
+            int(cfg.min_video_bytes) if cfg.min_video_bytes is not None else int(core_mod.MIN_VIDEO_BYTES)
+        ),
+        "naming_movie_template": str(cfg.naming_movie_template or ""),
+        "subtitle_expected_languages": (
+            None
+            if subtitle_expected_languages is None
+            else [str(item).strip().lower() for item in subtitle_expected_languages]
+        ),
         "title_match_min_cov": float(cfg.title_match_min_cov),
         "title_match_min_seq": float(cfg.title_match_min_seq),
         "max_year_delta_when_name_has_year": int(cfg.max_year_delta_when_name_has_year),
         "enable_tmdb": bool(cfg.enable_tmdb),
+        # Revue adverse : `enable_tmdb` reste True avec une cle VIDE (aucun
+        # client construit, aucun enrichissement). Sans cette empreinte, coller
+        # sa cle apres un premier scan ne relancait jamais TMDb.
+        "tmdb_api_key_sig": _tmdb_api_key_fingerprint(tmdb_api_key),
         "tmdb_language": str(cfg.tmdb_language),
         # BUG 1 : la version des regles de scoring fait partie de la signature.
         # Toute evolution des regles -> nouveau cfg_sig -> cache invalide.
         "_plan_cache_version": int(_PLAN_CACHE_VERSION),
     }
-    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha1(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
 
 
 def stats_snapshot_for_cache(stats: "Stats") -> Dict[str, Any]:
@@ -317,7 +490,7 @@ def _nfo_signature(nfo_path: Optional[Path]) -> Optional[str]:
     if cached is not None:
         return cached
     try:
-        sig = hashlib.sha1(nfo_path.read_bytes()).hexdigest()
+        sig = hashlib.sha1(nfo_path.read_bytes(), usedforsecurity=False).hexdigest()
     except (PermissionError, OSError):
         return None
     # Cap simple pour eviter croissance illimitee (drop arbitraire des 100 plus
@@ -344,7 +517,7 @@ def folder_signature(
     try:
         scandir_ctx = _os.scandir(str(folder))
     except (OSError, PermissionError, FileNotFoundError):
-        return hashlib.sha1(b"").hexdigest()
+        return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
     try:
         for entry in scandir_ctx:
             name = entry.name
@@ -377,7 +550,7 @@ def folder_signature(
             scandir_ctx.close()
     items.sort(key=lambda t: t[0])
     payload = "\n".join(line for _k, line in items)
-    return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()
+    return hashlib.sha1(payload.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest()
 
 
 @functools.lru_cache(maxsize=16)
@@ -549,7 +722,19 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
 
     ctx.cfg = ctx.cfg.normalized()
     ctx.incremental_enabled = bool(ctx.cfg.incremental_scan_enabled and ctx.scan_index is not None)
-    ctx.cfg_sig = cfg_signature_for_incremental(ctx.cfg) if ctx.incremental_enabled else ""
+    ctx.cfg_sig = (
+        cfg_signature_for_incremental(
+            ctx.cfg,
+            subtitle_expected_languages=ctx.subtitle_expected_languages,
+            # Revue adverse F08 : le client n'existe QUE si la cle est non vide
+            # (run_flow_support._init_tmdb_client). `None` ici couvre donc a la
+            # fois "TMDb desactive" et "TMDb active mais cle vide", et l'empreinte
+            # change des que l'utilisateur colle ou remplace sa cle.
+            tmdb_api_key=getattr(ctx.tmdb, "api_key", None),
+        )
+        if ctx.incremental_enabled
+        else ""
+    )
     ctx.root_key = str(ctx.cfg.root)
     if ctx.incremental_enabled:
         ctx.v2_kwargs = {
@@ -635,6 +820,21 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
                     cached_rows.append(row_obj)
         if isinstance(cached_stats_delta, dict):
             ctx.rows.extend(cached_rows)
+            # F26 (revue post-merge 2026-07-18) : SYMETRIE avec le chemin MISS
+            # (_classify_and_plan_folder alimente video_paths_seen). Sans cet
+            # append, un rescan 100% cache dossier laissait video_paths_seen
+            # VIDE alors que folders_seen_for_prune etait rempli -> Phase 3
+            # appelait prune_incremental_row_cache(keep=[]) = DELETE de TOUT le
+            # cache row du root (scan.py:343-348) : le cache row v2 etait
+            # structurellement mort des le 2e scan.
+            # La cle reconstruite est EXACTEMENT celle stockee par
+            # _store_row_cache (video_path=str(video) avec video = folder/nom,
+            # PlanRow.folder=str(folder) et PlanRow.video=video.name).
+            for row_obj in cached_rows:
+                cached_folder = str(getattr(row_obj, "folder", "") or "")
+                cached_video = str(getattr(row_obj, "video", "") or "")
+                if cached_folder and cached_video:
+                    ctx.video_paths_seen.append(str(Path(cached_folder) / cached_video))
             stats_apply_cached_delta(ctx.stats, cached_stats_delta)
             ctx.stats.incremental_cache_hits += 1
             ctx.stats.incremental_cache_rows_reused += len(cached_rows)
@@ -756,10 +956,8 @@ def _classify_and_plan_folder(
             )
             if looks_bonus:
                 for r in new_rows:
-                    try:
+                    with contextlib.suppress(AttributeError, TypeError):
                         r.kind = "extra"
-                    except (AttributeError, TypeError):
-                        pass
                     flags = getattr(r, "warning_flags", None)
                     if flags is not None and "bonus_video" not in flags:
                         flags.append("bonus_video")
@@ -774,9 +972,7 @@ def _classify_and_plan_folder(
     return ctx.check_cancel()
 
 
-def _merge_local_candidate_into_ctx(
-    ctx: _PlanLibraryContext, local: "LocalCandidate"
-) -> None:
+def _merge_local_candidate_into_ctx(ctx: _PlanLibraryContext, local: "LocalCandidate") -> None:
     """Rejoue les buckets locaux d'un LocalCandidate sur ctx.stats (Phase 2).
 
     VO-B : iter_videos a tourne en Phase 1 avec un bucket prive (thread-safe).
@@ -902,9 +1098,7 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             ignores_par_raison_after = dict(ctx.stats.analyse_ignores_par_raison or {})
 
             def _delta(reason: str) -> int:
-                return int(ignores_par_raison_after.get(reason, 0)) - int(
-                    ignores_par_raison_before.get(reason, 0)
-                )
+                return int(ignores_par_raison_after.get(reason, 0)) - int(ignores_par_raison_before.get(reason, 0))
 
             delta_ext = _delta("ignore_extension")
             delta_size = _delta("ignore_taille_min")
@@ -917,9 +1111,9 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             if delta_name > 0 and hasattr(ctx.stats, "films_rejected_name"):
                 ctx.stats.films_rejected_name = int(ctx.stats.films_rejected_name or 0) + delta_name
             if delta_scandir > 0 and hasattr(ctx.stats, "folders_rejected_scandir_error"):
-                ctx.stats.folders_rejected_scandir_error = int(
-                    ctx.stats.folders_rejected_scandir_error or 0
-                ) + delta_scandir
+                ctx.stats.folders_rejected_scandir_error = (
+                    int(ctx.stats.folders_rejected_scandir_error or 0) + delta_scandir
+                )
 
             # ITER15 #1 (2026-06-10) : `ignore_non_supporte` est le compteur
             # ROLLUP DOSSIER ("aucun fichier video exploitable", cf. core.py L1365
@@ -940,9 +1134,9 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             else:
                 non_video_exts_iter = core_mod._collect_non_video_extensions(ctx.cfg, folder).items()
             for ext, count in non_video_exts_iter:
-                ctx.stats.analyse_ignores_extensions[ext] = int(
-                    ctx.stats.analyse_ignores_extensions.get(ext, 0)
-                ) + int(count)
+                ctx.stats.analyse_ignores_extensions[ext] = int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(
+                    count
+                )
             ctx.persist_folder_cache(
                 folder=folder,
                 folder_sig=folder_sig,
@@ -962,6 +1156,21 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
             break
 
 
+def _scan_saw_unreadable_folder(ctx: _PlanLibraryContext) -> bool:
+    """True si au moins un dossier n'a pas pu etre LU pendant ce scan.
+
+    Garde du prune du cache row : `keep_video_paths=[]` se traduit par un DELETE
+    TOTAL du cache row de ce root. C'est la semantique CORRECTE quand le root n'a
+    vraiment plus aucune video (les entrees pointent alors sur des fichiers
+    disparus), mais ce serait une purge a tort si le scan n'a rien vu parce qu'un
+    dossier etait illisible — un simple aller-retour NAS/permission viderait le
+    cache. `ignore_scandir_error` est le compteur alimente par scan_helpers a
+    chaque scandir/stat en echec.
+    """
+    reasons = getattr(ctx.stats, "analyse_ignores_par_raison", None) or {}
+    return int(reasons.get("ignore_scandir_error", 0) or 0) > 0
+
+
 def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
     """Phase 3 : finalise stats.planned_rows, purge les caches incrementaux pour
     les dossiers/videos disparus depuis la derniere passe, propage les compteurs
@@ -974,19 +1183,38 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
         and (not core_mod._is_cancel_requested(ctx.should_cancel))
         and ctx.scan_index is not None
     ):
+        # F26 : sqlite3.Error n'herite PAS de OSError. Le prune est un
+        # best-effort (nettoyage de cache) : une DB verrouillee ou un
+        # "too many SQL variables" (keep_video_paths depasse
+        # SQLITE_MAX_VARIABLE_NUMBER sur les tres grosses bibliotheques) ne doit
+        # jamais faire echouer le scan.
         if hasattr(ctx.scan_index, "prune_incremental_scan_cache"):
             try:
                 ctx.scan_index.prune_incremental_scan_cache(
                     root_path=ctx.root_key, keep_folders=ctx.folders_seen_for_prune
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge dossiers: {exc}")
-        if hasattr(ctx.scan_index, "prune_incremental_row_cache"):
+        # F26 filet de securite : `keep_video_paths=[]` se traduit par un DELETE
+        # TOTAL du cache row pour ce root (scan.py). Le cas dangereux etait le
+        # rescan 100% cache, ou video_paths_seen restait vide alors que le root
+        # etait plein de films — c'est le defaut principal de F26, corrige en
+        # amont (_try_apply_folder_cache alimente desormais video_paths_seen).
+        #
+        # Revue adverse : le filet initial (`or not ctx.folders_seen_for_prune`)
+        # etait BINAIRE — des qu'un dossier avait ete vu sans aucune video, le
+        # prune etait saute meme quand des videos avaient reellement disparu, et
+        # le cache du root n'etait alors plus JAMAIS purge. On ne saute donc
+        # desormais le prune que dans le seul cas ou "0 video" n'est pas une
+        # observation fiable : un dossier illisible pendant ce scan.
+        if hasattr(ctx.scan_index, "prune_incremental_row_cache") and (
+            ctx.video_paths_seen or not _scan_saw_unreadable_folder(ctx)
+        ):
             try:
                 ctx.scan_index.prune_incremental_row_cache(
                     root_path=ctx.root_key, keep_video_paths=ctx.video_paths_seen
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
                 ctx.log("WARN", f"Cache incremental: echec purge videos: {exc}")
     # Apply v2 row cache stats to main stats.
     if hasattr(ctx.stats, "incremental_cache_row_hits"):
@@ -999,13 +1227,9 @@ def _dedup_and_finalize_phase(ctx: _PlanLibraryContext) -> None:
     # affichaient systematiquement 0 alors que la raison etait bien tracee.
     raisons = dict(ctx.stats.analyse_ignores_par_raison or {})
     if hasattr(ctx.stats, "folders_rejected_underscore"):
-        ctx.stats.folders_rejected_underscore = int(
-            raisons.get("ignore_prefix_underscore", 0)
-        )
+        ctx.stats.folders_rejected_underscore = int(raisons.get("ignore_prefix_underscore", 0))
     if hasattr(ctx.stats, "folders_rejected_depth"):
-        ctx.stats.folders_rejected_depth = int(
-            raisons.get("ignore_profondeur_max", 0)
-        )
+        ctx.stats.folders_rejected_depth = int(raisons.get("ignore_profondeur_max", 0))
     ctx.log("INFO", f"Scan folders: done total={ctx.scanned_total}")
     ctx.log("INFO", f"Plan built: rows={ctx.stats.planned_rows}")
     _log.info("scan: termine %s -> %d rows", ctx.cfg.root, ctx.stats.planned_rows)

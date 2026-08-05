@@ -11,7 +11,9 @@ qu'une vraie divergence serait visible (le diff compare valeur a valeur).
 Aucun effet de bord sur la vraie biblio : tempfile.mkdtemp() exclusif.
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/audit_horizons/proofs/meta_settings_roundtrip.py
 """
+
 from __future__ import annotations
+
 import tempfile
 from pathlib import Path
 
@@ -55,7 +57,13 @@ def mutate(payload):
                 elif isinstance(v, int):
                     obj[k] = v + 1 if v < 9000 else v  # eviter franchir seuils absurdes
                     changed[p] = obj[k]
-                elif isinstance(v, str) and v and "path" not in k.lower() and "root" not in k.lower() and "dir" not in k.lower():
+                elif (
+                    isinstance(v, str)
+                    and v
+                    and "path" not in k.lower()
+                    and "root" not in k.lower()
+                    and "dir" not in k.lower()
+                ):
                     # eviter de muter les chemins (normalises) -> faux positifs
                     if v in ("default", "plex", "jellyfin", "quality", "custom"):
                         obj[k] = "custom" if v != "custom" else "plex"
@@ -89,11 +97,13 @@ def main():
     base["__canary_roundtrip__"] = "CANARY-12345"
 
     save_settings_payload(
-        base, current_state_dir=tmp,
+        base,
+        current_state_dir=tmp,
         default_collection_folder_name=D["default_collection_folder_name"],
         default_empty_folders_folder_name=D["default_empty_folders_folder_name"],
         default_residual_cleanup_folder_name=D["default_residual_cleanup_folder_name"],
-        default_root=D["default_root"], default_probe_backend=D["default_probe_backend"],
+        default_root=D["default_root"],
+        default_probe_backend=D["default_probe_backend"],
         debug_enabled=D["debug_enabled"],
     )
     after = get_settings_payload(state_dir=tmp, default_state_dir_example=str(tmp), **D)
@@ -108,12 +118,14 @@ def main():
     for dotted, want, got in lost[:40]:
         print(f"  [DIFF] {dotted}: ecrit={want!r}  relu={got!r}")
     if len(lost) > 40:
-        print(f"  ... (+{len(lost)-40} autres)")
+        print(f"  ... (+{len(lost) - 40} autres)")
 
     canary = get_at(after, "__canary_roundtrip__")
     print(f"\n[falsifiabilite] canary relu = {canary!r} (si conserve => harnais voit bien les valeurs)")
-    print("\nNOTE: une divergence peut etre une NORMALISATION legitime (chemin, "
-          "alias, clamp) — a juger une par une, PAS un bug automatique.")
+    print(
+        "\nNOTE: une divergence peut etre une NORMALISATION legitime (chemin, "
+        "alias, clamp) — a juger une par une, PAS un bug automatique."
+    )
 
 
 if __name__ == "__main__":

@@ -6457,6 +6457,9 @@ body.v5-notif-lock {
 .historique-film-status.is-rejected { color: var(--danger, #b91c1c); background: rgba(185, 28, 28, 0.1); }
 .historique-film-status.is-duplicate { color: var(--warning, #d97706); background: rgba(217, 119, 6, 0.1); }
 .historique-film-status.is-deleted { color: var(--text-3); background: var(--surface-2); }
+/* Audit ultra 2026-07-13 (H8) : pastille "Reporte" (decision utilisateur
+   deferred) sur l'ecran Historique, teintee comme un statut d'attente. */
+.historique-film-status.is-deferred { color: var(--info, #2563eb); background: rgba(37, 99, 235, 0.1); }
 .historique-film-score { font-family: monospace; font-size: var(--fs-xs); color: var(--text-2); text-align: right; }
 .historique-film-link { text-decoration: none; color: var(--accent); font-weight: var(--fw-semibold); }
 .historique-film-link-dim { color: var(--text-3); }
@@ -9717,6 +9720,16 @@ body.v5-notif-lock {
   color: var(--danger, #c0392b);
   font-size: var(--fs-sm);
   padding: var(--sp-2);
+}
+/* Issue #413 : repli sur cache TMDb expire. Avertissement, pas erreur — les
+   resultats affiches restent exploitables, ils sont juste peut-etre perimes. */
+.tmdb-manual-search-stale {
+  color: var(--warning, #b26a00);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  border-left: 3px solid var(--warning, #b26a00);
+  background: var(--surface-2, rgba(178, 106, 0, 0.06));
 }
 .tmdb-manual-search-results {
   list-style: none;

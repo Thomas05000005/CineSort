@@ -14,23 +14,60 @@ logger = logging.getLogger(__name__)
 
 _MIGRATION_FILE_RE = re.compile(r"^(?P<version>\d+)_.*\.sql$")
 
-_IDEMPOTENT_ERROR_FRAGMENTS = (
-    "duplicate column name",
-    "already exists",
+# Issue #623 (volet 2) : chaque tolerance d'idempotence est APPARIEE au type de
+# statement qui peut legitimement la produire. Le test portait auparavant sur le
+# seul message d'erreur, sans aucun contexte :
+#
+#   - « already exists » etait avale pour TOUTE instruction, y compris
+#     `CREATE VIEW` et `CREATE VIRTUAL TABLE ... USING fts5`. Une migration de
+#     RESET d'un index FTS etait alors comptee « deja appliquee » alors que
+#     l'objet survivant est justement celui, potentiellement corrompu, qu'elle
+#     voulait recreer — et la migration passait en vert.
+#   - « duplicate column name » est legitime pour `ALTER TABLE ... ADD COLUMN`
+#     (pas `IF NOT EXISTS`-able avant SQLite 3.35, cf H-1 audit 20260428) mais
+#     signale une migration MAL ECRITE dans un `CREATE TABLE ... (a INT, a INT)`.
+#     Le taire y laissait la table absente et faisait echouer, plus loin et sans
+#     rapport apparent, les instructions qui en dependent.
+#
+# Sens de l'erreur : RESTRICTIF. Ce qui n'est pas explicitement reconnu comme
+# idempotent bloque le boot (recuperable via backup) au lieu de laisser un
+# schema silencieusement partiel.
+#
+# Aucune migration du depot n'est affectee : les 32 fichiers de `migrations/`
+# n'utilisent que `CREATE TABLE/INDEX [UNIQUE] IF NOT EXISTS` et
+# `ALTER TABLE ... ADD COLUMN` (aucun `CREATE VIEW`, `CREATE TRIGGER` ni
+# `CREATE VIRTUAL TABLE`). Le resserrement vise les migrations FUTURES.
+_IDEMPOTENT_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+    ("duplicate column name", re.compile(r"\s*ALTER\s+TABLE\b", re.IGNORECASE)),
+    (
+        "already exists",
+        re.compile(
+            r"\s*CREATE\s+(?:(?:UNIQUE|TEMP|TEMPORARY)\s+)*(?:TABLE|INDEX|TRIGGER)\b",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 
-def _is_idempotent_error(exc: sqlite3.OperationalError) -> bool:
-    # R8-021 RETRACTE (F2-d, attrape par le filet F2-d 3/3) : on N'attrape PAS
-    # IntegrityError (UNIQUE/PK). Raison : les migrations de RECONSTRUCTION (021/025 :
-    # INSERT INTO X_new SELECT ... FROM X ; DROP TABLE X ; RENAME) rejouees par le
-    # bootstrap sur une source CORROMPUE (PK dupliquees) levent une PK IntegrityError ;
-    # la "skipper" laisserait X_new VIDE puis DROP+RENAME ECRASERAIT silencieusement la
-    # table = PERTE DE DONNEES (meme classe que le bug 025 NULL R8-019). Bloquer le boot
-    # sur IntegrityError est le comportement SUR (recuperable via backup), donc on garde
-    # OperationalError uniquement.
+def _is_idempotent_error(exc: sqlite3.OperationalError, stmt: str) -> bool:
+    """L'erreur `exc` levee par `stmt` est-elle une simple redite idempotente ?
+
+    `stmt` n'a pas de valeur par defaut A DESSEIN : un appelant qui l'oublie
+    doit casser bruyamment plutot que retomber sur l'ancien comportement
+    permissif (les deux sites d'appel — `MigrationManager.apply` et
+    `SQLiteStore._bootstrap_schema_latest` — sont les deux chemins de boot).
+
+    R8-021 RETRACTE (F2-d, attrape par le filet F2-d 3/3) : on N'attrape PAS
+    IntegrityError (UNIQUE/PK). Raison : les migrations de RECONSTRUCTION (021/025 :
+    INSERT INTO X_new SELECT ... FROM X ; DROP TABLE X ; RENAME) rejouees par le
+    bootstrap sur une source CORROMPUE (PK dupliquees) levent une PK IntegrityError ;
+    la "skipper" laisserait X_new VIDE puis DROP+RENAME ECRASERAIT silencieusement la
+    table = PERTE DE DONNEES (meme classe que le bug 025 NULL R8-019). Bloquer le boot
+    sur IntegrityError est le comportement SUR (recuperable via backup), donc on garde
+    OperationalError uniquement.
+    """
     msg = str(exc).lower()
-    return any(fragment in msg for fragment in _IDEMPOTENT_ERROR_FRAGMENTS)
+    return any(fragment in msg and head_re.match(stmt) is not None for fragment, head_re in _IDEMPOTENT_RULES)
 
 
 def _split_sql_statements(sql: str) -> List[str]:
@@ -89,9 +126,7 @@ def _split_sql_statements(sql: str) -> List[str]:
         else:
             out: List[str] = []
             for stmt in sqlparse.split(sql):
-                cleaned_stmt = sqlparse.format(
-                    stmt, strip_comments=True
-                ).strip().rstrip(";").strip()
+                cleaned_stmt = sqlparse.format(stmt, strip_comments=True).strip().rstrip(";").strip()
                 if not cleaned_stmt:
                     continue
                 if cleaned_stmt.upper().startswith("PRAGMA USER_VERSION"):
@@ -245,8 +280,7 @@ class MigrationManager:
                     # commentaire descriptif (ex: "ne PAS utiliser
                     # @manager: disable_fk ici") n'active le PRAGMA a tort.
                     needs_fk_disable = any(
-                        line.strip().startswith("-- @manager: disable_fk")
-                        for line in sql.splitlines()
+                        line.strip().startswith("-- @manager: disable_fk") for line in sql.splitlines()
                     )
                     if needs_fk_disable:
                         conn.execute("PRAGMA foreign_keys = OFF")
@@ -267,7 +301,7 @@ class MigrationManager:
                                 # deja (DB clonee, restauree, ou migration partiellement
                                 # appliquee a la main), on tolere et on continue plutot que
                                 # de bloquer l'app. Meme logique pour CREATE TABLE/INDEX.
-                                if _is_idempotent_error(stmt_exc):
+                                if _is_idempotent_error(stmt_exc, stmt):
                                     conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
                                     conn.execute(f"RELEASE SAVEPOINT {sp_name}")
                                     logger.warning(

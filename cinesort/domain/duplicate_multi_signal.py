@@ -1,5 +1,30 @@
 """Detection multi-signal des doublons (VN-D.1).
 
+!!! MODULE NON CABLE EN PRODUCTION (audit NUANCE N03, 2026-08-03) !!!
+    Aucun module de `cinesort/` n'importe ce fichier : les 7 points d'entree
+    de prod chargent 202 modules `cinesort.*` et `duplicate_multi_signal` n'en
+    fait pas partie. Le seul importeur du depot est
+    `tests/test_duplicate_grouping_multisignal_v77.py`. Le cablage ou la
+    suppression sont un ARBITRAGE PRODUIT ouvert — ne pas en deduire qu'un
+    bug de doublons vient d'ici.
+
+    Ce qui EST cable, et couvre les deux cas qu'on attribue souvent a ce
+    module :
+      - cross-langue ("Spirited Away" / "Le Voyage de Chihiro") :
+        `cinesort.app.plan_support_dedup._rescore_with_alternative_titles`
+        (appele en :219, :310, :497) rejoue la similarite contre les
+        `alternative_titles` TMDb des l'IDENTIFICATION ;
+      - multi-rip du meme film : `duplicate_support.find_duplicate_targets`
+        groupe sur le titre DECIDE (`movie_key`), pas sur le nom de dossier.
+
+    Et surtout : cabler ce module NE resoudrait PAS le cas cross-langue.
+    Mesure sur le vrai code (2026-08-03) : `_index_token` bucketise sur le
+    premier token APRES tri alphabetique, donc 'spirited away' -> 'away' et
+    'le voyage de chihiro' -> 'chihiro' : buckets differents, les deux titres
+    ne sont jamais compares ; forces dans le meme bucket, leur
+    `token_sort_ratio` vaut 18.18 contre un `FUZZY_TITLE_MIN_SCORE` de 88.
+    `group_by_multi_signal([...], phases=[PHASE_FUZZY_TITLE])` rend `[]`.
+
 Phase A: strict-metadata (existant, equivalent a `movie_key`).
 Phase B: fuzzy titre via rapidfuzz token_sort_ratio >= 88 + year tolerance +-1.
 Phase C: comparaison Chromaprint via `compare_audio_fingerprints` (>= 0.85).
@@ -166,9 +191,7 @@ def _phase_a_strict_metadata(
     remaining: List[MultiSignalCandidate] = []
 
     # Ajouter aussi les candidats avec year invalide (ils n'ont pas ete buckets)
-    invalid_year_ids = {
-        c.item_id for c in candidates if not (1900 <= int(c.year or 0) <= 2100)
-    }
+    invalid_year_ids = {c.item_id for c in candidates if not (1900 <= int(c.year or 0) <= 2100)}
     for c in candidates:
         if c.item_id in invalid_year_ids:
             remaining.append(c)
@@ -216,9 +239,7 @@ def _phase_b_fuzzy_title(
         return [], []
 
     # Normalise pour matching
-    norm_titles: Dict[str, str] = {
-        c.item_id: _normalize_title_for_fuzzy(c.title) for c in candidates
-    }
+    norm_titles: Dict[str, str] = {c.item_id: _normalize_title_for_fuzzy(c.title) for c in candidates}
 
     new_groups: List[MultiSignalGroup] = []
     remaining: List[MultiSignalCandidate] = []
@@ -235,9 +256,7 @@ def _phase_b_fuzzy_title(
             if not rep_norm:
                 continue
             token = _index_token(rep_norm)
-            idx.setdefault((token, int(g.representative_year)), []).append(
-                (rep_norm, g)
-            )
+            idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, g))
         return idx
 
     a_index = _phase_a_index()
@@ -388,9 +407,7 @@ def _phase_c_audio_fingerprint(
                 if pair in seen_pairs:
                     continue
                 seen_pairs.add(pair)
-                sim = compare_audio_fingerprints(
-                    c.audio_fingerprint, other.audio_fingerprint
-                )
+                sim = compare_audio_fingerprints(c.audio_fingerprint, other.audio_fingerprint)
                 if sim is None:
                     continue
                 if sim >= min_similarity:
@@ -473,9 +490,7 @@ def group_by_multi_signal(
     remaining = cand_list
 
     if PHASE_STRICT_METADATA in phases:
-        groups_a, remaining = _phase_a_strict_metadata(
-            remaining, norm_for_tokens=norm_for_tokens
-        )
+        groups_a, remaining = _phase_a_strict_metadata(remaining, norm_for_tokens=norm_for_tokens)
         all_groups.extend(groups_a)
         phase_counts[PHASE_STRICT_METADATA] = len(groups_a)
 
@@ -557,9 +572,7 @@ def candidates_from_rows(
             try:
                 fp = fingerprint_lookup(row.row_id)
             except (OSError, KeyError, AttributeError, ValueError) as exc:
-                logger.debug(
-                    "fingerprint_lookup error for row %s: %s", row.row_id, exc
-                )
+                logger.debug("fingerprint_lookup error for row %s: %s", row.row_id, exc)
                 fp = None
         out.append(
             MultiSignalCandidate(
@@ -602,9 +615,7 @@ def augment_groups_with_multi_signal(
         Liste enrichie de groupes (les avis multi-signal sont marques par
         `advisory=True` et `detection_phase`).
     """
-    candidates = candidates_from_rows(
-        rows, decisions, fingerprint_lookup=fingerprint_lookup
-    )
+    candidates = candidates_from_rows(rows, decisions, fingerprint_lookup=fingerprint_lookup)
     if not candidates:
         return list(base_groups)
 
@@ -626,9 +637,7 @@ def augment_groups_with_multi_signal(
     for g in result.groups:
         # Filtrer : si TOUS les membres sont deja groupes par base, on saute
         new_members = [m for m in g.members if m not in existing_ids]
-        if len(new_members) < 2 and not (
-            len(g.members) >= 2 and any(m not in existing_ids for m in g.members)
-        ):
+        if len(new_members) < 2 and not (len(g.members) >= 2 and any(m not in existing_ids for m in g.members)):
             continue
         # Skip Phase A (deja gere par base_groups identique)
         if g.phase == PHASE_STRICT_METADATA:
@@ -637,9 +646,7 @@ def augment_groups_with_multi_signal(
             {
                 "title": g.representative_title,
                 "year": g.representative_year,
-                "rows": [
-                    {"row_id": rid, "kind": "advisory"} for rid in g.members
-                ],
+                "rows": [{"row_id": rid, "kind": "advisory"} for rid in g.members],
                 "existing_paths": [],
                 "plan_conflict": False,
                 "advisory": True,

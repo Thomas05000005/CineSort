@@ -798,12 +798,12 @@ async function _checkProbeToolsBoot() {
     banner.appendChild(title);
     const msg = document.createElement("span");
     msg.className = "ffprobe-banner__msg";
-    msg.textContent = "Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Parametres > Outils > Auto-install.";
+    msg.textContent = "Le scoring qualite ne fonctionnera pas. Installe-le via winget (winget install ffmpeg) ou via Paramètres > Outils > Auto-install.";
     banner.appendChild(msg);
     const settingsBtn = document.createElement("a");
     settingsBtn.className = "ffprobe-banner__action";
     settingsBtn.href = "#/parametres";
-    settingsBtn.textContent = "Ouvrir Parametres";
+    settingsBtn.textContent = "Ouvrir Paramètres";
     banner.appendChild(settingsBtn);
     const closeBtn = document.createElement("button");
     closeBtn.className = "ffprobe-banner__close";

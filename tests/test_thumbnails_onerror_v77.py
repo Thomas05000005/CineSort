@@ -9,6 +9,7 @@ Verif totale 2026-07 (LOTC-C1) : la CSP `script-src 'self'` bloque les handlers
 phase capture (`addEventListener("error", _onPosterError, true)`). Ce test
 verifie desormais ce contrat CSP-compliant.
 """
+
 from __future__ import annotations
 
 import unittest
@@ -21,7 +22,8 @@ class ThumbnailsOnErrorTests(unittest.TestCase):
     def _assert_delegated_error_listener(self, rel: str) -> None:
         js = (_ROOT / rel).read_text(encoding="utf-8")
         self.assertIn(
-            'addEventListener("error", _onPosterError, true)', js,
+            'addEventListener("error", _onPosterError, true)',
+            js,
             f"{rel} : listener 'error' delegue (capture) attendu (LOTC-C1, CSP).",
         )
         # Plus aucun handler inline (bloque par la CSP).

@@ -5,9 +5,9 @@
  *
  * Fonctionnalites :
  *  - Header avec stats agregees (N runs sur 30 jours)
- *  - Banner rétention (auto-suppression > 90j, spec §5)
- *  - Filtres complets : Statut (avec Undone), Periode (avec Custom date picker),
- *    Type (avec Undo), recherche par run_id OU par nom de film
+ *  - Banner rétention (auto-suppression, duree lue dans les reglages, spec §5)
+ *  - Filtres : Statut, Periode (avec Custom date picker), Type (plan / apply),
+ *    recherche par run_id OU par nom de film
  *  - Toggle Timeline / Tableau (persiste localStorage)
  *  - Timeline groupee par jour avec scroll infini (batch 30 + IntersectionObserver)
  *  - Inspecteur droit cable via right-panel.setSections (4 onglets detailles :
@@ -28,9 +28,10 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
-import { apiPost } from "../core/api.js";
+import { apiPost, cachedGetSettings } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { deriveRunStatus } from "../core/run-status.js";
 import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
@@ -139,7 +140,15 @@ let _viewMode = "timeline";
 let _customPeriodFrom = null;   // ISO date string or null
 let _customPeriodTo = null;     // ISO date string or null
 let _visibleCount = BATCH_SIZE; // scroll infini : nombre de runs affiches
-let _retentionDays = 90;
+// Revue post-merge 2026-08-03 : cette valeur etait lue dans le payload de
+// `run/get_dashboard`, qui n'a JAMAIS emis `history_retention_days` (verifie sur
+// les 3 chemins de retour de dashboard_support.get_dashboard). La banniere
+// affichait donc « retention 90 jours » en dur pendant que le cron purgait
+// reellement a J-<reglage> (app.py lit `settings.history_retention_days`) : un
+// utilisateur regle sur 30 croyait ses runs de J-40 encore presents. La valeur
+// vient desormais des reglages, seule source qui la porte.
+const _RETENTION_DAYS_DEFAULT = 90;
+let _retentionDays = _RETENTION_DAYS_DEFAULT;
 let _scrollObserver = null;
 // Fix audit 2026-05-25 (v1.5.3) Vague F : debounce search ID au niveau module
 // pour pouvoir l'annuler dans unmountHistorique() (le let local survivait au
@@ -171,18 +180,30 @@ function _writeString(key, value) {
   }
 }
 
-/* --- Status derivation (alignee avec accueil.js) ----------------------- */
-
+/* --- Status derivation ------------------------------------------------
+ *
+ * Revue post-merge 2026-08-03 — le court-circuit `if (run.status) return ...`
+ * rendait MORTES toutes les lignes suivantes : `run/get_dashboard` emet toujours
+ * un `status` NON VIDE (`str(run_row.get("status") or "PENDING")`,
+ * dashboard_support.py). Consequences mesurees a l'ecran :
+ *   - un run FAILED tombait dans le `default` de _statusClass et s'affichait en
+ *     GRIS, comme un run sain ; le filtre « Error » ne le trouvait pas ;
+ *   - les filtres « Applied » et « Partiel » ne matchaient jamais rien, alors
+ *     que le payload porte bien applied_rows / total_rows ;
+ *   - AWAITING_VALIDATION mappait vers `is-pending`, classe qui n'existe dans
+ *     AUCUN CSS du depot -> statut affiche sans couleur.
+ *
+ * La regle vit desormais dans `core/run-status.js`, IMPORTEE ICI ET DANS
+ * accueil.js : les deux ecrans decrivent le meme objet et ne peuvent plus se
+ * contredire (la premiere version de ce correctif ne touchait qu'historique.js
+ * et faisait lire ERROR ici, DONE sur l'accueil, pour le meme run).
+ *
+ * `run.undone` / `run.is_undo` / `run.type` ne sont emis par AUCUN payload :
+ * l'undo n'insere pas de ligne dans la table `runs`. Les options de filtre
+ * correspondantes sont retirees plus bas plutot que laissees inertes.
+ */
 function _deriveStatus(run) {
-  if (run.status) return String(run.status).toUpperCase();
-  const errors = Number(run.errors_count || 0);
-  const applied = Number(run.applied_rows || 0);
-  const total = Number(run.total_rows || 0);
-  if (run.undone) return "UNDONE";
-  if (errors > 0) return "ERROR";
-  if (applied > 0 && applied >= total) return "APPLIED";
-  if (applied > 0 && applied < total) return "PARTIAL";
-  return "DONE";
+  return deriveRunStatus(run);
 }
 
 function _statusClass(status) {
@@ -192,7 +213,10 @@ function _statusClass(status) {
     case "APPLIED": return "is-applied";
     case "UNDONE": return "is-undone";
     case "CANCELLED": case "CANCEL": return "is-cancelled";
-    case "AWAITING_VALIDATION": return "is-pending";
+    // « En validation » demande une action de l'utilisateur : on reutilise la
+    // teinte warning existante (.historique-run-status.is-partial). L'ancienne
+    // valeur `is-pending` n'etait declaree dans aucun CSS -> statut incolore.
+    case "AWAITING_VALIDATION": return "is-partial";
     default: return "is-done";
   }
 }
@@ -203,8 +227,11 @@ function _runDate(run) {
   return null;
 }
 
+/* Revue post-merge 2026-08-03 : `run.is_undo` et `run.type` n'existent dans
+ * aucun payload de `run/get_dashboard` — et ne peuvent pas exister, `undo_last_apply`
+ * n'inserant aucune ligne dans la table `runs`. Le type « undo » etait donc
+ * inatteignable ; il a ete retire du filtre Type et du resume d'en-tete. */
 function _runType(run) {
-  if (run.is_undo || run.type === "undo") return "undo";
   if (Number(run.applied_rows || 0) > 0) return "apply";
   return "plan";
 }
@@ -346,8 +373,24 @@ function _renderError(message) {
   `;
 }
 
+/** Lit `history_retention_days` dans les reglages (cache memoire partage).
+ *  Retourne le defaut backend (90) si le reglage est absent ou invalide. */
+async function _fetchRetentionDays() {
+  try {
+    const res = await cachedGetSettings();
+    if (!res || !res.data || typeof res.data !== "object" || res.data.ok === false) {
+      return _RETENTION_DAYS_DEFAULT;
+    }
+    const settings = res.data.data || res.data || {};
+    const days = Number(settings.history_retention_days);
+    return Number.isFinite(days) && days > 0 ? days : _RETENTION_DAYS_DEFAULT;
+  } catch {
+    return _RETENTION_DAYS_DEFAULT;
+  }
+}
+
 function _renderRetentionBanner() {
-  const days = _retentionDays || 90;
+  const days = _retentionDays || _RETENTION_DAYS_DEFAULT;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffStr = cutoffDate.toLocaleDateString("fr-FR");
@@ -379,6 +422,11 @@ function _renderCustomDatePicker() {
   `;
 }
 
+/* Revue post-merge 2026-08-03 : les options « Undone » (filtre Statut) et
+ * « Undo » (filtre Type) ont ete retirees. Un undo n'insere aucune ligne dans la
+ * table runs et le payload de run/get_dashboard ne porte ni undone, ni is_undo,
+ * ni type : les deux filtres etaient morts par construction et repondaient
+ * toujours « Aucun run ne correspond aux filtres actuels ». */
 function _renderHeader(stats) {
   return `
     <header class="historique-header">
@@ -394,7 +442,6 @@ function _renderHeader(stats) {
             <option value="cancelled" ${_filterStatus === "cancelled" ? "selected" : ""}>Cancelled</option>
             <option value="error" ${_filterStatus === "error" ? "selected" : ""}>Error</option>
             <option value="applied" ${_filterStatus === "applied" ? "selected" : ""}>Applied</option>
-            <option value="undone" ${_filterStatus === "undone" ? "selected" : ""}>Undone</option>
             <!-- Fix audit 2026-05-24 : ajout des statuts manquants (partial / awaiting_validation) -->
             <option value="partial" ${_filterStatus === "partial" ? "selected" : ""}>Partiel</option>
             <option value="awaiting_validation" ${_filterStatus === "awaiting_validation" ? "selected" : ""}>En validation</option>
@@ -417,7 +464,6 @@ function _renderHeader(stats) {
             <option value="all" ${_filterType === "all" ? "selected" : ""}>Tous</option>
             <option value="plan" ${_filterType === "plan" ? "selected" : ""}>Plan (scan)</option>
             <option value="apply" ${_filterType === "apply" ? "selected" : ""}>Apply</option>
-            <option value="undo" ${_filterType === "undo" ? "selected" : ""}>Undo</option>
           </select>
         </label>
         <div class="historique-search">
@@ -536,7 +582,7 @@ function _renderLoadingMore(remaining) {
 function _computeHistoriqueStats(runs) {
   const totalRuns = runs.length;
   const applies = runs.filter((r) => Number(r.applied_rows || 0) > 0).length;
-  const undones = runs.filter((r) => _deriveStatus(r) === "UNDONE" || _runType(r) === "undo").length;
+  const errors = runs.filter((r) => _deriveStatus(r) === "ERROR").length;
   const periodLabel = (() => {
     switch (_filterPeriod) {
       case "today": return "aujourd'hui";
@@ -552,8 +598,11 @@ function _computeHistoriqueStats(runs) {
       default: return "les 30 derniers jours";
     }
   })();
+  // Revue post-merge 2026-08-03 : le compteur « N undo » etait fige a 0 par
+  // construction (aucun run d'undo n'existe en base). Remplace par le nombre de
+  // runs en erreur, qui lui est reellement derivable du payload.
   return {
-    summary: `${totalRuns} runs · ${applies} apply · ${undones} undo · sur ${periodLabel}`,
+    summary: `${totalRuns} runs · ${applies} apply · ${errors} en erreur · sur ${periodLabel}`,
   };
 }
 
@@ -645,10 +694,19 @@ function _renderInspectorTabs() {
 /* --- Inspector detailed tabs (Phase 5) ------------------------------ */
 
 function _filmStatusLabel(film) {
-  // Map vers Approuvé/Rejeté/Doublon/Suppression
+  // Map vers Approuvé/Rejeté/Reporté/Doublon/Suppression.
+  const dec = String(film.decision || film.status || "").toLowerCase();
+  // H8 (2026-07-15) : la DÉCISION utilisateur explicite (tri-état
+  // accepted/approved/rejected/deferred exposé par history_support.py depuis
+  // validation.json) PRIME sur le tier qualité. Avant, `tier === "reject"` était
+  // testé AVANT de lire `film.decision` : un film au tier `reject` mais
+  // explicitement ACCEPTÉ affichait encore « Rejeté ». On ne retombe sur le tier
+  // (ni sur la détection doublon/suppression) QUE si `decision` est vide.
+  if (dec === "accepted" || dec === "approved") return { label: "Approuvé", cls: "is-approved" };
+  if (dec === "rejected") return { label: "Rejeté", cls: "is-rejected" };
+  if (dec === "deferred") return { label: "Reporté", cls: "is-deferred" };
   const tier = String(film.tier || "").toLowerCase();
   if (tier === "reject") return { label: "Rejeté", cls: "is-rejected" };
-  const dec = String(film.decision || film.status || "").toLowerCase();
   if (dec.includes("duplicate") || dec === "duplicate" || film.is_duplicate) return { label: "Doublon", cls: "is-duplicate" };
   if (dec.includes("delete") || dec === "delete_marked") return { label: "Suppression", cls: "is-deleted" };
   if (dec.includes("reject")) return { label: "Rejeté", cls: "is-rejected" };
@@ -1212,12 +1270,18 @@ async function _doDeleteRun(runId) {
 
 async function _refreshRuns() {
   try {
-    const res = await apiPost("run/get_dashboard", { run_id: "latest" });
+    // Le reglage de retention ne vient PAS de get_dashboard (il ne l'emet pas) :
+    // cachedGetSettings sert un cache memoire, donc aucun aller-retour reseau
+    // supplementaire dans le cas courant.
+    const [res, retentionDays] = await Promise.all([
+      apiPost("run/get_dashboard", { run_id: "latest" }),
+      _fetchRetentionDays(),
+    ]);
     // Fix audit 2026-05-24 : voir _doUndoApply.
     const data = (res && res.data) || res || {};
     if (res && data.ok !== false) {
       _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
-      _retentionDays = Number(data.history_retention_days || _retentionDays || 90);
+      _retentionDays = retentionDays;
       const container = document.querySelector(".historique-view");
       const root = container ? container.parentNode : null;
       if (root) _rerender(root);
@@ -1369,6 +1433,13 @@ export function unmountRunDetailPage() {
     document.removeEventListener("click", _onActionClick);
     _documentListenerAttached = false;
   }
+  // M19 (audit ultra 2026-07-13) : idem unmountHistorique — purge des caches par
+  // run_id (voir la note detaillee la-bas). La page standalone /run/:id partage
+  // _historyStatsCache / _filmsCacheByRun avec la timeline ; sans reset ici, un
+  // aller-retour /run/:id -> /historique servait un detail perime. Refetch au
+  // remontage via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _standaloneRunId = null;
   _standaloneContainer = null;
 }
@@ -1387,8 +1458,16 @@ export async function initHistorique(container) {
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
 
   let res = null;
+  let retentionDays = _RETENTION_DAYS_DEFAULT;
   try {
-    res = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal });
+    // En parallele du dashboard : le reglage de retention n'est PAS dans ce
+    // payload (cf _fetchRetentionDays), et un echec de sa lecture ne doit pas
+    // faire passer la vue en ecran d'erreur -> _fetchRetentionDays ne rejette
+    // jamais, elle retombe sur le defaut.
+    [res, retentionDays] = await Promise.all([
+      apiPost("run/get_dashboard", { run_id: "latest" }, { signal }),
+      _fetchRetentionDays(),
+    ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;
     container.innerHTML = _renderError(err ? String(err.message || err) : "Erreur réseau");
@@ -1405,7 +1484,7 @@ export async function initHistorique(container) {
 
   const data = res.data || res;
   _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
-  _retentionDays = Number(data.history_retention_days || 90);
+  _retentionDays = retentionDays;
   _selectedRunId = _runs.length > 0 ? _runs[0].run_id : null;
 
   _rerender(container);
@@ -1428,6 +1507,14 @@ export function unmountHistorique() {
     clearTimeout(_searchDebounceId);
     _searchDebounceId = null;
   }
+  // M19 (audit ultra 2026-07-13) : purge des caches par run_id au demontage.
+  // _historyStatsCache / _filmsCacheByRun sont module-level et n'etaient invalides
+  // que par delete_run / undo / bouton Recharger. Sans reset au unmount, un
+  // remontage ulterieur (autre run selectionne, apply survenu entre-temps)
+  // reaffichait des stats / films PERIMES d'un run different. Sur-invalider est
+  // sans danger : tout remontage refetch via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _runs = [];
   _selectedRunId = null;
 }

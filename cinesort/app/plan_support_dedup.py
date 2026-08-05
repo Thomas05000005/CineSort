@@ -8,6 +8,7 @@ groupes de doublons sur les destinations planifiees.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections import defaultdict
 from dataclasses import fields as dc_fields
@@ -20,8 +21,7 @@ from cinesort.domain import duplicate_support as _dup
 from cinesort.domain.edition_helpers import strip_edition
 from cinesort.domain.runtime_hard_filter import (
     DEFAULT_RUNTIME_HARD_THRESHOLD_MIN,
-    WARN_RUNTIME_HARD_EXCLUDED,
-    WARN_RUNTIME_HARD_KEPT_VIA_EDITION,
+    WARN_RUNTIME_HARD_KEPT_DECLARED,
     evaluate_runtime_hard_filter,
 )
 from cinesort.domain.title_helpers import _norm_for_tokens, extract_provider_tags
@@ -437,9 +437,7 @@ def _augment_candidates_from_name_tags(
             )
 
     # --- Resolution via IMDb ID (si pas deja resolu via TMDb ID) ---
-    if imdb_id_tag and not any(
-        getattr(c, "source", "") == "name_tmdb" for c in nfo_cands
-    ):
+    if imdb_id_tag and not any(getattr(c, "source", "") == "name_tmdb" for c in nfo_cands):
         try:
             imdb_result = tmdb.find_by_imdb_id(imdb_id_tag)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -509,9 +507,7 @@ def _accept_name_tag_candidate(
         year_delta = abs(int(result.year) - int(name_year))
         if year_delta > 2:
             year_ok = False
-    accept = (sim_best >= 0.50) or (
-        year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35
-    )
+    accept = (sim_best >= 0.50) or (year_ok and year_delta is not None and year_delta <= 1 and sim_best >= 0.35)
     if not accept:
         log(
             "WARN",
@@ -613,16 +609,41 @@ def _resolve_file_runtime_min(
     *,
     store: Any = None,
     settings: Optional[Dict[str, Any]] = None,
-) -> Optional[float]:
-    """Retrouve la duree fichier en minutes (NFO en priorite, puis probe cache).
+) -> Tuple[Optional[float], Optional[str]]:
+    """Retrouve la duree fichier en minutes ET sa source (probe MESURE vs NFO DECLARE).
 
-    1. Si nfo.runtime existe (zero cout, deja parse) -> utilise direct.
-    2. Sinon, tentative de lookup probe cache (pas de probe fresh -- on ne veut
-       pas declencher de ffprobe lourd au stade scoring). Si miss -> None.
+    H5 : la duree MESUREE par le probe fait autorite sur la duree DECLAREE par
+    le NFO. Un NFO peut annoncer un autre cut que le fichier reellement present
+    (ex. NFO theatrical 95 min sur un fichier Extended de 142 min) ; se fier au
+    NFO ferait exclure a tort de bons candidats TMDb par le filtre HARD.
 
-    Retourne None si aucune duree disponible (probe FAILED ou pas de cache).
-    Dans ce cas, le filtre HARD se desactive pour cette ligne (cf evaluate_runtime_hard_filter).
+    1. Cache probe (duree reellement mesuree). Pas de probe fresh -- on ne
+       declenche pas de ffprobe lourd au stade scoring, on lit seulement le
+       cache si dispo.
+    2. Repli : nfo.runtime (duree declaree, zero cout, deja parse).
+
+    Retourne (minutes, source) ou source vaut :
+        - "measured"  : duree issue du cache probe (MESUREE, fait autorite).
+        - "declared"  : duree issue du NFO (DECLAREE, non-autoritaire -> le
+          filtre HARD ne doit JAMAIS exclure durement sur cette base).
+        - None        : aucune duree disponible (pas de cache probe ET pas de
+          NFO) -> le filtre HARD se desactive pour cette ligne.
     """
+    # 1. Duree MESUREE (cache probe) -- fait autorite sur le NFO declare.
+    if store is not None and hasattr(store, "get_probe_cache"):
+        try:
+            media_path = Path(folder) / video.name if not isinstance(video, Path) else video
+            if safe_path_exists(media_path):
+                cached = store.get_probe_cache(str(media_path))
+                normalized = cached.get("normalized") if isinstance(cached, dict) else None
+                if isinstance(normalized, dict):
+                    duration_s = normalized.get("duration_s")
+                    if duration_s and float(duration_s) > 0:
+                        return float(duration_s) / 60.0, "measured"
+        except (AttributeError, KeyError, TypeError, ValueError, OSError):
+            pass  # cache illisible -> repli sur le NFO
+        _ = settings  # reserve pour un probe fresh eventuel (non declenche ici)
+    # 2. Repli : duree DECLAREE par le NFO.
     if nfo is not None:
         runtime = getattr(nfo, "runtime", None)
         try:
@@ -630,32 +651,8 @@ def _resolve_file_runtime_min(
         except (TypeError, ValueError):
             value = 0.0
         if value > 0:
-            return value
-    if store is None:
-        return None
-    try:
-        media_path = Path(folder) / video.name if not isinstance(video, Path) else video
-        if not safe_path_exists(media_path):
-            return None
-        from cinesort.infra.probe import ProbeService  # lazy: optionnel
-        probe = ProbeService(store)
-        probe_settings = settings or {}
-        if hasattr(store, "get_probe_cache"):
-            try:
-                cached = store.get_probe_cache(str(media_path))
-                if cached:
-                    normalized = cached.get("normalized") if isinstance(cached, dict) else None
-                    if isinstance(normalized, dict):
-                        duration_s = normalized.get("duration_s")
-                        if duration_s and float(duration_s) > 0:
-                            return float(duration_s) / 60.0
-            except (AttributeError, KeyError, TypeError, ValueError, OSError):
-                return None
-        _ = probe  # silence linter
-        _ = probe_settings
-    except (ImportError, OSError, TypeError, ValueError):
-        return None
-    return None
+            return value, "declared"
+    return None, None
 
 
 def _apply_runtime_hard_filter_to_tmdb_cands(
@@ -667,14 +664,25 @@ def _apply_runtime_hard_filter_to_tmdb_cands(
     settings: Optional[Dict[str, Any]],
     log: Callable[[str, str], None],
     log_ctx: str = "",
+    runtime_source: Optional[str] = None,
 ) -> Tuple[List[Any], bool]:
     """Filtre HARD : exclut les candidats TMDb dont la duree diverge trop.
 
-    - delta > threshold sans edition flag -> EXCLU
+    - delta > threshold sans edition flag, duree MESUREE (probe) -> EXCLU
     - delta > threshold AVEC edition flag -> conserve + warning
+    - delta > threshold sans edition flag, duree DECLAREE (NFO) -> conserve +
+      warning (H5 : une duree declaree n'a pas autorite pour exclure)
     - delta <= threshold -> conserve sans modification
+
+    Args:
+        runtime_source: "measured" (probe) ou "declared" (NFO), tel que retourne
+            par `_resolve_file_runtime_min`. None ou "measured" -> la mesure fait
+            autorite (comportement historique : exclusion dure). "declared" ->
+            jamais d'exclusion dure, seulement un warning reconcilie par le probe.
+
     Retourne (kept_tmdb_cands, any_excluded).
     """
+    runtime_measured = runtime_source != "declared"
     if not tmdb_cands or tmdb is None:
         return tmdb_cands, False
 
@@ -710,14 +718,11 @@ def _apply_runtime_hard_filter_to_tmdb_cands(
             edition_label=detected_edition,
             enabled=True,
             threshold_min=threshold,
+            runtime_measured=runtime_measured,
         )
         if excluded:
             any_excluded = True
-            delta = (
-                abs(float(file_runtime_min) - float(cand_runtime))
-                if cand_runtime is not None
-                else None
-            )
+            delta = abs(float(file_runtime_min) - float(cand_runtime)) if cand_runtime is not None else None
             delta_str = f"{delta:.0f}" if delta is not None else "?"
             log(
                 "INFO",
@@ -729,15 +734,17 @@ def _apply_runtime_hard_filter_to_tmdb_cands(
             continue
         if warning:
             existing_note = getattr(cand, "note", "") or ""
-            if WARN_RUNTIME_HARD_KEPT_VIA_EDITION not in existing_note:
-                try:
-                    cand.note = (existing_note + f" [{WARN_RUNTIME_HARD_KEPT_VIA_EDITION}]").strip()
-                except (AttributeError, TypeError):
-                    pass
+            if warning not in existing_note:
+                with contextlib.suppress(AttributeError, TypeError):
+                    cand.note = (existing_note + f" [{warning}]").strip()
+            if warning == WARN_RUNTIME_HARD_KEPT_DECLARED:
+                reason = "duree DECLAREE (NFO) non-autoritaire, reconciliation probe attendue"
+            else:
+                reason = f"grace a edition flag {detected_edition!r}"
             log(
                 "WARN",
                 f"VN-D.3 runtime HARD filter{(' ' + log_ctx) if log_ctx else ''}: "
-                f"candidat conserve grace a edition flag {detected_edition!r} "
+                f"candidat conserve ({reason}) "
                 f"(tmdb_id={cand_tmdb_id}, titre={cand.title!r}, "
                 f"runtime TMDb={cand_runtime} min, fichier={float(file_runtime_min):.0f} min)",
             )

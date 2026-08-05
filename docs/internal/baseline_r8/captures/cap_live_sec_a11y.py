@@ -35,6 +35,7 @@ Usage (depuis la racine du repo, serveur --api UP sur 127.0.0.1:8642) :
 HARD RULES respectees : aucun effet de bord sur la vraie biblio, aucun write
 serveur (on POST get_status = lecture seule), token masque, serveur laisse UP.
 """
+
 from __future__ import annotations
 
 import json
@@ -83,9 +84,7 @@ def _load_token() -> str:
     return ""
 
 
-def _request(
-    method: str, path: str, *, origin: str | None, token: str, payload: dict | None = None
-) -> int:
+def _request(method: str, path: str, *, origin: str | None, token: str, payload: dict | None = None) -> int:
     """Envoie une requete forgee via urllib et retourne le code HTTP.
 
     On capture HTTPError pour recuperer le code (403/401/...) sans lever. Le
@@ -116,8 +115,8 @@ def _sec_forge(token: str) -> None:
     print("F-SEC-01 / F-SEC-02 — Forge CORS/CSRF (rest_server.py:404-442, 1027)")
     print(SEP)
     print(f"  token (masque)              : {_mask(token)}")
-    print(f"  CSRF guard appele dans      : do_POST seulement (rest_server.py:1027)")
-    print(f"  do_GET (ligne 873) garde ?  : NON  -> /api/poster (ligne 921) non garde")
+    print("  CSRF guard appele dans      : do_POST seulement (rest_server.py:1027)")
+    print("  do_GET (ligne 873) garde ?  : NON  -> /api/poster (ligne 921) non garde")
     print()
 
     # run_id fourni : get_status l'exige. Sur les appels evil.example le 403 tombe
@@ -128,9 +127,7 @@ def _sec_forge(token: str) -> None:
 
     # --- F-SEC-01 ---------------------------------------------------------- #
     print("  [F-SEC-01] POST /api/run/get_status  Origin=http://evil.example")
-    st_post_evil = _request(
-        "POST", "/api/run/get_status", origin="http://evil.example", token=token, payload=gs
-    )
+    st_post_evil = _request("POST", "/api/run/get_status", origin="http://evil.example", token=token, payload=gs)
     print(f"             -> HTTP {st_post_evil}   (attendu 403 : POST cross-site refuse)")
 
     print("  [F-SEC-01] GET  /api/poster?id=550&size=w500  Origin=http://evil.example")
@@ -140,37 +137,39 @@ def _sec_forge(token: str) -> None:
         origin="http://evil.example",
         token=token,
     )
-    print(
-        f"             -> HTTP {st_get_evil}   (attendu 200 : GET NON garde = trou CSRF lecture)"
-    )
+    print(f"             -> HTTP {st_get_evil}   (attendu 200 : GET NON garde = trou CSRF lecture)")
     print()
 
     # --- F-SEC-02 ---------------------------------------------------------- #
     print("  [F-SEC-02] Le PORT de l'Origin est ignore (seul le host compte)")
     print("  [F-SEC-02] POST /api/run/get_status  Origin=http://localhost:9999")
-    st_post_9999 = _request(
-        "POST", "/api/run/get_status", origin="http://localhost:9999", token=token, payload=gs
-    )
-    print(
-        f"             -> HTTP {st_post_9999}   (attendu 200 : port 9999 ignore, host=localhost OK)"
-    )
+    st_post_9999 = _request("POST", "/api/run/get_status", origin="http://localhost:9999", token=token, payload=gs)
+    print(f"             -> HTTP {st_post_9999}   (attendu 200 : port 9999 ignore, host=localhost OK)")
 
     print("  [F-SEC-02] POST /api/run/get_status  Origin=http://evil.example")
-    st_post_evil2 = _request(
-        "POST", "/api/run/get_status", origin="http://evil.example", token=token, payload=gs
-    )
+    st_post_evil2 = _request("POST", "/api/run/get_status", origin="http://evil.example", token=token, payload=gs)
     print(f"             -> HTTP {st_post_evil2}   (attendu 403 : host externe refuse)")
     print()
 
     # --- Verdicts ---------------------------------------------------------- #
     sec01_ok = (st_post_evil == 403) and (st_get_evil == 200)
     sec02_ok = (st_post_9999 == 200) and (st_post_evil2 == 403)
-    print("  VERDICT F-SEC-01 : "
-          + ("CONFIRME (POST 403 garde / GET 200 NON garde -> asymetrie)"
-             if sec01_ok else f"NON CONFORME (post_evil={st_post_evil}, get_evil={st_get_evil})"))
-    print("  VERDICT F-SEC-02 : "
-          + ("CONFIRME (port ignore : localhost:9999 -> 200, evil -> 403)"
-             if sec02_ok else f"NON CONFORME (9999={st_post_9999}, evil={st_post_evil2})"))
+    print(
+        "  VERDICT F-SEC-01 : "
+        + (
+            "CONFIRME (POST 403 garde / GET 200 NON garde -> asymetrie)"
+            if sec01_ok
+            else f"NON CONFORME (post_evil={st_post_evil}, get_evil={st_get_evil})"
+        )
+    )
+    print(
+        "  VERDICT F-SEC-02 : "
+        + (
+            "CONFIRME (port ignore : localhost:9999 -> 200, evil -> 403)"
+            if sec02_ok
+            else f"NON CONFORME (9999={st_post_9999}, evil={st_post_evil2})"
+        )
+    )
     print()
 
 
@@ -233,12 +232,15 @@ def _i18n() -> None:
     counts_ok = (len(fr_keys) == 746) and (len(en_keys) == 746)
     confirmed = (not in_fr) and (not in_en) and (fallback_line is not None)
     print()
-    print("  VERDICT F-V4B-I18N : "
-          + ("CONFIRME (746/746, absente des 2 locales, hardcodee fallback FR -> "
-             "onglet Doublons non traduisible en EN)"
-             if (confirmed and counts_ok)
-             else f"DRIFT (fr={len(fr_keys)},en={len(en_keys)},in_fr={in_fr},"
-                  f"in_en={in_en},fallback={fallback_line is not None})"))
+    print(
+        "  VERDICT F-V4B-I18N : "
+        + (
+            "CONFIRME (746/746, absente des 2 locales, hardcodee fallback FR -> onglet Doublons non traduisible en EN)"
+            if (confirmed and counts_ok)
+            else f"DRIFT (fr={len(fr_keys)},en={len(en_keys)},in_fr={in_fr},"
+            f"in_en={in_en},fallback={fallback_line is not None})"
+        )
+    )
     print()
 
 

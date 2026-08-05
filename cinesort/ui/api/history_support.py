@@ -56,6 +56,143 @@ def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> Lis
     return payload_rows
 
 
+def _present_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, Any]]) -> set:
+    """Langues sous-titres présentes (externe ∪ embarqué) pour une row de PAYLOAD (dict).
+    Même union externe∪embarqué que librarian.py:132-158 / library_support, mais lisant
+    le DICT payload sérialisé (source unique de la réconciliation côté écran Traitement)."""
+    from cinesort.domain.subtitle_helpers import _normalize_iso639
+
+    present: set = set()
+    for lang in row.get("subtitle_languages") or []:
+        norm = _normalize_iso639(lang) or str(lang).strip().lower()
+        if norm:
+            present.add(norm)
+    qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
+    metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+    embedded = metrics.get("subtitles_embedded")
+    if isinstance(embedded, list):
+        for track in embedded:
+            if isinstance(track, dict):
+                raw = (track.get("language") or "").strip().lower()
+                if raw:
+                    norm = _normalize_iso639(raw)
+                    if norm:
+                        present.add(norm)
+    return present
+
+
+def _full_langs_from_payload(row: Dict[str, Any], qr_by_id: Dict[str, Dict[str, Any]]) -> set:
+    """Langues avec une piste EMBARQUÉE complète (non forcée), pour une row de PAYLOAD.
+
+    F12 : réconcilie `subtitle_forced_only_<lang>` quand le film a en réalité une piste
+    complète MUXÉE que le scan n'a pas vue. On ne lit PAS `row["subtitle_languages"]` :
+    ce champ ne distingue pas une piste forcée d'une piste complète (cf. la garde de
+    `reconcile_subtitle_flags`)."""
+    from cinesort.ui.api.run_read_support import full_langs_from_embedded
+
+    qr = qr_by_id.get(str(row.get("row_id") or "")) or {}
+    metrics = qr.get("metrics") if isinstance(qr.get("metrics"), dict) else {}
+    return full_langs_from_embedded(metrics.get("subtitles_embedded"))
+
+
+def _enrich_plan_payload(api: Any, run_id: str, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[écran Traitement/Vérification] Enrichit chaque row du payload :
+      - ``display_title`` : titre sans l'année dupliquée (colonne ANNÉE séparée),
+      - ``warning_flags`` : réconciliés — retire les faux ``subtitle_missing_<lang>``
+        dont la langue est en fait présente (FR muxé ignoré au scan) et les faux
+        ``subtitle_forced_only_<lang>`` démentis par une piste muxée COMPLÈTE,
+      - ``auto_approvable`` : bool (le frontend filtre « à examiner » sur NON auto_approvable
+        et affiche « Cas à vérifier » = nombre de NON auto_approvable, cohérent backend).
+    Best-effort : toute erreur (store/settings/quality indisponible) laisse le payload intact.
+    """
+    try:
+        from cinesort.domain.conversions import to_int
+        from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+        from cinesort.ui.api.film_support import (
+            apply_tmdb_overrides_bulk,
+            list_tmdb_overrides_bulk,
+            overlay_tmdb_override,
+        )
+        from cinesort.ui.api.library_support import _get_store
+        from cinesort.ui.api.run_read_support import (
+            _AUTO_CRITICAL_WARNINGS,
+            _AUTO_INTEGRITY_WARNINGS,
+            _CONFLICT_FLAGS,
+            build_qr_by_id,
+            reconcile_subtitle_flags,
+        )
+
+        store = _get_store(api)
+        qr_by_id: Dict[str, Dict[str, Any]] = {}
+        if store is not None and hasattr(store, "quality"):
+            with contextlib.suppress(Exception):
+                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+        try:
+            threshold = to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
+        except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
+            threshold = 85
+        blocking = _CONFLICT_FLAGS | _AUTO_CRITICAL_WARNINGS | _AUTO_INTEGRITY_WARNINGS
+        # PERF (ultra-audit 2026-08, CRITICAL) : les overrides TMDb du run sont
+        # lus en UNE requete au lieu de 2 connexions SQLite PAR ROW (2N pour un
+        # plan de N films : 40 s / 2002 connexions mesurees a N=1000, meme table
+        # vide). `None` = lecture bulk indisponible OU partielle -> on retombe
+        # sur le chemin par row (dans la boucle), lent mais correct : jamais un
+        # plan silencieusement privé de ses overrides. `{}` = run réellement
+        # sans override -> rien à appliquer, mais les rows sont bien marquées.
+        #
+        # `apply_tmdb_overrides_bulk` pose `TMDB_OVERLAY_DONE_KEY` lui-même sur
+        # les rows traitées (PR #849) : sans cela, `library_support` — qui est
+        # fail-closed sur ce marqueur — reprendrait la relecture par row et le
+        # N+1 supprimé ici reviendrait par la vue Bibliothèque. Il est appelé
+        # AVANT la boucle : l'overlay doit précéder le calcul de
+        # `display_title`, qui lit `proposed_title`/`proposed_year`.
+        overrides = list_tmdb_overrides_bulk(store, run_id)
+        if overrides is not None:
+            with contextlib.suppress(Exception):
+                apply_tmdb_overrides_bulk(payload_rows, overrides)
+
+        for row in payload_rows:
+            if not isinstance(row, dict):
+                continue
+            # HIGH-13 (2026-07-13) : overlay de l'override TMDb manuel AVANT tout
+            # calcul, pour que la Validation pré-cochée seede le bon titre/année/
+            # confiance (traitement.js lit r.proposed_year) et que l'apply voie le
+            # même titre que le modal fiche film / que l'overlay _validate_apply.
+            # Chemin de repli uniquement : le lot a déjà été appliqué ci-dessus
+            # quand la lecture groupée a abouti.
+            if overrides is None:
+                with contextlib.suppress(Exception):
+                    overlay_tmdb_override(store, run_id, row)
+            try:
+                # 1) titre d'affichage sans année dupliquée (helper testé, protège "Blade Runner 2049")
+                with contextlib.suppress(Exception):
+                    row["display_title"] = strip_trailing_year_if_equal(
+                        str(row.get("proposed_title") or ""), row.get("proposed_year")
+                    )
+                row.setdefault("display_title", str(row.get("proposed_title") or ""))
+                # 2) réconciliation sous-titres (faux subtitle_missing_<lang> retirés)
+                flags = row.get("warning_flags")
+                if isinstance(flags, list) and qr_by_id:
+                    present = _present_langs_from_payload(row, qr_by_id)
+                    row["warning_flags"] = reconcile_subtitle_flags(
+                        flags, present, _full_langs_from_payload(row, qr_by_id)
+                    )
+                # 3) auto_approvable (sur les flags réconciliés). to_int : robuste à un
+                #    proposed_year/confidence non numérique (n'abandonne pas la boucle).
+                cur = {str(f) for f in (row.get("warning_flags") or [])}
+                has_title = bool(str(row.get("proposed_title") or "").strip())
+                has_year = to_int(row.get("proposed_year"), 0) >= 1900
+                row["auto_approvable"] = bool(
+                    to_int(row.get("confidence"), 0) >= threshold and not (cur & blocking) and has_title and has_year
+                )
+            except Exception as row_exc:  # noqa: BLE001 — best-effort PAR ROW
+                logger.debug("enrich_plan_payload row error: %s", row_exc)
+                continue
+    except Exception as exc:  # noqa: BLE001 — enrichissement best-effort
+        logger.debug("enrich_plan_payload error: %s", exc)
+    return payload_rows
+
+
 @requires_valid_run_id
 def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
     # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
@@ -68,19 +205,21 @@ def get_plan(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, An
             "ok": False,
             "error": "plan_load_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de charger le plan du run. Le fichier est peut-etre corrompu."
-            ),
+            "user_message": ("Impossible de charger le plan du run. Le fichier est peut-etre corrompu."),
         }
 
 
-def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
-    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
-    logger.debug("api: get_plan run_id=%s", run_id)
+def _load_plan_rows(api: Any, run_id: str, *, normalize_user_path: Any) -> Tuple[Any, Dict[str, Any] | None]:
+    """Charge les PlanRow d'un run : memoire d'abord, puis plan.jsonl.
+
+    Retourne ``(rows, None)`` ou ``(None, reponse_erreur)``. Extrait de
+    ``_get_plan_impl`` pour que ``get_plan_row`` (fiche film) partage EXACTEMENT
+    les memes regles de resolution et les memes messages d'erreur.
+    """
     rs = api._get_run(run_id)
     if rs:
         if not rs.done:
-            return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+            return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
         rows = rs.rows
         if not rows:
             try:
@@ -90,41 +229,110 @@ def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[s
                 # legitime (run cleanup orphelin, run FAILED dont le plan.jsonl
                 # n'a jamais ete ecrit). Loguer en debug au lieu d'error pour
                 # eviter la pollution des logs.
-                return _err_response(str(exc), category="state", level="debug", log_module=__name__)
-        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
+                return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+        return rows, None
 
     found = api._find_run_row(run_id)
     if not found:
-        return _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
+        return None, _err_response("Run introuvable.", category="resource", level="info", log_module=__name__)
     row, _store = found
     status_text = str(row.get("status") or "")
     if status_text not in {RunStatus.DONE.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
-        return _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
+        return None, _err_response("Plan pas pret.", category="state", level="debug", log_module=__name__)
     run_paths = api._run_paths_for(
         normalize_user_path(row.get("state_dir"), api._state_dir), run_id, ensure_exists=False
     )
     try:
-        rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {"ok": True, "rows": _subtract_ignored_flags(api, api._serialize_rows_for_payload(rows))}
+        return api._load_rows_from_plan_jsonl(run_paths), None
     except (OSError, KeyError, TypeError, ValueError) as exc:
         # Fix audit 2026-05-24 (v1.5.1) : voir commentaire ci-dessus.
+        return None, _err_response(str(exc), category="state", level="debug", log_module=__name__)
+
+
+def _get_plan_impl(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    """Implementation reelle de get_plan, sans wrap global (Vague G)."""
+    logger.debug("api: get_plan run_id=%s", run_id)
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None:
+        return err
+    try:
+        payload = api._serialize_rows_for_payload(rows)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="state", level="debug", log_module=__name__)
+    return {"ok": True, "rows": _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))}
+
+
+def _row_id_of(row: Any) -> str:
+    """row_id d'une PlanRow (dataclass) ou d'une row deja serialisee (dict)."""
+    if isinstance(row, dict):
+        return str(row.get("row_id") or "")
+    return str(getattr(row, "row_id", "") or "")
+
+
+def get_plan_row(api: Any, run_id: str, row_id: str, *, normalize_user_path: Any) -> Dict[str, Any] | None:
+    """UNE row de plan enrichie, sans serialiser NI enrichir tout le plan.
+
+    PERF (ultra-audit 2026-08, HIGH) : la fiche film passait par
+    ``run/get_plan``, qui serialise les N rows du run et les enrichit toutes
+    (2 connexions SQLite par row pour l'override TMDb), pour ensuite jeter les
+    N-1 autres : 9,2 s et ~2000 connexions mesurees a N=1000 pour renvoyer une
+    seule ligne. On filtre desormais la PlanRow AVANT la serialisation et on ne
+    fait passer qu'elle dans la MEME chaine (alertes ignorees, override TMDb,
+    reconciliation des sous-titres, display_title, auto_approvable) : memes
+    champs en sortie, cout independant de la taille du plan.
+
+    Retourne ``None`` si le run, le plan ou la row sont introuvables — c'est le
+    contrat attendu par les appelants (fiche film), qui rendent alors leur
+    propre erreur "Film introuvable".
+    """
+    wanted = str(row_id or "")
+    if not wanted:
+        return None
+    rows, err = _load_plan_rows(api, run_id, normalize_user_path=normalize_user_path)
+    if err is not None or not rows:
+        return None
+    match = next((r for r in rows if _row_id_of(r) == wanted), None)
+    if match is None:
+        return None
+    payload = api._serialize_rows_for_payload([match])
+    if not payload:
+        return None
+    enriched = _enrich_plan_payload(api, run_id, _subtract_ignored_flags(api, payload))
+    return enriched[0] if enriched else None
 
 
 @requires_valid_run_id
 def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[str, Any]:
+    from cinesort.domain.conversions import to_bool
+    from cinesort.ui.api.run_read_support import seed_auto_approve_decisions
+
     rs = api._get_run(run_id)
     if rs:
         path = rs.paths.validation_json
         if not path.exists():
-            return {"ok": True, "decisions": {}}
+            # [auto-approve] Première visite (aucune validation.json). Si
+            # auto_approve_enabled, on pré-remplit la Validation (overlay
+            # read-only, jamais persisté) ; sinon comportement inchangé (vide).
+            # Lecture settings défensive : un settings illisible → comportement
+            # historique (décisions vides), jamais une exception (revue adversaire).
+            try:
+                _auto_on = to_bool(api._get_settings_impl().get("auto_approve_enabled"), False)
+            except Exception:  # noqa: BLE001 — best-effort, pas d'auto-approve si settings KO
+                _auto_on = False
+            if not _auto_on:
+                return {"ok": True, "decisions": {}}
+            rows = rs.rows if rs.rows else api._load_rows_from_plan_jsonl(rs.paths)
+            seeded = seed_auto_approve_decisions(api, rows, {})
+            return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 rows = rs.rows
                 if not rows:
                     rows = api._load_rows_from_plan_jsonl(rs.paths)
-                return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, data)}
+                # [auto-approve] Overlay read-only ; no-op si le flag est off.
+                seeded = seed_auto_approve_decisions(api, rows, data)
+                return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
             return {"ok": True, "decisions": {}}
         except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
             api._debug_log(
@@ -145,7 +353,9 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
     data = api._load_decisions_from_validation(run_paths)
     try:
         rows = api._load_rows_from_plan_jsonl(run_paths)
-        return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, data)}
+        # [auto-approve] Overlay read-only ; no-op si le flag est off.
+        seeded = seed_auto_approve_decisions(api, rows, data)
+        return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         api._debug_log(
             state_dir=state_dir,
@@ -183,9 +393,7 @@ def cancel_run(api: Any, run_id: str) -> Dict[str, Any]:
             "ok": False,
             "error": "cancel_run_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible d'annuler le run. Il continuera en arriere-plan."
-            ),
+            "user_message": ("Impossible d'annuler le run. Il continuera en arriere-plan."),
         }
 
 
@@ -195,6 +403,39 @@ def _store_for_run(api: Any, run_id: str) -> Tuple[Dict[str, Any], Any] | None:
     if not found:
         return None
     return found[0], found[1]
+
+
+def _readable_duplicate_group(group_key: str, winner_row: Dict[str, Any]) -> Tuple[str, Any]:
+    """Titre + annee LISIBLES d'un groupe de doublons pour l'Inspecteur Historique.
+
+    AUDIT 2026-07-13 (M16) : la `group_key` est une cle technique. Quand un groupe
+    n'expose pas de cle explicite, `_group_key_for` (run_flow_support.py) retourne
+    le fallback "titre minuscule|annee" (ex. "le seigneur des anneaux|2001").
+    L'ancien code ne parsait que le format "Titre (AAAA)" et affichait donc cette
+    cle BRUTE. On prefere le titre PROPRE du row gagnant (casse correcte, meme
+    source que winner_label), et on ne parse la cle qu'en repli (gagnant absent du
+    plan) — en tolerant les DEUX formats.
+    """
+    title = str(winner_row.get("proposed_title") or winner_row.get("nfo_title") or "").strip()
+    year: Any = None
+    winner_year = winner_row.get("proposed_year")
+    if winner_year:
+        with contextlib.suppress(TypeError, ValueError):
+            year = int(winner_year) or None
+    if title:
+        return title, year
+
+    gk = str(group_key or "").strip()
+    m = re.search(r"^(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)", gk)
+    if m:
+        return (m.group("title").strip() or "(Sans titre)"), int(m.group("year"))
+    if "|" in gk:
+        # Fallback _group_key_for : "titre|annee" (annee = dernier segment).
+        raw_title, _, raw_year = gk.rpartition("|")
+        if raw_year.strip().isdigit():
+            year = int(raw_year.strip())
+        return (raw_title.strip() or gk or "(Sans titre)"), year
+    return (gk or "(Sans titre)"), year
 
 
 @requires_valid_run_id
@@ -219,10 +460,7 @@ def get_history_stats(api: Any, run_id: str) -> Dict[str, Any]:
             "ok": False,
             "error": "history_stats_failed",
             "message": str(exc),
-            "user_message": (
-                "Impossible de charger les details du run. Verifie l'historique "
-                "ou redemarre l'app."
-            ),
+            "user_message": ("Impossible de charger les details du run. Verifie l'historique ou redemarre l'app."),
         }
 
 
@@ -276,7 +514,19 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
         )
     except (AttributeError, OSError, TypeError, ValueError):
         total_rows = _compute_total_fallback(row, stats_obj)
-    applied_rows = int(stats_obj.get("applied_count") or 0)
+    # AUDIT 2026-07-13 (HIGH-7) : applied_count vit dans apply_batches.summary_json
+    # (ecrit par l'apply), PAS dans runs.stats_json (cle jamais ecrite) -> lecture
+    # de la source reelle (repare retroactivement les runs deja en base). Le
+    # fallback stats_obj est conserve pour les fixtures/demo. _last_batch est
+    # reutilise plus bas (bloc "Apply operations") -> 0 requete supplementaire.
+    _last_batch: Dict[str, Any] | None = None
+    try:
+        _last_batch = store.apply.get_last_reversible_apply_batch(run_id) if store else None
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: last apply batch err run_id=%s err=%s", run_id, exc)
+    applied_rows = int(
+        ((_last_batch or {}).get("summary") or {}).get("applied_count") or stats_obj.get("applied_count") or 0
+    )
 
     # Quality reports : count + tier distribution + score moyen.
     validated_count = 0
@@ -323,21 +573,19 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # Apply operations : derniere batch reel (non dry-run) DONE.
     apply_operations: List[Dict[str, Any]] = []
     try:
-        if store:
-            last_batch = store.apply.get_last_reversible_apply_batch(run_id)
-            if last_batch:
-                ops = store.apply.list_apply_operations(batch_id=last_batch.get("batch_id"))
-                apply_operations = [
-                    {
-                        "op_index": int(op.get("op_index") or 0),
-                        "op_type": str(op.get("op_type") or ""),
-                        "src_path": str(op.get("src_path") or ""),
-                        "dst_path": str(op.get("dst_path") or ""),
-                        "reversible": bool(int(op.get("reversible") or 0)),
-                        "undo_status": str(op.get("undo_status") or "PENDING"),
-                    }
-                    for op in ops
-                ]
+        if store and _last_batch:
+            ops = store.apply.list_apply_operations(batch_id=_last_batch.get("batch_id"))
+            apply_operations = [
+                {
+                    "op_index": int(op.get("op_index") or 0),
+                    "op_type": str(op.get("op_type") or ""),
+                    "src_path": str(op.get("src_path") or ""),
+                    "dst_path": str(op.get("dst_path") or ""),
+                    "reversible": bool(int(op.get("reversible") or 0)),
+                    "undo_status": str(op.get("undo_status") or "PENDING"),
+                }
+                for op in ops
+            ]
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: apply_operations err run_id=%s err=%s", run_id, exc)
 
@@ -355,6 +603,17 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
         row_by_id = {str(r.get("row_id")): r for r in plan_rows if isinstance(r, dict)}
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: plan rows err run_id=%s err=%s", run_id, exc)
+    # AUDIT 2026-07-13 (HIGH-9) : la vraie DECISION utilisateur vit dans
+    # validation.json (tri-etat accepted/rejected/deferred), PAS sur la PlanRow
+    # serialisee (asdict(PlanRow) n'a aucun champ `decision` -> pr.get("decision")
+    # valait TOUJOURS ""). On charge la MEME facade que get_plan ci-dessus.
+    val_decisions: Dict[str, Any] = {}
+    try:
+        _vres = api.run.load_validation(run_id) if hasattr(api, "run") else None
+        if isinstance(_vres, dict) and _vres.get("ok"):
+            val_decisions = _vres.get("decisions") or {}
+    except (OSError, AttributeError, TypeError, ValueError) as exc:
+        logger.debug("get_history_stats: validation err run_id=%s err=%s", run_id, exc)
     dup_decisions: List[Dict[str, Any]] = []
     dup_row_ids: set = set()
     try:
@@ -363,7 +622,7 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
             wr = str(_d.get("winner_row_id") or "")
             if wr:
                 dup_row_ids.add(wr)
-            for _lr in (_d.get("loser_row_ids") or []):
+            for _lr in _d.get("loser_row_ids") or []:
                 dup_row_ids.add(str(_lr))
     except (OSError, AttributeError, TypeError, ValueError) as exc:
         logger.debug("get_history_stats: dup decisions err run_id=%s err=%s", run_id, exc)
@@ -381,7 +640,12 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
                     "score": rep.get("score"),
                     # R8-062 (F5) : statut lu par historique.js _filmStatusLabel
                     # (decision tri-état + is_duplicate). Avant : undefined -> toujours « Approuvé ».
-                    "decision": str(pr.get("decision") or "").strip().lower(),
+                    # HIGH-9 (2026-07-13) : source = validation.json (tri-état
+                    # accepted/rejected/deferred). Vide pour un film non décidé ->
+                    # le front retombe sur le tier. NB : pas de fallback ok→rejected
+                    # car load_validation matérialise TOUTES les rows (ok=False par
+                    # défaut) -> ce fallback classerait tout film non décidé « Rejeté ».
+                    "decision": str((val_decisions.get(rid) or {}).get("decision") or "").strip().lower(),
                     "is_duplicate": rid in dup_row_ids,
                 }
             )
@@ -392,7 +656,6 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     try:
         for dec in dup_decisions:
             gk = str(dec.get("group_key") or "")
-            m = re.search(r"^(?P<title>.+?)\s*\((?P<year>19\d{2}|20\d{2})\)", gk)
             winner_row_id = str(dec.get("winner_row_id") or "")
             winner_row = row_by_id.get(winner_row_id, {})
             # R8-061 (F5) : label gagnant lisible (front lit g.winner_label, sinon « — »).
@@ -403,10 +666,17 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
                 or winner_row_id
                 or "—"
             )
+            # AUDIT 2026-07-13 (M16) : la group_key est TECHNIQUE — le fallback
+            # `_group_key_for` (run_flow_support.py) vaut "titre minuscule|annee"
+            # ("le seigneur des anneaux|2001"), que la regex parenthesee ne matchait
+            # PAS -> le titre brut de la cle s'affichait dans l'Historique. On lit
+            # le titre PROPRE du row gagnant (deja charge), avec parsing de la cle
+            # en repli quand le gagnant est introuvable dans le plan.
+            dup_title, dup_year = _readable_duplicate_group(gk, winner_row)
             duplicates_decided.append(
                 {
-                    "title": (m.group("title").strip() if m else gk) or "(Sans titre)",
-                    "year": int(m.group("year")) if m else None,
+                    "title": dup_title,
+                    "year": dup_year,
                     "winner": winner_row_id,
                     "winner_label": winner_label,
                 }
@@ -537,6 +807,18 @@ def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
     }
 
 
+def _real_path(value: Path) -> Path:
+    """Chemin REEL canonise, pour comparer des chemins et non des chaines.
+
+    ``os.path.realpath`` resout jonctions NTFS, points de montage, noms courts
+    8.3 et liens ; ``os.path.normcase`` neutralise la casse (NTFS est
+    insensible a la casse). Les DEUX cotes d'une comparaison de zone doivent
+    passer par ici : sinon deux ecritures du meme chemin reel paraissent
+    differentes et un dossier legitime est refuse.
+    """
+    return Path(os.path.normcase(os.path.realpath(str(value))))
+
+
 def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: Any) -> Dict[str, Any]:
     try:
         raw_path = str(path or "").strip()
@@ -566,21 +848,24 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
-        # Fix audit 2026-05-25 (v1.5.3) Vague H : refuser aussi si la cible
-        # contient un symlink dans son chemin (ex: parent symlink).
-        if str(resolved_path) != str(candidate.absolute()):
-            logger.warning(
-                "open_path refuse : resolved differe de absolute (symlink parent ?) %s -> %s",
-                candidate,
-                resolved_path,
-            )
-            return _err_response(
-                "Les liens symboliques ne sont pas autorises.",
-                category="permission",
-                level="warning",
-                log_module=__name__,
-            )
-
+        # Fix 2026-08-03 : ici vivait une 2e garde qui comparait des CHAINES
+        # (``str(resolved_path) != str(candidate.absolute())``) pour deviner un
+        # symlink parent. Or ``resolve()`` reecrit la chaine sans qu'aucun lien
+        # n'existe des que le chemin traverse une jonction NTFS, un point de
+        # montage, un nom court 8.3 ou une casse differente (NTFS est
+        # insensible a la casse) : une bibliotheque placee derriere une
+        # jonction se voyait refuser un dossier parfaitement normal.
+        # La protection anti path-traversal de la Vague H (2026-05-25) reste
+        # entiere, portee par trois faits INDEPENDANTS de l'ecriture du chemin :
+        #  1. les liens symboliques sont refuses explicitement ci-dessus
+        #     (``candidate.is_symlink()``) ;
+        #  2. un lien situe dans le chemin PARENT est neutralise par le controle
+        #     de zone ci-dessous, qui compare des chemins REELS des deux cotes
+        #     (``_real_path``) : la cible du lien sort de la zone autorisee, donc
+        #     le chemin est refuse ;
+        #  3. ``os.startfile()`` n'ouvre que le chemin RESOLU, jamais
+        #     ``candidate`` : meme autorise, un lien ne peut pas faire ouvrir
+        #     autre chose que sa cible deja validee.
         open_target = resolved_path
         resolved_to_check = resolved_path
         if resolved_path.is_file():
@@ -596,9 +881,14 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
         if root_raw:
             allowed_bases.append(normalize_user_path(root_raw, Path(default_root)))
 
+        # Comparaison de chemins REELS (et non de chaines) des deux cotes :
+        # c'est ce controle qui porte desormais seul le refus d'une traversee
+        # par un lien parent. ``relative_to`` compare composant par composant :
+        # C:\lib2 n'est donc pas vu comme inclus dans C:\lib.
+        real_target = _real_path(resolved_to_check)
         for base in allowed_bases:
             try:
-                resolved_to_check.relative_to(base.resolve())
+                real_target.relative_to(_real_path(base))
                 allowed = True
                 break
             except (OSError, ValueError):

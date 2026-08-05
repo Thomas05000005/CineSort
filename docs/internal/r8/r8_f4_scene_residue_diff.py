@@ -1,12 +1,14 @@
 """R8 F4 — DIFFERENTIEL R8-040 : résidu audio DD5.1 -> "DD5 1" pollue la query TMDb.
 
 Vecteur : `name.replace('.',' ')` transforme "DD5.1" -> "DD5 1" AVANT _AUDIO_RESIDUE_RE
-qui exige `\b[257][\s.][01]\b` — le `\b` échoue car le "5" est collé à "DD" (pas de
+qui exige `\b[257][\\s.][01]\b` — le `\b` échoue car le "5" est collé à "DD" (pas de
 frontière de mot) -> résidu "DD5 1"/"DDP5 1"/"DD7 1" reste dans la query.
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f4_scene_residue_diff.py
 """
+
 from __future__ import annotations
+
 import json
 
 from cinesort.domain.scene_parser import parse_scene_title
