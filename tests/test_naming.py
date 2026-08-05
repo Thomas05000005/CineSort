@@ -615,6 +615,29 @@ class PreviewNamingEndpointTests(unittest.TestCase):
 
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_preview_sample_row_id_is_declared_not_applied(self) -> None:
+        """#460 : `sample_row_id` n'est pas honore -- et la reponse le DIT.
+
+        La branche « charger un vrai film depuis la BDD » etait morte des sa
+        premiere ligne (`_get_or_create_infra(state_dir, settings)` sur une
+        methode a un seul parametre -> TypeError avalee par un except large).
+        Elle est supprimee ; l'endpoint ne doit plus faire croire qu'il a
+        utilise la row demandee. Le jour ou l'apercu sur film reel sera cable,
+        ce drapeau devra passer a True -- et ce test tombera, ce qui est le but.
+        """
+        api, tmp = self._make_api()
+        try:
+            result = api._preview_naming_template_impl(template="{title} ({year})", sample_row_id="row_42")
+            self.assertTrue(result["ok"])
+            self.assertIs(result["sample_row_id_applied"], False)
+            # Coherence : puisque la row n'est pas chargee, le contexte EST le mock.
+            self.assertEqual(result["result"], "Inception (2010)")
+            self.assertEqual(result["variables"]["title"], "Inception")
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_preview_invalid_template(self) -> None:
         api, tmp = self._make_api()
         try:
