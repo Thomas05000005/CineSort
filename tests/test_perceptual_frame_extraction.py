@@ -123,6 +123,24 @@ class ParseRawFrameTests(unittest.TestCase):
         self.assertIsInstance(pixels, np.ndarray)
         self.assertEqual(pixels.size, 0)
 
+    def test_length_is_exactly_w_x_h_or_zero(self) -> None:
+        """Invariant dont depend `block_variance_stats` (audit #449).
+
+        `block_variance_stats` fait un `.reshape(h, w)` sans borner la longueur.
+        Il n'est sur que parce que ce parseur est le SEUL producteur de la cle
+        `pixels` et qu'il rend soit exactement w*h valeurs, soit un tableau
+        vide — jamais une frame partielle. Ce test verrouille cet invariant :
+        s'il tombe, c'est le reshape voisin qui levera un ValueError.
+        """
+        for bit_depth, bytes_per_px in ((8, 1), (10, 2)):
+            with self.subTest(bit_depth=bit_depth):
+                expected_bytes = 12 * bytes_per_px
+                self.assertEqual(parse_raw_frame(b"\x2a" * expected_bytes, 4, 3, bit_depth).size, 12)
+                # Surplus de donnees : tronque a w*h, jamais davantage.
+                self.assertEqual(parse_raw_frame(b"\x2a" * (expected_bytes * 4), 4, 3, bit_depth).size, 12)
+                # Un octet de moins : vide, jamais un tableau partiel.
+                self.assertEqual(parse_raw_frame(b"\x2a" * (expected_bytes - 1), 4, 3, bit_depth).size, 0)
+
 
 # ---------------------------------------------------------------------------
 # is_valid_frame (3 tests)

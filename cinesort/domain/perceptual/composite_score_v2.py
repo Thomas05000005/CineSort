@@ -41,6 +41,7 @@ from .constants import (
     GLOBAL_WEIGHT_AUDIO_V2,
     GLOBAL_WEIGHT_COHERENCE_V2,
     GLOBAL_WEIGHT_VIDEO_V2,
+    GRAIN_VINTAGE_ERAS_V2,
     SHORT_FILE_WARN_DURATION_S,
     TIER_BRONZE_THRESHOLD,
     TIER_GOLD_THRESHOLD,
@@ -550,10 +551,12 @@ def apply_contextual_adjustments(
                 "dnr_partial",
             )
         elif nature == "film_grain":
-            # Regle 9 : tolerance elargie pour films vintage (pre-1970) — moins penalisant,
-            # bonus legerement reduit pour eviter double comptage.
+            # Regle 9 : tolerance master vintage (eres pellicule, < 1999) — le grain
+            # y est attendu, le bonus est donc reduit pour eviter le double comptage.
+            # Le set d'eres vient de GRAIN_VINTAGE_ERAS_V2 (cf. #444 : la liste ecrite
+            # ici testait deux valeurs inexistantes, la regle ne voyait que 16mm_era).
             bonus = ADJUSTMENT_GRAIN_FILM_BONUS
-            if film_era in ("16mm_era", "35mm_golden", "early_color"):
+            if film_era in GRAIN_VINTAGE_ERAS_V2:
                 bonus = int(bonus * 0.7)
                 trace.append("vintage_master_tolerance")
             video_subs = _patch(video_subs, "perceptual_visual", bonus, "grain_film_authentic")

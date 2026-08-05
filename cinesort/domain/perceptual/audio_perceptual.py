@@ -657,6 +657,7 @@ def _compute_audio_score(
     s_dyn = 50
     s_crest = 50
     s_mel = 70  # defaut quasi-bon (pas de Mel = pas de penalite forte)
+    tp_clipping = False  # #523 : la preuve True Peak doit survivre a la mesure deep
 
     if loud:
         lra = loud.get("loudness_range")
@@ -673,6 +674,7 @@ def _compute_audio_score(
         tp = loud.get("true_peak")
         if tp is not None and tp >= TP_CLIPPING:
             s_clip = max(10, s_clip - 40)
+            tp_clipping = True
 
     if astats:
         nf = astats.get("noise_floor")
@@ -716,13 +718,21 @@ def _compute_audio_score(
     if clip and int(clip.get("total_segments", 0) or 0) > 0:
         pct = clip.get("clipping_pct", 0.0)
         if pct < CLIPPING_ACCEPTABLE_PCT:
-            s_clip = 90
+            s_clip_deep = 90
         elif pct < CLIPPING_MODERATE_PCT:
-            s_clip = 60
+            s_clip_deep = 60
         elif pct < CLIPPING_SEVERE_PCT:
-            s_clip = 30
+            s_clip_deep = 30
         else:
-            s_clip = 10
+            s_clip_deep = 10
+        # #523 : les deux mesures sont INDEPENDANTES. `loud` (true peak) voit un
+        # signal qui touche 0 dBTP ; `clip` (deep) compte les segments ecretes.
+        # La reaffectation seche effacait la preuve TP : un fichier a tp=+0.5 dBTP
+        # mais peu de segments deep ressortait a 90 (« propre ») au lieu de 40.
+        # Sans preuve TP la mesure deep fait autorite (elle est plus fine que le
+        # defaut 80) ; avec preuve TP on garde le pire des deux, une preuve
+        # d'ecretage ne s'annule pas.
+        s_clip = min(s_clip, s_clip_deep) if tp_clipping else s_clip_deep
 
     if mel is not None:
         s_mel = int(getattr(mel, "mel_score", s_mel))

@@ -62,11 +62,30 @@ EXCLUDED_DIRS = frozenset({"tests", "__pycache__"})
 # REFACTOR_PLAN_84.md. `__root__` = modules a la racine du paquet.
 MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     "__root__": 3,
-    "app": 24,
+    # 24 -> 23 : la couche avait 1 de marge non reprise. Le cliquet ne vaut que
+    # s'il colle a la mesure ; une marge dormante laisse passer une recidive
+    # gratuite. Baissee ici parce qu'on y touchait de toute facon.
+    "app": 23,
     "data": 0,
     "domain": 16,
     "infra": 17,
-    "ui": 110,
+    # 110 -> 111 : +1 pour `history_support.get_plan_row`, importe tardivement
+    # dans `film_support` (PR#853). Ce n'est pas un choix de confort : les deux
+    # modules se referencent mutuellement, un import de tete cree un cycle a
+    # l'import du paquet. Justification detaillee dans REFACTOR_PLAN_84.md.
+    # Le TOTAL reste a 170 : la couche `app` rend le point que `ui` prend.
+    # 111 -> 113 (PR#847, +2) : `quality_report_support` importe tardivement
+    # `run_read_support.full_langs_from_embedded` et
+    # `domain.subtitle_helpers._normalize_iso639`.
+    #
+    # Honnetement : je n'ai PAS pu etablir de cycle dur pour ces deux-la —
+    # `run_read_support` n'importe pas `quality_report_support` en retour. Ils
+    # suivent le motif deja etabli dans le module (`dashboard_support.py:300-309`
+    # importe `run_read_support` tardivement a QUATRE endroits), donc les
+    # convertir isolement n'aurait pas de sens : c'est le motif entier qui
+    # demande un nettoyage, et il depasse le perimetre de cette PR.
+    # A reprendre dans le chantier de conversion de la couche `ui`.
+    "ui": 113,
 }
 
 # Borne globale = somme des bornes par couche (170). Gardee pour que le

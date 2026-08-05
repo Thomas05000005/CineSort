@@ -21,7 +21,7 @@ from cinesort.app.omdb_cross_check import cross_check_rows_with_omdb
 from cinesort.app.plan_support import find_duplicate_targets as _find_dups
 from cinesort.app.plan_support import plan_multi_roots
 from cinesort.app.runtime_probe_check import cross_check_rows_with_probe
-from cinesort.domain.conversions import to_bool, to_float
+from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.duplicate_compare import compare_duplicates
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import RunStatus
@@ -203,8 +203,11 @@ def _init_tmdb_client(
     tmdb_timeout_s = to_float(settings.get("tmdb_timeout_s"), 10.0)
     api_key = (settings.get("tmdb_api_key") or "").strip()
     # V5-03 polish v7.7.0 (R5-STRESS-4) : propager le TTL configurable.
+    # Le `or 30` est sans danger ici (contrairement au seuil OMDb plus bas) :
+    # tmdb_cache_ttl_days est clampe [1, 365] au save (settings_support.py:1415)
+    # et l'UI impose min:1 (parametres.js:168), donc 0 n'est pas persistable.
     try:
-        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)  # sentinel-ok: 0 non persistable, cf supra
     except (TypeError, ValueError):
         cache_ttl_days = 30
     if tmdb_enabled and api_key:
@@ -313,8 +316,24 @@ def _validate_and_init_plan_context(
         message=f"start_plan infra ready db_path={store.db_path}",
     )
 
-    run_id = api._generate_unique_run_id(store)
-    run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
+    # RESERVATION ATOMIQUE : le run_id et son dossier `tri_films_<run_id>` sont
+    # pris d'un seul tenant, AVANT toute creation de RunState et avant
+    # start_job. Auparavant l'unicite n'etait verifiee que cote base alors que
+    # le dossier etait deja cree (mkdir exist_ok=True) : deux runs de meme id
+    # partageaient le meme dossier et le second ecrasait le plan.jsonl du
+    # premier sans rien signaler.
+    try:
+        run_id, run_paths = api._reserve_unique_run(store, state_dir)
+    except (OSError, RuntimeError) as exc:
+        return (
+            _err_response(
+                str(exc),
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            ),
+            None,
+        )
     api._debug_log(
         state_dir=state_dir,
         run_id=run_id,
@@ -492,7 +511,11 @@ def _build_plan_job_fn(
                         cache_path=omdb_cache_path,
                         timeout_s=10.0,
                     )
-                    threshold = int(settings.get("omdb_min_confidence_for_call") or 90)
+                    # settings_support.py:1555 persiste deja ce seuil via
+                    # to_int (donc 0 est stocke tel quel, l'UI clampe [0, 100]) :
+                    # un `... or 90` ici le ressusciterait a 90 et appellerait
+                    # OMDb alors que l'utilisateur l'a desactive (#791).
+                    threshold = to_int(settings.get("omdb_min_confidence_for_call"), 90)
                     n_checked = cross_check_rows_with_omdb(
                         rows,
                         omdb_client,
@@ -1411,10 +1434,32 @@ def _mirror_decisions_to_sql(
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:
-    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report."""
+    """Reconstitue un pseudo-probe depuis les metriques detected d'un quality_report.
+
+    Fix revue adversaire PR#854. Cette fonction est le SEUL producteur de probes
+    du comparateur de doublons, et elle ne propageait que la HAUTEUR. Or la
+    hauteur ffprobe est celle du flux encode, bandes noires deja retirees : un
+    2160p scope 2.39:1 (`3840x1600`, la geometrie de la majorite des UHD
+    Blu-ray) tombait dans la classe 1080p et se retrouvait a EGALITE avec un
+    vrai 1080p flat -- le critere Resolution perdait ses 30 points, ce qui
+    suffisait a retourner le verdict global vers « Garder B, archiver A » sur le
+    fichier 5x plus gros. Le verdict etant applicable en masse (« Auto-decider
+    tous », perdants deplaces en _review/_duplicates_user_decided/ a l'apply),
+    la classe se decide desormais sur la LARGEUR comme partout ailleurs.
+
+    L'etiquette canonique n'est propagee que si elle vient d'une MESURE
+    (`resolution_source == "probe"`) : `_resolution_label` retombe sinon sur le
+    nom de release, et un fichier mesure 700x400 nomme `.1080p.` imposerait sa
+    classe au comparateur. Meme regle que `quality_score._effective_resolution_height`.
+    """
+    measured_label = ""
+    if str(detected.get("resolution_source") or "") == "probe":
+        measured_label = str(detected.get("resolution") or "")
     return {
         "video": {
             "height": detected.get("height") or detected.get("resolution_height") or 0,
+            "width": detected.get("width") or 0,
+            "resolution": measured_label,
             "codec": detected.get("video_codec") or "",
             "bitrate": detected.get("bitrate_bps") or (int(detected.get("bitrate_kbps") or 0) * 1000),
             "hdr10": detected.get("hdr10", False),
