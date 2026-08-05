@@ -41,7 +41,22 @@ def is_under_collection_root(
     except (ValueError, TypeError):
         return False
     parts = [part.lower() for part in rel.parts]
-    return len(parts) >= 1 and parts[0] == str(cfg.collection_root_name or "").lower()
+    if not parts:
+        # REVUE 2026-08-03 : `folder` EST la racine de la bibliotheque
+        # (`rel` == "."), cas des films poses EN VRAC directement a la racine
+        # (plan_support_core force alors kind='collection' avec folder == root).
+        # Les 3 appelants utilisent ce predicat comme "ce dossier doit-il etre
+        # redirige sous <root>/<collection_root_name>/ ?" et la reponse pour la
+        # racine est NON, absolument : la cible serait un DESCENDANT de la
+        # source. Repondre False ici menait a deux issues, les deux cassees :
+        # move_collection_folder -> shutil "Cannot move a directory into
+        # itself" (apply bloque a chaque relance, films jamais ranges), et
+        # merge_dir_safe quand <root>/<collection>/<nom racine> existait deja
+        # -> la bibliotheque ENTIERE videe dans _review/_leftovers avec un
+        # apply retournant errors=0. Les films de la racine sont ranges par la
+        # boucle apply normale, qui cree <root>/<Titre (Annee)>/.
+        return True
+    return parts[0] == str(cfg.collection_root_name or "").lower()
 
 
 def movie_dir_title_year(name: str) -> Optional[Tuple[str, int]]:
