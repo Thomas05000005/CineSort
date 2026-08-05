@@ -120,25 +120,51 @@ fourre-tout** : deux causes MESUREES se cachaient derriere (issue #960), et
 « rejouer en isolation » ne prouve rien contre elles — le test passe seul parce
 qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
 
-1. **`%TEMP%` sature.** La suite y laissait **259 dossiers par execution** et
-   rien ne les purge (26 059 avaient ete trouves). Au-dela de quelques milliers
-   d'entrees, la creation/le renommage de dossiers temporaires part en
-   `PermissionError [WinError 5]`. La CI ne le voit jamais : runner neuf a
-   chaque fois. `tests/_temp_leak_guard.py` compte desormais la fuite (il
-   redirige `%TEMP%` vers un bac a sable et compte ce qui reste) et fait
-   echouer la session au-dela de la borne.
+1. **`%TEMP%` sature** — defaut REEL, mais **PAS** la cause du `WinError 5`.
+   La suite y laissait **259 dossiers par execution** et rien ne les purge
+   (26 059 avaient ete trouves) ; la CI ne le voit jamais, runner neuf a chaque
+   fois. `tests/_temp_leak_guard.py` compte desormais la fuite (il redirige
+   `%TEMP%` vers un bac a sable) et fait echouer la session au-dela de la borne.
+
+   Ce fichier a affirme qu'au-dela de quelques milliers d'entrees le renommage
+   partait en `PermissionError [WinError 5]`. **Experience controlee (#965), une
+   seule variable, bras alternes, dossier neuf a chaque tour :**
+
+   ```
+   %TEMP% VIDE   a chaque tour : 10/30 echecs (33 %)
+   %TEMP% SATURE (7 000 dirs)  :  6/30 echecs (20 %)
+   Fisher exact bilateral      : p = 0,38
+   ```
+
+   L'echec se produit donc dans un `%TEMP%` **parfaitement vide**, une fois sur
+   trois, et l'ecart entre les deux bras n'est pas distinguable du hasard. La
+   saturation n'est ni necessaire, ni demontree comme aggravante.
+
+   Une premiere version de l'experience concluait l'inverse (2/12 contre 5/12) :
+   son bras « vide » **se remplissait au fil des tours** — les deux echecs y sont
+   tombes aux tours 6 et 10 — et les deux bras s'executaient l'un apres l'autre.
+   Elle mesurait une saturation progressive, pas son absence.
 2. **Les threads de fond de l'app survivent au test.** Ils continuent d'ecrire
    dans le `state_dir` du test, au point de le **recreer** juste apres le
    `rmtree` du `tearDown` (12 dossiers sur 13 pour `test_api_bridge_lot3.py`),
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
-3. **Une troisieme cause reste INEXPLIQUEE — ne pas reconduire le fourre-tout
-   sous un autre nom.** Le `WinError 5` survit dans un `%TEMP%` neuf et quasi
-   vide : sur la chaine apply/undo, 2 puis 2 echecs sur la branche corrigee,
-   0 puis 3 sur `main`, meme signature. Les deux causes ci-dessus sont mesurees
-   et corrigees ; celle-la ne l'est pas. Attribuer un nouvel echec a l'une des
-   deux premieres demande donc une MESURE, pas une ressemblance.
+3. **Le `WinError 5` lui-meme reste INEXPLIQUE (#965)** — et c'est la SEULE
+   cause connue de cette signature. Il se reproduit a **33 %** dans un `%TEMP%`
+   neuf et vide, sur `apply` (renommage d'un DOSSIER de film), y compris sur le
+   garde anti-destruction de la racine de bibliotheque. Ce n'est donc ni un
+   defaut d'`undo`, ni un effet de la charge, ni un effet de la saturation.
+
+   Deja ecarte par lecture, ne pas y revenir : `sha1_quick` ferme son handle
+   (`with`), et les deux `os.scandir` sans context manager sont fermes en
+   `finally`. Reste a instrumenter quel handle est ouvert a l'instant du rename.
+
+   **« Rejouer en isolation » ne prouve RIEN sur cette famille** : le meme
+   fichier est vert seul et rouge en suite complete, et le cas de #965 est rouge
+   *en* isolation. Attribuer un nouvel echec a l'une des causes 1 ou 2 demande
+   une MESURE, pas une ressemblance — c'est en s'en dispensant que ce fichier
+   avait affirme une causalite que l'experience a ensuite refutee.
 
 ## Conventions
 
