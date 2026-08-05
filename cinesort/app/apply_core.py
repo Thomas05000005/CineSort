@@ -2564,7 +2564,17 @@ def apply_single(
         core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
         return
 
-    if core_mod._single_folder_is_conform(folder.name, title, year, naming_template=cfg.naming_movie_template):
+    # #469 : memes entrees de contexte que `_naming_ctx` ci-dessus (edition +
+    # separator), sinon cette garde NOOP compare le dossier a un nom que ce
+    # meme bloc n'ecrira jamais.
+    if core_mod._single_folder_is_conform(
+        folder.name,
+        title,
+        year,
+        naming_template=cfg.naming_movie_template,
+        edition=edition or "",
+        separator=getattr(cfg, "separator", " "),
+    ):
         core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
         return
 
