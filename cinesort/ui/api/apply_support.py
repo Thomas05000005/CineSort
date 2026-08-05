@@ -2115,6 +2115,13 @@ def _execute_apply(
             # canoniques, donc de reecrire un titre depuis le reseau au moment
             # d'un apply : c'est un chemin de mutilation de titre, il se traite
             # separement et sous test, pas en marge de cette suppression.
+            #
+            # Ne PAS la remettre « pour aligner sur `film_support.apply_tmdb_override` » :
+            # ce helper-la opere sur des rows DICT (payload Bibliotheque / fiche
+            # film), ou `tmdb_id` / `chosen_tmdb_id` sont des cles d'enrichissement
+            # LEGITIMES et relues (cf `_ENRICHMENT_KEYS` de
+            # tests/test_dead_field_invariants.py). Sur l'OBJET PlanRow, ce sont
+            # des attributs fantomes.
             if _ov.get("proposed_title"):
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
