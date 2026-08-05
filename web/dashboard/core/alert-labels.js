@@ -217,6 +217,16 @@ const FLAG_MAP = {
     severity: "warning",
     action: { kind: "open_film", label: "Voir détail" },
   },
+  // #613 : episode TV dont la saison n'a pas ete resolue (nom de type
+  // "Episode 12" sans saison). L'apply REFUSE de le ranger : "Saison 00" est le
+  // dossier des specials, pas une poubelle pour les saisons inconnues.
+  tv_season_unknown: {
+    icon: "📺",
+    label: "Saison indéterminée",
+    description: "La saison de cet épisode n'a pas pu être déterminée. L'application refusera de le ranger (le mettre dans « Saison 00 » le confondrait avec les specials) : renseigner la saison avant Apply.",
+    severity: "warning",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
 };
 
 // AUDIT 2026-06-14 (R6-I) : map de langues pour les flags subtitle_missing_<lang>
