@@ -6,12 +6,16 @@ Couvre :
 - compare_criterion : higher/lower is better, tie
 - compare_per_frame : structure retournee
 - build_comparison_report : gagnant, recommendation, criteria_summary
+- extract_aligned_frames : resolution commune forcee (issue #559)
 - endpoint compare_perceptual expose
 """
 
 from __future__ import annotations
 
 import unittest
+from unittest import mock
+
+import numpy as np
 
 from cinesort.domain.perceptual.comparison import (
     build_comparison_report,
@@ -19,6 +23,7 @@ from cinesort.domain.perceptual.comparison import (
     compare_histograms,
     compare_per_frame,
     compute_pixel_diff,
+    extract_aligned_frames,
 )
 
 # ---------------------------------------------------------------------------
@@ -197,6 +202,101 @@ class BuildComparisonReportTests(unittest.TestCase):
         self.assertIn("Dynamique audio (LRA)", criteria_names)
         self.assertIn("Clipping", criteria_names)
         self.assertEqual(len(criteria_names), 8)  # 5 video + 3 audio
+
+
+# ---------------------------------------------------------------------------
+# extract_aligned_frames — resolution commune forcee (issue #559, 3 tests)
+# ---------------------------------------------------------------------------
+
+
+class ExtractAlignedFramesTests(unittest.TestCase):
+    """Issue #559 : deux fichiers de resolutions differentes doivent etre
+    ramenes a la MEME grille de pixels avant toute comparaison."""
+
+    NATIVE = {"A_1080p.mkv": (1920, 1080), "B_720p.mkv": (1280, 720)}
+
+    @staticmethod
+    def _render(width: int, height: int) -> bytes:
+        """Rend une mire 8-bit dont la valeur ne depend que de la position
+        NORMALISEE : la meme scene rendue a deux resolutions differentes donne
+        des octets identiques une fois ramenee a la meme grille."""
+        if width <= 0 or height <= 0:
+            return b""
+        xs = (np.arange(width) * 256) // width
+        ys = (np.arange(height) * 256) // height
+        return ((xs[None, :] + ys[:, None]) % 256).astype(np.uint8).tobytes()
+
+    def setUp(self) -> None:
+        self.commands: list[list[str]] = []
+
+    def _fake_ffmpeg(self, cmd: list[str], timeout: float) -> tuple[int, bytes, str]:
+        """Faux ffmpeg fidele : sort la frame a la resolution demandee par
+        ``-vf scale=W:H``, et a la resolution NATIVE du fichier sans filtre."""
+        self.commands.append(list(cmd))
+        width, height = self.NATIVE[cmd[cmd.index("-i") + 1]]
+        if "-vf" in cmd:
+            spec = cmd[cmd.index("-vf") + 1]
+            parts = spec.split("scale=")[1].split(":")
+            width, height = int(parts[0]), int(parts[1])
+        return (0, self._render(width, height), "")
+
+    def _run(self, **kwargs) -> list:
+        with mock.patch(
+            "cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary",
+            side_effect=self._fake_ffmpeg,
+        ):
+            return extract_aligned_frames(
+                "/usr/bin/ffmpeg",
+                "A_1080p.mkv",
+                "B_720p.mkv",
+                100.0,
+                100.0,
+                1920,
+                1080,
+                1280,
+                720,
+                frames_count=3,
+                **kwargs,
+            )
+
+    def test_1080p_vs_720p_frames_are_pixel_aligned(self) -> None:
+        """1080p vs 720p : les 2 frames sont sur la meme grille 1280x720."""
+        aligned = self._run()
+
+        # Non-regression : les 3 paires demandees sont bien produites.
+        self.assertEqual(len(aligned), 3)
+        for frame in aligned:
+            self.assertEqual(frame["width"], 1280)
+            self.assertEqual(frame["height"], 720)
+            self.assertEqual(frame["pixels_a"].size, 1280 * 720)
+            self.assertEqual(frame["pixels_b"].size, 1280 * 720)
+            # Coeur du bug : sans mise a l'echelle forcee, la frame A est sortie
+            # en 1920x1080 et tronquee a l'aveugle -> pixels decales.
+            self.assertTrue(np.array_equal(frame["pixels_a"], frame["pixels_b"]))
+            diff = compute_pixel_diff(frame["pixels_a"], frame["pixels_b"])
+            self.assertEqual(diff["mean_diff"], 0.0)
+            self.assertEqual(diff["max_diff"], 0)
+
+    def test_scale_filter_applied_to_both_inputs(self) -> None:
+        """Chaque commande ffmpeg force explicitement la resolution commune."""
+        self._run()
+
+        self.assertEqual(len(self.commands), 6)  # 3 timestamps x 2 fichiers
+        for cmd in self.commands:
+            self.assertIn("-vf", cmd)
+            self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=1280:720")
+
+    def test_missing_probe_width_returns_empty(self) -> None:
+        """Largeur inconnue (probe incomplet) → aucune extraction tentee."""
+        with mock.patch(
+            "cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary",
+            side_effect=self._fake_ffmpeg,
+        ):
+            aligned = extract_aligned_frames(
+                "/usr/bin/ffmpeg", "A_1080p.mkv", "B_720p.mkv", 100.0, 100.0, 0, 0, 1280, 720, frames_count=3
+            )
+        self.assertEqual(aligned, [])
+        self.assertEqual(self.commands, [])
 
 
 # ---------------------------------------------------------------------------
