@@ -2754,6 +2754,15 @@ def _restore_jellyfin_watched(
         result = restore_watched(client, user_id, snapshot, operations)
         if result.restored > 0:
             log_fn("INFO", f"Jellyfin sync : {result.restored} statut(s) vu restauré(s).")
+        if result.counters_lost > 0:
+            # #535 : le statut vu est revenu, mais pas le nombre de lectures ni
+            # la date. Silencieux jusqu'ici, c'etait une perte de donnees
+            # invisible pour l'utilisateur.
+            log_fn(
+                "WARN",
+                f"Jellyfin sync : {result.counters_lost} film(s) restauré(s) SANS leur historique "
+                "(nombre de lectures et date perdus — serveur trop ancien pour l'API UserData ?).",
+            )
         if result.not_found > 0:
             log_fn("WARN", f"Jellyfin sync : {result.not_found} film(s) non retrouvé(s) après re-indexation.")
         if result.errors > 0:

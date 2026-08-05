@@ -31,6 +31,7 @@ from .constants import (
     MEL_N_FILTERS,
     MEL_SOFT_CLIP_HARMONICS_SEVERE_PCT,
     MEL_SOFT_CLIP_HARMONICS_WARN_PCT,
+    MEL_TOP_DB,
     MEL_WEIGHT_AAC_HOLES,
     MEL_WEIGHT_FLATNESS,
     MEL_WEIGHT_MP3_SHELF,
@@ -144,8 +145,12 @@ def apply_mel_filters(
     return np.maximum(mel, 0.0)
 
 
-def mel_to_db(mel_spec: np.ndarray, top_db: float = 80.0, eps: float = 1e-10) -> np.ndarray:
-    """Conversion lineaire -> dB, clippe a [-top_db, 0]."""
+def mel_to_db(mel_spec: np.ndarray, top_db: float = MEL_TOP_DB, eps: float = 1e-10) -> np.ndarray:
+    """Conversion lineaire -> dB, clippe a [-top_db, 0].
+
+    Le plancher `-top_db` est le contrat que consomme `detect_aac_holes` :
+    MEL_AAC_HOLE_THRESHOLD_DB doit rester strictement au-dessus (issue #660).
+    """
     max_val = float(mel_spec.max()) if mel_spec.size > 0 else 1.0
     ref = max(max_val, eps)
     db = 20.0 * np.log10(np.maximum(mel_spec, eps) / ref)
@@ -278,13 +283,16 @@ def detect_mp3_shelf(
         # Nyquist insuffisant, pas de shelf mesurable
         return {"shelf_detected": False, "shelf_drop_db": 0.0, "frames_pct": 0.0}
 
-    drops = []
-    for i in range(mel_spec_db.shape[0]):
-        before_pow = float(np.mean(mel_spec_db[i, before_idx]))
-        after_pow = float(np.mean(mel_spec_db[i, after_idx]))
-        drops.append(before_pow - after_pow)
-
-    drops_arr = np.asarray(drops, dtype=np.float64)
+    # Issue #560 — deux reductions numpy au lieu de deux `np.mean` par frame
+    # (soit ~1400 appels sur un spectrogramme de 700 frames). `dtype=np.float64`
+    # est explicite : le pipeline fournit deja du float64 (verifie sur
+    # `analyze_mel` avec des echantillons f64/f32/int16), mais la fonction est
+    # publique et un appelant qui passerait du float32 verrait sinon la
+    # SOUSTRACTION s'effectuer en float32 — moins precis que la boucle remplacee,
+    # qui repassait par un `float()` Python a chaque frame.
+    before_pow = mel_spec_db[:, before_idx].mean(axis=1, dtype=np.float64)
+    after_pow = mel_spec_db[:, after_idx].mean(axis=1, dtype=np.float64)
+    drops_arr = np.asarray(before_pow - after_pow, dtype=np.float64)
     mean_drop = float(drops_arr.mean()) if drops_arr.size > 0 else 0.0
     frames_with_shelf = int(np.sum(drops_arr > MEL_MP3_SHELF_DROP_DB))
     frames_pct = 100.0 * frames_with_shelf / max(1, drops_arr.size)
@@ -302,7 +310,9 @@ def detect_aac_holes(
 ) -> Dict[str, Any]:
     """Detecte trous spectraux AAC bas bitrate.
 
-    - hole_ratio : fraction de bandes avec puissance moy < -80 dB
+    - hole_ratio : fraction de bandes avec puissance moyenne
+      < MEL_AAC_HOLE_THRESHOLD_DB (strictement au-dessus du plancher de
+      `mel_to_db`, sans quoi aucune bande ne peut jamais etre comptee — #660)
     - synthetic_ratio : fraction de bandes avec variance temporelle < 0.05
 
     Returns: {"hole_ratio": float, "synthetic_ratio": float, "verdict": str}
