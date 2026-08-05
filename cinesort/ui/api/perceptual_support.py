@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
 from cinesort.domain.i18n_messages import t
@@ -43,11 +45,129 @@ from cinesort.domain.perceptual.upscale_detection import (
     compute_fft_hf_ratio_median,
 )
 from cinesort.domain.perceptual.video_analysis import analyze_video_frames, run_filter_graph
+from cinesort.domain.probe_models import probe_quality_is_failed
 from cinesort.infra.probe import ProbeService
+from cinesort.infra.probe.tooling import safe_tool_path
+from cinesort.infra.subprocess_safety import tracked_run
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+def _ffmpeg_platform_kwargs() -> Dict[str, Any]:
+    """Kwargs subprocess Windows pour eviter le flash console ffmpeg.
+
+    Identique a `cinesort.domain.perceptual.ffmpeg_runner._runner_platform_kwargs`
+    mais local pour eviter une dependance ui -> domain interne.
+    """
+    if os.name != "nt":
+        return {}
+    kwargs: Dict[str, Any] = {"creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0))}
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    si.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+    kwargs["startupinfo"] = si
+    return kwargs
+
+
+# ---------------------------------------------------------------------------
+# R8-056 (F5) — Forme canonique perceptuelle servie à la modale
+# ---------------------------------------------------------------------------
+# La modale (perceptual-modal.js) consomme TOP-LEVEL : d.grain_analysis.verdict_label,
+# d.width, d.height, d.display_tier, d.breakdown[]. Or le rapport DB les imbrique
+# (metrics.grain_analysis, metrics.video_perceptual.resolution, global_score_v2_payload)
+# -> grain « — », dimensions 0, breakdown vide. Ce sérialiseur APLATIT le rapport vers
+# le contrat de la modale (jamais servi auparavant). breakdown est DÉRIVÉ des
+# category_scores du payload V2 (cohérent avec les vraies métriques réparées en F4).
+
+_CATEGORY_LABEL_FR = {"video": "Vidéo", "audio": "Audio", "coherence": "Cohérence"}
+
+
+def _tier_to_status(tier: str) -> str:
+    """Mappe un tier V2 -> classe de statut CSS de la modale (good/warning/reject/info)."""
+    t = str(tier or "").strip().lower()
+    if t in ("platinum", "gold"):
+        return "good"
+    if t in ("silver", "bronze"):
+        return "warning"
+    if t == "reject":
+        return "reject"
+    return "info"
+
+
+def _category_to_breakdown_row(cat: Dict[str, Any]) -> Dict[str, Any]:
+    """Traduit un category_score (video/audio/coherence) en ligne de breakdown modale."""
+    value = float(cat.get("value") or 0.0)
+    weight = float(cat.get("weight") or 0.0)
+    name = str(cat.get("name") or "")
+    return {
+        "component": _CATEGORY_LABEL_FR.get(name, name or "?"),
+        "weight": round(weight, 2),
+        "value_label": f"{value:.0f}/100",
+        "status": _tier_to_status(str(cat.get("tier") or "")),
+        "points": round(value * weight, 1),  # contribution pondérée au score global
+    }
+
+
+def _flatten_perceptual_for_modal(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Enrichit le rapport DB avec la forme canonique top-level attendue par la modale.
+
+    Mutation idempotente : ne réécrit pas un champ déjà présent. codec N'EST PAS dérivable
+    (le rapport perceptuel ne stocke pas le codec vidéo — résidu documenté, la modale
+    retombe sur « — »).
+    """
+    if not isinstance(report, dict):
+        return report
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    grain = metrics.get("grain_analysis")
+    if isinstance(grain, dict) and not report.get("grain_analysis"):
+        report["grain_analysis"] = grain
+    vid = metrics.get("video_perceptual") if isinstance(metrics.get("video_perceptual"), dict) else {}
+    res = vid.get("resolution") if isinstance(vid.get("resolution"), dict) else {}
+    if res:
+        if report.get("width") is None:
+            report["width"] = res.get("width")
+        if report.get("height") is None:
+            report["height"] = res.get("height")
+    # R8-056b (filet F5) : remonter hdr_analysis (sibling de resolution sous
+    # video_perceptual). OUBLIÉ par le flatten initial -> d.hdr_analysis undefined ->
+    # la modale retombait sur « sdr » pour TOUS les films (y compris vrais HDR10/DV/HLG),
+    # valeur FAUSSE et non « unknown » : résultat faux silencieux (famille F4).
+    hdr = vid.get("hdr_analysis")
+    if isinstance(hdr, dict) and not report.get("hdr_analysis"):
+        report["hdr_analysis"] = hdr
+    # Ultra-audit 2026-08 (N32) : deux champs de MEME FAMILLE que hdr_analysis
+    # etaient oublies par le flatten. `to_dict()` (domain/perceptual/models.py)
+    # les place sous `metrics`, la modale les lit au top-level :
+    #   - audio_perceptual -> perceptual-modal.js:327 (dynamic_range_db) : la
+    #     dynamique audio etait toujours absente ;
+    #   - cross_verdicts   -> perceptual-modal.js:227 et :422 : la section
+    #     « Verdicts croises » etait TOUJOURS vide, pour tous les films.
+    # Les deux lectures sont gardees cote JS (`&&` / Array.isArray) : pas de
+    # crash, juste une information silencieusement perdue.
+    audio = metrics.get("audio_perceptual")
+    if isinstance(audio, dict) and not report.get("audio_perceptual"):
+        flat_audio = dict(audio)
+        # La modale lit `dynamic_range_db`, que le rapport ne porte nulle part :
+        # la valeur existe sous `astats.dynamic_range` (ffmpeg astats, en dB,
+        # cf domain/perceptual/audio_perceptual.py:249). On la derive ici sans
+        # toucher au rapport stocke (copie).
+        astats = audio.get("astats") if isinstance(audio.get("astats"), dict) else {}
+        if flat_audio.get("dynamic_range_db") is None and astats.get("dynamic_range") is not None:
+            flat_audio["dynamic_range_db"] = astats["dynamic_range"]
+        report["audio_perceptual"] = flat_audio
+    cross = metrics.get("cross_verdicts")
+    if isinstance(cross, list) and cross and not report.get("cross_verdicts"):
+        report["cross_verdicts"] = cross
+    if report.get("global_tier_v2") and not report.get("display_tier"):
+        report["display_tier"] = report["global_tier_v2"]
+    payload = report.get("global_score_v2_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    cats = payload.get("category_scores")
+    if isinstance(cats, list) and cats and not report.get("breakdown"):
+        report["breakdown"] = [_category_to_breakdown_row(c) for c in cats if isinstance(c, dict)]
+    return report
 
 
 def get_perceptual_report(
@@ -55,10 +175,17 @@ def get_perceptual_report(
     run_id: str,
     row_id: str,
     options: Optional[Dict[str, Any]] = None,
+    *,
+    rows_index: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Analyse perceptuelle d'un film unique."""
+    """Analyse perceptuelle d'un film unique.
+
+    `rows_index` (usage interne, cf `analyze_perceptual_batch`) : index
+    row_id -> PlanRow deja charge. Evite de relire plan.jsonl une fois par
+    film quand le run n'est pas en memoire.
+    """
     try:
-        ctx = _validate_and_load_context(api, run_id, row_id, options)
+        ctx = _validate_and_load_context(api, run_id, row_id, options, rows_index=rows_index)
         if isinstance(ctx, dict):
             return ctx  # erreur de validation
         return _execute_perceptual_analysis(api, run_id, row_id, ctx)
@@ -99,8 +226,10 @@ def get_perceptual_details(
                 "message": "Aucune analyse perceptuelle persistee pour ce film. Lancez l'analyse depuis l'inspecteur.",
                 "missing": True,
             }
-        # Le DB mixin renvoie deja un dict complet. On le wrap juste avec ok=True.
-        return {"ok": True, "details": report}
+        # R8-056 (F5) : aplatit vers la forme canonique que la modale consomme
+        # (grain_analysis / width / height / display_tier / breakdown top-level).
+        # Avant, ces champs n'existaient qu'imbriqués -> modale à moitié vide.
+        return {"ok": True, "details": _flatten_perceptual_for_modal(report)}
     except (KeyError, ValueError, OSError) as exc:
         logger.warning("get_perceptual_details error run=%s row=%s: %s", run_id, row_id, exc)
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
@@ -111,13 +240,16 @@ def _validate_and_load_context(
     run_id: str,
     row_id: str,
     options: Optional[Dict[str, Any]],
+    *,
+    rows_index: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Valide les pre-requis et charge le contexte. Retourne un dict erreur ou un tuple contexte."""
     settings = api.settings.get_settings()
     if not settings.get("perceptual_enabled"):
         return _err_response(t("errors.perceptual_disabled"), category="state", level="info", log_module=__name__)
 
-    ffprobe_path = str(settings.get("ffprobe_path") or "")
+    # R8-032 (F3) : valider le binaire AVANT exec (meme garde que get_tools_status).
+    ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")
     ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
     if not ffmpeg_path:
         # H-7 audit QA 20260429 : message explicite + suggestion d'action
@@ -146,13 +278,39 @@ def _validate_and_load_context(
             for k in ("audio_fingerprint", "ssim_self_ref", "upscale_verdict", "spectral_cutoff_hz", "lossy_verdict"):
                 if k in existing and existing[k] is not None:
                     metrics[k] = existing[k]
+            # R6-PERC-CACHE-HIT-VOCAB : applique le meme dispatch V1/V2 que le
+            # chemin non-cache (cf lignes 482-505) pour eviter que le cache_hit
+            # expose le vocabulaire V1 (reference/excellent/bon/mediocre/degrade)
+            # alors que VN-B.1 a promu V2 (Platinum/Gold/Silver/Bronze/Reject)
+            # comme source de verite par defaut (composite_score_version=2).
+            score_version = _normalize_composite_score_version(settings.get("composite_score_version"))
+            metrics["composite_score_version"] = score_version
+            if score_version == 2:
+                v2_score = existing.get("global_score_v2")
+                v2_tier = existing.get("global_tier_v2")
+                if v2_score is not None and v2_tier:
+                    metrics["global_score"] = int(round(float(v2_score)))
+                    metrics["global_tier"] = str(v2_tier)
+                else:
+                    metrics["composite_score_version"] = 1
             return {"ok": True, "cache_hit": True, "perceptual": metrics}
 
     state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
     rs = api._get_run(run_id)
-    rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
-    row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
+    # Ultra-audit 2026-08 (N24) : sur un run ANTERIEUR au process courant,
+    # `api._runs` est vide (seul start_plan le peuple) -> cette ligne relisait
+    # INTEGRALEMENT plan.jsonl une fois PAR FILM. Mesure sur le plan reel de
+    # l'utilisateur : 1027 relectures, 1.45 Go relus, +33 s, et ~19 Mo de
+    # PlanRow x N workers en pointe. `rows_index` (fourni par
+    # analyze_perceptual_batch) charge le plan UNE fois pour tout le batch.
+    if rs and rs.rows:
+        row = next((r for r in rs.rows if str(r.row_id) == str(row_id)), None)
+    elif rows_index is not None:
+        row = rows_index.get(str(row_id))
+    else:
+        rows = api._load_rows_from_plan_jsonl(run_paths)
+        row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
     if row is None:
         return _err_response(
             "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
@@ -169,7 +327,8 @@ def _validate_and_load_context(
     width = int(video_info.get("width") or 0)
     height = int(video_info.get("height") or 0)
     probe_quality = str(normalized.get("probe_quality") or "")
-    if probe_quality == "FAILED" and width == 0 and height == 0:
+    # BUG-018 (hotfix1) : helper centralise vs == "FAILED" strict case-sensitive.
+    if probe_quality_is_failed(probe_quality) and width == 0 and height == 0:
         return _err_response(
             "Probe echouee (fichier corrompu ou format non supporte).",
             category="runtime",
@@ -250,6 +409,11 @@ def _execute_perceptual_analysis(
             width=width,
             height=height,
         )
+        # R8-043 (F4) : reporter le type HDR détecté par le probe (métadonnée
+        # couleur bt2020/smpte2084/hlg...) sur le modèle perceptuel -> exposé en
+        # hdr_analysis dans to_dict -> la modale affiche le vrai format (plus « sdr »
+        # systématique). hdr_type vide/absent -> reste "sdr".
+        video_local.hdr_type = str(video_info.get("hdr_type") or "sdr")
         tmdb_meta = _load_tmdb_metadata(api, row)
         # §15 v7.5.0 : utilise analyze_grain_v2 si Grain Intelligence active
         if p_settings.get("grain_intelligence_enabled"):
@@ -257,7 +421,7 @@ def _execute_perceptual_analysis(
             codec = str(video_info.get("codec") or "").lower()
             av1_info = None
             if codec in ("av1", "av01"):
-                ffprobe_path_local = str(settings.get("ffprobe_path") or "") or "ffprobe"
+                ffprobe_path_local = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
                 av1_info = extract_av1_film_grain_params(ffprobe_path_local, str(media_path))
             grain_local = analyze_grain_v2(
                 frames_local,
@@ -283,6 +447,7 @@ def _execute_perceptual_analysis(
                 str(media_path),
                 duration_s=duration_s,
                 video_height=height,
+                video_width=width,  # #525 : re-upscale a la resolution NATIVE
                 is_animation=grain_local.is_animation,
             )
             video_local.ssim_self_ref = ssim_result.ssim_y
@@ -294,13 +459,15 @@ def _execute_perceptual_analysis(
         if p_settings["hdr10_plus_detection_enabled"]:
             hdr_type = str(video_info.get("hdr_type") or "")
             if hdr_type == "hdr10":
-                ffprobe_path_local = str(settings.get("ffprobe_path") or "") or "ffprobe"
+                ffprobe_path_local = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
                 video_local.has_hdr10_plus_detected = detect_hdr10_plus_multi_frame(
                     ffprobe_path_local,
                     str(media_path),
                 )
         # §7 v7.5.0 : Fake 4K detection FFT 2D + combinaison avec §13 SSIM
-        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height)
+        # #823 : bit_depth transmis, sinon les gardes « frame sombre / uniforme »
+        # restent calibrees 8 bits et ne filtrent quasi rien sur du 10 bits.
+        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height, bit_depth)
         video_local.fft_hf_ratio_median = fft_ratio
         verdict_fft, _conf_fft = classify_fake_4k_fft(
             fft_ratio, video_height=height, is_animation=grain_local.is_animation
@@ -459,19 +626,56 @@ def _execute_perceptual_analysis(
         result_dict["global_score_v2"] = gv2_payload
 
     # V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : dispatch V1/V2.
-    # - Defaut (`composite_score_version=1`) : on conserve le score V1 historique
-    #   comme `global_score`/`global_tier`, V2 reste accessible via la cle
-    #   `global_score_v2` (et en BDD).
-    # - Toggle V2 (`composite_score_version=2`) : on promeut V2 en score
-    #   principal pour ce payload (`global_score`, `global_tier`, marqueur
-    #   `composite_score_version=2`). Si le calcul V2 a echoue, fallback
-    #   silencieux vers V1 (jamais de KeyError pour l'UI).
-    result_dict["composite_score_version"] = 1
-    if p_settings.get("composite_score_version") == 2 and gv2_payload is not None and gv2_score is not None:
-        result_dict["global_score"] = int(round(float(gv2_score)))
-        result_dict["global_tier"] = str(gv2_tier or result_dict.get("global_tier") or "")
-        result_dict["composite_score_version"] = 2
+    # VN-B.1 (Vague N batch 2) : V2 est desormais la source de verite unique
+    # pour `global_score`/`global_tier` (vocabulaire Platinum/Gold/Silver/...
+    # Bronze/Reject). V1 reste un kill-switch de rollback explicite
+    # (composite_score_version=1) qui expose le vocabulaire historique
+    # reference/excellent/bon/mediocre/degrade. Avant VN-B.1 les 2 vocabulaires
+    # cohabitaient cote UI selon l'endroit consomme (audit Vague N).
+    # - Defaut (`composite_score_version=2`) : on promeut V2 comme score
+    #   principal. Si le calcul V2 a echoue, fallback silencieux vers V1
+    #   (jamais de KeyError pour l'UI).
+    # - Kill-switch (`composite_score_version=1`) : conserve les valeurs V1
+    #   historiques exposees par build_perceptual_result.
+    score_version = int(p_settings.get("composite_score_version") or 2)
+    result_dict["composite_score_version"] = score_version
+    if score_version == 2:
+        if gv2_payload is not None and gv2_score is not None:
+            result_dict["global_score"] = int(round(float(gv2_score)))
+            result_dict["global_tier"] = str(gv2_tier or result_dict.get("global_tier") or "")
+        else:
+            # Fallback silencieux : V2 indisponible, on conserve V1 mais on
+            # annonce explicitement la version effectivement exposee pour que
+            # l'UI ne mixe pas 2 vocabulaires inconsciemment.
+            result_dict["composite_score_version"] = 1
     return {"ok": True, "cache_hit": False, "perceptual": result_dict}
+
+
+def _build_plan_rows_index(api: Any, run_id: str) -> Optional[Dict[str, Any]]:
+    """Index row_id -> PlanRow charge UNE fois depuis plan.jsonl (cf N24).
+
+    Retourne None quand l'index n'apporte rien (run deja en memoire) ou quand
+    le plan est illisible : les appelants retombent alors sur le chemin
+    historique, film par film. Le dict est lu seulement (jamais mute) par les
+    workers, comme l'est deja `rs.rows` sur le chemin en memoire.
+    """
+    try:
+        rs = api._get_run(run_id)
+        if rs is not None and getattr(rs, "rows", None):
+            return None  # deja en memoire : rien a precharger
+        found = api._find_run_row(run_id)
+        if not found:
+            return None
+        run_row, _store = found
+        state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+        rows = api._load_rows_from_plan_jsonl(run_paths)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:
+        logger.debug("perceptual batch: prechargement du plan impossible (%s)", exc)
+        return None
+    if not rows:
+        return None
+    return {str(r.row_id): r for r in rows}
 
 
 def analyze_perceptual_batch(
@@ -479,6 +683,7 @@ def analyze_perceptual_batch(
     run_id: str,
     row_ids: Any,
     options: Optional[Dict[str, Any]] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, Any]:
     """Analyse perceptuelle batch sur plusieurs films.
 
@@ -511,14 +716,37 @@ def analyze_perceptual_batch(
 
     cancel_event = _resolve_cancel_event(api)
 
+    # Ultra-audit 2026-08 (N24) : charger le plan UNE seule fois pour tout le
+    # batch. Sans ca, chaque film relisait plan.jsonl en entier (le run n'est
+    # en memoire que s'il a ete lance par CE process). None = le chemin
+    # historique par film reste en place (aucune regression si l'index echoue).
+    rows_index = _build_plan_rows_index(api, run_id) if len(ids) > 1 else None
+
     # Choix du nombre de workers + fast path sequentiel.
     if not parallelism_enabled or len(ids) < 2:
         max_workers = 1
     else:
         max_workers = resolve_batch_workers(configured_workers)
 
+    # AUDIT 2026-06-13 (R5-C) : progress_cb(done, total) appele apres CHAQUE film
+    # (thread-safe) pour alimenter une barre de progression cote UI sans perdre
+    # le parallelisme. None (defaut) = comportement historique inchange.
+    _total = len(ids)
+    _done_lock = threading.Lock()
+    _done = [0]
+
     def _worker(rid: str) -> Dict[str, Any]:
-        return get_perceptual_report(api, run_id, rid, options)
+        try:
+            return get_perceptual_report(api, run_id, rid, options, rows_index=rows_index)
+        finally:
+            if progress_cb is not None:
+                with _done_lock:
+                    _done[0] += 1
+                    current = _done[0]
+                try:
+                    progress_cb(current, _total)
+                except Exception:  # noqa: BLE001 - un cb defaillant ne casse pas le batch
+                    logger.debug("analyze_perceptual_batch: progress_cb a leve, ignore", exc_info=True)
 
     raw_results = run_batch_parallel(
         ids,
@@ -575,7 +803,7 @@ def compare_perceptual(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             # H-7 audit QA 20260429 : message explicite avec marqueur
@@ -751,7 +979,7 @@ def get_perceptual_compare_frames(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             return _err_response(
@@ -925,32 +1153,75 @@ def _run_perceptual_job(
     pairs: List[Dict[str, str]],
     options: Optional[Dict[str, Any]],
 ) -> None:
-    """Worker thread daemon : execute compare_perceptual sur chaque paire."""
+    """Worker thread daemon : execute compare_perceptual sur chaque paire.
+
+    BUG-005: garde-fou large `except Exception` autour de toute la boucle worker
+    pour eviter qu'une exception inattendue (RuntimeError, AttributeError, etc.)
+    laisse le job en status="running" indefiniment. Le catch etroit interne
+    (OSError/KeyError/TypeError/ValueError) reste pour qu'une paire defaillante
+    n'interrompe pas le batch, tandis que le catch externe garantit une
+    finalisation systematique status=error+ts_end en cas de plantage fatal.
+
+    Hotfix2 (H12) : verifie `api._perceptual_cancel_event` (s'il existe) entre
+    chaque paire pour permettre un shutdown propre du batch sans laisser de
+    ffmpeg orphelins ni de jobs bloques en "running". Les ffmpeg lances par
+    compare_perceptual sont deja proteges par `tracked_run` (registre global
+    + cleanup atexit), donc le shutdown gracieux les tue. Le check ici evite
+    de demarrer une NOUVELLE paire apres signal cancel + marque le job comme
+    "cancelled" avec ts_end pour finalisation propre.
+    """
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     done_count = 0
-    for pair in pairs:
-        try:
-            res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
-            if isinstance(res, dict) and res.get("ok"):
-                results.append({**pair, "ok": True})
-            else:
-                msg = str(res.get("message", "")) if isinstance(res, dict) else "erreur inconnue"
-                errors.append({**pair, "ok": False, "message": msg})
-        except (OSError, KeyError, TypeError, ValueError) as exc:
-            errors.append({**pair, "ok": False, "message": str(exc)})
-        done_count += 1
-        _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
+    cancel_event = _resolve_cancel_event(api)
+    cancelled = False
+    try:
+        for pair in pairs:
+            # H12: check cancel AVANT de lancer une nouvelle paire — evite de
+            # demarrer un compare_perceptual (qui spawn ffmpeg) sur shutdown.
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+            try:
+                res = compare_perceptual(api, pair["run_id"], pair["row_a"], pair["row_b"], options)
+                if isinstance(res, dict) and res.get("ok"):
+                    results.append({**pair, "ok": True})
+                else:
+                    msg = str(res.get("message", "")) if isinstance(res, dict) else "erreur inconnue"
+                    errors.append({**pair, "ok": False, "message": msg})
+            except (OSError, KeyError, TypeError, ValueError) as exc:
+                errors.append({**pair, "ok": False, "message": str(exc)})
+            done_count += 1
+            _record_job_snapshot(job_id, done=done_count, errors=list(errors), results=list(results))
 
-    _record_job_snapshot(
-        job_id,
-        status="done",
-        done=done_count,
-        ts_end=time.time(),
-        results=list(results),
-        errors=list(errors),
-    )
-    _trim_perceptual_jobs()
+        # Status final : cancelled si event signale en cours de boucle, sinon done.
+        final_status = "cancelled" if cancelled else "done"
+        _record_job_snapshot(
+            job_id,
+            status=final_status,
+            done=done_count,
+            ts_end=time.time(),
+            results=list(results),
+            errors=list(errors),
+        )
+    except Exception as exc:  # noqa: BLE001 - garde-fou worker thread
+        logger.exception("perceptual job %s a echoue: %s", job_id, exc)
+        try:
+            _record_job_snapshot(
+                job_id,
+                status="error",
+                done=done_count,
+                ts_end=time.time(),
+                results=list(results),
+                errors=list(errors) + [{"ok": False, "message": f"job worker failure: {exc}"}],
+            )
+        except Exception:  # noqa: BLE001 - dernier rempart, jamais propager hors du thread
+            logger.exception("perceptual job %s : impossible d'enregistrer le snapshot d'erreur", job_id)
+    finally:
+        try:
+            _trim_perceptual_jobs()
+        except Exception:  # noqa: BLE001
+            logger.exception("perceptual job %s : _trim_perceptual_jobs a echoue", job_id)
 
 
 def queue_perceptual_analyses(
@@ -1003,6 +1274,105 @@ def queue_perceptual_analyses(
     thread.start()
 
     return {"ok": True, "job_id": job_id, "total": len(normalized)}
+
+
+def _run_perceptual_batch_job(
+    api: Any,
+    job_id: str,
+    run_id: str,
+    row_ids: List[str],
+    options: Optional[Dict[str, Any]],
+) -> None:
+    """Worker thread daemon : analyse perceptuelle batch SINGLE-film (pas paires).
+
+    Reutilise analyze_perceptual_batch (parallelisme + tally) en lui passant un
+    progress_cb qui met a jour le snapshot du job (done/total) apres chaque film.
+    Garde-fou large pour finaliser le job meme en cas de plantage (cf
+    _run_perceptual_job pour la meme logique sur les paires).
+    """
+    try:
+
+        def _cb(done: int, _total: int) -> None:
+            _record_job_snapshot(job_id, done=done)
+
+        res = analyze_perceptual_batch(api, run_id, row_ids, options, progress_cb=_cb)
+        ok = bool(res.get("ok"))
+        results = list(res.get("results") or [])
+        errors = list(res.get("errors") or [])
+        _record_job_snapshot(
+            job_id,
+            status="done" if ok else "error",
+            done=int(res.get("total") or len(row_ids)),
+            ts_end=time.time(),
+            results=results,
+            errors=errors,
+            success_count=int(res.get("success_count") or len(results)),
+            error_count=int(res.get("error_count") or len(errors)),
+        )
+    except Exception as exc:  # noqa: BLE001 - garde-fou worker thread
+        logger.exception("perceptual batch job %s a echoue: %s", job_id, exc)
+        try:
+            _record_job_snapshot(
+                job_id,
+                status="error",
+                ts_end=time.time(),
+                errors=[{"ok": False, "message": f"job worker failure: {exc}"}],
+            )
+        except Exception:  # noqa: BLE001 - dernier rempart
+            logger.exception("perceptual batch job %s : snapshot d'erreur impossible", job_id)
+    finally:
+        try:
+            _trim_perceptual_jobs()
+        except Exception:  # noqa: BLE001
+            logger.exception("perceptual batch job %s : _trim a echoue", job_id)
+
+
+def queue_perceptual_batch(
+    api: Any,
+    run_id: str,
+    row_ids: Any,
+    options: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Queue une analyse perceptuelle batch SINGLE-film en background.
+
+    AUDIT 2026-06-13 (R5-C/D) : variante async de analyze_perceptual_batch pour
+    la bibliotheque. Avant, le bouton "Analyser perceptuel" appelait le endpoint
+    bloquant -> requete suspendue plusieurs minutes sans progression ni refresh,
+    toast "lancee" trompeur. On expose desormais un job_id pollable via
+    get_perceptual_job_status (meme registre que les paires de doublons), avec
+    progression done/total.
+
+    Returns: {ok, job_id, total} ou err.
+    """
+    ids = [str(r) for r in (row_ids or []) if str(r).strip()]
+    if not run_id or not str(run_id).strip():
+        return _err_response("run_id requis.", category="validation", level="info", log_module=__name__)
+    if not ids:
+        return _err_response("Aucun row_id valide.", category="validation", level="info", log_module=__name__)
+
+    job_id = f"perceptual_batch_{int(time.time() * 1000)}_{id(ids) & 0xFFFF:04x}"
+    snapshot: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": "running",
+        "total": len(ids),
+        "done": 0,
+        "results": [],
+        "errors": [],
+        "ts_start": time.time(),
+        "ts_end": None,
+    }
+    with _PERCEPTUAL_JOBS_LOCK:
+        _PERCEPTUAL_JOBS[job_id] = snapshot
+
+    thread = threading.Thread(
+        target=_run_perceptual_batch_job,
+        args=(api, job_id, str(run_id), ids, options),
+        name=f"perc-batch-{job_id}",
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "job_id": job_id, "total": len(ids)}
 
 
 def get_perceptual_job_status(api: Any, job_id: str) -> Dict[str, Any]:  # noqa: ARG001
@@ -1086,7 +1456,7 @@ def get_perceptual_compare_audio(
                 log_module=__name__,
             )
 
-        ffprobe_path = str(settings.get("ffprobe_path") or "")
+        ffprobe_path = safe_tool_path(settings.get("ffprobe_path"), "ffprobe")  # R8-032 (F3)
         ffmpeg_path = resolve_ffmpeg_path(ffprobe_path)
         if not ffmpeg_path:
             return _err_response(
@@ -1129,8 +1499,8 @@ def get_perceptual_compare_audio(
 
         probe_a = _load_probe(api, store, run_row, media_a)
         probe_b = _load_probe(api, store, run_row, media_b)
-        na = probe_a.get("normalized") if isinstance(probe_a, dict) else {} or {}
-        nb = probe_b.get("normalized") if isinstance(probe_b, dict) else {} or {}
+        na = (probe_a.get("normalized") if isinstance(probe_a, dict) else {}) or {}
+        nb = (probe_b.get("normalized") if isinstance(probe_b, dict) else {}) or {}
         dur_a = float(na.get("duration_s") or 0)
         dur_b = float(nb.get("duration_s") or 0)
 
@@ -1185,9 +1555,13 @@ def _extract_audio_waveform_b64(
 
     Renvoie chaine vide si ffmpeg echoue (pas d'erreur, l'UI peut afficher
     un placeholder).
+
+    Hotfix2 (C1) : utilise `tracked_run` pour garantir le cleanup du child
+    ffmpeg en cas de shutdown / KeyboardInterrupt / exception (sinon zombie
+    ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
+    le flash de console.
     """
     import base64
-    import subprocess
 
     cmd = [
         ffmpeg_path,
@@ -1211,12 +1585,14 @@ def _extract_audio_waveform_b64(
         "png",
         "-",
     ]
+    platform_kwargs = _ffmpeg_platform_kwargs()
     try:
-        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+        result = tracked_run(  # noqa: S603 - cmd built from sanitized args
             cmd,
             capture_output=True,
             timeout=30,
             check=False,
+            **platform_kwargs,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.debug("waveform ffmpeg failed (%s)", exc)
@@ -1232,9 +1608,14 @@ def _extract_audio_clip_b64(
     ts: float,
     duration_s: int,
 ) -> str:
-    """Extrait un clip MP3 court via ffmpeg + libmp3lame, retourne base64."""
+    """Extrait un clip MP3 court via ffmpeg + libmp3lame, retourne base64.
+
+    Hotfix2 (C1) : utilise `tracked_run` pour garantir le cleanup du child
+    ffmpeg en cas de shutdown / KeyboardInterrupt / exception (sinon zombie
+    ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
+    le flash de console.
+    """
     import base64
-    import subprocess
 
     cmd = [
         ffmpeg_path,
@@ -1259,12 +1640,14 @@ def _extract_audio_clip_b64(
         "mp3",
         "-",
     ]
+    platform_kwargs = _ffmpeg_platform_kwargs()
     try:
-        result = subprocess.run(  # noqa: S603 - cmd built from sanitized args
+        result = tracked_run(  # noqa: S603 - cmd built from sanitized args
             cmd,
             capture_output=True,
             timeout=30,
             check=False,
+            **platform_kwargs,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.debug("audio clip ffmpeg failed (%s)", exc)
@@ -1280,14 +1663,18 @@ def enrich_quality_report_with_perceptual(
     row_id: str,
     result: Dict[str, Any],
     *,
-    composite_score_version: int = 1,
+    composite_score_version: int = 2,
 ) -> None:
     """Enrichit un rapport qualite technique avec les donnees perceptuelles si disponibles.
 
     V4-05 (Polish Total v7.7.0, R4-PERC-7 / H16) : si `composite_score_version=2`,
     on substitue le score/tier global par la version V2 (stockee en BDD via
     migration 018). Fallback silencieux sur V1 si V2 indisponible (legacy row
-    sans calcul V2, ou setting V2 active mais cache V1 historique).
+    sans calcul V2, ou kill-switch V1 active).
+
+    VN-B.1 (Vague N batch 2) : V2 est desormais le defaut explicite. Les
+    appels legacy sans kwarg recoivent automatiquement le vocabulaire
+    Platinum/Gold/Silver/Bronze/Reject, supprimant le mix v1/v2 cote UI.
     """
     try:
         perc = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
@@ -1361,6 +1748,40 @@ def _load_probe(api: Any, store: Any, run_row: Any, media_path: Any) -> Dict[str
     return probe.probe_file(media_path=media_path, settings=probe_settings)
 
 
+def _build_tmdb_client(api: Any):
+    """Construit un TmdbClient depuis les settings (secrets en clair), ou None.
+
+    AUDIT 2026-06-10 (REAL 2/2) : `api._tmdb_client()` n'existe pas sur
+    CineSortApi -> AttributeError (hors du except de _load_tmdb_metadata) qui
+    remontait dans _video_task et faisait echouer TOUTE l'analyse video
+    perceptuelle (grain, fake-4K, HDR10+, etc.) pour tout film avec un tmdb_id.
+    On construit le client correctement, avec la cle dé-masquee.
+    """
+    try:
+        settings = api._internal_settings()
+        api_key = str(settings.get("tmdb_api_key") or "").strip()
+        if not api_key:
+            return None
+        import cinesort.infra.state as _state  # noqa: PLC0415
+        from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
+        from cinesort.ui.api.settings_support import normalize_user_path  # noqa: PLC0415
+
+        state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
+        try:
+            cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
+        except (TypeError, ValueError):
+            cache_ttl_days = 30
+        return TmdbClient(
+            api_key=api_key,
+            cache_path=state_dir / "tmdb_cache.json",
+            timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
+            cache_ttl_days=cache_ttl_days,
+        )
+    except (ImportError, AttributeError, OSError, TypeError, ValueError) as exc:
+        logger.debug("perceptual: build TmdbClient failed (best-effort): %s", exc)
+        return None
+
+
 def _load_tmdb_metadata(api: Any, row: Any) -> Optional[Dict[str, Any]]:
     """Charge les metadata TMDb pour l'analyse grain (genres, budget, companies)."""
     tmdb_id = 0
@@ -1370,10 +1791,10 @@ def _load_tmdb_metadata(api: Any, row: Any) -> Optional[Dict[str, Any]]:
     if tmdb_id <= 0:
         return None
     try:
-        tmdb = api._tmdb_client()
+        tmdb = _build_tmdb_client(api)
         if tmdb:
             return tmdb.get_movie_metadata_for_perceptual(tmdb_id)
-    except (ImportError, KeyError, OSError, TypeError, ValueError):
+    except (ImportError, AttributeError, KeyError, OSError, TypeError, ValueError):
         pass
     return None
 

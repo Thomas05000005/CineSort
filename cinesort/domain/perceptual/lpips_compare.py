@@ -256,7 +256,7 @@ def preprocess_frame_for_lpips(
         4. Normaliser [0, 255] -> [-1, 1].
         5. (1, 3, target_size, target_size) float32.
     """
-    if not pixels_y or width <= 0 or height <= 0:
+    if pixels_y is None or len(pixels_y) == 0 or width <= 0 or height <= 0:
         return None
     expected = int(width) * int(height)
     if len(pixels_y) != expected:
@@ -308,10 +308,14 @@ def compute_lpips_distance_pair(
         logger.warning("LPIPS inference erreur : %s", exc)
         return None
 
-    raw = outputs[0]
     try:
+        # outputs peut etre [] (run partiel) -> IndexError
+        # outputs[0] peut etre None (legacy onnxruntime sur certaines versions)
+        # -> np.asarray(None) renvoie array(None, dtype=object), reshape OK,
+        # mais float(None) -> TypeError. Couvrir les 3 cas.
+        raw = outputs[0]
         return float(np.asarray(raw).reshape(-1)[0])
-    except (IndexError, ValueError):
+    except (IndexError, ValueError, TypeError):
         return None
 
 
@@ -367,8 +371,10 @@ def compute_lpips_comparison(
     for frame in selected:
         w = int(frame.get("width", 0))
         h = int(frame.get("height", 0))
-        pa = frame.get("pixels_a") or []
-        pb = frame.get("pixels_b") or []
+        pa = frame.get("pixels_a")
+        pb = frame.get("pixels_b")
+        if pa is None or pb is None:
+            continue
         pre_a = preprocess_frame_for_lpips(pa, w, h)
         pre_b = preprocess_frame_for_lpips(pb, w, h)
         if pre_a is None or pre_b is None:

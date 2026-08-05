@@ -122,7 +122,11 @@ def _get_jellyfin_date_map(api: Any, settings: Dict[str, Any]) -> Dict[str, str]
         library_id = settings.get("jellyfin_library_id") or None
         if not user_id:
             return {}
-        movies = client.get_movies(user_id=user_id, library_id=library_id)
+        # AUDIT 2026-06-10 (REAL 2/2) : la methode est get_all_movies, pas
+        # get_movies (inexistante) -> AttributeError avalee -> la source
+        # prioritaire 'Jellyfin DateCreated' ne fonctionnait JAMAIS (fallback
+        # silencieux sur le mtime filesystem meme avec Jellyfin configure).
+        movies = client.get_all_movies(user_id, library_id=library_id)
     except (OSError, ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.info("library_timeline jellyfin lookup failed (fallback to fs mtime): %s", exc)
         return {}
@@ -157,6 +161,21 @@ def _generate_month_range(latest_month: str, n_months: int) -> List[str]:
 
 
 def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_library_timeline_impl(api, months, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_library_timeline failed for months=%s run_id=%s", months, run_id)
+        return {
+            "ok": False,
+            "error": "timeline_load_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger la timeline.",
+        }
+
+
+def _get_library_timeline_impl(api: Any, months: int = 12, run_id: Optional[str] = None) -> Dict[str, Any]:
     """Retourne le nombre de films ajoutes par mois pour les N derniers mois.
 
     Args:
@@ -184,7 +203,9 @@ def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = Non
         n_months = 12
 
     try:
-        settings = api.settings.get_settings()
+        # AUDIT 2026-06-10 : _internal_settings (jellyfin_api_key en clair) sinon
+        # le client Jellyfin recevrait le masque -> 401 (meme famille Vague 3).
+        settings = api._internal_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
         store, _ = api._get_or_create_infra(state_dir)
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -201,7 +222,7 @@ def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = Non
             runs = store.run.get_runs_summary(limit=1)
         except (OSError, AttributeError, KeyError, TypeError, ValueError):
             runs = []
-        run_id = str(runs[0]["run_id"]) if runs else None
+        run_id = (str(runs[0].get("run_id") or "") or None) if runs else None
 
     if not run_id:
         return {
@@ -237,7 +258,14 @@ def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = Non
 
     # 1. Tente de recuperer les dates Jellyfin par tmdb_id
     jelly_dates = _get_jellyfin_date_map(api, settings)
-    using_jellyfin = bool(jelly_dates)
+    # Issue #683 : `source` est le badge de PROVENANCE des dates affichees, donc
+    # il doit se deduire des dates REELLEMENT retenues. Le figer a
+    # `bool(jelly_dates)` avant la boucle le rendait vrai des qu'un seul film,
+    # meme etranger a ce run, existait cote Jellyfin : sur une bibliotheque dont
+    # aucun tmdb_id ne matche (autre bibliotheque, films non identifies, merge
+    # partiel), 100 % des mois venaient du mtime filesystem et le badge annoncait
+    # quand meme « mixed ». `using_filesystem` etait deja derive des matchs, lui.
+    using_jellyfin = False
     using_filesystem = False
 
     # 2. Pour chaque film, resoud le mois
@@ -250,7 +278,12 @@ def get_library_timeline(api: Any, months: int = 12, run_id: Optional[str] = Non
         if tmdb_id and jelly_dates:
             iso = jelly_dates.get(str(tmdb_id))
             if iso:
+                # Une date Jellyfin illisible ou implausible (`_parse_iso_to_month`
+                # rend None) ne compte pas comme une date Jellyfin UTILISEE : la
+                # row retombe sur le mtime juste en dessous.
                 month = _parse_iso_to_month(iso)
+                if month is not None:
+                    using_jellyfin = True
         # Fallback filesystem
         if month is None:
             path = str(row.get("path") or "")

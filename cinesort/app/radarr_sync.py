@@ -15,15 +15,17 @@ _OBSOLETE_CODECS = frozenset({"mpeg4", "xvid", "divx", "wmv", "mpeg2", "mpeg1"})
 # Score seuil pour proposer un upgrade
 _UPGRADE_SCORE_THRESHOLD = 54
 
-# Note (audit 2026-06-01 #490) : la constante `_UPGRADE_ENCODE_FLAGS = frozenset(
-# {"upscale_suspect", "reencode_degraded"})` declaree historiquement ici n'etait
-# jamais utilisee. La detection effective passe par un substring matching sur les
-# reasons humaines emises par quality_score (ex: "-25 Upscale suspect") car ces
-# strings sont en francais et ne contiennent pas les flags canoniques bruts. Pour
-# eviter une drift silencieuse on aligne le commentaire avec le code existant.
+# Warnings d'encode que Radarr peut resoudre (flags canoniques d'encode_analysis).
+# `4k_light` en est volontairement absent : c'est un flag informatif, pas un defaut.
+_UPGRADE_ENCODE_FLAGS = frozenset({"upscale_suspect", "reencode_degraded"})
 
-from cinesort.app._fuzzy_utils import normalize_for_fuzzy
+# Seuil rapidfuzz du fallback titre+annee (cf issue #29).
+_FUZZY_TITLE_THRESHOLD = 85
+
+
+from cinesort.app._fuzzy_utils import find_best_fuzzy_match, normalize_for_fuzzy
 from cinesort.app._path_utils import normalize_path as _normalize_path
+from cinesort.domain.encode_analysis import analyze_encode_quality
 
 
 def _extract_local_tmdb_id(row: Any) -> Optional[int]:
@@ -93,24 +95,19 @@ def build_radarr_report(
                 rm = radarr_by_title_year[key]
             else:
                 # Fallback fuzzy vectorise (cf issue #29 : remplace boucle O(n*m)).
-                # On utilise rapidfuzz.process.extractOne sur les titres pre-normalises
-                # de l'annee, ce qui delegue la comparaison au C natif.
-                from rapidfuzz import fuzz, process
-
+                # Passe par le helper partage `find_best_fuzzy_match` : les titres
+                # de l'annee sont deja normalises par l'index, d'ou
+                # choices_are_normalized=True (pas de re-normalisation par ligne).
                 candidates = radarr_by_year_normalized.get(year, [])
                 if candidates:
-                    query_norm = normalize_for_fuzzy(title)
-                    if query_norm:
-                        norm_titles = [c[0] for c in candidates]
-                        best = process.extractOne(
-                            query_norm,
-                            norm_titles,
-                            scorer=fuzz.ratio,
-                            score_cutoff=85,
-                        )
-                        if best is not None:
-                            _, _, idx = best
-                            rm = candidates[idx][1]
+                    best = find_best_fuzzy_match(
+                        title,
+                        [c[0] for c in candidates],
+                        threshold=_FUZZY_TITLE_THRESHOLD,
+                        choices_are_normalized=True,
+                    )
+                    if best is not None:
+                        rm = candidates[best[2]][1]
 
         if rm:
             pid = int(rm.get("quality_profile_id") or 0)
@@ -165,21 +162,31 @@ def should_propose_upgrade(
     metrics_raw = quality_report.get("metrics")
     metrics = metrics_raw if isinstance(metrics_raw, dict) else {}
     detected = metrics.get("detected") or {}
-    codec = str(detected.get("codec") or "").strip().lower()
+    # `metrics.detected` expose la cle `video_codec` (quality_score.py:1702) —
+    # pas `codec`. Cette branche lisait donc toujours "" et le test de codec
+    # obsolete etait inatteignable. Meme lecture que le jumeau librarian.py:181,
+    # avec le fallback `codec` de library_support.py:440 pour les rapports
+    # persistes par d'anciennes versions.
+    codec = str(detected.get("video_codec") or detected.get("codec") or "").strip().lower()
     if codec in _OBSOLETE_CODECS:
         return True
 
-    # Verifier les flags d'encode du rapport. Les reasons emises par
-    # quality_score sont des strings descriptives FR ("-25 Upscale suspect",
-    # "-15 Re-encode degrade") et non les flags canoniques raw, donc le match
-    # substring "upscale" / "reencode" est volontaire et permissif. Toute
-    # evolution du format reasons (passage a des flags canoniques bruts) devra
-    # synchroniser ce site avec encode_analysis._UPGRADE_ENCODE_FLAGS.
-    reasons = quality_report.get("reasons") or []
-    for reason in reasons:
-        r = str(reason).lower()
-        if "upscale" in r or "reencode" in r:
-            return True
+    # Verifier les flags d'encode du rapport.
+    # AVANT : scan par sous-chaine sur les libelles HUMAINS de `reasons`
+    # ("-8 Upscale suspect", "-12 Re-encode degrade"). Or "Re-encode degrade"
+    # ne contient pas la sous-chaine "reencode" (trait d'union) : le flag
+    # `reencode_degraded` n'a donc JAMAIS declenche d'upgrade quand il etait
+    # seul, c.-a-d. sur les fichiers SD sous 300 kbps (aux autres resolutions
+    # il s'accompagne toujours de `upscale_suspect`, qui, lui, matchait).
+    # On lit desormais les flags CANONIQUES recalcules depuis metrics.detected
+    # (meme fonction pure que celle utilisee au scoring) : la detection ne
+    # depend plus du libelle, ni de sa langue, ni de sa ponctuation.
+    # `analyze_encode_quality` ne lit que `video_codec` (encode_analysis.py:54) :
+    # on lui reinjecte le codec DEJA normalise ci-dessus, sans quoi le fallback
+    # legacy `codec` serait honore pour la branche codec obsolete et ignore ici
+    # — le meme rapport ancien donnerait deux verdicts contradictoires.
+    if _UPGRADE_ENCODE_FLAGS.intersection(analyze_encode_quality({**detected, "video_codec": codec})):
+        return True
 
     return False
 

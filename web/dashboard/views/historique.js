@@ -5,9 +5,9 @@
  *
  * Fonctionnalites :
  *  - Header avec stats agregees (N runs sur 30 jours)
- *  - Banner rétention (auto-suppression > 90j, spec §5)
- *  - Filtres complets : Statut (avec Undone), Periode (avec Custom date picker),
- *    Type (avec Undo), recherche par run_id OU par nom de film
+ *  - Banner rétention (auto-suppression, duree lue dans les reglages, spec §5)
+ *  - Filtres : Statut, Periode (avec Custom date picker), Type (plan / apply),
+ *    recherche par run_id OU par nom de film
  *  - Toggle Timeline / Tableau (persiste localStorage)
  *  - Timeline groupee par jour avec scroll infini (batch 30 + IntersectionObserver)
  *  - Inspecteur droit cable via right-panel.setSections (4 onglets detailles :
@@ -28,12 +28,61 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
-import { apiPost } from "../core/api.js";
+import { apiPost, cachedGetSettings } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { deriveRunStatus } from "../core/run-status.js";
 import * as rightPanel from "../components/right-panel.js";
 import { dangerConfirmModal, showModal, closeModal } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
+import { buildEmptyState } from "../components/empty-state.js";
+
+/* --- Helper EMPTY_STATE uniforme (iter11 4.3.x) ---------------------- */
+/* Tous les messages "rien a afficher" de l'historique transitent par ce
+ * helper afin d'utiliser le composant v2 .empty-state (styles unifies,
+ * a11y aria-label, icone optionnelle) au lieu de <p class=historique-
+ * empty-msg> inline. La classe .historique-empty-msg reste preservee
+ * via la classe wrapper externe pour back-compat CSS absolue (cf
+ * components.css L6371-6372 / web/shared). */
+function _emptyInline(message, icon) {
+  return `<div class="historique-empty-msg">${buildEmptyState({
+    variant: "inline",
+    icon: icon || "history",
+    title: "",
+    message,
+  })}</div>`;
+}
+
+/* --- Labels FR centralises (iter11 LABELS_APPLY_HISTORIQUE) ---------- */
+/* Dict: traduit les op_type/run_type bruts (anglais) en libelles FR
+ * uniformes affiches dans la vue Historique. Cf carto iter11 4.5.1-3. */
+
+const _OP_TYPE_LABELS_FR = Object.freeze({
+  rename: "renommage",
+  move: "déplacement",
+  move_file: "déplacement",
+  move_dir: "renommage dossier",
+  quarantine: "quarantaine",
+  delete_mark: "marquage suppression",
+  mark_delete: "marquage suppression",
+  other: "autre",
+});
+
+const _RUN_TYPE_LABELS_FR = Object.freeze({
+  apply: "Application",
+  undo: "Annulation",
+  plan: "Plan",
+});
+
+function _opTypeLabelFr(opType) {
+  const key = String(opType || "").toLowerCase();
+  return _OP_TYPE_LABELS_FR[key] || (key ? key : "autre");
+}
+
+function _runTypeLabelFr(runType) {
+  const key = String(runType || "").toLowerCase();
+  return _RUN_TYPE_LABELS_FR[key] || _RUN_TYPE_LABELS_FR.plan;
+}
 
 /* --- Format dates ----------------------------------------------------- */
 
@@ -91,8 +140,24 @@ let _viewMode = "timeline";
 let _customPeriodFrom = null;   // ISO date string or null
 let _customPeriodTo = null;     // ISO date string or null
 let _visibleCount = BATCH_SIZE; // scroll infini : nombre de runs affiches
-let _retentionDays = 90;
+// Revue post-merge 2026-08-03 : cette valeur etait lue dans le payload de
+// `run/get_dashboard`, qui n'a JAMAIS emis `history_retention_days` (verifie sur
+// les 3 chemins de retour de dashboard_support.get_dashboard). La banniere
+// affichait donc « retention 90 jours » en dur pendant que le cron purgait
+// reellement a J-<reglage> (app.py lit `settings.history_retention_days`) : un
+// utilisateur regle sur 30 croyait ses runs de J-40 encore presents. La valeur
+// vient desormais des reglages, seule source qui la porte.
+const _RETENTION_DAYS_DEFAULT = 90;
+let _retentionDays = _RETENTION_DAYS_DEFAULT;
 let _scrollObserver = null;
+// Fix audit 2026-05-25 (v1.5.3) Vague F : debounce search ID au niveau module
+// pour pouvoir l'annuler dans unmountHistorique() (le let local survivait au
+// demontage et declenchait un _rerender sur un container detache).
+let _searchDebounceId = null;
+// Fix audit 2026-05-25 (v1.5.3) Vague F : flag pour eviter le double attachement
+// du listener document.click (initHistorique + initRunDetailPage attachaient
+// tous les deux le meme _onActionClick, et un seul removeEventListener restait).
+let _documentListenerAttached = false;
 // Cache des appels get_history_stats par run_id (evite refetch a chaque switch onglet).
 const _historyStatsCache = new Map();
 // Cache des films par run_id (lookup pour recherche par nom).
@@ -115,18 +180,30 @@ function _writeString(key, value) {
   }
 }
 
-/* --- Status derivation (alignee avec accueil.js) ----------------------- */
-
+/* --- Status derivation ------------------------------------------------
+ *
+ * Revue post-merge 2026-08-03 — le court-circuit `if (run.status) return ...`
+ * rendait MORTES toutes les lignes suivantes : `run/get_dashboard` emet toujours
+ * un `status` NON VIDE (`str(run_row.get("status") or "PENDING")`,
+ * dashboard_support.py). Consequences mesurees a l'ecran :
+ *   - un run FAILED tombait dans le `default` de _statusClass et s'affichait en
+ *     GRIS, comme un run sain ; le filtre « Error » ne le trouvait pas ;
+ *   - les filtres « Applied » et « Partiel » ne matchaient jamais rien, alors
+ *     que le payload porte bien applied_rows / total_rows ;
+ *   - AWAITING_VALIDATION mappait vers `is-pending`, classe qui n'existe dans
+ *     AUCUN CSS du depot -> statut affiche sans couleur.
+ *
+ * La regle vit desormais dans `core/run-status.js`, IMPORTEE ICI ET DANS
+ * accueil.js : les deux ecrans decrivent le meme objet et ne peuvent plus se
+ * contredire (la premiere version de ce correctif ne touchait qu'historique.js
+ * et faisait lire ERROR ici, DONE sur l'accueil, pour le meme run).
+ *
+ * `run.undone` / `run.is_undo` / `run.type` ne sont emis par AUCUN payload :
+ * l'undo n'insere pas de ligne dans la table `runs`. Les options de filtre
+ * correspondantes sont retirees plus bas plutot que laissees inertes.
+ */
 function _deriveStatus(run) {
-  if (run.status) return String(run.status).toUpperCase();
-  const errors = Number(run.errors_count || 0);
-  const applied = Number(run.applied_rows || 0);
-  const total = Number(run.total_rows || 0);
-  if (run.undone) return "UNDONE";
-  if (errors > 0) return "ERROR";
-  if (applied > 0 && applied >= total) return "APPLIED";
-  if (applied > 0 && applied < total) return "PARTIAL";
-  return "DONE";
+  return deriveRunStatus(run);
 }
 
 function _statusClass(status) {
@@ -136,7 +213,10 @@ function _statusClass(status) {
     case "APPLIED": return "is-applied";
     case "UNDONE": return "is-undone";
     case "CANCELLED": case "CANCEL": return "is-cancelled";
-    case "AWAITING_VALIDATION": return "is-pending";
+    // « En validation » demande une action de l'utilisateur : on reutilise la
+    // teinte warning existante (.historique-run-status.is-partial). L'ancienne
+    // valeur `is-pending` n'etait declaree dans aucun CSS -> statut incolore.
+    case "AWAITING_VALIDATION": return "is-partial";
     default: return "is-done";
   }
 }
@@ -147,8 +227,11 @@ function _runDate(run) {
   return null;
 }
 
+/* Revue post-merge 2026-08-03 : `run.is_undo` et `run.type` n'existent dans
+ * aucun payload de `run/get_dashboard` — et ne peuvent pas exister, `undo_last_apply`
+ * n'inserant aucune ligne dans la table `runs`. Le type « undo » etait donc
+ * inatteignable ; il a ete retire du filtre Type et du resume d'en-tete. */
 function _runType(run) {
-  if (run.is_undo || run.type === "undo") return "undo";
   if (Number(run.applied_rows || 0) > 0) return "apply";
   return "plan";
 }
@@ -195,6 +278,34 @@ function _matchesSearchQuery(run, q) {
     }
   }
   return false;
+}
+
+// Fix bug audit : la recherche par nom de film ne fonctionnait QUE sur les runs
+// deja consultes (cache rempli par _ensureHistoryStats au clic). Resultat : faux
+// negatif silencieux. Solution : prefetch les films pour tous les runs non encore
+// cachees lors d'une recherche, puis re-render pour appliquer le filtre.
+let _prefetchInflight = false;
+async function _prefetchFilmsForSearch(container) {
+  if (_prefetchInflight) return;
+  if (!_searchQuery || !_searchQuery.trim()) return;
+  const missing = _runs.filter((r) => r && r.run_id && !_filmsCacheByRun.has(r.run_id));
+  if (missing.length === 0) return;
+  _prefetchInflight = true;
+  try {
+    // Sequentiel pour ne pas saturer le rate-limiter backend (5/60s).
+    for (const r of missing) {
+      if (!_searchQuery || !_searchQuery.trim()) break; // user a vide la recherche
+      try {
+        await _ensureHistoryStats(r.run_id);
+      } catch (_e) { /* noop par run */ }
+    }
+  } finally {
+    _prefetchInflight = false;
+    // Re-render uniquement si le container existe encore.
+    if (container && container.isConnected) {
+      try { _rerender(container); } catch (_e) { /* noop */ }
+    }
+  }
 }
 
 function _filterRuns(runs) {
@@ -262,8 +373,24 @@ function _renderError(message) {
   `;
 }
 
+/** Lit `history_retention_days` dans les reglages (cache memoire partage).
+ *  Retourne le defaut backend (90) si le reglage est absent ou invalide. */
+async function _fetchRetentionDays() {
+  try {
+    const res = await cachedGetSettings();
+    if (!res || !res.data || typeof res.data !== "object" || res.data.ok === false) {
+      return _RETENTION_DAYS_DEFAULT;
+    }
+    const settings = res.data.data || res.data || {};
+    const days = Number(settings.history_retention_days);
+    return Number.isFinite(days) && days > 0 ? days : _RETENTION_DAYS_DEFAULT;
+  } catch {
+    return _RETENTION_DAYS_DEFAULT;
+  }
+}
+
 function _renderRetentionBanner() {
-  const days = _retentionDays || 90;
+  const days = _retentionDays || _RETENTION_DAYS_DEFAULT;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
   const cutoffStr = cutoffDate.toLocaleDateString("fr-FR");
@@ -295,6 +422,11 @@ function _renderCustomDatePicker() {
   `;
 }
 
+/* Revue post-merge 2026-08-03 : les options « Undone » (filtre Statut) et
+ * « Undo » (filtre Type) ont ete retirees. Un undo n'insere aucune ligne dans la
+ * table runs et le payload de run/get_dashboard ne porte ni undone, ni is_undo,
+ * ni type : les deux filtres etaient morts par construction et repondaient
+ * toujours « Aucun run ne correspond aux filtres actuels ». */
 function _renderHeader(stats) {
   return `
     <header class="historique-header">
@@ -310,7 +442,6 @@ function _renderHeader(stats) {
             <option value="cancelled" ${_filterStatus === "cancelled" ? "selected" : ""}>Cancelled</option>
             <option value="error" ${_filterStatus === "error" ? "selected" : ""}>Error</option>
             <option value="applied" ${_filterStatus === "applied" ? "selected" : ""}>Applied</option>
-            <option value="undone" ${_filterStatus === "undone" ? "selected" : ""}>Undone</option>
             <!-- Fix audit 2026-05-24 : ajout des statuts manquants (partial / awaiting_validation) -->
             <option value="partial" ${_filterStatus === "partial" ? "selected" : ""}>Partiel</option>
             <option value="awaiting_validation" ${_filterStatus === "awaiting_validation" ? "selected" : ""}>En validation</option>
@@ -333,7 +464,6 @@ function _renderHeader(stats) {
             <option value="all" ${_filterType === "all" ? "selected" : ""}>Tous</option>
             <option value="plan" ${_filterType === "plan" ? "selected" : ""}>Plan (scan)</option>
             <option value="apply" ${_filterType === "apply" ? "selected" : ""}>Apply</option>
-            <option value="undo" ${_filterType === "undo" ? "selected" : ""}>Undo</option>
           </select>
         </label>
         <div class="historique-search">
@@ -364,7 +494,7 @@ function _renderRunRow(run, selected) {
   const statusClass = _statusClass(status);
   const total = Number(run.total_rows || 0);
   const type = _runType(run);
-  const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
+  const typeLabel = _runTypeLabelFr(type);
   return `
     <li class="historique-run ${selected ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(run.run_id)}">
       <span class="historique-run-time">${escapeHtml(time)}</span>
@@ -381,7 +511,7 @@ function _renderTimeline(runs, selectedId) {
   if (groups.length === 0) {
     return `
       <section class="historique-section historique-empty">
-        <p class="historique-empty-msg">Aucun run ne correspond aux filtres actuels.</p>
+        ${_emptyInline("Aucun run ne correspond aux filtres actuels.", "history")}
       </section>
     `;
   }
@@ -399,7 +529,7 @@ function _renderTable(runs, selectedId) {
   if (runs.length === 0) {
     return `
       <section class="historique-section historique-empty">
-        <p class="historique-empty-msg">Aucun run ne correspond aux filtres actuels.</p>
+        ${_emptyInline("Aucun run ne correspond aux filtres actuels.", "history")}
       </section>
     `;
   }
@@ -408,7 +538,7 @@ function _renderTable(runs, selectedId) {
     const status = _deriveStatus(r);
     const total = Number(r.total_rows || 0);
     const type = _runType(r);
-    const typeLabel = type === "apply" ? "Apply" : (type === "undo" ? "Undo" : "Plan");
+    const typeLabel = _runTypeLabelFr(type);
     return `
       <tr class="${r.run_id === selectedId ? "is-selected" : ""}" tabindex="0" data-run-id="${escapeHtml(r.run_id)}">
         <td>${escapeHtml(d ? d.toLocaleString("fr-FR") : "—")}</td>
@@ -452,7 +582,7 @@ function _renderLoadingMore(remaining) {
 function _computeHistoriqueStats(runs) {
   const totalRuns = runs.length;
   const applies = runs.filter((r) => Number(r.applied_rows || 0) > 0).length;
-  const undones = runs.filter((r) => _deriveStatus(r) === "UNDONE" || _runType(r) === "undo").length;
+  const errors = runs.filter((r) => _deriveStatus(r) === "ERROR").length;
   const periodLabel = (() => {
     switch (_filterPeriod) {
       case "today": return "aujourd'hui";
@@ -468,8 +598,11 @@ function _computeHistoriqueStats(runs) {
       default: return "les 30 derniers jours";
     }
   })();
+  // Revue post-merge 2026-08-03 : le compteur « N undo » etait fige a 0 par
+  // construction (aucun run d'undo n'existe en base). Remplace par le nombre de
+  // runs en erreur, qui lui est reellement derivable du payload.
   return {
-    summary: `${totalRuns} runs · ${applies} apply · ${undones} undo · sur ${periodLabel}`,
+    summary: `${totalRuns} runs · ${applies} apply · ${errors} en erreur · sur ${periodLabel}`,
   };
 }
 
@@ -503,7 +636,7 @@ function _buildInspectorSections(selectedRun) {
     return [
       {
         title: "Inspecteur",
-        html: `<p class="historique-empty-msg">Sélectionnez un run dans la liste pour voir son détail.</p>`,
+        html: _emptyInline("Sélectionnez un run dans la liste pour voir son détail.", "inbox"),
       },
     ];
   }
@@ -534,7 +667,7 @@ function _buildInspectorSections(selectedRun) {
         <div class="historique-inspector-actions">
           <button type="button" class="v5-btn v5-btn--secondary" data-historique-action="view-report" data-run-id="${escapeHtml(selectedRun.run_id)}">📄 Voir rapport complet</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="resume" data-run-id="${escapeHtml(selectedRun.run_id)}">↻ Reprendre ce run</button>
-          ${isApply ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : ""}
+          ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
         </div>
       `,
@@ -561,10 +694,19 @@ function _renderInspectorTabs() {
 /* --- Inspector detailed tabs (Phase 5) ------------------------------ */
 
 function _filmStatusLabel(film) {
-  // Map vers Approuvé/Rejeté/Doublon/Suppression
+  // Map vers Approuvé/Rejeté/Reporté/Doublon/Suppression.
+  const dec = String(film.decision || film.status || "").toLowerCase();
+  // H8 (2026-07-15) : la DÉCISION utilisateur explicite (tri-état
+  // accepted/approved/rejected/deferred exposé par history_support.py depuis
+  // validation.json) PRIME sur le tier qualité. Avant, `tier === "reject"` était
+  // testé AVANT de lire `film.decision` : un film au tier `reject` mais
+  // explicitement ACCEPTÉ affichait encore « Rejeté ». On ne retombe sur le tier
+  // (ni sur la détection doublon/suppression) QUE si `decision` est vide.
+  if (dec === "accepted" || dec === "approved") return { label: "Approuvé", cls: "is-approved" };
+  if (dec === "rejected") return { label: "Rejeté", cls: "is-rejected" };
+  if (dec === "deferred") return { label: "Reporté", cls: "is-deferred" };
   const tier = String(film.tier || "").toLowerCase();
   if (tier === "reject") return { label: "Rejeté", cls: "is-rejected" };
-  const dec = String(film.decision || film.status || "").toLowerCase();
   if (dec.includes("duplicate") || dec === "duplicate" || film.is_duplicate) return { label: "Doublon", cls: "is-duplicate" };
   if (dec.includes("delete") || dec === "delete_marked") return { label: "Suppression", cls: "is-deleted" };
   if (dec.includes("reject")) return { label: "Rejeté", cls: "is-rejected" };
@@ -581,7 +723,7 @@ function _renderFilmsList(runStats, runId) {
         <a href="#/bibliotheque?run_id=${encodeURIComponent(runId)}" class="v5-btn v5-btn--secondary v5-btn--sm">→ Voir dans Bibliothèque</a>
       `;
     }
-    return `<p class="historique-empty-msg">Aucun film associé à ce run.</p>`;
+    return _emptyInline("Aucun film associé à ce run.", "film");
   }
   const items = films.map((f) => {
     const st = _filmStatusLabel(f);
@@ -604,17 +746,33 @@ function _renderFilmsList(runStats, runId) {
   `;
 }
 
+// Fix audit 2026-05-25 (v1.5.3) Vague F : separer dossier/fichier pour ne
+// pas suggerer un renommage du fichier video. apply_core ne renomme JAMAIS
+// les fichiers video, seul le dossier parent est renomme/deplace.
 function _opLabel(op) {
   const t = String(op.op_type || "").toLowerCase();
   const src = String(op.src_path || "");
   const dst = String(op.dst_path || "");
   const srcShort = src.split(/[\\/]/).pop() || src;
   const dstShort = dst.split(/[\\/]/).pop() || dst;
-  if (t === "rename") return { icon: "→", text: `Renommé ${srcShort} → ${dstShort}` };
-  if (t === "move") return { icon: "→", text: `Déplacé ${srcShort} → ${dst}` };
+  if (t === "rename" || t === "move_dir") {
+    // Renommage de dossier : le fichier video conserve son nom.
+    return { icon: "→", text: `Dossier renommé : ${srcShort} → ${dstShort} (fichier conservé)` };
+  }
+  if (t === "move" || t === "move_file") {
+    // Deplacement de fichier : nom conserve si srcShort == dstShort, sinon
+    // c'est un renommage TV (episodes).
+    if (srcShort === dstShort) {
+      return { icon: "→", text: `Vidéo déplacée : ${srcShort} (nom conservé)` };
+    }
+    return { icon: "→", text: `Vidéo renommée (TV) : ${srcShort} → ${dstShort}` };
+  }
   if (t === "quarantine") return { icon: "⚠", text: `Quarantaine bucket _review/ — ${srcShort}` };
   if (t === "delete_mark" || t === "mark_delete") return { icon: "🗑", text: `Marqué suppression — ${srcShort}` };
-  return { icon: "•", text: `${op.op_type || "Op"} : ${srcShort}${dst ? " → " + dstShort : ""}` };
+  // Fallback FR : libelle traduit au lieu d'op_type brut anglais (iter11).
+  const labelFr = _opTypeLabelFr(op.op_type) || "Opération";
+  const labelCap = labelFr.charAt(0).toUpperCase() + labelFr.slice(1);
+  return { icon: "•", text: `${labelCap} : ${srcShort}${dst ? " → " + dstShort : ""}` };
 }
 
 function _renderApplyOps(runStats) {
@@ -627,7 +785,7 @@ function _renderApplyOps(runStats) {
       <p class="historique-tab-stat"><strong>${applied}</strong> film${applied > 1 ? "s" : ""} appliqué${applied > 1 ? "s" : ""}</p>
       <p class="historique-tab-stat"><strong>${Math.max(0, total - applied)}</strong> non appliqué${total - applied > 1 ? "s" : ""}</p>
       <p class="historique-tab-stat"><strong>${errors}</strong> erreur${errors > 1 ? "s" : ""}</p>
-      ${applied > 0 ? `<p class="historique-empty-msg">Détail des opérations non disponible pour ce run.</p>` : `<p class="historique-empty-msg">Aucun apply effectué.</p>`}
+      ${applied > 0 ? _emptyInline("Détail des opérations non disponible pour ce run.", "history") : _emptyInline("Aucun apply effectué.", "history")}
     `;
   }
   // Compter par type
@@ -636,7 +794,7 @@ function _renderApplyOps(runStats) {
     acc[t] = (acc[t] || 0) + 1;
     return acc;
   }, {});
-  const countersHtml = Object.entries(counts).map(([t, n]) => `<span class="historique-apply-counter">${escapeHtml(t)}: <strong>${n}</strong></span>`).join("");
+  const countersHtml = Object.entries(counts).map(([t, n]) => `<span class="historique-apply-counter">${escapeHtml(_opTypeLabelFr(t))}: <strong>${n}</strong></span>`).join("");
   const opsHtml = ops.map((o) => {
     const lbl = _opLabel(o);
     return `<li class="historique-apply-op"><span class="historique-apply-op-icon">${escapeHtml(lbl.icon)}</span><span class="historique-apply-op-text">${escapeHtml(lbl.text)}</span></li>`;
@@ -655,7 +813,7 @@ function _renderDoublonsList(runStats) {
   if (decided.length === 0 && skipped.length === 0) {
     return `
       <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
-      ${dupGroups > 0 ? `<p class="historique-empty-msg">Détail des groupes non disponible pour ce run.</p><a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : `<p class="historique-empty-msg">Aucun doublon dans ce run.</p>`}
+      ${dupGroups > 0 ? `${_emptyInline("Détail des groupes non disponible pour ce run.", "history")}<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : _emptyInline("Aucun doublon dans ce run.", "history")}
     `;
   }
   const decidedHtml = decided.map((g) => {
@@ -684,7 +842,7 @@ function _renderLogViewer(runStats, runId) {
       <div class="historique-log-viewer-actions">
         <button type="button" class="v5-btn v5-btn--secondary v5-btn--sm" data-historique-action="reload-log" data-run-id="${escapeHtml(runId)}">↻ Recharger</button>
       </div>
-      <p class="historique-empty-msg">Aucun log disponible pour ce run.</p>
+      ${_emptyInline("Aucun log disponible pour ce run.", "history")}
     `;
   }
   const content = lines.map((l) => escapeHtml(String(l))).join("\n");
@@ -838,6 +996,13 @@ function _attachScrollObserver(container) {
   if (!sentinel) return;
   if (typeof IntersectionObserver === "undefined") return;
   _scrollObserver = new IntersectionObserver((entries) => {
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : guard isConnected pour eviter
+    // _rerender sur un container detache du DOM (apres unmount). On disconnecte
+    // l'observer immediatement pour libérer la reference.
+    if (!container || !container.isConnected) {
+      if (_scrollObserver) { try { _scrollObserver.disconnect(); } catch { /* noop */ } _scrollObserver = null; }
+      return;
+    }
     for (const e of entries) {
       if (e.isIntersecting) {
         _visibleCount += BATCH_SIZE;
@@ -870,10 +1035,23 @@ function _bindEvents(container) {
     });
   });
   // Custom date pickers
+  // Fix bug audit : validation si _customPeriodTo < _customPeriodFrom. Auto-swap
+  // pour eviter une liste vide silencieuse + toast informatif a l'utilisateur.
+  const _swapDatesIfInverted = () => {
+    if (_customPeriodFrom && _customPeriodTo && _customPeriodTo < _customPeriodFrom) {
+      const oldFrom = _customPeriodFrom;
+      _customPeriodFrom = _customPeriodTo;
+      _customPeriodTo = oldFrom;
+      try {
+        showToast({ type: "info", text: "Date de fin avant date de début — dates inversées automatiquement." });
+      } catch (_e) { /* noop si toast indisponible */ }
+    }
+  };
   const fromInput = container.querySelector("[data-historique-custom-from]");
   if (fromInput) {
     fromInput.addEventListener("change", (ev) => {
       _customPeriodFrom = String(ev.target.value || "") || null;
+      _swapDatesIfInverted();
       _visibleCount = BATCH_SIZE;
       _rerender(container);
     });
@@ -882,6 +1060,7 @@ function _bindEvents(container) {
   if (toInput) {
     toInput.addEventListener("change", (ev) => {
       _customPeriodTo = String(ev.target.value || "") || null;
+      _swapDatesIfInverted();
       _visibleCount = BATCH_SIZE;
       _rerender(container);
     });
@@ -889,17 +1068,23 @@ function _bindEvents(container) {
   // Recherche
   const searchInput = container.querySelector("[data-historique-search]");
   if (searchInput) {
-    let debounce;
+    // Fix audit 2026-05-25 (v1.5.3) Vague F : _searchDebounceId au niveau module
+    // (cf declaration en tete) pour pouvoir annuler le setTimeout dans
+    // unmountHistorique() — sinon le _rerender s'execute sur un container detache.
     searchInput.addEventListener("input", (ev) => {
       const value = String(ev.target.value || "");
-      clearTimeout(debounce);
-      debounce = setTimeout(() => {
+      if (_searchDebounceId) clearTimeout(_searchDebounceId);
+      _searchDebounceId = setTimeout(() => {
+        _searchDebounceId = null;
         _searchQuery = value;
         _visibleCount = BATCH_SIZE;
         _rerender(container);
         // Restore focus dans la search box.
         const next = container.querySelector("[data-historique-search]");
         if (next) { next.focus(); next.setSelectionRange(value.length, value.length); }
+        // Fix bug audit : prefetch films pour tous les runs non caches pour
+        // que la recherche par nom de film fonctionne meme sur runs non consultes.
+        if (value && value.trim()) _prefetchFilmsForSearch(container);
       }, 200);
     });
   }
@@ -919,8 +1104,15 @@ function _bindEvents(container) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); }
     });
   });
-  // Actions (depuis l'inspector ou ailleurs : delegation globale)
-  document.addEventListener("click", _onActionClick);
+  // Actions (depuis l'inspector ou ailleurs : delegation globale).
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag _documentListenerAttached pour
+  // eviter le double attachement (le rerender + initRunDetailPage attachaient
+  // tous deux le meme handler, et un seul removeEventListener n'en detachait
+  // qu'une seule reference).
+  if (!_documentListenerAttached) {
+    document.addEventListener("click", _onActionClick);
+    _documentListenerAttached = true;
+  }
   // Retry
   const retryBtn = container.querySelector("[data-historique-retry]");
   if (retryBtn) retryBtn.addEventListener("click", () => initHistorique(container));
@@ -1078,12 +1270,18 @@ async function _doDeleteRun(runId) {
 
 async function _refreshRuns() {
   try {
-    const res = await apiPost("run/get_dashboard", { run_id: "latest" });
+    // Le reglage de retention ne vient PAS de get_dashboard (il ne l'emet pas) :
+    // cachedGetSettings sert un cache memoire, donc aucun aller-retour reseau
+    // supplementaire dans le cas courant.
+    const [res, retentionDays] = await Promise.all([
+      apiPost("run/get_dashboard", { run_id: "latest" }),
+      _fetchRetentionDays(),
+    ]);
     // Fix audit 2026-05-24 : voir _doUndoApply.
     const data = (res && res.data) || res || {};
     if (res && data.ok !== false) {
       _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
-      _retentionDays = Number(data.history_retention_days || _retentionDays || 90);
+      _retentionDays = retentionDays;
       const container = document.querySelector(".historique-view");
       const root = container ? container.parentNode : null;
       if (root) _rerender(root);
@@ -1115,6 +1313,10 @@ function _onActionClick(ev) {
       break;
     case "undo-apply":
       // Action dangereuse — dangerConfirmModal (P0 #233, cf feedback-cinesort-actions-dangereuses).
+      // Fix audit 2026-06-07 UX medium : cancelLabel par defaut "Annuler" vs
+      // confirmLabel "Annuler l'apply" cree une ambiguite cognitive (deux
+      // boutons "Annuler" aux sens opposes). Pattern traitement.js "Garder
+      // le run" => "Garder l'apply".
       dangerConfirmModal({
         title: `Annuler l'apply du run ${runId} ?`,
         items: [`Run ${runId}`],
@@ -1123,6 +1325,7 @@ function _onActionClick(ev) {
           "Réversible tant qu'un nouvel apply n'a pas eu lieu.",
         countdownSeconds: 3,
         confirmLabel: "✗ Annuler l'apply",
+        cancelLabel: "Garder l'apply",
         onConfirm: () => _doUndoApply(runId),
       });
       break;
@@ -1215,12 +1418,28 @@ export async function initRunDetailPage(container, opts) {
   // Charge le detail si pas en cache.
   await _ensureHistoryStats(runId);
   _refreshStandaloneIfActive();
-  // Attach action click delegation (idempotent grace au listener au boot).
-  document.addEventListener("click", _onActionClick);
+  // Attach action click delegation (idempotent grace au flag module-level).
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : cf _bindEvents — le flag empeche
+  // le double attachement avec initHistorique().
+  if (!_documentListenerAttached) {
+    document.addEventListener("click", _onActionClick);
+    _documentListenerAttached = true;
+  }
 }
 
 export function unmountRunDetailPage() {
-  document.removeEventListener("click", _onActionClick);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag pour ne detacher qu'une fois.
+  if (_documentListenerAttached) {
+    document.removeEventListener("click", _onActionClick);
+    _documentListenerAttached = false;
+  }
+  // M19 (audit ultra 2026-07-13) : idem unmountHistorique — purge des caches par
+  // run_id (voir la note detaillee la-bas). La page standalone /run/:id partage
+  // _historyStatsCache / _filmsCacheByRun avec la timeline ; sans reset ici, un
+  // aller-retour /run/:id -> /historique servait un detail perime. Refetch au
+  // remontage via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _standaloneRunId = null;
   _standaloneContainer = null;
 }
@@ -1239,8 +1458,16 @@ export async function initHistorique(container) {
   const signal = typeof getNavSignal === "function" ? getNavSignal() : undefined;
 
   let res = null;
+  let retentionDays = _RETENTION_DAYS_DEFAULT;
   try {
-    res = await apiPost("run/get_dashboard", { run_id: "latest" }, { signal });
+    // En parallele du dashboard : le reglage de retention n'est PAS dans ce
+    // payload (cf _fetchRetentionDays), et un echec de sa lecture ne doit pas
+    // faire passer la vue en ecran d'erreur -> _fetchRetentionDays ne rejette
+    // jamais, elle retombe sur le defaut.
+    [res, retentionDays] = await Promise.all([
+      apiPost("run/get_dashboard", { run_id: "latest" }, { signal }),
+      _fetchRetentionDays(),
+    ]);
   } catch (err) {
     if (err && err.name === "AbortError") return;
     container.innerHTML = _renderError(err ? String(err.message || err) : "Erreur réseau");
@@ -1257,7 +1484,7 @@ export async function initHistorique(container) {
 
   const data = res.data || res;
   _runs = Array.isArray(data.runs_history) ? data.runs_history : [];
-  _retentionDays = Number(data.history_retention_days || 90);
+  _retentionDays = retentionDays;
   _selectedRunId = _runs.length > 0 ? _runs[0].run_id : null;
 
   _rerender(container);
@@ -1266,8 +1493,28 @@ export async function initHistorique(container) {
 }
 
 export function unmountHistorique() {
-  document.removeEventListener("click", _onActionClick);
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : flag _documentListenerAttached pour
+  // ne detacher qu'une fois (vs double attachement avec initRunDetailPage).
+  if (_documentListenerAttached) {
+    document.removeEventListener("click", _onActionClick);
+    _documentListenerAttached = false;
+  }
   _detachScrollObserver();
+  // Fix audit 2026-05-25 (v1.5.3) Vague F : annuler le debounce search en cours,
+  // sinon le setTimeout survivait au demontage et declenchait _rerender sur un
+  // container detache du DOM.
+  if (_searchDebounceId) {
+    clearTimeout(_searchDebounceId);
+    _searchDebounceId = null;
+  }
+  // M19 (audit ultra 2026-07-13) : purge des caches par run_id au demontage.
+  // _historyStatsCache / _filmsCacheByRun sont module-level et n'etaient invalides
+  // que par delete_run / undo / bouton Recharger. Sans reset au unmount, un
+  // remontage ulterieur (autre run selectionne, apply survenu entre-temps)
+  // reaffichait des stats / films PERIMES d'un run different. Sur-invalider est
+  // sans danger : tout remontage refetch via _ensureHistoryStats.
+  _historyStatsCache.clear();
+  _filmsCacheByRun.clear();
   _runs = [];
   _selectedRunId = null;
 }

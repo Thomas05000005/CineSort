@@ -6,12 +6,12 @@ import sqlite3
 import stat
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
-import cinesort.domain.core as core
 import cinesort.app.cleanup as core_cleanup
 import cinesort.app.plan_support as core_plan_support
+import cinesort.domain.core as core
 
 
 class ParseMovieNfoResilienceTests(unittest.TestCase):

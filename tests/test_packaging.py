@@ -164,6 +164,7 @@ class MeipassFallbackTests(unittest.TestCase):
     def test_meipass_fallback_resolves_dashboard_root(self) -> None:
         """_resolve_dashboard_root doit trouver web/dashboard meme sans _MEIPASS."""
         import sys
+
         from cinesort.infra.rest_server import _resolve_dashboard_root
 
         # Retirer _MEIPASS s'il existe (dev mode normal)

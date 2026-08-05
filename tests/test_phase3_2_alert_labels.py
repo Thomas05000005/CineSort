@@ -7,7 +7,10 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ALERT_LABELS = _ROOT / "web" / "dashboard" / "core" / "alert-labels.js"
-_FILM_DETAIL = _ROOT / "web" / "dashboard" / "views" / "film-detail.js"
+# R8-053/054/055 (F5, D1) : vue standalone views/film-detail.js SUPPRIMÉE ;
+# le composant components/film-detail.js est la fiche film canonique (intègre
+# alert-labels avec les mêmes features, classes film-detail-alert* au lieu de v5-film-alert*).
+_FILM_DETAIL = _ROOT / "web" / "dashboard" / "components" / "film-detail.js"
 _COMPONENTS_CSS = _ROOT / "web" / "shared" / "components.css"
 
 
@@ -42,6 +45,7 @@ class AlertLabelsApiTests(unittest.TestCase):
             "integrity_header_invalid",
             "subtitle_missing_fr",
             "subtitle_missing",
+            "subtitle_forced_only_fr",
             "subtitle_orphan",
             "subtitle_duplicate_lang",
             "duplicate_cross_root",
@@ -72,15 +76,17 @@ class FilmDetailIntegrationTests(unittest.TestCase):
         self.assertIn("countBySeverity", self.js)
 
     def test_renders_alerts_section(self) -> None:
-        self.assertIn("v5-film-alerts-list", self.js)
-        self.assertIn("v5-film-alert--", self.js)
+        # R8 (D1) : classes du composant (film-detail-alert*) ; l'ancienne vue utilisait v5-film-alert*.
+        self.assertIn("film-detail-alerts-list", self.js)
+        self.assertIn("film-detail-alert--", self.js)
 
     def test_renders_alert_metadata(self) -> None:
         for attr in ("a.severity", "a.icon", "a.label", "a.description"):
             self.assertIn(attr, self.js)
 
     def test_action_button_rendered(self) -> None:
-        self.assertIn("data-v5-alert-action", self.js)
+        # R8 (D1) : attribut du composant (data-film-alert-action) ; vue = data-v5-alert-action.
+        self.assertIn("data-film-alert-action", self.js)
         self.assertIn("a.action", self.js)
 
     def test_merges_warning_flags_and_perceptual_warnings(self) -> None:

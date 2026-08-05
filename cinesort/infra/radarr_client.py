@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
@@ -36,7 +36,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise RadarrError(f"URL Radarr refusee : {reason}")
     return url
@@ -62,11 +72,41 @@ class RadarrClient:
             }
         )
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, requests.Session laisse N sockets en
+    # TIME_WAIT a chaque polling. Expose CM + close() + __del__ best-effort.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente (idempotent)."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "RadarrClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
+        """GET Radarr. La borne anti-OOM du corps est appliquee au transport
+        (cf `request_bounded`), A LA LECTURE et non apres materialisation
+        (issue #433/#753)."""
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, **kwargs)
             resp.raise_for_status()
             _log.debug("Radarr: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
@@ -85,7 +125,9 @@ class RadarrClient:
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.post(
+            resp = request_bounded(
+                self._session,
+                "POST",
                 url,
                 data=json.dumps(payload) if payload else None,
                 timeout=self.timeout_s,
@@ -117,9 +159,6 @@ class RadarrClient:
             return {"ok": False, "error": "Cle API non configuree"}
         try:
             resp = self._get("/api/v3/system/status")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             data = resp.json()
         except RadarrError as exc:
             return {"ok": False, "error": str(exc)}
@@ -135,9 +174,6 @@ class RadarrClient:
         """Retourne tous les films Radarr avec metadonnees et fichier."""
         try:
             resp = self._get("/api/v3/movie")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             items = resp.json()
         except RadarrError:
             raise
@@ -170,9 +206,6 @@ class RadarrClient:
         """Retourne les profils qualite Radarr."""
         try:
             resp = self._get("/api/v3/qualityprofile")
-            _body = getattr(resp, "content", b"")
-            if _body and len(_body) > 10_000_000:
-                raise ValueError("Response too large")
             items = resp.json()
         except RadarrError:
             raise

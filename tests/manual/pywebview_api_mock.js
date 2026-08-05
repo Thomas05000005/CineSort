@@ -42,7 +42,8 @@
       proposed_year: f.year,
       proposed_source: "name",
       confidence: f.score,
-      confidence_label: f.score >= 80 ? "high" : f.score >= 60 ? "med" : "low",
+      // VN-C.1 (batch 2) : seuils unifies CONF_HIGH=85 / CONF_MEDIUM=60.
+      confidence_label: f.score >= 85 ? "high" : f.score >= 60 ? "med" : "low",
       candidates: [{ title: f.title, year: f.year, source: "name", tmdb_id: 10000 + idx, score: 0.9 }],
       warning_flags: [],
       tmdb_collection_id: null,

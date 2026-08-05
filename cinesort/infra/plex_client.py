@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import ResponseTooLargeError, make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
@@ -50,7 +50,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise PlexError(f"URL Plex refusee : {reason}")
     return url
@@ -75,15 +85,57 @@ class PlexClient:
             }
         )
 
+    # ------------------------------------------------------------------
+    # Resource management (BUG H9 / hotfix2)
+    # ------------------------------------------------------------------
+    # H9 : sans close() explicite, le pool de connexions de requests.Session
+    # garde N sockets TIME_WAIT a chaque polling dashboard. On expose CM +
+    # close() + __del__ best-effort.
+
+    def close(self) -> None:
+        """Ferme la session HTTP sous-jacente (idempotent)."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def __enter__(self) -> "PlexClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
-        """GET avec gestion d'erreurs standardisee."""
+        """GET avec gestion d'erreurs standardisee.
+
+        La borne anti-OOM du corps est appliquee ICI, au transport (cf
+        `request_bounded`), donc A LA LECTURE du flux et non apres que
+        `requests` ait deja alloue tout le corps (issues #433 / #753).
+        PlexClient etait le dernier client sans cette borne : ses quatre
+        `resp.json()` (`validate_connection`, `get_libraries`, `get_movies`,
+        `get_movies_count`) sont couverts d'un coup, `refresh_library` avec.
+        """
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
             _log.debug("Plex: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
+        except ResponseTooLargeError as exc:
+            # Converti en PlexError : c'est le seul type d'erreur que les cinq
+            # appelants traitent (`refresh_library` n'attrape QUE PlexError).
+            # Laisser fuir un ValueError le ferait remonter brut jusqu'a l'UI.
+            _log.warning("Plex: GET %s -> corps hors borne (%s)", path, exc)
+            raise PlexError(f"Reponse Plex trop volumineuse sur {path} : {exc}") from exc
         except requests.ConnectionError as exc:
             _log.debug("Plex: GET %s -> connexion impossible (%.1fs)", path, time.monotonic() - _t0)
             raise PlexError(f"Connexion impossible a {self.base_url} : {exc}") from exc
@@ -113,7 +165,17 @@ class PlexClient:
         except (ValueError, KeyError) as exc:
             return {"ok": False, "error": f"Reponse serveur invalide : {exc}"}
 
-        mc = data.get("MediaContainer") or data
+        # Fix audit 2026-05-25 (v1.5.3) Vague H : guard sur le fallback
+        # data->mc. Si la reponse n'est pas un dict (ex: serveur renvoie une
+        # liste ou un None), on retourne un payload structure plutot que de
+        # KeyError sur .get("version").
+        mc_raw = data.get("MediaContainer") if isinstance(data, dict) else None
+        if isinstance(mc_raw, dict):
+            mc = mc_raw
+        elif isinstance(data, dict):
+            mc = data
+        else:
+            return {"ok": False, "error": "Reponse serveur invalide : structure inattendue"}
         return {
             "ok": True,
             "server_name": mc.get("friendlyName") or mc.get("machineIdentifier") or "Plex",
@@ -206,7 +268,17 @@ class PlexClient:
         if not _SAFE_ID_RE.match(lid):
             raise PlexError(f"Invalid library section id: {lid!r}")
         try:
-            resp = self._get(f"/library/sections/{lid}/all", params={"type": "1", "X-Plex-Container-Size": "0"})
+            # Fix audit 2026-05-25 (v1.5.3) Vague H : X-Plex-Container-Size
+            # est un HEADER HTTP cote Plex, pas un query param. En le passant
+            # via params il etait silencieusement ignore -> Plex renvoyait la
+            # liste complete (100 par defaut) et `totalSize` restait juste,
+            # mais la requete tirait gratuitement tout le payload films au
+            # lieu d'un comptage rapide. On le passe en header desormais.
+            resp = self._get(
+                f"/library/sections/{lid}/all",
+                params={"type": "1"},
+                headers={"X-Plex-Container-Size": "0"},
+            )
             data = resp.json()
             mc = data.get("MediaContainer") or {}
             return int(mc.get("totalSize") or mc.get("size") or 0)

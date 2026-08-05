@@ -135,6 +135,25 @@ function _renderHeader(title) {
   `;
 }
 
+/* Revue post-merge 2026-08-03 : le pied de modale lisait `d.analyzed_at`, cle
+ * que le backend n'emet PAS. `quality/get_perceptual_details` renvoie
+ * l'horodatage sous `ts` (epoch secondes, colonne perceptual_reports.ts) et
+ * `_flatten_perceptual_for_modal` ne le renomme pas. Resultat : une analyse
+ * complete et persistee s'affichait avec « Non analysé » en pied de modale,
+ * juste sous son propre score — contradiction directe a l'ecran. On lit donc
+ * `analyzed_at` (si un jour le backend l'ajoute) PUIS `ts` en repli.
+ */
+function _analyzedAtLabel(d) {
+  if (!d || typeof d !== "object") return null;
+  if (d.analyzed_at) return String(d.analyzed_at);
+  const ts = Number(d.ts);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  const date = new Date(ts * 1000);
+  if (Number.isNaN(date.getTime())) return null;
+  try { return date.toLocaleString("fr-FR"); }
+  catch { return date.toISOString(); }
+}
+
 function _renderFooter(analyzedAt, canRelaunch) {
   return `
     <footer class="perceptual-modal-footer">
@@ -215,7 +234,10 @@ function _renderError(title, msg) {
 
 function _renderScoreSection(d) {
   const score = d.global_score_v2 != null ? Math.round(Number(d.global_score_v2)) : null;
-  const tier = String(d.tier_v2 || d.global_tier_v2 || "unknown").toLowerCase();
+  // VN-B.2 : single source of truth display_tier (echelle V2 lowercase
+  // reconciliee backend). Fallback tier_v2 / global_tier_v2 pour les payloads
+  // pre-VN-B.2.
+  const tier = String(d.display_tier || d.tier_v2 || d.global_tier_v2 || "unknown").toLowerCase();
   const tierLabel = humanize(tier, tier);
   const sev = severityForTier(tier);
   const visualScore = d.visual_score != null ? Number(d.visual_score) : null;
@@ -457,7 +479,7 @@ function _renderNormal(title, d) {
       ${_renderCrossVerdictsSection(d)}
       ${_renderFramesSection()}
     </div>
-    ${_renderFooter(d.analyzed_at, true)}
+    ${_renderFooter(_analyzedAtLabel(d), true)}
   `;
 }
 

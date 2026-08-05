@@ -1,3 +1,8 @@
+-- @manager: disable_fk
+-- Fix audit 2026-05-25 (v1.5.3) Vague H : disable_fk pour eviter CASCADE des FK runs->enfants
+-- (marker en TETE du fichier — le manager le detecte aussi dans les commentaires plus bas,
+--  mais on le place ici pour visibilite immediate et robustesse a un futur nettoyage de doc.)
+--
 -- Migration 023 (V8-01 spec 08 Traitement) : etend la contrainte CHECK sur runs.status
 -- pour supporter PAUSED, SAVED, AWAITING_VALIDATION + ajoute colonne paused_at.
 --
@@ -24,6 +29,18 @@
 --
 -- (Cf migration_manager.py — PRAGMA foreign_keys ne fonctionne PAS dans une
 -- transaction, le manager pose le PRAGMA avant BEGIN et le restaure apres.)
+
+-- R8-019 (F2-d) : SELF-HEAL SAFE. Le bootstrap self-healing (sqlite_store
+-- _bootstrap_schema_latest) REJOUE ce script entier sur une DB qui a deja paused_at +
+-- des donnees. Avant, le `SELECT ..., NULL FROM runs` ci-dessous ecrasait tous les
+-- paused_at a NULL au replay (perte de donnees). On garantit d'abord que la colonne
+-- paused_at existe sur la table source, puis on la COPIE (au lieu de NULL) :
+--   - 1er passage (migration v24->v25, runs sans paused_at) : l'ALTER l'ajoute (NULL),
+--     le SELECT lit ce NULL -> resultat identique a l'ancien comportement ;
+--   - replay self-heal (runs a deja paused_at) : l'ALTER leve "duplicate column" =
+--     erreur IDEMPOTENTE (skip par le SAVEPOINT du manager/bootstrap), le SELECT lit
+--     la valeur existante -> paused_at PRESERVE. Aucune perte.
+ALTER TABLE runs ADD COLUMN paused_at REAL;
 
 DROP TABLE IF EXISTS runs_new;
 
@@ -56,7 +73,7 @@ INSERT INTO runs_new (
 SELECT
   run_id, status, created_ts, started_ts, ended_ts, root, state_dir,
   config_json, stats_json, idx, total, current_folder, cancel_requested,
-  error_message, NULL
+  error_message, paused_at
 FROM runs;
 
 DROP TABLE runs;

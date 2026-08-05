@@ -20,6 +20,7 @@ venv*/
 build/
 dist/
 packages/
+*.egg-info/
 web/_backup_*/
 .tmp_test/
 .tmp_audit/
@@ -40,11 +41,16 @@ Thumbs.db
 # Runtime app state
 STATE_DIR/
 runs/
-db/
-CineSort/
-!cinesort/infra/db/
-!cinesort/infra/db/migrations/
-!cinesort/infra/db/migrations/*.sql
+# '/db/' ANCRE a la racine : sinon 'db/' (non ancre) matche aussi
+# cinesort/infra/db/ et ré-ignore les migrations source. C'est ce que les
+# negations retirees ci-dessous tentaient de contourner.
+/db/
+# NOTE (2026-07-13) : l'ancienne regle 'CineSort/' ignorait TOUT le package
+# source cinesort/ sur un FS insensible a la casse (Windows) -> 27 fichiers
+# source jamais commites (clone casse). La sortie build PyInstaller est deja
+# couverte par dist/ (plus haut) ; les negations '!cinesort/infra/db/...' qui
+# suivaient etaient un contournement inoperant (git ne re-inclut pas un fichier
+# sous un repertoire parent exclu). Regle retiree.
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
@@ -65,8 +71,24 @@ _LOCAL_uncommitted_changes_backup.patch
 # Exceptions : templates de configuration versionnes (pas de secrets reels)
 !.env.example
 !settings.json.example
-# Local settings (contiennent cles DPAPI, tokens)
-settings.json
+# Local settings (contiennent cles DPAPI, tokens) — ancre racine pour ne pas
+# masquer .vscode/settings.json ou des fixtures de test
+/settings.json
+
+# Artefacts de debug de session (regenerables, jamais commites — cf
+# docs/internal/verif_totale_2026_07/PLAN_VERIF_TOTALE.md Phase 0.3)
+*.err
+*.out
+*.pid
+_iter*
+_observe_*
+_pytest_*
+_rebuild_*
+_revue_*
+_verif_*
+.tmp_*
+observe_*.out
+postmortem_*.log
 
 # Audits visuels manuels : screenshots et videos (gros artefacts, regenerables)
 tests/manual/screenshots/
@@ -85,3 +107,21 @@ ci_log.txt
 
 # Release notes temporaires (uploadees sur GitHub Release puis supprimees)
 .release_notes_*.md
+
+# V3.1 SCAFFOLDING — Bundle WebView2 Fixed Version (genere par
+# scripts/download_webview2_fixed.py, lourd ~120 MB, EULA Microsoft).
+# Ne JAMAIS commit. Cf docs/RELEASE.md section "Bundle WebView2".
+webview2_fixed/
+webview2_fixed.cab
+
+# R8 F6-b option (a) : artefacts REGENERABLES sortis du suivi (disque intact,
+# historique passe inchange — la purge historique = chantier separe). Cf
+# docs/internal/r8/F6B_GIT_ANALYSIS.md. NE PAS confondre avec baseline_r8/ et
+# docs/internal/r8/ (preuves R8, restent suivies).
+docs/internal/observe/
+dist_backup_*/
+test_library/
+FAIL_*.png
+# Logs pytest bruts régénérables (étape squash-merge) — on garde les VRAIES preuves
+# R8 (R8_CORRECTIONS.md, scripts *_diff.py, baseline_r8/, *.out.txt) mais pas ces dumps.
+docs/internal/r8/suite_*.txt

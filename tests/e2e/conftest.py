@@ -7,21 +7,23 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 import time
 from http.client import HTTPConnection
 from pathlib import Path
+from pathlib import Path as _Path
 from typing import Any, Dict, Generator
 
 import pytest
-
-import sys
-from pathlib import Path as _Path
 
 # Ajouter le dossier e2e au path pour les imports locaux (pas de __init__.py pour eviter unittest discover)
 _e2e_dir = str(_Path(__file__).resolve().parent)
 if _e2e_dir not in sys.path:
     sys.path.insert(0, _e2e_dir)
+
+import contextlib
+import json as _json
 
 from create_test_data import (  # noqa: E402
     _TOKEN,
@@ -30,8 +32,7 @@ from create_test_data import (  # noqa: E402
     populate_database,
     write_plan_file,
 )
-import contextlib
-import json as _json
+
 from tests._helpers import find_free_port as _find_free_port
 
 

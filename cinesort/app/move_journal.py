@@ -45,8 +45,12 @@ def journaled_move(
         with journaled_move(store, src=src, dst=dst, op_type="MOVE_FILE"):
             shutil.move(str(src), str(dst))
 
-    - INSERT pending move dans la DB AVANT d'entrer dans le with.
+    - INSERT pending move dans la DB AVANT d'entrer dans le with. Une erreur
+      inattendue ici REMONTE (rien n'a encore bouge sur le disque : fail-closed).
     - Si le with se termine sans exception : DELETE pending move (move OK).
+      Une erreur ici est AVALEE et loggee (issue #670) : les octets ont deja
+      bouge, et laisser l'exception sortir ferait sauter le `record_apply_op`
+      qui suit chez l'appelant — le move deviendrait non annulable.
     - Si exception dans le with : l'entree pending reste, sera detectee par
       reconcile_pending_moves() au prochain boot.
 
@@ -89,14 +93,33 @@ def journaled_move(
 
     # Sortie sans exception : le move (ou ce qui est dans le with) a reussi.
     # On peut nettoyer le journal.
+    #
+    # Issue #670 — ce nettoyage est POST-DEPLACEMENT : les octets ont deja bouge
+    # sur le disque quand on arrive ici. Toute exception qui s'echappe d'ici
+    # remonte au call site (apply_core), qui execute `record_apply_op` APRES
+    # `atomic_move` : le move ne serait alors JAMAIS journalise dans
+    # apply_operations, donc plus annulable, alors que le dossier a bel et bien
+    # change de place. Le tuple etroit (sqlite3.Error, OSError, AttributeError)
+    # laissait passer tout le reste, et `delete_pending_move` peut lever hors de
+    # ce tuple : `_ensure_schema_group` -> `_schema_group_tables` leve KeyError,
+    # le bootstrap de schema leve RuntimeError, un pending_id non convertible
+    # leve TypeError/ValueError.
+    #
+    # Sur ce chemin destructif, le sens RESTRICTIF est donc d'AVALER : perdre
+    # l'entree pending ne coute rien (la reconciliation au boot la classera
+    # "completed" puisque src a disparu et dst existe), alors que perdre l'undo
+    # laisse un etat mixte non annulable. L'asymetrie avec l'INSERT ci-dessus est
+    # deliberee : la, rien n'a encore bouge, donc une erreur inattendue doit
+    # remonter (fail-closed avant tout deplacement).
     if pending_id is not None:
         try:
             store.apply.delete_pending_move(pending_id)
-        except (sqlite3.Error, OSError, AttributeError) as exc:
-            _logger.warning(
-                "journaled_move: delete_pending_move(id=%d) failed: %s",
+        except Exception:  # noqa: BLE001 - nettoyage best-effort, ne doit jamais invalider un move reussi
+            _logger.exception(
+                "journaled_move: delete_pending_move(id=%s) a echoue ; le move est DEJA "
+                "applique sur disque et reste journalise/annulable, l'entree pending "
+                "sera reconciliee au prochain boot",
                 pending_id,
-                exc,
             )
 
 

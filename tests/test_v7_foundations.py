@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from contextlib import closing
 import shutil
 import sqlite3
 import tempfile
 import threading
 import unittest
-from unittest import mock
+from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from cinesort.infra.db import SQLiteStore, db_path_for_state_dir
 from cinesort.infra.run_id import RUN_ID_PATTERN, normalize_or_generate_run_id
@@ -246,14 +246,33 @@ class V7FoundationsTests(unittest.TestCase):
         errs = self.store.run.list_errors(run_id)
         self.assertEqual(len(errs), 12)
 
-    def test_run_id_normalization_or_uuid_fallback(self) -> None:
+    def test_run_id_normalization_keeps_legacy_and_falls_back_canonically(self) -> None:
+        """Contrat mis a jour avec le lot « unicite du run_id ».
+
+        Inchange (c'est LA garantie de compat ascendante) : un run_id a 3
+        groupes deja present chez l'utilisateur traverse la normalisation
+        INTACT.
+
+        Change DELIBEREMENT : le repli n'est plus un `uuid4().hex`. L'ancien
+        repli avait deux defauts reels — (1) il ne matchait pas
+        `RUN_ID_PATTERN`, donc il etait re-genere a chaque passage dans cette
+        meme fonction (un run_id de reprise changeait d'identite) ; (2) un hex
+        commencant par une lettre trie APRES tout id horodate, si bien que
+        `clean_old_runs` (tri lexicographique du nom de dossier) le classait
+        eternellement comme « le plus recent » et purgeait de vrais runs dates
+        a sa place. Le repli est desormais au format canonique : valide, unique
+        et triable. L'exigence est renforcee, pas abaissee.
+        """
         current = "20260218_150500_321"
         kept = normalize_or_generate_run_id(current)
         self.assertEqual(kept, current)
 
         fallback = normalize_or_generate_run_id("invalid")
-        self.assertRegex(fallback, r"^[0-9a-f]{32}$")
-        self.assertFalse(bool(RUN_ID_PATTERN.match(fallback)))
+        self.assertTrue(bool(RUN_ID_PATTERN.match(fallback)))
+        # Stabilite : re-normaliser le repli ne doit plus le remplacer.
+        self.assertEqual(normalize_or_generate_run_id(fallback), fallback)
+        # Unicite : deux replis consecutifs ne collident pas.
+        self.assertNotEqual(fallback, normalize_or_generate_run_id("invalid"))
 
     def test_apply_journal_insert_append_close_and_query(self) -> None:
         self.store.initialize()

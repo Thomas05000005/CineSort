@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import cinesort.ui.api.cinesort_api as backend
 
@@ -145,8 +145,9 @@ class TestImportWatchlist(unittest.TestCase):
             store = MagicMock()
             store.run.get_runs_summary.return_value = [{"run_id": "run0001", "status": "DONE"}]
             mock_infra.return_value = (store, MagicMock())
-            (self.state_dir / "runs" / "run0001").mkdir(parents=True)
-            (self.state_dir / "runs" / "run0001" / "plan.jsonl").write_text("", encoding="utf-8")
+            # Audit 2026-06-02 : convention `tri_films_{run_id}` (state.new_run).
+            (self.state_dir / "runs" / "tri_films_run0001").mkdir(parents=True)
+            (self.state_dir / "runs" / "tri_films_run0001" / "plan.jsonl").write_text("", encoding="utf-8")
 
             result = self.api._import_watchlist_impl(csv_content="x", source="letterboxd")
             self.assertTrue(result["ok"])

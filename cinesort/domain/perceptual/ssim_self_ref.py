@@ -19,6 +19,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from cinesort.domain._runners import tracked_run
+
 from .constants import (
     SSIM_SELF_REF_AMBIGUOUS_THRESHOLD,
     SSIM_SELF_REF_FAKE_THRESHOLD,
@@ -26,8 +28,6 @@ from .constants import (
     SSIM_SELF_REF_SEGMENT_DURATION_S,
     SSIM_SELF_REF_TIMEOUT_S,
 )
-from cinesort.domain._runners import tracked_run
-
 from .ffmpeg_runner import _runner_platform_kwargs
 
 logger = logging.getLogger(__name__)
@@ -65,16 +65,38 @@ def classify_ssim_verdict(ssim_y: float) -> Tuple[str, float]:
     return ("native", 0.90)
 
 
+def _half_even(value: int) -> int:
+    """Moitie de `value`, arrondie a l'inferieur sur un nombre PAIR (>= 2).
+
+    Les pix_fmt 4:2:0 exigent des dimensions paires ; une etape intermediaire
+    impaire ferait echouer le graphe de filtres.
+    """
+    return max(2, (int(value) // 4) * 2)
+
+
 def build_ssim_self_ref_command(
     ffmpeg_path: str,
     media_path: str,
     start_offset_s: float,
     duration_s: float,
+    video_width: int,
+    video_height: int,
 ) -> List[str]:
     """Construit la commande ffmpeg filter_complex pour SSIM self-referential.
 
-    Split -> downscale 1080p bicubic -> upscale 4K bicubic -> SSIM contre l'original.
+    Split -> downscale demi-resolution bicubic -> re-upscale a la resolution
+    NATIVE bicubic -> SSIM contre l'original.
+
+    #525 : l'etape de re-upscale codait 3840x2160 en dur. Sur toute source dont
+    la geometrie n'est pas exactement UHD 16:9 — DCI 4K 4096x2160, 2:1 3840x1920,
+    scope 4096x1716... — `[ref]` et `[b]` n'avaient plus la meme taille et le
+    filtre ssim refusait de s'initialiser ("Width and height of input videos must
+    be same"), d'ou returncode != 0 -> verdict "error" et signal §13 perdu en
+    silence. On repasse donc par les dimensions natives, ce qui rend l'egalite
+    de taille vraie par construction.
     """
+    w, h = int(video_width), int(video_height)
+    half_w, half_h = _half_even(w), _half_even(h)
     return [
         ffmpeg_path,
         "-hide_banner",
@@ -86,7 +108,7 @@ def build_ssim_self_ref_command(
         "-t",
         str(float(duration_s)),
         "-filter_complex",
-        ("[0:v]split=2[a][b];[a]scale=1920:1080:flags=bicubic,scale=3840:2160:flags=bicubic[ref];[b][ref]ssim"),
+        (f"[0:v]split=2[a][b];[a]scale={half_w}:{half_h}:flags=bicubic,scale={w}:{h}:flags=bicubic[ref];[b][ref]ssim"),
         "-f",
         "null",
         "-v",
@@ -101,11 +123,16 @@ def compute_ssim_self_ref(
     duration_s: float,
     video_height: int,
     *,
+    video_width: int,
     is_animation: bool = False,
     segment_duration_s: float = SSIM_SELF_REF_SEGMENT_DURATION_S,
     timeout_s: float = SSIM_SELF_REF_TIMEOUT_S,
 ) -> SsimSelfRefResult:
     """Calcule le SSIM self-referential pour detecter les fake 4K.
+
+    `video_width` est REQUIS (mot-cle) : le graphe de filtres doit re-upscaler a
+    la resolution native, cf. #525. Pas de valeur par defaut volontairement — un
+    defaut ferait silencieusement revivre le 3840x2160 code en dur.
 
     Returns:
         SsimSelfRefResult avec ssim_y/all + verdict + confidence.
@@ -119,9 +146,21 @@ def compute_ssim_self_ref(
         return SsimSelfRefResult(-1.0, -1.0, "not_applicable_duration", 0.0)
     if not ffmpeg_path or not media_path:
         return SsimSelfRefResult(-1.0, -1.0, "error", 0.0)
+    if int(video_width) <= 0:
+        # Largeur inconnue : impossible de garantir [ref] == [b]. On le dit au
+        # lieu de lancer un ffmpeg qui echouera de toute facon.
+        logger.warning("ssim_self_ref: largeur video inconnue (%s), analyse ignoree", video_width)
+        return SsimSelfRefResult(-1.0, -1.0, "error", 0.0)
 
     start_offset = max(0.0, (float(duration_s) - float(segment_duration_s)) / 2.0)
-    cmd = build_ssim_self_ref_command(ffmpeg_path, media_path, start_offset, segment_duration_s)
+    cmd = build_ssim_self_ref_command(
+        ffmpeg_path,
+        media_path,
+        start_offset,
+        segment_duration_s,
+        video_width=int(video_width),
+        video_height=int(video_height),
+    )
 
     try:
         platform_kwargs = _runner_platform_kwargs()

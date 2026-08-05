@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from cinesort.domain.scene_parser import extract_release_group, extract_source
 from cinesort.infra import state
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.library_support import _build_library_rows
+from cinesort.ui.api.library_support import CODEC_UNKNOWN, _build_library_rows
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,9 @@ def _resolve_latest_run_id(api: Any) -> Optional[str]:
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("library_podiums cannot resolve latest run: %s", exc)
         return None
-    return str(runs[0]["run_id"]) if runs else None
+    if not runs:
+        return None
+    return str(runs[0].get("run_id") or "") or None
 
 
 def _aggregate_top(values: List[Optional[str]], limit: int) -> List[Dict[str, Any]]:
@@ -69,6 +71,25 @@ def _aggregate_top(values: List[Optional[str]], limit: int) -> List[Dict[str, An
 
 
 def get_library_podiums(
+    api: Any,
+    run_id: Optional[str] = None,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    # Fix audit 2026-05-25 (v1.5.3) Vague G : wrap global pour eviter HTTP 500
+    # sur cet endpoint d'agregation appele depuis le dashboard Bibliotheque.
+    try:
+        return _get_library_podiums_impl(api, run_id=run_id, limit=limit)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("get_library_podiums failed for run_id=%s limit=%s", run_id, limit)
+        return {
+            "ok": False,
+            "error": "podiums_load_failed",
+            "message": str(exc),
+            "user_message": "Impossible de charger les podiums.",
+        }
+
+
+def _get_library_podiums_impl(
     api: Any,
     run_id: Optional[str] = None,
     limit: int = 10,
@@ -159,9 +180,16 @@ def get_library_podiums(
         filename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""
         release_groups.append(extract_release_group(filename))
         sources.append(extract_source(filename))
-        # Codec : deja normalise par _build_library_rows via _normalize_codec()
-        codec = row.get("codec")
-        codecs.append(str(codec).strip() if codec else None)
+        # Codec : deja normalise par _build_library_rows via _normalize_codec().
+        # Issue #681 : cette normalisation ne rend JAMAIS None ni "" — un film
+        # sans probe ffprobe recoit la sentinelle CODEC_UNKNOWN, qui est truthy.
+        # Comptee telle quelle, elle devenait une entree du podium (souvent la
+        # premiere sur une bibliotheque non probee) et gonflait `codecs_pct` a
+        # ~100 % alors qu'aucun codec reel n'etait connu. On la ramene a None,
+        # la valeur que `release_groups`/`sources` rendent deja pour « absent »,
+        # et que `_aggregate_top` comme le calcul de couverture ecartent.
+        codec = str(row.get("codec") or "").strip()
+        codecs.append(codec if codec and codec.lower() != CODEC_UNKNOWN else None)
 
     # Coverage = % des films pour lesquels on a extrait la donnee
     rg_have = sum(1 for v in release_groups if v)
