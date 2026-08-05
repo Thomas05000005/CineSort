@@ -105,7 +105,7 @@ def extract_local_candidate(folder: Path, cfg: Any) -> LocalCandidate:
             min_video_bytes=effective_min_bytes,
             stats=local_stats,
         )
-    except (OSError, PermissionError, FileNotFoundError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         errors.append(f"iter_videos failed on {folder}: {exc}")
         videos = []
 
@@ -114,7 +114,7 @@ def extract_local_candidate(folder: Path, cfg: Any) -> LocalCandidate:
         # Inventaire utile uniquement quand `videos=[]` (branche diagnostic).
         try:
             non_video_exts = core_mod._collect_non_video_extensions(cfg, folder)
-        except (OSError, PermissionError, FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             errors.append(f"collect_non_video_extensions failed on {folder}: {exc}")
             non_video_exts = {}
 

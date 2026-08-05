@@ -341,7 +341,7 @@ def backup_db_with_rotation(
 
     try:
         backup_db(src, backup_path)
-    except (sqlite3.Error, OSError, PermissionError) as exc:
+    except (sqlite3.Error, OSError) as exc:
         _logger.warning("backup_db_with_rotation: backup echoue (%s): %s", trigger, exc)
         return None
 

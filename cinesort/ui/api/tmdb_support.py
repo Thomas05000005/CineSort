@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Set
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
+from cinesort.ui.api import run_data_support
 from cinesort.ui.api._responses import err as _err_response
 
 # AUDIT 2026-06-10 (CRITICAL) : `api._normalize_user_path` n'existe pas (c'est un
@@ -271,21 +272,16 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
         # lance en fin de scan (run_flow_support.py:634) : son `.tmp` en dur
         # etait le MEME chemin que celui de `_rematch_tmdb_and_update_plan`,
         # declenchable au meme instant depuis l'UI (#732). Cf write_plan_jsonl.
-        # Un SEUL import differe pour les deux symboles : cf. la meme note dans
-        # `library_actions_support._rematch_tmdb_and_update_plan` (cliquet
-        # `test_lazy_imports_bounded`).
-        from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
-            resync_run_state_rows,
-            write_plan_jsonl,
-        )
-
-        write_plan_jsonl(plan_jsonl, all_rows)
+        # `run_data_support` est desormais importe en TETE (#779), en
+        # MODULE-STYLE : cf. la meme note dans
+        # `library_actions_support._rematch_tmdb_and_update_plan`.
+        run_data_support.write_plan_jsonl(plan_jsonl, all_rows)
 
         # AUDIT 2026-07-13 (HIGH-17) : toute reecriture de plan.jsonl doit
         # resynchroniser le snapshot memoire (prefere au fichier par get_plan /
         # apply / dashboard) et purger le cache dashboard, dont la signature est
         # calculee sur plan.jsonl (sinon cache empoisonne avec des rows perimees).
-        resync_run_state_rows(api, run_id)
+        run_data_support.resync_run_state_rows(api, run_id)
 
     with contextlib.suppress(OSError, AttributeError):
         tmdb.flush()

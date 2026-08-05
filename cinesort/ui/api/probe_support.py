@@ -371,7 +371,7 @@ def auto_install_probe_tools(
         msg = "Outils installes avec succes." if ok else f"Installation partielle : {'; '.join(errors)}"
         _logger.info("auto_install_probe_tools: ok=%s installed=%s errors=%s", ok, list(installed), errors)
         return {"ok": ok, "installed": installed, "errors": errors, "message": msg, "status": status}
-    except (OSError, FileNotFoundError) as exc:
+    except OSError as exc:
         # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
         # (auto_install est optionnel : l'utilisateur peut installer manuellement les outils)
         _logger.warning("auto_install_probe_tools: %s", exc)

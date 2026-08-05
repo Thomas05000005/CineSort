@@ -556,7 +556,7 @@ def _load_trash_preset() -> Dict[str, Any]:
         ref = resources.files("cinesort.data.presets").joinpath("tier_preset_trash_2026.json")
         text = ref.read_text(encoding="utf-8")
         _PRESET_CACHE = json.loads(text)
-    except (OSError, ModuleNotFoundError, FileNotFoundError, json.JSONDecodeError) as exc:
+    except (OSError, ModuleNotFoundError, json.JSONDecodeError) as exc:
         logger.warning("Impossible de charger tier_preset_trash_2026.json: %s", exc)
         _PRESET_CACHE = {}
     return copy.deepcopy(_PRESET_CACHE)

@@ -363,7 +363,7 @@ class OmdbClient:
                 if tmp.exists():
                     with contextlib.suppress(OSError):
                         tmp.unlink()
-        except (OSError, PermissionError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             logger.debug("omdb cache save warning: %s", exc)
             if tmp.exists():
                 with contextlib.suppress(OSError):

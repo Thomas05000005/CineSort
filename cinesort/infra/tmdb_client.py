@@ -222,7 +222,7 @@ class TmdbClient:
             debug_path = self.cache_path.parent / "debug_tmdb.log"
             with open(debug_path, "a", encoding="utf-8") as f:
                 f.write(f"[{ts}] {message}\n")
-        except (OSError, PermissionError):
+        except OSError:
             return
 
     def _load_cache(self) -> None:
@@ -244,7 +244,7 @@ class TmdbClient:
                     self._cache = OrderedDict()
             else:
                 self._cache = OrderedDict()
-        except (OSError, PermissionError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
             # Cache corrompu -> on repart propre.
             self._cache = OrderedDict()
             self._debug(f"cache load warning path={self.cache_path} error={exc}")
@@ -315,7 +315,7 @@ class TmdbClient:
                 if self.cache_path.exists():
                     raw = json.loads(read_text_bounded(self.cache_path, max_bytes=_TMDB_CACHE_MAX_BYTES))
                     entry = raw.get(key)
-            except (OSError, PermissionError, json.JSONDecodeError, ValueError):
+            except (OSError, json.JSONDecodeError, ValueError):
                 return None, None
         if entry is None:
             return None, None
@@ -403,13 +403,13 @@ class TmdbClient:
                 self._dirty = False
             except AtomicWriteError as exc:
                 logger.warning("tmdb cache tmp write failed, keeping previous cache (%s)", exc)
-            except (OSError, PermissionError, ValueError) as exc:
+            except (OSError, ValueError) as exc:
                 logger.debug("tmdb cache save warning: %s", exc)
 
     def flush(self) -> None:
         try:
             self._save_cache_atomic(force=True)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             self._debug(f"cache flush warning path={self.cache_path} error={exc}")
 
     # ------------------------------------------------------------------
@@ -588,7 +588,7 @@ class TmdbClient:
             # best-effort save
             try:
                 self._save_cache_atomic()
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 self._debug(f"search_movie cache save warning key={cache_key} error={exc}")
         return results
 
@@ -670,7 +670,7 @@ class TmdbClient:
         self._cache_set(cache_key, cache_entry)
         try:
             self._save_cache_atomic()
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             self._debug(f"movie detail cache save warning movie_id={mid} error={exc}")
         return cache_entry
 
@@ -1216,7 +1216,7 @@ def purge_expired_tmdb_cache(
     except FileTooLargeError as exc:
         result["error"] = f"too_large: {exc}"
         return result
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         result["error"] = f"read_error: {exc}"
         return result
 
@@ -1269,7 +1269,7 @@ def purge_expired_tmdb_cache(
     # anterieur a cette PR, mais elle reecrit cette ligne et fsync son resultat.
     try:
         atomic_write_json(cache_path, new_cache, indent=None)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         result["error"] = f"write_error: {exc}"
         return result
 

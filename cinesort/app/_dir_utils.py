@@ -82,5 +82,5 @@ def is_dir_empty(path: Path) -> bool:
         return False
     except StopIteration:
         return True
-    except (OSError, PermissionError):
+    except OSError:
         return False
