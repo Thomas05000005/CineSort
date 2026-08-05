@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .constants import (
+    FAKE_4K_CONFIDENCE_SINGLE_SIGNAL,
     FAKE_4K_FFT_HF_CUTOFF_RATIO,
     FAKE_4K_FFT_MIN_VARIANCE,
     FAKE_4K_FFT_MIN_VARIANCE_10BIT,
@@ -220,11 +221,17 @@ def combine_fake_4k_verdicts(
         ssim_self_ref: score SSIM Y 0.0-1.0, None ou -1 si non calcule.
 
     Returns:
-        "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
-        "fake_4k_probable"  : un seul conclut fake (conf 0.70)
-        "4k_native"         : aucun ne conclut fake
-                              (conf 0.90 si les 2 signaux consultes, 0.60 si un seul)
-        "ambiguous"         : les 2 sont indisponibles (conf 0.30)
+        Les DEUX signaux consultes :
+          "fake_4k_confirmed" : les 2 concluent fake (conf 0.95)
+          "fake_4k_probable"  : un seul des 2 conclut fake (conf 0.70)
+          "4k_native"         : aucun des 2 ne conclut fake (conf 0.90)
+        UN SEUL signal disponible (#804, audit-bot:2026-07-25-A1) : meme verdict,
+        mais confiance rabaissee a FAKE_4K_CONFIDENCE_SINGLE_SIGNAL. Un verdict
+        rendu sur un signal unique n'est corrobore par personne — ni dans le sens
+        "natif" (le signal absent aurait pu conclure fake) ni dans le sens "fake"
+        (il aurait pu conclure natif) — et ne peut pas porter la confiance d'un
+        consensus.
+        "ambiguous" : les 2 sont indisponibles (conf 0.30)
     """
     # Normalise : SSIM peut etre None ou -1 (flag "non calcule")
     ssim_available = ssim_self_ref is not None and ssim_self_ref >= 0
@@ -236,14 +243,20 @@ def combine_fake_4k_verdicts(
     fft_says_fake = fft_available and fft_ratio < FAKE_4K_FFT_THRESHOLD_AMBIGUOUS
     ssim_says_fake = ssim_available and ssim_self_ref >= SSIM_SELF_REF_FAKE_THRESHOLD
 
+    # Un seul signal consulte : aucune corroboration possible, ni dans un sens
+    # ni dans l'autre. La categorie reste celle du signal disponible, mais la
+    # confiance ne peut pas etre celle d'un consensus. Cette branche couvre les
+    # DEUX categories : "4k_native" mono-signal (audit-bot:2026-07-25-A1, deja
+    # traite sur main) ET "fake_4k_probable" mono-signal (#804), qui portait
+    # sinon 0.70 — exactement la confiance d'un DESACCORD entre deux signaux.
+    if not (fft_available and ssim_available):
+        verdict = "fake_4k_probable" if (fft_says_fake or ssim_says_fake) else "4k_native"
+        return (verdict, FAKE_4K_CONFIDENCE_SINGLE_SIGNAL)
+
+    # A partir d'ici les deux signaux ont parle : les confiances sont celles du
+    # consensus (ou du desaccord) a deux signaux.
     if fft_says_fake and ssim_says_fake:
         return ("fake_4k_confirmed", 0.95)
     if fft_says_fake or ssim_says_fake:
         return ("fake_4k_probable", 0.70)
-    # Aucun signal ne conclut fake. La confiance depend du nombre de signaux
-    # reellement consultes : un consensus a deux signaux (0.90) est plus solide
-    # qu'un verdict fonde sur un seul signal disponible (0.60), l'autre — absent —
-    # ayant pu conclure fake. Cf audit-bot:2026-07-25-A1.
-    if fft_available and ssim_available:
-        return ("4k_native", 0.90)
-    return ("4k_native", 0.60)
+    return ("4k_native", 0.90)
