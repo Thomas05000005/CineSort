@@ -353,8 +353,39 @@ if (toast2 && toast2.action && typeof toast2.action.onClick === "function") {
   afterUndoAvecRetouche = M.__decisions();
 }
 
+// --- Horloge FIGEE : la retouche tombe dans la meme milliseconde ---------
+// C'est le cas que `decided_at` ne pouvait pas distinguer. Avec un horodatage
+// pour identite, `current.decided_at === bulkStamps.get(rid)` restait VRAI et
+// « Annuler » ecrasait une decision que l'utilisateur venait de prendre.
+Date.now = () => 1000;
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = true;
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+M.__retoucher("r2", true);
+const toast3 = globalThis.__spy.toasts[globalThis.__spy.toasts.length - 1] || null;
+let afterUndoHorlogeFigee = null;
+if (toast3 && toast3.action && typeof toast3.action.onClick === "function") {
+  await toast3.action.onClick();
+  afterUndoHorlogeFigee = M.__decisions();
+}
+
+// --- Echec API sous horloge qui AVANCE : le rollback doit aussi tenir -----
+// Les deux gardes partagent le meme critere ; celle du rollback n'etait
+// exercee que sous horloge normale, donc elle pouvait passer par chance.
+Date.now = () => (_tic += 1);
+globalThis.__spy = { toasts: [], api: [] };
+globalThis.__apiOk = false;
+M.__setup(ids);
+await M.__applyBulkApprove(new Set(ids), ids.length);
+const afterFailureHorloge = M.__decisions();
+const failToastsHorloge = globalThis.__spy.toasts.map((t) => t.type);
+
 Date.now = _vraiNow;
-__emit({ afterApprove, afterUndo, afterUndoAvecRetouche });
+__emit({
+  afterApprove, afterUndo, afterUndoAvecRetouche,
+  afterUndoHorlogeFigee, afterFailureHorloge, failToastsHorloge,
+});
 """
 
 _BULK_HORLOGE_EXTRA = (
@@ -413,6 +444,42 @@ class BulkUndoHorlogeQuiAvanceTests(unittest.TestCase):
             {"r1": False, "r2": True, "r3": False},
             "r2 a ete retouchee APRES le bulk : l'annulation doit la respecter",
         )
+
+    def test_une_retouche_DANS_LA_MEME_MILLISECONDE_survit(self) -> None:
+        """Le cas qu'un horodatage ne peut pas distinguer.
+
+        Premiere version de ce correctif : l'identite d'ecriture etait
+        `decided_at`, un HORODATAGE. Une retouche tombant dans la meme
+        milliseconde que le bulk gardait donc l'egalite vraie, et « Annuler »
+        ecrasait une decision que l'utilisateur venait de prendre. Fenetre plus
+        etroite que le defaut d'origine, meme famille.
+
+        L'identite est desormais un compteur de REVISION monotone : deux
+        ecritures distinctes ont toujours des numeros distincts, quelle que
+        soit l'horloge.
+        """
+        res = self._run_or_skip()
+        self.assertEqual(
+            res["afterUndoHorlogeFigee"],
+            {"r1": False, "r2": True, "r3": False},
+            "horloge figee : la retouche de r2 a ete ECRASEE par l'annulation",
+        )
+
+    def test_le_rollback_d_echec_API_tient_aussi_horloge_qui_avance(self) -> None:
+        """La seconde garde partage le meme critere et doit etre exercee AUSSI.
+
+        Elle ne l'etait que sous horloge normale : elle pouvait donc passer par
+        chance. Un rollback qui ne rollback pas laisse l'ecran afficher des
+        approbations que le serveur n'a jamais enregistrees.
+        """
+        res = self._run_or_skip()
+        self.assertEqual(
+            res["afterFailureHorloge"],
+            {"r1": False, "r2": False, "r3": False},
+            "echec de save_validation : l'etat doit revenir en arriere",
+        )
+        self.assertIn("error", res["failToastsHorloge"], "echec silencieux interdit")
+        self.assertNotIn("success", res["failToastsHorloge"], "pas de toast de succes sur echec")
 
 
 class DoublonsStepTests(unittest.TestCase):

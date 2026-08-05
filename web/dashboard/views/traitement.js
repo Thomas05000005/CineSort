@@ -151,6 +151,26 @@ let _validationExpanded = new Set();
 // reinjectait silencieusement REJECT pour toutes les lignes hors viewport.
 // rowId -> { ok: bool, year: int|null, decided_at: ts }
 let _decisionsState = new Map();
+
+// Compteur MONOTONE d'ecritures sur `_decisionsState`. C'est la seule identite
+// d'ecriture qui ne peut pas collisionner : `decided_at` est un HORODATAGE, et
+// deux ecritures dans la meme milliseconde y sont indiscernables.
+//
+// Le correctif du 2026-08-05 avait remplace une comparaison d'ORDRE
+// (`decided_at > snapshot_ts`) par une comparaison d'EGALITE sur `decided_at`.
+// Cela reglait le cas courant — le bulk ne prenait plus ses propres ecritures
+// pour des decisions utilisateur — mais laissait une fenetre : une retouche
+// tombant dans la MEME milliseconde que le bulk gardait l'egalite vraie, et
+// « Annuler » ecrasait alors une decision que l'utilisateur venait de prendre.
+// Fenetre plus etroite, meme famille de defaut.
+//
+// `_rev` ne depend d'aucune horloge : chaque ecriture obtient un numero, et
+// deux ecritures distinctes ont toujours des numeros distincts.
+let _decisionsRev = 0;
+function _nextRev() {
+  _decisionsRev += 1;
+  return _decisionsRev;
+}
 // Fix APPLY-2 (2026-05-30) : intervalle polling pendant l'apply (idem scan)
 // et state apply pour les progressions live.
 let _applyStatus = null;
@@ -1942,7 +1962,7 @@ function _initDecisionsState() {
     else if (r.decision === "REJECT" || r.decision === "REJECTED") ok = false;
     else ok = _defaultDecisionOk(r);
     const year = Number(r.proposed_year) || null;
-    _decisionsState.set(rowId, { ok, year, decided_at: Date.now() });
+    _decisionsState.set(rowId, { ok, year, decided_at: Date.now(), rev: _nextRev() });
   }
   // Cleanup d'eventuelles entrees orphelines (rows disparues du plan, ex.
   // rescan). Garde le state focus sur les rows actuelles uniquement.
@@ -1972,7 +1992,7 @@ function _setDecisionOk(rowId, ok) {
   if (!rowId) return;
   const id = String(rowId);
   const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
-  _decisionsState.set(id, { ...prev, ok: !!ok, decided_at: Date.now() });
+  _decisionsState.set(id, { ...prev, ok: !!ok, decided_at: Date.now(), rev: _nextRev() });
 }
 
 function _setDecisionYear(rowId, yearValue) {
@@ -1980,7 +2000,7 @@ function _setDecisionYear(rowId, yearValue) {
   const id = String(rowId);
   const prev = _decisionsState.get(id) || { ok: false, year: null, decided_at: 0 };
   const y = yearValue === "" || yearValue == null ? null : Number(yearValue) || null;
-  _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now() });
+  _decisionsState.set(id, { ...prev, year: y, decided_at: Date.now(), rev: _nextRev() });
 }
 
 // VN-C.3 (Vague N batch 2) : seuil bulk-approve "sûrs" = CONF_HIGH (85),
@@ -2106,11 +2126,11 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   // On memorise l'empreinte EXACTE que ce bulk vient d'ecrire pour chaque row.
   // C'est elle, et non un ordre de timestamps, qui permettra de reconnaitre
   // plus bas ce qui vient de nous — cf `_ecritParCeBulk`.
-  const bulkStamps = new Map();
+  const bulkRevs = new Map();
   for (const rid of targetIds) {
     _setDecisionOk(rid, true);
     const ecrit = _decisionsState.get(rid);
-    bulkStamps.set(rid, ecrit ? ecrit.decided_at : null);
+    bulkRevs.set(rid, ecrit ? ecrit.rev : null);
   }
 
   // Une row a-t-elle ete retouchee PAR L'UTILISATEUR depuis notre ecriture ?
@@ -2134,7 +2154,12 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   const _ecritParCeBulk = (rid) => {
     const current = _decisionsState.get(rid);
     if (!current) return true;
-    return current.decided_at === bulkStamps.get(rid);
+    const attendue = bulkRevs.get(rid);
+    // Une entree SANS revision ne vient pas de nous : elle precede ce
+    // mecanisme ou a ete posee ailleurs. On la laisse tranquille — le sens
+    // restrictif est de ne PAS ecraser ce dont on n'est pas l'auteur.
+    if (current.rev == null || attendue == null) return false;
+    return current.rev === attendue;
   };
   if (_activeContainer) {
     _activeContainer.querySelectorAll("[data-traitement-validation-check]").forEach((cb) => {
