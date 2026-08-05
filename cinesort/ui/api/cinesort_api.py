@@ -977,7 +977,12 @@ class CineSortApi:
 
             qr = segno.make(url)
             buf = io.BytesIO()
-            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=False)
+            # Cf issue #555 : `svgns=True` (namespace SVG present). Le frontend
+            # ne colle plus ce markup dans innerHTML, il le rend via
+            # <img src="data:image/svg+xml,...">. Un SVG charge en contexte
+            # IMAGE doit etre un document autonome : sans le xmlns, le
+            # navigateur refuse de l'afficher.
+            qr.save(buf, kind="svg", scale=5, dark="#e0e0e8", light="#0a0a0f", border=2, xmldecl=False, svgns=True)
             svg_str = buf.getvalue().decode("utf-8")
         except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
             _log.warning("api: echec generation QR — %s", exc)
@@ -1322,6 +1327,22 @@ class CineSortApi:
                 level="info",
                 log_module=__name__,
             )
+        # Cf issue #563 : le refus cleartext vit dans send_email_report (garde
+        # de securite, elle doit tenir quel que soit l'appelant). On le rejoue
+        # ici uniquement pour REMONTER LE MOTIF a l'utilisateur : sinon le
+        # bouton "Tester l'envoi" affichait "Echec de l'envoi. Verifiez les
+        # parametres SMTP." sans dire lequel.
+        if str(settings.get("email_smtp_user") or "").strip() and str(settings.get("email_smtp_password") or ""):
+            if not _email_report_mod.smtp_session_will_be_encrypted(
+                settings.get("email_smtp_port") or 587,
+                settings.get("email_smtp_tls", True),
+            ):
+                return _err_response(
+                    _email_report_mod.CLEARTEXT_REFUSAL_MESSAGE,
+                    category="permission",
+                    level="error",
+                    log_module=__name__,
+                )
         mock_data = {
             "run_id": "test",
             "ts": time.time(),
@@ -2886,6 +2907,34 @@ class CineSortApi:
 
     # ---------- misc ----------
     def open_path(self, path: str) -> Dict[str, Any]:
+        """Ouvre un dossier dans l'explorateur — caller LOCAL uniquement.
+
+        Cf issue #509. `history_support.open_path` finit par `os.startfile()`
+        sur la machine qui HEBERGE CineSort. Ses deux voisins immediats
+        (`_open_logs_folder_impl`, `_open_external_url_impl`) refusent deja les
+        requetes REST distantes ; celle-ci ne le faisait pas. Les protections
+        existantes (refus des symlinks, confinement dans `state_dir` + `root`)
+        valident le CHEMIN, jamais l'ORIGINE de l'appel.
+
+        Portee honnete : `open_path` est aujourd'hui hors d'atteinte du
+        dispatcher REST (`rest_server._EXCLUDED_METHODS`), verifie en
+        construisant le dispatcher — y compris avec la passe legacy forcee.
+        Le garde est donc de la defense en profondeur, pas la fermeture d'une
+        porte ouverte. Il n'est pas decoratif pour autant : `open_logs_folder`
+        a precisement ete RETIREE de cette liste d'exclusion (V2-09) pour
+        debloquer un bouton du dashboard, et c'est son garde local-only qui a
+        rattrape l'exposition. `open_path` a maintenant le sien.
+
+        `is_remote_request()` vaut False hors REST et pour 127.0.0.1/::1 : le
+        bridge pywebview natif et le dashboard local ne sont pas affectes.
+        """
+        if is_remote_request():
+            return _err_response(
+                "Operation locale uniquement (l'ouverture de l'explorateur n'est pas autorisee via REST distant).",
+                category="permission",
+                level="info",
+                log_module=__name__,
+            )
         return history_support.open_path(
             self,
             path,
