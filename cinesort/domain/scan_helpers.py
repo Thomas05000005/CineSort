@@ -402,6 +402,19 @@ def discover_candidate_folders(
             # versionnage manuel, etc.). On garde toujours le skip du
             # dossier collection (interne CineSort).
             if depth == 0 and nm.startswith("_"):
+                # `_retenir` AVANT le `continue` : sans cet enregistrement, le
+                # dossier ecarte n'entre jamais dans `vus`, et une jonction
+                # portant un AUTRE nom qui pointe dessus le fait rentrer par la
+                # fenetre. Mesure sur `main` avant ce correctif :
+                #
+                #   Bibliotheque/_Collection/Deja Trie (2019)/...  (bac interne)
+                #   Bibliotheque/Raccourci -> _Collection          (jonction)
+                #   -> candidat : Raccourci\Deja Trie (2019)
+                #
+                # Un film DEJA trie et quarantine redevenait candidat au tri, et
+                # l'apply pouvait le redeplacer. Le skip par NOM ne suffit pas :
+                # il faut interdire le dossier PHYSIQUE, pas l'un de ses chemins.
+                _retenir(entry_path)
                 _bump_stats_reject(
                     stats,
                     "ignore_prefix_underscore",
@@ -409,7 +422,10 @@ def discover_candidate_folders(
                 )
                 continue
             if depth == 0 and nm.lower() == collection_name_lower:
-                # Skip le dossier _Collection au niveau 1 du root
+                # Skip le dossier _Collection au niveau 1 du root. Meme raison
+                # que ci-dessus : on enregistre son identite pour qu'aucun autre
+                # chemin ne le rende visible.
+                _retenir(entry_path)
                 continue
             # BUG 5 : fast-path — si le nom contient `(YYYY)`, on suppose
             # un dossier de film. SCAN-FIX (Opus 2026-06-11) : un dossier
