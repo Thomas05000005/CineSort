@@ -348,7 +348,12 @@ class _StoreBase:
                             # tolere les erreurs idempotentes (duplicate column,
                             # already exists) pour rester self-healing sur DB
                             # partielle.
-                            if _is_idempotent_error(stmt_exc):
+                            # Issue #623 (volet 2) : la tolerance est APPARIEE au
+                            # statement (cf _IDEMPOTENT_RULES). Sans `stmt`, un
+                            # `CREATE VIEW`/`CREATE VIRTUAL TABLE` en echec passait
+                            # pour « deja applique ». Ce site est le SECOND chemin
+                            # de boot : il doit muter avec l'autre, pas apres.
+                            if _is_idempotent_error(stmt_exc, stmt):
                                 conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
                                 conn.execute(f"RELEASE SAVEPOINT {sp_name}")
                                 logger.warning(

@@ -102,7 +102,17 @@ VIDEO_EXTS_ALL = frozenset(
         ".webm",
     }
 )
-SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub"}
+# #874 : `.idx` est la MOITIE d'une paire atomique VobSub (`.sub` = flux bitmap,
+# `.idx` = index des timings/offsets). `.sub` etait dans la table, `.idx` non —
+# alors que les deux autres tables de sidecars (SIDECAR_METADATA_EXTS,
+# RESIDUAL_SUBTITLE_EXTS) les listent toutes les deux. Consequence sur les deux
+# sites qui DEPLACENT des fichiers (`classify_sidecars` ci-dessous et
+# `apply_core.is_managed_merge_file`) : un merge/move emportait `Film.fr.sub` et
+# laissait `Film.fr.idx` derriere. Un `.sub` prive de son `.idx` est illisible.
+# Aucune migration de reglages n'est requise : `build_cfg_from_settings`
+# (ui/api/settings_support.py) ne cable JAMAIS `side_exts`, donc le champ vaut
+# toujours None et `normalized()` retombe sur ce defaut.
+SIDE_EXTS_DEFAULT = {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".ass", ".sub", ".idx"}
 
 MIN_VIDEO_BYTES = (
     10 * 1024 * 1024
@@ -1424,6 +1434,14 @@ SKIP_REASON_AUTRE = "skip_autre"
 # un OSError cryptique "Le chemin specifie est introuvable" ou pire un
 # rename partiel laissant le FS dans un etat intermediaire.
 SKIP_REASON_PATH_TOO_LONG = "skip_path_too_long"
+# #613 : saison TV INDETERMINEE (`row.tv_season is None`). A ne pas confondre
+# avec `tv_season == 0`, qui est une saison LEGITIME (les specials Kodi/Jellyfin
+# vivent dans `Saison 00`). `int(row.tv_season or 0)` ecrasait la distinction :
+# un episode dont la saison n'avait pas ete resolue (pattern « Episode 12 » sans
+# saison, tv_helpers.parse_tv_info) etait range en silence dans `Saison 00`,
+# c'est-a-dire melange aux specials, avec un chemin de destination FABRIQUE.
+# Chemin destructif -> l'erreur va dans le sens restrictif : on refuse bruyamment.
+SKIP_REASON_TV_SAISON_INDETERMINEE = "skip_tv_saison_indeterminee"
 
 ANALYSE_IGNORE_LABELS_FR = {
     "ignore_tv_like": "Ignoré (ressemble à une série)",
@@ -1446,6 +1464,7 @@ SKIP_REASON_LABELS_FR = {
     SKIP_REASON_ERREUR_PRECEDENTE: "Erreur précédente",
     SKIP_REASON_AUTRE: "Autre",
     SKIP_REASON_PATH_TOO_LONG: "Chemin trop long (MAX_PATH Windows)",
+    SKIP_REASON_TV_SAISON_INDETERMINEE: "Saison TV indéterminée (destination non fabriquée)",
 }
 
 
