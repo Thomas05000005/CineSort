@@ -65,10 +65,11 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "state_dir_example": "FANTOME - exemple onboarding, aucun lecteur",
     "tmdb_key_protection": "FANTOME - meta GET jamais affichee par l'UI",
     "tmdb_key_warning": "FANTOME - meta GET jamais affichee par l'UI",
-    # --- WRITE_ONLY (15) : UI ecrit/affiche, aucune lecture backend hors persistance ---
+    # --- WRITE_ONLY (12) : UI ecrit/affiche, aucune lecture backend hors persistance ---
+    # NB : auto_approve_enabled / auto_approve_threshold RETIRES 2026-07-10 — desormais
+    # LUS par history_support.load_validation (seed READ-TIME de la Validation via
+    # run_read_support.seed_auto_approve_decisions / is_auto_approvable). Feature cablee.
     "animation_level": "WRITE_ONLY - effet purement client-side (app.js:900 applique le niveau d'animation)",
-    "auto_approve_enabled": "WRITE_ONLY - toggle parametres.js:105, aucune logique d'auto-approbation ne lit la cle dans cinesort/",
-    "auto_approve_threshold": "WRITE_ONLY - seuil parametres.js:106 jamais lu (get_auto_approved_summary n'applique rien)",
     "cleanup_empty_folders": "WRITE_ONLY - toggle parametres.js:155, aucun lecteur backend",
     "cleanup_orphans": "WRITE_ONLY - toggle parametres.js:154, aucun lecteur backend",
     "dry_run_apply": "WRITE_ONLY - toggle dry-run cote UI (traitement.js) ; le backend lit le flag dry_run du payload run/apply, pas ce setting",
@@ -79,7 +80,9 @@ KNOWN_UNWIRED: Dict[str, str] = {
     "light_intensity": "WRITE_ONLY - effet client-side (variables CSS)",
     "notifications_enabled": "WRITE_ONLY - R8-069 : le gate desktop lit desktop_notifications_enabled, ce toggle n'a plus aucun lecteur",
     "onboarding_completed": "WRITE_ONLY - toggle parametres.js:328 mais AUCUN lecteur (ni wizard ni backend)",
-    "retention_days": "WRITE_ONLY - persiste mais aucun lecteur backend",
+    # NB : "retention_days" RETIRE 2026-08-03 — le reglage fantome a ete SUPPRIME
+    # (settings_support._save_section_advanced + champ parametres.js), pas cable :
+    # la purge "scores et analyses" qu'il promettait n'existe pas cote backend.
     "theme": "WRITE_ONLY - effet client-side (app.js:899 document.body.dataset.theme)",
     # --- HORS matrice JSON (2) : _LITERAL_DEFAULTS est un AnnAssign que
     # m3_settings.py ne parsait pas (branche literal_default morte). Ce test
@@ -95,13 +98,13 @@ KNOWN_UNWIRED: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 INDIRECTIONS: Dict[str, str] = {
     "file_extensions": "CABLEE special - jamais lu tel quel : miroir vers video_exts au save "
-                       "(_save_section_sources settings_support.py) ; video_exts est lu par build_cfg_from_settings",
+    "(_save_section_sources settings_support.py) ; video_exts est lu par build_cfg_from_settings",
     "remember_key": "CABLEE special - lu par write_settings (couche persistance settings_support.py:608,614) : "
-                    "gate la persistance DPAPI de tmdb_api_key -> effet reel",
+    "gate la persistance DPAPI de tmdb_api_key -> effet reel",
     "_has_tmdb_api_key": "CABLEE meta GET - generee backend, consommee par l'UI (accueil.js:821) ; "
-                         "aucune lecture backend attendue",
+    "aucune lecture backend attendue",
     "notifications_scan_triggered": "READ_ONLY indirect - lu via notify_service._SETTING_KEYS (notify_service.py:25-31) "
-                                    "-> self._settings.get(key, True) (notify_service.py:84)",
+    "-> self._settings.get(key, True) (notify_service.py:84)",
     "notifications_scan_done": "CABLEE indirect - lu via notify_service._SETTING_KEYS -> .get(key, True)",
     "notifications_apply_done": "CABLEE indirect - lu via notify_service._SETTING_KEYS -> .get(key, True)",
     "notifications_undo_done": "CABLEE indirect - lu via notify_service._SETTING_KEYS -> .get(key, True)",
@@ -111,18 +114,26 @@ INDIRECTIONS: Dict[str, str] = {
 # Fonctions de settings_support.py dont les lectures BRANCHENT un comportement
 # (meme set que m3_settings.py CONSUMER_FUNCS). Toute autre fonction de ce
 # fichier = couche persistance/echo, ses lectures ne comptent pas.
-CONSUMER_FUNCS = frozenset({
-    "build_cfg_from_settings", "build_cfg_from_run_row",
-    "resolve_effective_scan_max_workers", "get_scan_max_workers_payload",
-    "get_advanced_pragma_settings_payload",
-    "resolve_payload_state_dir", "resolve_root_from_payload", "resolve_roots_from_payload",
-    "test_tmdb_key", "test_jellyfin_connection",
-})
+CONSUMER_FUNCS = frozenset(
+    {
+        "build_cfg_from_settings",
+        "build_cfg_from_run_row",
+        "resolve_effective_scan_max_workers",
+        "get_scan_max_workers_payload",
+        "get_advanced_pragma_settings_payload",
+        "resolve_payload_state_dir",
+        "resolve_root_from_payload",
+        "resolve_roots_from_payload",
+        "test_tmdb_key",
+        "test_jellyfin_connection",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # 1. Extraction AST des cles canoniques (technique de m3_settings.py)
 # ---------------------------------------------------------------------------
+
 
 def _const_str(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -170,9 +181,13 @@ def _extract_canonical_keys() -> Tuple[Dict[str, List[str]], Dict[str, Tuple[int
                     if s:
                         secret_fields.append(s)
 
-    def scan_func(name: str, receivers: Tuple[str, ...],
-                  take_setdefault: bool = False, take_return_dict: bool = False,
-                  take_meta_strings: bool = False) -> None:
+    def scan_func(
+        name: str,
+        receivers: Tuple[str, ...],
+        take_setdefault: bool = False,
+        take_return_dict: bool = False,
+        take_meta_strings: bool = False,
+    ) -> None:
         fn = funcs.get(name)
         if fn is None:
             return
@@ -183,8 +198,7 @@ def _extract_canonical_keys() -> Tuple[Dict[str, List[str]], Dict[str, Tuple[int
                     add(_const_str(node.args[0]), name, node.lineno)
             if isinstance(node, ast.Assign):
                 for tgt in node.targets:
-                    if (isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name)
-                            and tgt.value.id in receivers):
+                    if isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name) and tgt.value.id in receivers:
                         add(_const_str(tgt.slice), name, node.lineno)
             if take_return_dict and isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
                 for kn in node.value.keys:
@@ -220,6 +234,7 @@ def _extract_canonical_keys() -> Tuple[Dict[str, List[str]], Dict[str, Tuple[int
 # 2. Scan des lectures backend consommatrices (cle QUOTEE, hors commentaires)
 # ---------------------------------------------------------------------------
 
+
 def _strip_line_comment(line: str) -> str:
     quote = None
     i, n = 0, len(line)
@@ -243,7 +258,7 @@ def _strip_line_comment(line: str) -> str:
 def _read_context(line: str, m: "re.Match[str]") -> Optional[str]:
     """Contexte de lecture (read_get / read_subscript / read_membership) ou None."""
     before = line[: m.start()]
-    after = line[m.end():]
+    after = line[m.end() :]
     if re.search(r"\.get\(\s*$", before):
         return "read_get"
     if re.search(r"\.pop\(\s*$", before) or re.search(r"\.setdefault\(\s*$", before):
@@ -260,8 +275,7 @@ def _read_context(line: str, m: "re.Match[str]") -> Optional[str]:
     return None
 
 
-def _scan_consumer_reads(all_keys: List[str],
-                         support_ranges: Dict[str, Tuple[int, int]]) -> Dict[str, List[str]]:
+def _scan_consumer_reads(all_keys: List[str], support_ranges: Dict[str, Tuple[int, int]]) -> Dict[str, List[str]]:
     """Sites de lecture backend hors persistance/echo, par cle canonique."""
     quoted_re = re.compile(r"[\"'](" + "|".join(re.escape(k) for k in all_keys) + r")[\"']")
     reads: Dict[str, List[str]] = {k: [] for k in all_keys}
@@ -272,8 +286,7 @@ def _scan_consumer_reads(all_keys: List[str],
                 return name
         return None
 
-    files = [p for p in sorted((REPO_ROOT / "cinesort").rglob("*.py"))
-             if "__pycache__" not in p.parts]
+    files = [p for p in sorted((REPO_ROOT / "cinesort").rglob("*.py")) if "__pycache__" not in p.parts]
     files.append(REPO_ROOT / "app.py")
     for path in files:
         rel = path.relative_to(REPO_ROOT).as_posix()
@@ -312,7 +325,8 @@ class SettingsContractTests(unittest.TestCase):
     def test_extraction_is_sane(self) -> None:
         """Garde anti-silence : si l'extracteur casse, on le voit tout de suite."""
         self.assertGreaterEqual(
-            len(self.keys), 140,
+            len(self.keys),
+            140,
             msg=(
                 f"Extraction des cles canoniques suspecte : {len(self.keys)} cles "
                 f"(attendu >= 140, la matrice M3 2026-07 en listait 160). "
@@ -325,7 +339,8 @@ class SettingsContractTests(unittest.TestCase):
     def test_lists_are_disjoint_and_canonical(self) -> None:
         overlap = set(KNOWN_UNWIRED) & set(INDIRECTIONS)
         self.assertEqual(
-            overlap, set(),
+            overlap,
+            set(),
             msg=f"Cles a la fois KNOWN_UNWIRED et INDIRECTIONS : {sorted(overlap)}",
         )
 
@@ -339,18 +354,19 @@ class SettingsContractTests(unittest.TestCase):
                 prov = "; ".join(self.keys[key][:3])
                 violations.append(f"  - {key!r} (canonique via {prov})")
         self.assertEqual(
-            violations, [],
+            violations,
+            [],
             msg=(
                 f"{len(violations)} cle(s) canonique(s) du GET settings SANS lecture "
                 f"backend consommatrice (settings.get('cle') & co dans cinesort/, hors "
                 f"couche persistance/echo de settings_support.py) :\n"
                 + "\n".join(violations)
                 + "\n\nComment corriger : cabler un consommateur backend reel de la cle ; "
-                  "ou, si le cablage est indirect (table de mapping, endpoint dedie, "
-                  "miroir vers une autre cle), le documenter avec preuve fichier:ligne "
-                  "dans INDIRECTIONS ; en dernier recours, assumer la dette dans "
-                  "KNOWN_UNWIRED (deconseille : la liste doit retrecir, pas grossir). "
-                  "Ref : docs/internal/verif_totale_2026_07/matrices/m3_settings.json."
+                "ou, si le cablage est indirect (table de mapping, endpoint dedie, "
+                "miroir vers une autre cle), le documenter avec preuve fichier:ligne "
+                "dans INDIRECTIONS ; en dernier recours, assumer la dette dans "
+                "KNOWN_UNWIRED (deconseille : la liste doit retrecir, pas grossir). "
+                "Ref : docs/internal/verif_totale_2026_07/matrices/m3_settings.json."
             ),
         )
 
@@ -362,16 +378,17 @@ class SettingsContractTests(unittest.TestCase):
                 stale.append(f"  - {key!r} : n'est PLUS une cle canonique du GET settings")
             elif self.reads.get(key):
                 stale.append(
-                    f"  - {key!r} : a maintenant un lecteur backend "
-                    f"({self.reads[key][0]}) -> la cle est cablee"
+                    f"  - {key!r} : a maintenant un lecteur backend ({self.reads[key][0]}) -> la cle est cablee"
                 )
         self.assertEqual(
-            stale, [],
+            stale,
+            [],
             msg=(
-                f"{len(stale)} entree(s) KNOWN_UNWIRED perimee(s) :\n" + "\n".join(stale)
+                f"{len(stale)} entree(s) KNOWN_UNWIRED perimee(s) :\n"
+                + "\n".join(stale)
                 + "\n\nComment corriger : retirer ces entrees de KNOWN_UNWIRED dans "
-                  "tests/test_contract_settings.py (Phase 5 PLAN_VERIF_TOTALE : la "
-                  "liste des violations connues ne peut que retrecir)."
+                "tests/test_contract_settings.py (Phase 5 PLAN_VERIF_TOTALE : la "
+                "liste des violations connues ne peut que retrecir)."
             ),
         )
 
@@ -387,11 +404,13 @@ class SettingsContractTests(unittest.TestCase):
                     f"({self.reads[key][0]}), l'indirection documentee est inutile"
                 )
         self.assertEqual(
-            stale, [],
+            stale,
+            [],
             msg=(
-                f"{len(stale)} entree(s) INDIRECTIONS perimee(s) :\n" + "\n".join(stale)
+                f"{len(stale)} entree(s) INDIRECTIONS perimee(s) :\n"
+                + "\n".join(stale)
                 + "\n\nComment corriger : retirer ces entrees d'INDIRECTIONS dans "
-                  "tests/test_contract_settings.py."
+                "tests/test_contract_settings.py."
             ),
         )
 

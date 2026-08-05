@@ -56,11 +56,21 @@ class MergeMetadataBarrierTests(unittest.TestCase):
 
     def test_fill_mode_keeps_non_empty_target(self):
         """Mode "completer" : ne touche pas un champ deja rempli."""
-        source = {"title": "BAD", "year": 2000}
-        target = {"title": "GOOD", "year": 0}  # year=0 considere vide
+        source = {"title": "BAD", "overview": "BAD"}
+        target = {"title": "GOOD", "overview": "GOOD"}
         result = merge_metadata(source, target, locked_fields=[], replace_data=False)
         self.assertEqual(result["title"], "GOOD")
-        self.assertEqual(result["year"], 2000)
+        self.assertEqual(result["overview"], "GOOD")
+
+    def test_fill_mode_remplit_les_vrais_vides(self):
+        """Contrat #638 : "vide" == None, chaine blanche, collection vide."""
+        source = {"a": 1, "b": "src", "c": ["x"], "d": 2}
+        target = {"a": None, "b": "   ", "c": [], "d": 2}
+        result = merge_metadata(source, target, locked_fields=[], replace_data=False)
+        self.assertEqual(result["a"], 1, "None doit etre rempli")
+        self.assertEqual(result["b"], "src", "chaine blanche doit etre remplie")
+        self.assertEqual(result["c"], ["x"], "collection vide doit etre remplie")
+        self.assertEqual(result["d"], 2, "valeur presente : intacte")
 
     def test_case_insensitive_locked_fields(self):
         """Jellyfin-style : noms de champ insensibles a la casse."""
@@ -156,6 +166,35 @@ class MergeMetadataEdgeCasesTests(unittest.TestCase):
         target = {"title": "GOOD"}
         result = merge_metadata(source, target, locked_fields=["  Title  "], replace_data=True)
         self.assertEqual(result["title"], "GOOD")
+
+
+class MergeMetadataZeroNestPasVideTests(unittest.TestCase):
+    """#638 : en mode "completer les manques", `0` / `0.0` / `False` sont PRESENTS.
+
+    L'ancien `_is_empty` retournait True pour tout `int`/`float` valant 0. Comme
+    `bool` est une sous-classe de `int` et que `False == 0`, un flag
+    explicitement desactive tombait dans le meme piege. Une source externe
+    (OMDb/TMDb/probe) ecrasait donc des valeurs legitimes dans le mode dont la
+    docstring promet qu'il « ne remplace que les champs vides/None ».
+    """
+
+    def test_zero_entier_nest_pas_ecrase(self):
+        result = merge_metadata({"episode_count": 12}, {"episode_count": 0}, replace_data=False)
+        self.assertEqual(result["episode_count"], 0, "un compteur a 0 est une valeur, pas une absence")
+
+    def test_zero_flottant_nest_pas_ecrase(self):
+        result = merge_metadata({"community_rating": 7.4}, {"community_rating": 0.0}, replace_data=False)
+        self.assertEqual(result["community_rating"], 0.0, "une note nulle est une valeur mesuree")
+
+    def test_false_nest_pas_ecrase(self):
+        """`isinstance(False, int)` vaut True en Python : le sous-cas le plus vicieux."""
+        result = merge_metadata({"has_subtitles": True}, {"has_subtitles": False}, replace_data=False)
+        self.assertIs(result["has_subtitles"], False, "un flag desactive est un choix, pas un manque")
+
+    def test_le_mode_tout_reconstruire_ecrase_toujours_le_zero(self):
+        """Anti-correctif-nuisible : `replace_data=True` n'est PAS concerne par #638."""
+        result = merge_metadata({"community_rating": 7.4}, {"community_rating": 0.0}, replace_data=True)
+        self.assertEqual(result["community_rating"], 7.4)
 
 
 if __name__ == "__main__":

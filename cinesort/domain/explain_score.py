@@ -43,6 +43,24 @@ _CATEGORY_LABELS_FR: Dict[str, str] = {
 
 # Chaque entrée : (match label substring, suggestion FR).
 # Si un factor négatif correspond, la suggestion est proposée.
+#
+# ÉTAT MESURÉ (audit NUANCE N05, 2026-08-03) — 4 motifs ne matchent AUCUN
+# libellé émis par `quality_score.py` (comptage sur les littéraux du module) :
+#   - "bitrate bas"      : le scorer écrit "Debit trop faible pour {res} (…)"  (L919)
+#   - "hdr 8bit"         : le scorer écrit "HDR detecte avec profondeur 8 bits" (L928)
+#   - "langue manquante" : aucun libellé équivalent (le plus proche, "Pas de VO
+#                          detectee" L1027, ne veut PAS dire la même chose)
+#   - "récent" (accentué): le libellé est "Film recent ({year}) en definition
+#                          standard" — mais il est capté juste après par
+#                          "standard", donc AUCUNE suggestion n'est perdue.
+# "commentary" est mort lui aussi, sans effet : "commentaire" est testé avant
+# dans la même boucle qui `break` et émet exactement le même texte.
+# Non corrigé DÉLIBÉRÉMENT : aucune UI ne lit `suggestions` (le front n'appelle
+# même pas get_quality_report ; seules sortent la clé `score_explanation_full`
+# de l'export JSON et un appel API scripté), et réaligner les motifs sur les
+# libellés FR recréerait à l'identique le couplage fragile qui a pourri ici.
+# Le vrai correctif est de clé sur une métadonnée de factor, pas sur une
+# sous-chaîne de libellé — refonte à arbitrer, pas une rustine.
 _SUGGESTION_RULES: List[tuple[str, str]] = [
     ("upscale", "Remplacer par une source native à la résolution annoncée (éviter les upscales)."),
     ("re-encode", "Chercher une version REMUX ou avec un bitrate plus élevé (≥ 15 Mbps en 1080p)."),
@@ -66,6 +84,33 @@ def _classify_direction(delta: int) -> str:
     return "="
 
 
+def _resolve_weight(weights: Dict[str, Any], key: str, default: int) -> int:
+    """Résout UN poids de catégorie, indépendamment des deux autres (#656).
+
+    Trois règles, dans cet ordre :
+
+    - clef absente **ou** `None` → `default` (l'absence n'est pas une valeur) ;
+    - clef présente et castable → sa valeur, **y compris `0`** : un poids nul
+      est une valeur sentinelle légitime que ce module s'interdit de masquer
+      (cf. audit 2026-05-21, `_compute_category_contribution` ci-dessous). Le
+      raccourci `int(weights.get(k, d) or d)` est donc PROSCRIT : `0 or 60`
+      vaut 60, il ressusciterait un poids délibérément mis à zéro ;
+    - clef présente et non castable → `default`, sans toucher aux autres clefs.
+
+    Le `try/except` groupé d'avant réinitialisait les TROIS poids dès qu'une
+    seule clef valait `None` : `{"video": None, "audio": 300, "extras": 100}`
+    retombait sur 60/30/10 — les poids audio/extras légitimes étaient jetés
+    alors que seul `video` était à corriger.
+    """
+    raw = weights.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _compute_category_contribution(
     category: str,
     subscore: int,
@@ -76,12 +121,12 @@ def _compute_category_contribution(
     `contribution` = subscore × weight / total_weight ; c'est ce que la
     catégorie apporte au score final.
     """
-    try:
-        w_video = int(weights.get("video", 0) or 0)
-        w_audio = int(weights.get("audio", 0) or 0)
-        w_extras = int(weights.get("extras", 0) or 0)
-    except (TypeError, ValueError):
-        w_video = w_audio = w_extras = 0
+    # Défauts `0` ici (et non 60/30/10) : sans poids déclaré, cette fonction
+    # doit rendre une contribution explicitement nulle plutôt qu'inventer une
+    # répartition — cf. le bloc `sum_weights <= 0` ci-dessous.
+    w_video = _resolve_weight(weights, "video", 0)
+    w_audio = _resolve_weight(weights, "audio", 0)
+    w_extras = _resolve_weight(weights, "extras", 0)
 
     weight_map = {"video": w_video, "audio": w_audio, "extras": w_extras}
     weight = weight_map.get(category, 0)
@@ -123,12 +168,13 @@ def _weighted_delta_for_factor(
     if delta == 0:
         return 0.0
 
-    try:
-        w_video = int(weights.get("video", 60))
-        w_audio = int(weights.get("audio", 30))
-        w_extras = int(weights.get("extras", 10))
-    except (TypeError, ValueError):
-        w_video, w_audio, w_extras = 60, 30, 10
+    # #656 : résolution PAR CLEF. Défauts 60/30/10 (contrat propre à cette
+    # fonction : un factor a toujours un impact pondéré, même sur un profil
+    # sans poids déclarés), mais une clef `None`/invalide ne jette plus les
+    # deux autres.
+    w_video = _resolve_weight(weights, "video", 60)
+    w_audio = _resolve_weight(weights, "audio", 30)
+    w_extras = _resolve_weight(weights, "extras", 10)
     total = max(1, w_video + w_audio + w_extras)
 
     category = str(factor.get("category") or "video").lower()

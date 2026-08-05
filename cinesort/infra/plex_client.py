@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from cinesort.infra._http_utils import make_session_with_retry
+from cinesort.infra._http_utils import ResponseTooLargeError, make_session_with_retry, request_bounded
 from cinesort.infra.network_utils import is_safe_external_url
 
 _log = logging.getLogger(__name__)
@@ -28,6 +28,28 @@ _PLEX_HEADERS = {
 # Audit C5 P0 #3 : validation stricte du library section id (anti path injection)
 # avant interpolation dans /library/sections/{lid}/...
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+# Pagination de get_movies (regression signalee sur la PR #756).
+#
+# Mesure sur un item realiste du listing /library/sections/{id}/all?type=1
+# (blocs Media/Part/Guid imbriques, JSON compact) :
+#   - minimal (sans Guid ni people)                    ~1 926 octets/film
+#   - defaut PMS + Guid                                ~2 001 octets/film
+#   - complet (Guid + Genre/Country/Director/.../Role) ~2 580 octets/film
+#   - complet + resume long                            ~2 860 octets/film
+# La borne anti-OOM de 10 Mo appliquee dans _get etait donc franchie par une
+# bibliotheque LEGITIME de ~3 500 a ~5 200 films : le sync Plex serait passe
+# d'un succes a un echec dur « Reponse Plex trop volumineuse ».
+#
+# Plex expose la pagination via DEUX en-tetes HTTP a envoyer ensemble
+# (X-Plex-Container-Start + X-Plex-Container-Size) — ce sont bien des
+# en-tetes et pas des query params, cf le fix Vague H sur get_movies_count.
+# 500 films/page = ~1,3 Mo dans le pire cas mesure, soit une marge x7 sous la
+# borne, qui redevient valable PAR PAGE.
+_MOVIES_PAGE_SIZE = 500
+# Garde-fou anti-boucle : 400 pages = 200 000 films, trois ordres de grandeur
+# au-dessus d'une bibliotheque personnelle.
+_MOVIES_MAX_PAGES = 400
 
 
 from cinesort.infra.integration_errors import IntegrationError
@@ -50,7 +72,17 @@ def _normalize_url(url: str) -> str:
     if url and "://" not in url:
         url = f"http://{url}"
     if url:
-        ok, reason = is_safe_external_url(url)
+        # `resolve_dns=False` : ce constructeur est appele quand l'utilisateur
+        # enregistre ses parametres. Resoudre le DNS ici rendrait cet appel
+        # BLOQUANT — `socket.getaddrinfo` ne respecte pas
+        # `socket.setdefaulttimeout` et peut tenir des dizaines de secondes sur
+        # un hote injoignable, ce qui est exactement le cas ou l'on configure
+        # une URL. La protection contre le DNS rebinding n'est pas perdue : elle
+        # est portee par `SsrfGuardHTTPAdapter`, qui verifie l'IP au moment de
+        # la CONNEXION — le seul instant ou la verification ne peut pas etre
+        # contournee par un changement de DNS entre-temps (TOCTOU).
+        # Releve par CodeRabbit sur la PR#898.
+        ok, reason = is_safe_external_url(url, resolve_dns=False)
         if not ok:
             raise PlexError(f"URL Plex refusee : {reason}")
     return url
@@ -86,7 +118,7 @@ class PlexClient:
         """Ferme la session HTTP sous-jacente (idempotent)."""
         session = getattr(self, "_session", None)
         if session is not None:
-            try:
+            try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
                 session.close()
             except Exception:  # noqa: BLE001
                 pass
@@ -98,20 +130,40 @@ class PlexClient:
         self.close()
 
     def __del__(self) -> None:
-        try:
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
             self.close()
         except Exception:  # noqa: BLE001
             pass
 
     def _get(self, path: str, **kwargs: Any) -> requests.Response:
-        """GET avec gestion d'erreurs standardisee."""
+        """GET avec gestion d'erreurs standardisee.
+
+        La borne anti-OOM du corps est appliquee ICI, au transport (cf
+        `request_bounded`), donc A LA LECTURE du flux et non apres que
+        `requests` ait deja alloue tout le corps (issues #433 / #753).
+        PlexClient etait le dernier client sans cette borne : ses quatre
+        `resp.json()` (`validate_connection`, `get_libraries`, `get_movies`,
+        `get_movies_count`) sont couverts d'un coup, `refresh_library` avec.
+        """
         url = f"{self.base_url}{path}"
         _t0 = time.monotonic()
         try:
-            resp = self._session.get(url, timeout=self.timeout_s, verify=True, **kwargs)
+            resp = request_bounded(self._session, "GET", url, timeout=self.timeout_s, verify=True, **kwargs)
             resp.raise_for_status()
+            # Borne anti-OOM alignee sur les clients freres (jellyfin/radarr/tmdb/omdb) :
+            # un serveur Plex usurpe/on-path ou une tres grosse bibliotheque ne doit
+            # pas forcer le parse JSON d'un body non borne dans le thread scan.
+            _body = getattr(resp, "content", b"")
+            if _body and len(_body) > 10_000_000:
+                raise PlexError("Reponse Plex trop volumineuse")
             _log.debug("Plex: GET %s -> %d (%.1fs)", path, resp.status_code, time.monotonic() - _t0)
             return resp
+        except ResponseTooLargeError as exc:
+            # Converti en PlexError : c'est le seul type d'erreur que les cinq
+            # appelants traitent (`refresh_library` n'attrape QUE PlexError).
+            # Laisser fuir un ValueError le ferait remonter brut jusqu'a l'UI.
+            _log.warning("Plex: GET %s -> corps hors borne (%s)", path, exc)
+            raise PlexError(f"Reponse Plex trop volumineuse sur {path} : {exc}") from exc
         except requests.ConnectionError as exc:
             _log.debug("Plex: GET %s -> connexion impossible (%.1fs)", path, time.monotonic() - _t0)
             raise PlexError(f"Connexion impossible a {self.base_url} : {exc}") from exc
@@ -186,54 +238,139 @@ class PlexClient:
             )
         return result
 
+    @staticmethod
+    def _parse_movie(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Convertit un Metadata Plex en dict CineSort {id, name, year, path, tmdb_id, played}."""
+        # Extraire le chemin depuis Media.Part.file
+        path = ""
+        for media in item.get("Media") or []:
+            for part in media.get("Part") or []:
+                p = str(part.get("file") or "").strip()
+                if p:
+                    path = p
+                    break
+            if path:
+                break
+        # Extraire tmdb_id depuis Guid
+        tmdb_id: Optional[str] = None
+        for guid in item.get("Guid") or []:
+            gid = str(guid.get("id") or "")
+            if gid.startswith("tmdb://"):
+                tmdb_id = gid[7:]
+                break
+        return {
+            "id": str(item.get("ratingKey") or ""),
+            "name": str(item.get("title") or ""),
+            "year": int(item.get("year") or 0),
+            "path": path,
+            "tmdb_id": tmdb_id,
+            "played": bool(item.get("viewCount") and int(item.get("viewCount", 0)) > 0),
+        }
+
     def get_movies(self, library_id: str) -> List[Dict[str, Any]]:
-        """Retourne tous les films d'une section avec path, year, tmdb_id."""
+        """Retourne tous les films d'une section avec path, year, tmdb_id.
+
+        Pagine via les en-tetes X-Plex-Container-Start / X-Plex-Container-Size
+        (cf _MOVIES_PAGE_SIZE) : la reponse non paginee depassait la borne
+        anti-OOM de 10 Mo de `_get` des ~4 000 films, transformant le sync
+        d'une grosse bibliotheque en echec dur.
+
+        Un serveur peut ignorer la pagination (la doc Plex previent que la
+        reponse « might not be paginated at all ») : on le detecte et on
+        s'arrete apres la premiere page plutot que de rejouer le meme offset.
+        """
         lid = str(library_id or "").strip()
         if not lid:
             raise PlexError("library_id requis")
         if not _SAFE_ID_RE.match(lid):
             raise PlexError(f"Invalid library section id: {lid!r}")
-        try:
-            resp = self._get(f"/library/sections/{lid}/all", params={"type": "1"})
-            data = resp.json()
-        except PlexError:
-            raise
-        except (ValueError, KeyError) as exc:
-            raise PlexError(f"Reponse films invalide : {exc}") from exc
 
-        mc = data.get("MediaContainer") or {}
-        items = mc.get("Metadata") or []
         result: List[Dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            # Extraire le chemin depuis Media.Part.file
-            path = ""
-            for media in item.get("Media") or []:
-                for part in media.get("Part") or []:
-                    p = str(part.get("file") or "").strip()
-                    if p:
-                        path = p
-                        break
-                if path:
-                    break
-            # Extraire tmdb_id depuis Guid
-            tmdb_id: Optional[str] = None
-            for guid in item.get("Guid") or []:
-                gid = str(guid.get("id") or "")
-                if gid.startswith("tmdb://"):
-                    tmdb_id = gid[7:]
-                    break
-            result.append(
-                {
-                    "id": str(item.get("ratingKey") or ""),
-                    "name": str(item.get("title") or ""),
-                    "year": int(item.get("year") or 0),
-                    "path": path,
-                    "tmdb_id": tmdb_id,
-                    "played": bool(item.get("viewCount") and int(item.get("viewCount", 0)) > 0),
-                }
+        start = 0
+        page_num = 0
+        total_size: Optional[int] = None
+
+        while True:
+            page_num += 1
+            try:
+                resp = self._get(
+                    f"/library/sections/{lid}/all",
+                    # `includeGuids=1` est INDISPENSABLE : le parsing lit
+                    # `item["Guid"]` pour en extraire le tmdb_id, mais Plex ne
+                    # joint le tableau Guid a un listing de section QUE si ce
+                    # parametre est passe. Sans lui le tmdb_id remontait
+                    # TOUJOURS None et le rapport de sync appariait les films
+                    # sur le seul chemin de fichier.
+                    # Cout mesure : ~+4 % de payload. C'est la pagination
+                    # ci-dessous qui rend cet ajout sans risque — sans elle il
+                    # rapprochait la reponse de la borne des 10 Mo.
+                    params={"type": "1", "includeGuids": "1"},
+                    headers={
+                        "X-Plex-Container-Start": str(start),
+                        "X-Plex-Container-Size": str(_MOVIES_PAGE_SIZE),
+                    },
+                )
+                data = resp.json()
+            except PlexError:
+                raise
+            except (ValueError, KeyError) as exc:
+                raise PlexError(f"Reponse films invalide : {exc}") from exc
+
+            mc = data.get("MediaContainer") or {}
+            items = mc.get("Metadata") or []
+            if total_size is None:
+                try:
+                    total_size = int(mc.get("totalSize") or 0) or None
+                except (TypeError, ValueError):
+                    total_size = None
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                result.append(self._parse_movie(item))
+
+            page_count = len(items)
+            _log.debug(
+                "plex pagination page=%d start=%d recu=%d total=%s (cumule=%d)",
+                page_num,
+                start,
+                page_count,
+                total_size,
+                len(result),
             )
+
+            if page_count == 0:
+                break
+            # Serveur qui ignore les en-tetes : il a renvoye TOUTE la section.
+            # Redemander une page produirait des doublons a l'infini.
+            if page_count > _MOVIES_PAGE_SIZE:
+                _log.warning(
+                    "plex pagination ignoree par le serveur (recu %d > demande %d) : arret apres la premiere page",
+                    page_count,
+                    _MOVIES_PAGE_SIZE,
+                )
+                break
+            start += page_count
+            if total_size and start >= total_size:
+                break
+            # Page incomplete = derniere page (fallback quand totalSize est absent).
+            if page_count < _MOVIES_PAGE_SIZE:
+                break
+            if page_num >= _MOVIES_MAX_PAGES:
+                _log.warning(
+                    "plex pagination : garde-fou atteint (page=%d start=%d), arret",
+                    page_num,
+                    start,
+                )
+                break
+
+        _log.info(
+            "plex get_movies : %d/%s films en %d page(s) (section=%s)",
+            len(result),
+            total_size if total_size is not None else "?",
+            page_num,
+            lid,
+        )
         return result
 
     def get_movies_count(self, library_id: str) -> int:

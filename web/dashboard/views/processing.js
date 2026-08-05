@@ -23,6 +23,10 @@
  *   initProcessing(container, opts?)  // opts.step = "scan" | "review" | "apply"
  */
 import { apiPost, escapeHtml } from "./_v5_helpers.js";
+// Audit ultra 2026-07-13 (M6) : seuils confidence pilotes par la source unique
+// (cinesort/domain/confidence_thresholds.py via /api/settings) au lieu des
+// 80/60 hardcodes — meme comportement que traitement.js.
+import { getConfidenceThresholdsSync, fetchConfidenceThresholds } from "../core/api.js";
 // Fix audit 2026-06-07 UX high : feedback utilisateur sur erreurs reseau
 // (start_scan, cancel_run, pollStatus). Sans toast, l'utilisateur reste
 // bloque sans aucune indication que le serveur ne repond pas.
@@ -708,7 +712,11 @@ function _renderReviewRow(r) {
   const rowClass = decisionLabel === "accepted" ? "row-approved"
     : decisionLabel === "rejected" ? "row-rejected" : "";
   const conf = Number(r.confidence || 0);
-  const confClass = conf >= 80 ? "tier-gold" : conf >= 60 ? "tier-silver" : "tier-bronze";
+  // M6 : seuils unifies (high/medium) au lieu des 80/60 hardcodes. Meme source
+  // que traitement.js (_confidenceBucket / _renderValidationStep).
+  const _confThr = getConfidenceThresholdsSync();
+  const confClass = conf >= _confThr.high ? "tier-gold"
+    : conf >= _confThr.medium ? "tier-silver" : "tier-bronze";
 
   return `
     <tr class="${rowClass}" data-row-id="${_esc(r.row_id)}">
@@ -1006,6 +1014,11 @@ export async function initProcessing(container, opts) {
   `;
   const initialPanel = container.querySelector("[data-v5-processing-panel]");
   _renderSkeletonForStep(initialPanel, _state.activeStep);
+
+  // M6 : prefetch des seuils confidence (cache module-level partage avec
+  // traitement.js) pour que _renderReviewRow lise les valeurs settings et non
+  // les DEFAULTS. Fire-and-forget : fallback safe sur DEFAULTS 85/60.
+  fetchConfidenceThresholds().catch(() => { /* fallback DEFAULTS */ });
 
   await _fetchLastRunId();
   _renderActiveStep();

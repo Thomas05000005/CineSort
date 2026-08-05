@@ -275,47 +275,47 @@ def _run_ffmpeg_pipe_fpcalc(
     safe_timeout = max(1.0, float(timeout_s))
 
     try:
-        with tracked_popen(
-            ffmpeg_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            **platform_kwargs,
-        ) as ffmpeg_proc:
-            with tracked_popen(
+        with (
+            tracked_popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **platform_kwargs,
+            ) as ffmpeg_proc,
+            tracked_popen(
                 fpcalc_cmd,
                 stdin=ffmpeg_proc.stdout,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 **platform_kwargs,
-            ) as fpcalc_proc:
-                # Important : fermer notre cote du pipe pour que fpcalc voie EOF
-                # quand ffmpeg se termine. Sinon deadlock potentiel.
-                if ffmpeg_proc.stdout is not None:
-                    ffmpeg_proc.stdout.close()
-                try:
-                    fp_stdout_bytes, fp_stderr_bytes = fpcalc_proc.communicate(
-                        timeout=safe_timeout
-                    )
-                except subprocess.TimeoutExpired:
-                    logger.warning(
-                        "fpcalc (pipe ffmpeg) timeout apres %ss sur %s",
-                        timeout_s,
-                        media_path,
-                    )
-                    return None
-                fpcalc_rc = fpcalc_proc.returncode
+            ) as fpcalc_proc,
+        ):
+            # Important : fermer notre cote du pipe pour que fpcalc voie EOF
+            # quand ffmpeg se termine. Sinon deadlock potentiel.
+            if ffmpeg_proc.stdout is not None:
+                ffmpeg_proc.stdout.close()
+            try:
+                fp_stdout_bytes, fp_stderr_bytes = fpcalc_proc.communicate(timeout=safe_timeout)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "fpcalc (pipe ffmpeg) timeout apres %ss sur %s",
+                    timeout_s,
+                    media_path,
+                )
+                return None
+            fpcalc_rc = fpcalc_proc.returncode
 
-                # Attendre la fin de ffmpeg pour eviter zombie + recuperer stderr.
-                try:
-                    _, ff_stderr_bytes = ffmpeg_proc.communicate(timeout=safe_timeout)
-                except subprocess.TimeoutExpired:
-                    logger.warning(
-                        "ffmpeg (pipe fpcalc) timeout apres %ss sur %s",
-                        timeout_s,
-                        media_path,
-                    )
-                    return None
-                ffmpeg_rc = ffmpeg_proc.returncode
+            # Attendre la fin de ffmpeg pour eviter zombie + recuperer stderr.
+            try:
+                _, ff_stderr_bytes = ffmpeg_proc.communicate(timeout=safe_timeout)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "ffmpeg (pipe fpcalc) timeout apres %ss sur %s",
+                    timeout_s,
+                    media_path,
+                )
+                return None
+            ffmpeg_rc = ffmpeg_proc.returncode
     except OSError as exc:
         logger.warning(
             "pipe ffmpeg|fpcalc OSError sur %s: %s (fallback indisponible)",

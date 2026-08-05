@@ -36,9 +36,7 @@ class IntegrationsFacade(_BaseFacade):
         """
         return self._api._test_tmdb_key_impl(api_key, state_dir, timeout_s)
 
-    def get_tmdb_posters(
-        self, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False
-    ) -> Dict[str, Any]:
+    def get_tmdb_posters(self, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False) -> Dict[str, Any]:
         """Recupere les URL posters TMDb pour une liste d'IDs.
 
         E4 : force_refresh=True bypass le cache local (refresh jaquette).

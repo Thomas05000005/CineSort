@@ -13,9 +13,10 @@
  */
 
 import { escapeHtml } from "../core/dom.js";
-import { apiPost } from "../core/api.js";
+import { apiPost, getSettingsEpoch } from "../core/api.js";
 import { getNavSignal } from "../core/nav-abort.js";
 import { navigateTo } from "../core/router.js";
+import { deriveRunStatus } from "../core/run-status.js";
 import * as rightPanel from "../components/right-panel.js";
 
 /* --- Format dates relatives -------------------------------------------- */
@@ -245,6 +246,10 @@ const _PING_CACHE_TTL_MS = 5 * 60 * 1000;
 const _pingCache = {
   // { key: { ok: bool, ts: ms } }
 };
+// M21 : derniere epoque de settings pour laquelle _pingCache a ete purge.
+// -1 => purge au tout premier montage (cache vide, no-op) puis seulement quand
+// getSettingsEpoch() change (apres un save_settings).
+let _lastPingPurgeEpoch = -1;
 
 function _pingCacheGet(key) {
   const entry = _pingCache[key];
@@ -258,6 +263,19 @@ function _pingCacheGet(key) {
 
 function _pingCacheSet(key, ok) {
   _pingCache[key] = { ok: !!ok, ts: Date.now() };
+}
+
+/** M21 (audit ultra 2026-07-13) : purge INTEGRALE du cache de ping.
+ *  A appeler a chaque (re)lecture des settings — evenement qui suit toute
+ *  sauvegarde dans Parametres. Sans ca, un changement d'URL/cle d'integration
+ *  (Jellyfin/Plex/Radarr/...) laissait une entree de ping valide (TTL 5 min,
+ *  clef par NOM d'integration, insensible aux valeurs) -> la pastille affichait
+ *  un statut PERIME. On ne fingerprinte PAS les valeurs (get_settings masque les
+ *  secrets, un diff serait aveugle a une cle changee) : on purge sur l'evenement.
+ *  Sur-invalider est sans danger (les pings repartent en arriere-plan juste apres).
+ */
+function _purgePingCacheAll() {
+  for (const k of Object.keys(_pingCache)) delete _pingCache[k];
 }
 
 /** Ping une seule intégration. Retourne true (ok) / false (offline) ou null
@@ -297,8 +315,15 @@ async function _pingIntegration(key, settings, signal) {
     } else if (key === "plex") {
       const url = String(s.plex_url || "");
       const token = String(s.plex_token || "");
+      // Revue post-merge 2026-08-03 : le parametre s'appelle `token`, PAS
+      // `api_key` (IntegrationsFacade.test_plex_connection(url, token, timeout_s)
+      // — Plex est la seule integration a ne pas utiliser `api_key`). Le serveur
+      // REST fait `method(**params)` sans aliasing : `api_key` levait un
+      // TypeError -> HTTP 400 -> pastille Plex bloquee sur « hors ligne » des
+      // qu'un token etait configure, alors que Parametres > Tester repondait OK
+      // sur le meme serveur (parametres.js envoie bien `token`).
       const payload = (url || token)
-        ? { url, api_key: token, timeout_s: 5 }
+        ? { url, token, timeout_s: 5 }
         : {};
       res = await apiPost("integrations/test_plex_connection", payload, _opts);
     } else if (key === "radarr") {
@@ -669,28 +694,26 @@ function _renderSuggestions(stats) {
 const _TIMELINE_DAYS = 7;
 const _WEEKDAY_SHORT_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
-/** Retourne le statut derive (APPLIED/PARTIAL/ERROR/DONE) pour un run. */
-function _deriveRunStatus(r) {
-  const errors = Number(r.errors_count || 0);
-  const applied = Number(r.applied_rows || 0);
-  const total = Number(r.total_rows || 0);
-  const explicit = String(r.status || "").toUpperCase();
-  if (explicit) {
-    if (explicit === "APPLIED" || explicit === "DONE" || explicit === "PARTIAL" || explicit === "ERROR") {
-      return explicit;
-    }
-  }
-  if (errors > 0) return "ERROR";
-  if (applied > 0 && total > 0 && applied >= total) return "APPLIED";
-  if (applied > 0 && total > 0 && applied < total) return "PARTIAL";
-  return "DONE";
-}
-
+/* Revue adversaire PR #855 (2026-08-03) : la derivation locale vivait ici, avec
+ * une liste blanche `APPLIED/DONE/PARTIAL/ERROR` qui ne contenait ni FAILED, ni
+ * CANCELLED, ni aucun statut transitoire. Tout le reste retombait sur
+ * `return "DONE"` : un run PLANTE sans ligne d'erreur, un run ANNULE et meme un
+ * run ENCORE EN COURS s'affichaient en pastille grise « saine », avec une
+ * infobulle « ... — DONE ». C'est exactement le defaut « run FAILED invisible »
+ * corrige dans /historique — ici sur l'ecran d'atterrissage.
+ * La regle est desormais UNIQUE (core/run-status.js) et partagee avec
+ * views/historique.js : les deux ecrans ne peuvent plus se contredire. */
 function _statusBulletClass(status) {
   const s = String(status || "").toUpperCase();
   if (s === "APPLIED") return "accueil-timeline-bullet--applied";
-  if (s === "PARTIAL") return "accueil-timeline-bullet--partial";
   if (s === "ERROR") return "accueil-timeline-bullet--error";
+  // « En validation » attend une action de l'utilisateur : meme teinte warning
+  // que dans /historique (.historique-run-status.is-partial). Aucune classe
+  // ajoutee — .accueil-timeline-bullet--partial existe deja (components.css).
+  if (s === "PARTIAL" || s === "AWAITING_VALIDATION") return "accueil-timeline-bullet--partial";
+  // PENDING / RUNNING / PAUSED / CANCELLED : gris neutre, comme le `is-done` /
+  // `is-cancelled` d'historique.js (tous deux gris). Le mot affiche dans
+  // l'infobulle, lui, dit desormais la verite.
   return "accueil-timeline-bullet--done";
 }
 
@@ -736,7 +759,7 @@ function _renderRecentActivity(runs) {
   const cols = _bucketRunsByDay(list, new Date());
   const colsHtml = cols.map((c) => {
     const bullets = c.runs.map((r) => {
-      const status = _deriveRunStatus(r);
+      const status = deriveRunStatus(r);
       const cls = _statusBulletClass(status);
       const hh = String(r._ts.getHours()).padStart(2, "0");
       const mm = String(r._ts.getMinutes()).padStart(2, "0");
@@ -1381,6 +1404,18 @@ export async function initAccueil(container) {
   const _updP = (updateRes && updateRes.data) || updateRes || null;
   const updateInfo = _updP && _updP.ok !== false ? _updP : null;
   _currentSettings = settings;
+
+  // M21 (audit ultra 2026-07-13) + revue R2 : purge le cache de ping UNIQUEMENT
+  // apres un vrai changement de settings (getSettingsEpoch bouge a chaque
+  // save_settings), pas a CHAQUE montage — sinon on re-ping toutes les
+  // integrations et on fait clignoter les pastilles (offline -> ok optimiste ->
+  // warning) a chaque simple navigation vers Accueil. L'epoque couvre aussi les
+  // cles/tokens masques que get_settings ne renvoie jamais en clair.
+  const _ep = getSettingsEpoch();
+  if (_ep !== _lastPingPurgeEpoch) {
+    _purgePingCacheAll();
+    _lastPingPurgeEpoch = _ep;
+  }
 
   container.innerHTML = _renderAccueil(dashboardData, stats, settings, updateInfo);
   _bindEvents(container);
