@@ -45,28 +45,18 @@ def _name_eq_fs(a: str, b: str) -> bool:
     )
 
 
-def _video_ext(cfg: "Config", video: Path) -> str:
-    """Retourne le suffixe de `video` en respectant cfg.lowercase_extensions.
-
-    ITER7 fix LOWERCASE_EXTENSIONS : la cle UI "lowercase_extensions"
-    (settings.json, persistee par _save_section_naming) etait sauvegardee
-    mais JAMAIS lue. Path.suffix preserve la casse FS source (".MKV" reste
-    ".MKV"). Ce helper applique la regle Domain (cfg.lowercase_extensions)
-    sur le suffixe. True = ".mkv", False = preservation casse source.
-    """
-    suffix = video.suffix
-    if getattr(cfg, "lowercase_extensions", True):
-        return suffix.lower()
-    return suffix
-
-
-def _video_name_with_ext_case(cfg: "Config", video: Path) -> str:
-    """Retourne `video.name` (stem + suffixe) en respectant cfg.lowercase_extensions.
-
-    Stem preserve, seule la casse du suffixe est ajustee selon le reglage UI.
-    Utilise pour single/collection/quarantine ou le nom final = nom source.
-    """
-    return f"{video.stem}{_video_ext(cfg, video)}"
+# REGLE INVIOLABLE n1 : le nom du fichier video n'est JAMAIS reconstruit.
+#
+# Les helpers `_video_ext` / `_video_name_with_ext_case` (ITER7) rebatissaient
+# le nom cible en `f"{video.stem}{suffix}"` avec un suffixe force en minuscules
+# quand `cfg.lowercase_extensions` etait vrai (defaut). Un apply reel sur
+# `Back.To.The.Future.1985.1080p.MKV` produisait `....mkv` : c'est un RENOMMAGE
+# du fichier video, qui desynchronise le fichier de son torrent et casse le
+# seeding. Le reglage a ete SUPPRIME (Domain, settings, UI) : il n'avait aucun
+# autre effet — aucun nom de DOSSIER n'en dependait.
+#
+# Toute destination de fichier video se construit desormais avec `video.name`,
+# c'est-a-dire l'octet-pour-octet du nom source.
 
 
 def build_apply_context(
@@ -377,7 +367,12 @@ _UNIQUE_PATH_MAX_ATTEMPTS = 10_000
 
 
 def unique_path(base: Path) -> Path:
-    """Retourne `base` ou la première variante `_2`, `_3`... non existante."""
+    """Retourne `base` ou la première variante `_2`, `_3`... non existante.
+
+    RESERVE AUX DOSSIERS (`cleanup._move_dirs_to_bucket`). Ne JAMAIS l'appliquer
+    a un chemin de fichier : la regle inviolable n1 interdit de renommer un
+    fichier. Pour les bacs `_review`, utiliser `unique_bucket_path`.
+    """
     if not base.exists():
         return base
     stem = base.stem
@@ -391,7 +386,12 @@ def unique_path(base: Path) -> Path:
 
 
 def unique_path_dup(base: Path) -> Path:
-    """Retourne `base` ou la première variante `__DUP1`, `__DUP2`... non existante."""
+    """Retourne `base` ou la première variante `__DUP1`, `__DUP2`... non existante.
+
+    RESERVE AUX DOSSIERS (bacs `_duplicates_user_decided` /
+    `_user_marked_for_deletion`, ou l'entree deplacee est un dossier `single`).
+    Ne JAMAIS l'appliquer a un chemin de fichier : cf. `unique_path`.
+    """
     if not base.exists():
         return base
     stem = base.stem
@@ -402,6 +402,54 @@ def unique_path_dup(base: Path) -> Path:
             return candidate
     # Fallback ultime : timestamp ns.
     return base.with_name(f"{stem}__DUP{time.time_ns()}{suffix}")
+
+
+def _bucket_dir_variant(head: str, idx: int, *, use_dup_suffix: bool) -> str:
+    """Nom du DOSSIER de desambiguisation (`Rocky_2`, `Rocky__DUP1`, `_2`, `__DUP1`)."""
+    return f"{head}__DUP{idx}" if use_dup_suffix else f"{head}_{idx}"
+
+
+def unique_bucket_path(dst: Path, *, bucket_root: Path, use_dup_suffix: bool) -> Optional[Path]:
+    """Chemin libre pour `dst` sous `bucket_root`, en desambiguisant un DOSSIER.
+
+    REGLE INVIOLABLE n1 : `dst.name` est rendu INTACT. Quand la cible est deja
+    prise, l'index (`_2`, `_3`... ou `__DUP1`, `__DUP2`...) est porte par le
+    premier dossier situe sous `bucket_root` — celui qui identifie le groupe
+    source (le dossier d'origine), pas par le fichier. Si `dst` est pose
+    directement dans `bucket_root`, un dossier d'index est INSERE (`_2/nom.mkv`).
+
+    Cause racine traitee : les bacs sont indexes par `folder.name` seul, donc
+    deux dossiers sources homonymes visaient le meme sous-dossier ; l'ancien
+    `unique_path()` resolvait la collision en renommant le FICHIER
+    (`Rocky.1976.1080p.mkv` -> `Rocky.1976.1080p_2.mkv`).
+
+    Retourne `None` quand aucune desambiguisation de dossier n'est possible
+    (chemin hors de `bucket_root`, ou cap d'essais epuise). L'appelant DOIT
+    alors abandonner le deplacement : sur un chemin destructif, on refuse
+    plutot que d'ecraser silencieusement la cible.
+    """
+    if not dst.exists():
+        return dst
+    try:
+        rel = dst.relative_to(bucket_root)
+    except (ValueError, TypeError):
+        return None
+    if not rel.parts:
+        return None
+    if len(rel.parts) >= 2:
+        head = rel.parts[0]
+        tail = Path(*rel.parts[1:])
+    else:
+        # Fichier pose a la racine du bac : aucun dossier de groupe a indexer,
+        # on en INSERE un plutot que de toucher au nom du fichier.
+        head = ""
+        tail = Path(rel.parts[0])
+    start = 1 if use_dup_suffix else 2
+    for idx in range(start, _UNIQUE_PATH_MAX_ATTEMPTS + start):
+        candidate = bucket_root / _bucket_dir_variant(head, idx, use_dup_suffix=use_dup_suffix) / tail
+        if not candidate.exists():
+            return candidate
+    return None
 
 
 # F30 : ensemble des dossiers deja "crees" pendant un apply EN DRY-RUN.
@@ -700,8 +748,13 @@ def move_to_review_bucket(
 ) -> Optional[Path]:
     """Déplace `src_file` dans un sous-dossier de `_review` (conflits/duplicates/leftovers).
 
-    Calcule le chemin destination en préservant la hiérarchie relative à `src_anchor`,
-    applique le suffixe `_2` ou `__DUP1` si collision, journalise et retourne le path final.
+    Calcule le chemin destination en préservant la hiérarchie relative à `src_anchor`.
+    En cas de collision, l'index de desambiguisation est porte par un DOSSIER
+    (`unique_bucket_path`) : le nom du fichier est rendu intact, regle inviolable n1.
+
+    Retourne le path final, ou `None` si le deplacement a ete ABANDONNE faute de
+    desambiguisation possible — jamais un ecrasement silencieux. L'appelant ne
+    doit compter ni move ni quarantaine dans ce cas.
     """
     if rel_override is not None:
         rel = rel_override
@@ -714,7 +767,19 @@ def move_to_review_bucket(
         dst = bucket_root / core_mod.windows_safe(src_anchor.name) / rel
     else:
         dst = bucket_root / rel
-    dst = unique_path_dup(dst) if use_dup_suffix else unique_path(dst)
+    resolved = unique_bucket_path(dst, bucket_root=bucket_root, use_dup_suffix=use_dup_suffix)
+    if resolved is None:
+        # Sens restrictif : la source reste en place, on ne renomme pas le
+        # fichier et on n'ecrase pas la cible. L'echec est BRUYANT.
+        err = f"{bucket_name}: ABANDON, aucune desambiguisation de dossier possible pour {src_file} -> {dst}"
+        log("ERROR", err)
+        res.errors += 1
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            res.error_messages.append(err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens (ApplyResult factice)
+            pass
+        return None
+    dst = resolved
     msg = f"{bucket_name}: {src_file} -> {dst}"
     log("WARN" if bucket_name == "CONFLICT quarantined" else "INFO", msg)
     source_is_file = src_file.is_file()
@@ -778,7 +843,7 @@ def move_file_with_collision_policy(
         sidecars_ctx_root = conflicts_sidecars_root / ctx
         duplicates_ctx_root = duplicates_identical_root / ctx
         if not dst_file.is_file():
-            move_to_review_bucket(
+            qdst_dir = move_to_review_bucket(
                 src_file,
                 src_anchor=src_anchor,
                 bucket_root=conflicts_ctx_root,
@@ -791,8 +856,11 @@ def move_file_with_collision_policy(
                 res=res,
                 record_op=record_op,
             )
-            res.conflicts_quarantined_count += 1
-            res.quarantined += 1
+            # `None` = deplacement ABANDONNE (cf. move_to_review_bucket) : la source
+            # est intacte, ne pas la compter comme mise en quarantaine.
+            if qdst_dir is not None:
+                res.conflicts_quarantined_count += 1
+                res.quarantined += 1
             return "conflict"
 
         if files_identical_quick(src_file, dst_file, hash_cache=hash_cache):
@@ -811,8 +879,8 @@ def move_file_with_collision_policy(
             )
             if moved_to is not None:
                 log("INFO", f"DUPLICATE_IDENTICAL moved to _review/_duplicates_identical: {moved_to}")
-            res.duplicates_identical_moved_count += 1
-            res.duplicates_identical_deleted_count += 1
+                res.duplicates_identical_moved_count += 1
+                res.duplicates_identical_deleted_count += 1
             return "duplicate_identical"
 
         if is_sidecar_metadata(cfg, src_file):
@@ -840,8 +908,8 @@ def move_file_with_collision_policy(
             )
             if sidecar_dst is not None:
                 log("INFO", f"SIDECAR CONFLICT kept both: {src_file} -> {sidecar_dst} (dst kept: {dst_file})")
-            res.sidecar_conflicts_kept_both_count += 1
-            res.conflicts_sidecars_quarantined_count += 1
+                res.sidecar_conflicts_kept_both_count += 1
+                res.conflicts_sidecars_quarantined_count += 1
             return "sidecar_conflict"
 
         qdst = move_to_review_bucket(
@@ -858,8 +926,9 @@ def move_file_with_collision_policy(
             record_op=record_op,
         )
         log("WARN", f"CONFLICT: {src_file} would overwrite {dst_file} -> {qdst}")
-        res.conflicts_quarantined_count += 1
-        res.quarantined += 1
+        if qdst is not None:
+            res.conflicts_quarantined_count += 1
+            res.quarantined += 1
         return "conflict"
 
     mkdir_counted(dst_file.parent, dry_run=dry_run, log=log, res=res, record_op_fn=record_op)
@@ -915,8 +984,9 @@ def move_file_with_collision_policy(
                 record_op=record_op,
             )
             log("WARN", f"CONFLICT (race): {src_file} would overwrite {dst_file} -> {qdst}")
-            res.conflicts_quarantined_count += 1
-            res.quarantined += 1
+            if qdst is not None:
+                res.conflicts_quarantined_count += 1
+                res.quarantined += 1
             return "conflict"
 
         atomic_move(
@@ -1029,8 +1099,18 @@ def merge_dir_safe(
                 rel = leftover_file.relative_to(src_dir)
             except (ValueError, TypeError):
                 rel = Path(leftover_file.name)
-            planned = unique_path(leftovers_root / core_mod.windows_safe(src_dir.name) / rel)
-            log("INFO", f"LEFTOVERS planned: {leftover_file} -> {planned}")
+            # Parite preview/reel : meme desambiguisation par DOSSIER que
+            # move_to_review_bucket, sinon la preview annoncerait un nom de
+            # fichier suffixe que l'apply reel ne produit plus.
+            planned = unique_bucket_path(
+                leftovers_root / core_mod.windows_safe(src_dir.name) / rel,
+                bucket_root=leftovers_root,
+                use_dup_suffix=False,
+            )
+            if planned is None:
+                log("WARN", f"LEFTOVERS: aucune destination desambiguisable, {leftover_file} restera en place")
+            else:
+                log("INFO", f"LEFTOVERS planned: {leftover_file} -> {planned}")
         res.leftovers_moved_count += len(leftover_files)
         # Hotfix3 (mega-hotfix) : aligner la simulation dry_run sur le comportement
         # reel. En mode reel (L863-864 plus bas), source_dirs_deleted_count
@@ -1054,7 +1134,7 @@ def merge_dir_safe(
 
     remaining_files = _walk_without_crossing_reparse_points(src_dir).files
     for src_file in remaining_files:
-        move_to_review_bucket(
+        leftover_dst = move_to_review_bucket(
             src_file,
             src_anchor=src_dir,
             bucket_root=leftovers_root,
@@ -1067,7 +1147,9 @@ def merge_dir_safe(
             res=res,
             record_op=record_op,
         )
-        res.leftovers_moved_count += 1
+        # `None` = abandon : le fichier est reste en place, ne pas le compter.
+        if leftover_dst is not None:
+            res.leftovers_moved_count += 1
 
     if prune_empty_dirs(src_dir):
         res.source_dirs_deleted_count += 1
@@ -1358,7 +1440,10 @@ def move_duplicate_losers_to_user_decided(
                 # L'ancien `+= _rid_count` ajoutait video + sidecars -> un episode avec 2
                 # sous-titres s'affichait comme 3 "films deplaces" sous un libelle UI
                 # "Films ... deplaces", et divergeait de la branche single (`+= 1`).
-                res.duplicates_user_decided_moved_count += 1
+                # `moved_to is None` = deplacement de la VIDEO abandonne : ne pas
+                # transformer cet echec en succes silencieux dans le bandeau.
+                if moved_to is not None:
+                    res.duplicates_user_decided_moved_count += 1
                 continue
 
             # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
@@ -1546,7 +1631,10 @@ def move_marked_for_deletion_to_bucket(
                 # RELECTURE R2 [D4] : +1 par FILM (row), pas par FICHIER deplace.
                 # Le libelle UI est "Films marques pour suppression deplaces" : compter
                 # les sidecars gonflait le chiffre (1 episode + 2 srt = 3 "films").
-                res.marked_for_deletion_moved_count += 1
+                # `moved_to is None` = deplacement de la VIDEO abandonne : pas de succes
+                # silencieux (le fichier est reste dans son dossier d'origine).
+                if moved_to is not None:
+                    res.marked_for_deletion_moved_count += 1
                 continue
 
             # AUDIT 2026-07-13 [CRIT-1] garde-fou (défense en profondeur) : une row
@@ -2661,9 +2749,8 @@ def apply_collection_item(
     # VQ-3 : kill-switch MAX_PATH Windows. Verifier le path du sous-dossier
     # ET le path final video (sub_dir/video.name) car c'est ce dernier qui
     # peut exceder 260 chars meme si sub_dir reste valide.
-    # ITER7 : cfg.lowercase_extensions ajuste la casse du suffixe cible
-    # (n'allonge pas le chemin, mais on garde la coherence avec dst_video).
-    _candidate_video_path = sub_dir / _video_name_with_ext_case(cfg, video)
+    # Regle inviolable n1 : `video.name` tel quel, jamais reconstruit.
+    _candidate_video_path = sub_dir / video.name
     _path_err = check_path_length_killswitch(str(_candidate_video_path))
     if _path_err is not None:
         log("WARN", _path_err)
@@ -2759,7 +2846,8 @@ def apply_collection_item(
             elif status in {"conflict", "sidecar_conflict"}:
                 core_mod._mark_skip(res, core_mod.SKIP_REASON_CONFLIT_QUARANTAINE)
 
-        dst_video = sub_dir / _video_name_with_ext_case(cfg, video)
+        # Regle inviolable n1 : nom de fichier video preserve a l'identique.
+        dst_video = sub_dir / video.name
         vid_key: Optional[Tuple[str, str, str]] = None
         if dedup_seen_ops is not None:
             vid_key = (str(core_mod._norm_win_path(video)), str(core_mod._norm_win_path(dst_video)), "collection_video")
@@ -2864,7 +2952,7 @@ def apply_tv_episode(
     episode = int(row.tv_episode or 0)
     ep_title = str(row.tv_episode_title or "").strip()
 
-    # Build target path: root / Série (année) / Saison NN / S01E01 - Titre.ext
+    # Build target path: root / Série (année) / Saison NN / <nom source>
     # ITER7 etape 3 : approvisionnement cfg.separator (cf. site apply_single).
     _naming_ctx = build_naming_context(
         title=_eff_series,
@@ -2877,34 +2965,45 @@ def apply_tv_episode(
     )
     series_folder_name = format_tv_series_folder(cfg.naming_tv_template, _naming_ctx)
     season_folder_name = f"Saison {season:02d}" if season else "Saison 00"
-    _ep_ext = _video_ext(cfg, video)
-    if ep_title:
-        target_filename = f"S{season:02d}E{episode:02d} - {core_mod.windows_safe(ep_title)}{_ep_ext}"
-    else:
-        target_filename = f"S{season:02d}E{episode:02d}{_ep_ext}"
+
+    # REGLE INVIOLABLE n1 : un episode est RANGE, jamais RENOMME.
+    #
+    # L'ancien code batissait `S01E01 - Titre.ext` : un apply reel transformait
+    # `Breaking.Bad.S01E01.1080p.BluRay.x264-GROUP.mkv` en `S01E01.mkv`, ce qui
+    # desynchronise le fichier de son torrent (seeding casse) ET detruit
+    # l'information de release (source, encodeur, resolution). Le template TV ne
+    # s'applique donc qu'au DOSSIER (`Serie (annee)/Saison NN/`) ; le nom du
+    # fichier est celui de la source, octet pour octet.
+    target_filename = video.name
 
     target_dir = cfg.root / series_folder_name / season_folder_name
     target_file = target_dir / target_filename
     core_mod.ensure_inside_root(cfg, target_file)
 
-    # GATE 1 (TV1) : réaligner les sidecars sur le STEM cible (SxxExx - Titre) plutôt
-    # que de conserver leur nom source (sinon orphelins pour Jellyfin/Kodi/Plex).
-    # Les sidecars episode-specifiques partagent le stem video -> on remplace ce stem
-    # par le stem cible en preservant la chaine de suffixes (.fr.forced.srt).
-    # Les sidecars generiques (poster.jpg, ne commencant pas par le stem video) gardent
-    # leur nom (ne PAS les realigner sur l'episode).
-    target_stem = target_file.stem
+    # NOOP : l'episode est DEJA a sa place. Cette garde n'existait pas tant que
+    # la cible etait un nom fabrique (`SxxExx - Titre.ext`), qui ne pouvait
+    # pratiquement jamais coincider avec la source. La cible etant maintenant
+    # `target_dir / video.name`, un 2e apply sur une bibliotheque deja rangee
+    # donne `src == dst` — et sans cette garde
+    # `move_file_with_collision_policy` verrait `dst.exists()` puis
+    # `files_identical_quick(src, src) == True` et deplacerait chaque episode
+    # vers `_review/_duplicates_identical`. Comparaison FS-equivalente
+    # (casse/NFC Windows), pas une egalite de chaines.
+    if core_mod._norm_win_path(target_file) == core_mod._norm_win_path(video):
+        log("INFO", f"TV NOOP: episode deja range, rien a faire: {video}")
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_NOOP_DEJA_CONFORME)
+        return
+
+    # Les sidecars gardent EUX AUSSI leur nom source. L'ancien realignement sur
+    # le stem cible (`SxxExx - Titre`) n'existait que parce que la video etait
+    # renommee : le stem video ne bougeant plus, il n'y a plus rien a realigner
+    # et un sidecar reste apparie a sa video par construction.
     sidecar_targets: list[Tuple[Path, Path]] = []
     try:
         for sc in core_mod.classify_sidecars(cfg, folder, video, is_collection=True):
             if not sc.exists():
                 continue
-            if sc.name.startswith(video.stem):
-                suffix_chain = sc.name[len(video.stem) :]
-                dst_sc = target_dir / f"{target_stem}{suffix_chain}"
-            else:
-                dst_sc = target_dir / sc.name
-            sidecar_targets.append((sc, dst_sc))
+            sidecar_targets.append((sc, target_dir / sc.name))
     except (PermissionError, OSError) as exc:
         log("WARN", f"TV sidecar scan failed for {folder}: {exc}")
 
@@ -3084,7 +3183,8 @@ def quarantine_row(
             )
         res.quarantined += 1
 
-    dst_video = base / _video_name_with_ext_case(cfg, video)
+    # Regle inviolable n1 : nom de fichier video preserve a l'identique.
+    dst_video = base / video.name
     if not dst_video.exists():
         log("INFO", f"QUARANTINE MOVE: {video} -> {dst_video}")
         if not dry_run:

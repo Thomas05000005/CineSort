@@ -63,21 +63,22 @@ class SettingsUiRoundtripTests(unittest.TestCase):
         self.assertEqual(after.get("collection_folder_name"), "_MesSagas")
         self.assertIn("collection_folder_name", after, "round-trip affichage")
 
-    # --- P10 : lowercase_extensions ---
+    # --- P10 : lowercase_extensions SUPPRIME (regle inviolable n1) ---
 
-    def test_lowercase_extensions_present_in_fresh_get(self) -> None:
+    def test_lowercase_extensions_absent_du_get(self) -> None:
+        """Le reglage n'existe plus : ni au GET, ni dans le formulaire UI.
+
+        Son seul effet etait de renommer le FICHIER VIDEO cible (.MKV -> .mkv).
+        Le reexposer au GET ferait reapparaitre un toggle sans effet — ou pire,
+        inviterait a recabler le renommage.
+        """
         fresh = self.api.settings.get_settings()
-        self.assertIn(
-            "lowercase_extensions",
-            fresh,
-            "consomme par build_cfg (defaut True) : doit etre expose au GET, "
-            "sinon le toggle UI affiche OFF alors que l'effectif est ON",
+        self.assertNotIn("lowercase_extensions", fresh)
+        self.assertNotIn(
+            'key: "lowercase_extensions"',
+            _PARAMETRES_JS.read_text(encoding="utf-8"),
+            "le toggle UI doit rester retire",
         )
-        self.assertTrue(fresh.get("lowercase_extensions"))
-
-    def test_lowercase_extensions_off_roundtrip(self) -> None:
-        after = self._save_full(lowercase_extensions=False)
-        self.assertFalse(after.get("lowercase_extensions"))
 
     # --- P11 : subtitle_expected_languages split ';' ---
 

@@ -37,6 +37,22 @@ class MigrationRollbackTests(unittest.TestCase):
             )
             conn.commit()
 
+    def _make_migration_pending(self) -> None:
+        """Remet `user_version` un cran en arriere.
+
+        Nuance N28 (ultra-audit 2026-08-03) : le backup pre_migration n'est plus
+        pousse a CHAQUE boot mais seulement quand le schema va reellement bouger
+        — sinon DEFAULT_MAX_BACKUPS lancements suffisaient a evincer tous les
+        backups riches par des copies de la base courante. Les tests qui
+        exercent le rollback doivent donc mettre en scene une VRAIE migration en
+        attente, ce qui est exactement l'etat d'une base apres une mise a jour
+        de l'application.
+        """
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
+            current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            conn.execute(f"PRAGMA user_version = {max(0, current - 1)}")
+            conn.commit()
+
     def test_no_pre_migration_backup_on_fresh_install(self) -> None:
         """Fresh install : pas de backup pre_migration cree (rien a sauver)."""
         store = SQLiteStore(self.db_path, busy_timeout_ms=2000)
@@ -46,8 +62,9 @@ class MigrationRollbackTests(unittest.TestCase):
         self.assertEqual(len(pre_migration), 0)
 
     def test_pre_migration_backup_created_on_subsequent_init(self) -> None:
-        """Sur DB existante, _backup_before_migrations cree un backup pre_migration."""
+        """Sur DB existante AVEC migration en attente, un backup pre_migration est cree."""
         self._seed_db()
+        self._make_migration_pending()
         # 2eme initialize() → backup pre_migration cree
         store = SQLiteStore(self.db_path, busy_timeout_ms=2000)
         store.initialize()
@@ -58,6 +75,7 @@ class MigrationRollbackTests(unittest.TestCase):
     def test_failed_migration_triggers_restore(self) -> None:
         """Si _apply_schema_migrations leve, la DB doit etre restauree depuis le backup."""
         self._seed_db()
+        self._make_migration_pending()
 
         # Capture le contenu de la DB avant la tentative de migration ratee
         with closing(sqlite3.connect(str(self.db_path))) as conn:
