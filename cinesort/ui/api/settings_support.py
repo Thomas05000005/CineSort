@@ -90,6 +90,7 @@ def _coerce_int_with_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
 
+
 TMDB_KEY_SECRET_FIELD = "tmdb_api_key_secret"
 TMDB_KEY_PROTECTION_LEGACY = "plaintext_legacy"
 TMDB_KEY_PURPOSE = "tmdb_api_key"
@@ -561,9 +562,7 @@ def read_settings(state_dir: Path) -> Dict[str, Any]:
             scheme = str(rest_secret.get("scheme") or "").strip().lower()
             blob_b64 = str(rest_secret.get("blob_b64") or "").strip()
             if scheme == WINDOWS_DPAPI_CURRENT_USER and blob_b64:
-                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(
-                    blob_b64, purpose=REST_TOKEN_PURPOSE
-                )
+                ok_rt, value_rt, _err_rt = _unprotect_secret_ng(blob_b64, purpose=REST_TOKEN_PURPOSE)
                 if ok_rt:
                     data["rest_api_token"] = value_rt
                 else:
@@ -956,10 +955,9 @@ _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
     # V5-02 (R5-STRESS-5) parallelisme batch inter-films
     ("perceptual_parallelism_enabled", True),
     ("perceptual_workers", 0),
-    # AUDIT 2026-06-11 (R4-P10) : lowercase_extensions est CONSOMME par
-    # build_cfg_from_settings (to_bool defaut True) mais etait absent du GET ->
-    # le toggle UI affichait OFF en permanence alors que l'effectif etait ON.
-    ("lowercase_extensions", True),
+    # AUDIT 2026-06-11 (R4-P10) : "lowercase_extensions" a vecu ici. RETIRE :
+    # le reglage ne servait qu'a renommer le fichier video (.MKV -> .mkv), ce
+    # qu'interdit la regle inviolable n1. Ne pas le reintroduire.
     ("perceptual_audio_fingerprint_enabled", True),
     ("perceptual_scene_detection_enabled", True),
     ("perceptual_audio_spectral_enabled", True),
@@ -1166,7 +1164,6 @@ def build_cfg_from_settings(
         scan_max_workers=cfg_scan_workers,
         naming_movie_template=cfg_movie_template,
         naming_tv_template=cfg_tv_template,
-        lowercase_extensions=to_bool(settings.get("lowercase_extensions"), True),
         # ITER7 etape 3 : approvisionnement separator Domain (drop silencieux
         # historique au save). Le coerce-and-default est aussi applique cote
         # _save_section_naming (settings_support.py:1611-1613) mais on duplique
@@ -1336,6 +1333,7 @@ def get_confidence_thresholds_payload() -> Dict[str, Any]:
     module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
     """
     from cinesort.domain.confidence_thresholds import get_confidence_thresholds  # noqa: PLC0415
+
     return {
         "ok": True,
         "thresholds": get_confidence_thresholds(),
@@ -1436,8 +1434,7 @@ def _save_section_cleanup(
     if collection_folder_value is None:
         collection_folder_value = payload.get("collection_folder_name")
     collection_folder_name = (
-        str(collection_folder_value or default_collection_folder_name).strip()
-        or default_collection_folder_name
+        str(collection_folder_value or default_collection_folder_name).strip() or default_collection_folder_name
     )
     return {
         "collection_folder_enabled": to_bool(payload.get("collection_folder_enabled"), True),
@@ -1489,13 +1486,9 @@ def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     out: Dict[str, Any] = {}
     if "scan_max_workers_mode" in payload:
-        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(
-            payload.get("scan_max_workers_mode")
-        )
+        out["scan_max_workers_mode"] = _normalize_scan_max_workers_mode(payload.get("scan_max_workers_mode"))
     if "scan_max_workers_value" in payload:
-        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(
-            payload.get("scan_max_workers_value")
-        )
+        out["scan_max_workers_value"] = _normalize_scan_max_workers_value(payload.get("scan_max_workers_value"))
     return out
 
 
@@ -1505,7 +1498,9 @@ def _save_section_scan_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
         "quarantine_unapproved": to_bool(payload.get("quarantine_unapproved"), False),
         "dry_run_apply": to_bool(payload.get("dry_run_apply"), True),
         "auto_approve_enabled": to_bool(payload.get("auto_approve_enabled"), False),
-        "auto_approve_threshold": max(70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))),
+        "auto_approve_threshold": max(
+            70, min(100, _coerce_int_with_default(payload.get("auto_approve_threshold", _MISSING), 85))
+        ),
         # M-2 : auto-quarantine films corrompus (integrity warnings)
         "auto_quarantine_corrupted": to_bool(payload.get("auto_quarantine_corrupted"), False),
         "onboarding_completed": to_bool(payload.get("onboarding_completed"), False),
@@ -1590,7 +1585,9 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
 def _save_section_watch(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "watch_enabled": to_bool(payload.get("watch_enabled"), False),
-        "watch_interval_minutes": max(1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))),
+        "watch_interval_minutes": max(
+            1, min(60, _coerce_int_with_default(payload.get("watch_interval_minutes", _MISSING), 5))
+        ),
     }
 
 
@@ -1630,13 +1627,23 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         "perceptual_enabled": to_bool(payload.get("perceptual_enabled"), False),
         "perceptual_auto_on_scan": to_bool(payload.get("perceptual_auto_on_scan"), False),
         "perceptual_auto_on_quality": to_bool(payload.get("perceptual_auto_on_quality"), True),
-        "perceptual_timeout_per_film_s": max(30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))),
-        "perceptual_frames_count": max(5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))),
-        "perceptual_skip_percent": max(0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))),
+        "perceptual_timeout_per_film_s": max(
+            30, min(600, _coerce_int_with_default(payload.get("perceptual_timeout_per_film_s", _MISSING), 120))
+        ),
+        "perceptual_frames_count": max(
+            5, min(50, _coerce_int_with_default(payload.get("perceptual_frames_count", _MISSING), 10))
+        ),
+        "perceptual_skip_percent": max(
+            0, min(20, _coerce_int_with_default(payload.get("perceptual_skip_percent", _MISSING), 5))
+        ),
         "perceptual_dark_weight": max(1.0, min(3.0, to_float(payload.get("perceptual_dark_weight"), 1.5))),
         "perceptual_audio_deep": to_bool(payload.get("perceptual_audio_deep"), True),
-        "perceptual_audio_segment_s": max(10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))),
-        "perceptual_comparison_frames": max(10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))),
+        "perceptual_audio_segment_s": max(
+            10, min(120, _coerce_int_with_default(payload.get("perceptual_audio_segment_s", _MISSING), 30))
+        ),
+        "perceptual_comparison_frames": max(
+            10, min(100, _coerce_int_with_default(payload.get("perceptual_comparison_frames", _MISSING), 20))
+        ),
         "perceptual_comparison_timeout_s": max(
             120, min(1800, _coerce_int_with_default(payload.get("perceptual_comparison_timeout_s", _MISSING), 600))
         ),
@@ -1655,9 +1662,9 @@ def _save_section_perceptual(payload: Dict[str, Any]) -> Dict[str, Any]:
         # donc la canonique perimee primait sur la saisie alias. L'alias reste
         # accepte en fallback pour les payloads partiels (REST legacy)
         # UNIQUEMENT quand la canonique est absente. Clamp [0..16] (0=auto).
-        "perceptual_workers": max(0, min(16, _coerce_workers_int(
-            payload.get("perceptual_workers", payload.get("perceptual_workers_count"))
-        ))),
+        "perceptual_workers": max(
+            0, min(16, _coerce_workers_int(payload.get("perceptual_workers", payload.get("perceptual_workers_count"))))
+        ),
         "perceptual_audio_fingerprint_enabled": to_bool(payload.get("perceptual_audio_fingerprint_enabled"), True),
         "perceptual_scene_detection_enabled": to_bool(payload.get("perceptual_scene_detection_enabled"), True),
         "perceptual_audio_spectral_enabled": to_bool(payload.get("perceptual_audio_spectral_enabled"), True),
@@ -1720,7 +1727,8 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Fix audit 2026-05-24 : section Nommage manquait totalement du dispatcher.
     6 champs (`naming_template`, `windows_safe`, `lowercase_extensions`, `separator`,
     `naming_movie_template`, `naming_tv_template`) etaient silencieusement droppes
-    a chaque save. Meme pattern que bug OMDb.
+    a chaque save. Meme pattern que bug OMDb. Il n'en reste que 3 : les 3 autres
+    ont depuis ete retires (fantomes, ou violation de la regle inviolable n1).
 
     Note : `_apply_naming_preset` (deja appele dans le dispatcher) gere uniquement
     la mecanique du preset selecteur ; ce helper gere les champs templates + regles.
@@ -1734,11 +1742,14 @@ def _save_section_naming(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["naming_tv_template"] = str(payload.get("naming_tv_template") or "").strip()
     # R8-101 (filet F5) : "windows_safe" RETIRÉ — fantôme. windows_safe() est appliquée
     # inconditionnellement (aucun gate settings) -> échappement Windows toujours actif.
-    if "lowercase_extensions" in payload:
-        out["lowercase_extensions"] = to_bool(payload.get("lowercase_extensions"), True)
+    # "lowercase_extensions" RETIRE : le seul effet du toggle etait de renommer
+    # le FICHIER VIDEO (.MKV -> .mkv), interdit par la regle inviolable n1. Une
+    # cle deja presente dans un settings.json existant n'est PAS effacee (le
+    # merge read-modify-write de _save_settings_payload_locked part de
+    # l'existant) : elle devient simplement inerte.
     if "separator" in payload:
-        sep = str(payload.get("separator") or ".")
-        out["separator"] = sep if sep in {".", " ", "_", "-"} else "."
+        sep = str(payload.get("separator") or " ")
+        out["separator"] = sep if sep in {".", " ", "_", "-"} else " "
     return out
 
 
@@ -1779,8 +1790,13 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if "history_retention_days" in payload:
         out["history_retention_days"] = max(0, min(3650, to_int(payload.get("history_retention_days"), 90)))
-    if "retention_days" in payload:
-        out["retention_days"] = max(0, min(3650, to_int(payload.get("retention_days"), 90)))
+    # "retention_days" RETIRE (2026-08-03) — reglage FANTOME : persiste, jamais lu.
+    # Le seul cron de retention (app.py:495 et 1004 -> retention_cleanup) lit
+    # `history_retention_days` ci-dessus ; aucun code ne lisait `retention_days`.
+    # Le champ UI promettait "conservation des analyses perceptuelles et scores
+    # qualite" : cette purge n'existe pas, et la cabler par simple anciennete
+    # detruirait le cache probe vivant d'une bibliotheque stable (re-probe complet
+    # SMB/NAS). Le reglage est donc supprime plutot qu'invente.
     # VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review (defaut 30j, 0 = OFF).
     # Bornage [0, 3650] aligne sur history_retention_days. Le cron tourne 24h via
     # `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`, demarre depuis app.py.
@@ -2243,6 +2259,7 @@ def _detect_storage_profile(state_dir: Path) -> str:
         if os.name == "nt":
             try:
                 import ctypes  # noqa: PLC0415
+
                 drive = str(state_dir.resolve()).split(":")[0] + ":\\"
                 drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
                 # 4 = DRIVE_REMOTE (SMB/CIFS)

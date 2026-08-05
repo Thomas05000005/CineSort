@@ -13,6 +13,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Un nouveau push sur une PR rend le run precedent sans objet : on l'annule
+  # au lieu de le laisser occuper un slot. Mesure du 2026-08-03 : 247 runs
+  # perimes sur 999 en file, pour 16 slots d'execution.
+  # `github.sha` et NON `github.ref` pour les evenements hors PR : chaque commit
+  # de `main` obtient ainsi son PROPRE groupe, donc deux runs de `main` ne
+  # peuvent jamais s'annuler l'un l'autre — quelle que soit la facon dont
+  # `cancel-in-progress` est evalue.
+  #
+  # Mesure du 2026-08-04 : le run du commit ca85b282 (evenement `push`) a ete
+  # ANNULE alors que `cancel-in-progress` valait l'expression
+  # `github.event_name == 'pull_request'`, donc `false` pour un push. Le
+  # commentaire ci-dessous promet pourtant « sur main on laisse le run aller au
+  # bout : c'est la reference ». Il ne le faisait pas.
+  #
+  # Consequence concrete : relancer un ancien run de `main` le remet dans le
+  # groupe `CI-refs/heads/main` et tue le run du commit le PLUS RECENT — l'etat
+  # de reference de `main` devient alors inexploitable, ce qui est exactement le
+  # signal sur lequel s'appuie le suivi de la cascade.
+  #
+  # Le comportement voulu pour les PR est INCHANGE : `pull_request.number` reste
+  # la clef, donc un nouveau push sur une PR annule toujours son run precedent.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Sur main, au contraire, on laisse le run aller au bout : c'est la reference.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Job dedie a la generation/validation de uv.lock.
   # V1.1 uv : centralise la verification du lockfile pour eviter le drift
@@ -51,6 +77,45 @@ jobs:
           name: uv-lock
           path: uv.lock
           retention-days: 14
+
+  # Garde-fou de syntaxe du front.
+  #
+  # Ce job existe parce que `node --check` MENTAIT. Mesure du 2026-08-03
+  # (Node v24.14.1, depot sans package.json) : en injectant `const BROKEN = ;`
+  # dans chacun des 48 `.js` de `web/dashboard/`, 47 sortaient quand meme en 0.
+  # Ce sont des modules ESM ; sans `package.json` declarant `"type": "module"`,
+  # la detection de syntaxe de module de Node s'interpose et le processus sort
+  # en 0 sans jamais reverifier la source dans le goal « module ». Seul
+  # `bootstrap-debug.js` (IIFE, sans import ni export, charge par un
+  # `<script src>` classique) etait reellement verifie. Une vingtaine de bilans
+  # internes citaient ce `node --check` comme preuve de validite du JS : ces
+  # preuves etaient nulles.
+  #
+  # `scripts/check_js_syntax.mjs` impose le goal explicitement (`--input-type`,
+  # source sur stdin), derive ce goal de la maniere dont chaque fichier est
+  # reellement charge par le navigateur, et s'auto-teste par canaris avant de
+  # conclure. Code 1 = erreur de syntaxe ; code 2 = l'outil ne se fait plus
+  # confiance (il refuse alors de verdir).
+  js-syntax:
+    name: Syntaxe JS (web/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout du depot
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # Auto-test d'abord : si les canaris ne detectent plus rien, autant le
+      # savoir avant de lire un « tout va bien » qui ne voudrait rien dire.
+      - name: Auto-test du verificateur (canaris)
+        run: node scripts/check_js_syntax.mjs --self-test
+
+      - name: Verification de syntaxe des sources de web/
+        run: node scripts/check_js_syntax.mjs
 
   ci:
     name: Lint, Tests, Build
@@ -106,9 +171,23 @@ jobs:
         shell: pwsh
         run: lint-imports
 
-      # 7. Execution des tests avec mesure de couverture (unitaires
-      # uniquement — les E2E dashboard/desktop necessitent des navigateurs
-      # Playwright installes, traites apres le build).
+      # 6c. Navigateur Playwright pour les tests runtime de `tests/` (2026-08-03).
+      #
+      # Le commentaire ci-dessous supposait que TOUS les tests navigateur vivaient
+      # dans tests/e2e*. Ce n'est plus vrai : 46 tests parametres `[chromium]`
+      # (contraste WCAG, invariantes de couleurs de tier, libelles UTF-8, cycles
+      # de toast et de countdown, arret des pollers au unmount) vivent dans
+      # `tests/` et sont donc DANS le perimetre de ce job. Sans navigateur ils
+      # echouaient tous au setup — 46 ERROR qui faisaient echouer l'etape des
+      # tests, et masquaient les vrais echecs.
+      # `--only-shell` suffit : ces tests tournent en headless.
+      - name: Navigateur Playwright (tests runtime de tests/)
+        shell: pwsh
+        run: python -m playwright install chromium --only-shell
+
+      # 7. Execution des tests avec mesure de couverture (unitaires + tests
+      # runtime headless de `tests/` — les E2E dashboard/desktop restent
+      # exclus et sont traites apres le build).
       #
       # v1.0.0-beta : pollution inter-tests resolue (issue #4).
       # Cause root : test_import_cycle_guard manipulait sys.modules ce qui

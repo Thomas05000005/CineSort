@@ -16,8 +16,11 @@ from cinesort.app.updater import (
     _build_update_info,
     _compare_versions,
     _parse_version,
+    _read_cache,
+    _write_cache,
     check_for_updates,
 )
+from cinesort.infra import state
 
 
 def _fake_payload(
@@ -52,6 +55,62 @@ class _FakeResponse:
 
     def __exit__(self, *_args) -> None:
         return None
+
+
+class WriteCacheAtomicTests(unittest.TestCase):
+    """_write_cache doit ecrire atomiquement ET durablement.
+
+    Le couple `.tmp` unique + fsync + `os.replace` n'est plus ecrit sur place
+    dans `updater` : il vit dans `cinesort.infra.state.atomic_write_bytes`,
+    seul ecrivain atomique du depot. Les tests patchent donc `os.replace` LA
+    OU IL EST APPELE. Ce qui est verifie n'a pas bouge d'un pouce : echec du
+    basculement -> pas de cache final, pas de `.tmp` orphelin, pas
+    d'exception qui remonte au caller.
+    """
+
+    def test_roundtrip_and_no_tmp_leftover(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            _write_cache(cache_path, _fake_payload())
+            # Le cache est lisible immediatement...
+            got = _read_cache(cache_path, cache_ttl_s=3600)
+            self.assertIsInstance(got, dict)
+            self.assertEqual(got["tag_name"], "7.7.0")
+            # ...et aucun fichier .tmp residuel ne subsiste.
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
+
+    def test_replace_failure_cleans_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            # On patche le VRAI `os.replace` du helper, pas `atomic_write_json`
+            # lui-meme : mocker l'ecrivain fabriquerait la condition testee et
+            # ne prouverait plus rien du chemin d'ecriture reel.
+            with mock.patch.object(state.os, "replace", side_effect=OSError("boom")):
+                _write_cache(cache_path, _fake_payload())
+            # Echec du replace -> pas de cache final, pas de .tmp orphelin.
+            self.assertFalse(cache_path.exists())
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
+
+    def test_replace_failure_leaves_previous_cache_intact(self) -> None:
+        """Un echec d'ecriture ne doit JAMAIS degrader le cache deja en place.
+
+        C'est la propriete que `write_text` n'avait pas (#787) : il tronquait
+        la cible AVANT d'ecrire, donc une coupure laissait un fichier vide.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = Path(d) / updater.CACHE_FILENAME
+            _write_cache(cache_path, _fake_payload(tag="7.7.0"))
+            before = cache_path.read_bytes()
+
+            with mock.patch.object(state.os, "replace", side_effect=OSError("boom")):
+                _write_cache(cache_path, _fake_payload(tag="9.9.9"))
+
+            self.assertEqual(cache_path.read_bytes(), before)
+            self.assertEqual(_read_cache(cache_path, cache_ttl_s=3600)["tag_name"], "7.7.0")
+            leftovers = [p.name for p in Path(d).iterdir() if ".tmp" in p.name]
+            self.assertEqual(leftovers, [])
 
 
 class CompareVersionsTests(unittest.TestCase):
@@ -163,6 +222,38 @@ class CheckForUpdatesTests(unittest.TestCase):
                 info = check_for_updates("7.6.0", "foo/cinesort", cache_path=cache)
             assert info is not None
             self.assertEqual(info.latest_version, "7.7.0")
+
+    def test_cache_non_numeric_ts_falls_back_to_network(self) -> None:
+        # ts non-numerique (ecriture partielle / edition manuelle) ne doit pas
+        # faire crasher float() : on retombe sur un refetch reseau.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            cache.write_text(
+                json.dumps({"ts": "garbage", "payload": _fake_payload(tag="7.7.0")}),
+                encoding="utf-8",
+            )
+            payload = _fake_payload(tag="7.8.0")
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(payload)) as m:
+                info = check_for_updates("7.6.0", "foo/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1)
+            assert info is not None
+            self.assertEqual(info.latest_version, "7.8.0")
+
+    def test_cache_null_ts_falls_back_to_network(self) -> None:
+        # ts=null en JSON -> data.get("ts") renvoie None -> float(None) leverait
+        # TypeError sans la garde. On doit refetcher proprement.
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            cache.write_text(
+                json.dumps({"ts": None, "payload": _fake_payload(tag="7.7.0")}),
+                encoding="utf-8",
+            )
+            payload = _fake_payload(tag="7.8.0")
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(payload)) as m:
+                info = check_for_updates("7.6.0", "foo/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1)
+            assert info is not None
+            self.assertEqual(info.latest_version, "7.8.0")
 
 
 class BuildUpdateInfoTests(unittest.TestCase):

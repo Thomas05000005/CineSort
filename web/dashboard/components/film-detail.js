@@ -57,6 +57,12 @@ const _state = {
   onClose: null,
   showAllCandidates: false,
   loading: false,
+  // F05 (revue post-merge 2026-07-18) : compteur d'epoque de chargement.
+  // get_film_full a une latence tres variable (TMDb froid ~10 s vs instantane) et
+  // apiPost ne dedup/abort pas : deux ouvertures rapprochees (film A lent puis
+  // film B rapide) laissaient la reponse tardive de A repeindre la fiche de B.
+  // Toute reponse dont l'epoque n'est plus l'epoque courante est jetee.
+  loadSeq: 0,
   // sprint orphelins #350 : feedback utilisateur sur le scoring.
   // Apres soumission, on retient le feedback_id pour permettre annulation
   // (delete_score_feedback). Pas persiste cross-mount : la session courante
@@ -768,8 +774,17 @@ function _bindEvents() {
 async function _handleAction(action, btn) {
   if (!_state.data) return;
   const row = _state.data.row || {};
-  const runId = _state.runId || _state.data.run_id;
-  const rowId = _state.rowId || _state.data.row_id;
+  // F05 (defense en profondeur) : l'identite doit venir du payload AFFICHE, pas
+  // de l'etat de navigation — sinon la modale de confirmation montre le film A
+  // et le POST destructif porte sur le film B. get_film_full renvoie toujours
+  // row_id/run_id au niveau racine (ui/api/film_support.py) ; le fallback sur
+  // _state garde le mode B legacy fonctionnel si le payload ne les porte pas.
+  const runId = _state.data.run_id || _state.runId;
+  const rowId = String(_state.data.row_id || _state.rowId || "");
+  if (_state.rowId && rowId !== String(_state.rowId)) {
+    showToast({ type: "warn", text: "La fiche affichée n'est plus à jour. Rouvre le film avant d'agir." });
+    return;
+  }
 
   switch (action) {
     case "open-analysis":
@@ -1030,8 +1045,9 @@ async function _refreshPosterUnit(tmdbId, btn) {
 async function _chooseCandidate(tmdbId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "..."; }
   try {
-    const runId = _state.runId || (_state.data && _state.data.run_id);
-    const rowId = _state.rowId || (_state.data && _state.data.row_id);
+    // F05 : meme ordre que _handleAction — le payload affiche fait foi.
+    const runId = (_state.data && _state.data.run_id) || _state.runId;
+    const rowId = (_state.data && _state.data.row_id) || _state.rowId;
     const res = await apiPost("library/set_film_tmdb_candidate", {
       run_id: runId,
       row_id: rowId,
@@ -1335,7 +1351,8 @@ function _markForDeletionWithConfirm(row, runId, rowId) {
 
 async function _handleAlertAction(kind, code) {
   const row = (_state.data && _state.data.row) || {};
-  const rowId = _state.rowId || (_state.data && _state.data.row_id);
+  // F05 : meme ordre que _handleAction — le payload affiche fait foi.
+  const rowId = (_state.data && _state.data.row_id) || _state.rowId;
   switch (kind) {
     case "ignore": {
       try {
@@ -1431,13 +1448,24 @@ function _renderInto(html) {
 
 async function _reload() {
   if (!_state.rowId) return;
+  // F05 : identite + epoque capturees AVANT l'await. Le skeleton reste ecrit
+  // inconditionnellement (sinon la fiche qu'on ouvre perdrait son skeleton).
+  const rowId = _state.rowId;
+  const runId = _state.runId;
+  const seq = (_state.loadSeq += 1);
   _state.loading = true;
   _renderInto(_renderSkeleton());
   try {
-    _state.data = await _loadFilmFull(_state.rowId, _state.runId);
+    const data = await _loadFilmFull(rowId, runId);
+    // F05 : reponse perimee (autre film ouvert entre-temps, ou overlay ferme)
+    // -> on ne publie rien et on ne repeint rien.
+    if (seq !== _state.loadSeq || _state.rowId !== rowId) return;
+    _state.data = data;
     _state.loading = false;
     _renderAll();
   } catch (e) {
+    // F05 : meme garde sur l'echec, sinon l'erreur du film A efface la fiche B.
+    if (seq !== _state.loadSeq || _state.rowId !== rowId) return;
     _state.loading = false;
     _state.data = null;
     _renderInto(_renderErrorState(e && (e.message || String(e))));
@@ -1554,6 +1582,9 @@ export async function renderFilmDetail(opts) {
 
 /** Ferme le mode C overlay (no-op pour A et B). */
 export function closeFilmDetail() {
+  // F05 : invalide toute reponse get_film_full encore en vol, sinon elle
+  // repeindrait un overlay deja ferme (ou celui d'un autre film).
+  _state.loadSeq += 1;
   if (_state.overlayEl) {
     if (_state.overlayEl._escHandler) {
       document.removeEventListener("keydown", _state.overlayEl._escHandler);

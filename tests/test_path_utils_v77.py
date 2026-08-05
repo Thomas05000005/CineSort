@@ -123,6 +123,7 @@ class CycleBreakingTests(unittest.TestCase):
     def test_path_utils_is_leaf(self):
         # path_utils ne doit RIEN importer depuis cinesort.* (feuille du graphe).
         import ast
+
         src = Path(path_utils.__file__).read_text(encoding="utf-8")
         tree = ast.parse(src)
         cinesort_imports = []
@@ -143,6 +144,7 @@ class CycleBreakingTests(unittest.TestCase):
     def test_naming_no_longer_imports_core(self):
         # naming doit importer path_utils, PAS core.
         import ast
+
         src = Path(naming.__file__).read_text(encoding="utf-8")
         tree = ast.parse(src)
         bad = []
@@ -150,9 +152,9 @@ class CycleBreakingTests(unittest.TestCase):
             if isinstance(node, ast.ImportFrom) and node.module == "cinesort.domain.core":
                 bad.append(node.module)
         self.assertEqual(
-            bad, [],
-            msg=f"naming.py importe encore depuis core : {bad}. "
-            f"Cycle non casse.",
+            bad,
+            [],
+            msg=f"naming.py importe encore depuis core : {bad}. Cycle non casse.",
         )
 
     def test_duplicate_support_eager_naming_import_works(self):

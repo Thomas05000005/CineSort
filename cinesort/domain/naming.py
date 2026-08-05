@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
 # --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
@@ -90,7 +91,16 @@ _CLEANUP_PATTERNS = [
     (re.compile(r"\{\s*\}"), ""),  # accolades vides (residuelles)
     (re.compile(r"\s*-\s*$"), ""),  # tiret en fin
     (re.compile(r"^\s*-\s*"), ""),  # tiret en debut
-    (re.compile(r"\s+-\s+(?=[\[\(])"), " "),  # tiret avant crochet/parenthese vide
+    # F14 : le pattern historique `\s+-\s+(?=[\[\(])` supprimait le tiret meme
+    # quand toutes les variables etaient PLEINES ("{title} - [{resolution}]" ->
+    # "Inception [1080p]"), violant le template configure. Les groupes vides ont
+    # deja ete retires par les patterns 1-3 : le seul indice restant d'une
+    # variable videe est le RESIDU d'espace (double espace) qu'elle laisse. On
+    # exige donc ce residu, d'un cote ou de l'autre du tiret. Ces deux patterns
+    # doivent rester AVANT le collapse `\s{2,}` ci-dessous, qui ecraserait le
+    # residu et les rendrait inoperants.
+    (re.compile(r"\s+-\s{2,}(?=[\[\(])"), " "),  # variable videe APRES le tiret
+    (re.compile(r"\s{2,}-\s+(?=[\[\(])"), " "),  # variable videe AVANT le tiret
     (re.compile(r"\s{2,}"), " "),  # espaces multiples
 ]
 
@@ -274,7 +284,9 @@ def build_naming_context(
     """Construit le dictionnaire de variables pour le template de renommage."""
     ctx: Dict[str, str] = {}
 
-    # Toujours disponibles
+    # Toujours disponibles. NB : la déduplication de l'année de queue ("Titre 2005 (2005)")
+    # est faite dans _apply_template, conditionnée à la présence de {year} dans le template
+    # (un template custom SANS {year} conserve donc l'année du titre — pas de perte d'info).
     ctx["title"] = str(title or "").strip()
     ctx["year"] = str(year) if year and year > 0 else ""
     ctx["source"] = str(source or "").strip()
@@ -296,7 +308,7 @@ def build_naming_context(
     # Probe audio (meilleure piste)
     audio_tracks = probe.get("audio_tracks") or []
     if audio_tracks:
-        best = audio_tracks[0]
+        best = _best_audio_track(audio_tracks)
         ctx["audio_codec"] = _codec_label(best.get("codec"))
         channels = best.get("channels")
         ctx["channels"] = _channels_label(channels) if channels else ""
@@ -353,6 +365,24 @@ def format_tv_series_folder(template: str, context: Dict[str, str]) -> str:
 
 def _apply_template(template: str, context: Dict[str, str]) -> str:
     """Substitue les variables, nettoie les separateurs orphelins, sanitise pour Windows."""
+
+    # Fix double-année disque : si le template ré-injecte l'année via {year}, retirer l'année
+    # de QUEUE redondante du titre/série (proposed_title issu d'un nom de fichier peut finir par
+    # l'année, ex. "Le Havre 2011"). Sinon "{title} ({year})" produirait "Le Havre 2011 (2011)".
+    # CONDITIONNÉ à "{year}" dans le template -> un template SANS {year} conserve l'année du titre
+    # (pas de perte d'info). "Blade Runner 2049" (≠ année de sortie) et un titre-année nu ("1984")
+    # sont préservés par le helper. Copie locale : ne mute pas le contexte de l'appelant.
+    if "{year}" in (template or "") and context.get("year"):
+        try:
+            from cinesort.domain.title_helpers import strip_trailing_year_if_equal
+
+            _yr = int(context["year"])
+            context = dict(context)
+            for _key in ("title", "series", "original_title"):
+                if context.get(_key):
+                    context[_key] = strip_trailing_year_if_equal(context[_key], _yr)
+        except (TypeError, ValueError):
+            pass
 
     # Substituer les variables
     def _replacer(m: re.Match) -> str:
@@ -524,6 +554,32 @@ def _channels_label(channels: Any) -> str:
     VN-F.1 : delegue a `codec_ranks.format_audio_channels` (sentinel `""`).
     """
     return _format_audio_channels(channels, invalid="")
+
+
+def _audio_track_sort_key(track: Dict[str, Any]) -> Tuple[int, int, int]:
+    codec = str(track.get("codec") or "").strip().lower()
+    rank = _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    return (rank, _as_int(track.get("channels")), _as_int(track.get("bitrate")))
+
+
+def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Meilleure piste audio pour les placeholders {audio_codec}/{channels}.
+
+    Aligne sur `quality_score._best_audio_track` (R8-039) : rang codec d'abord
+    (lossless > lossy), puis canaux, puis bitrate. Avant, `audio_tracks[0]`
+    prenait l'ordre du conteneur -> une piste lossy compatible pouvait etiqueter
+    le fichier avec un codec inferieur a la vraie meilleure piste.
+    """
+    if not audio_tracks:
+        return {}
+    return max(audio_tracks, key=_audio_track_sort_key)
 
 
 # --- Conformance check ----------------------------------------------------

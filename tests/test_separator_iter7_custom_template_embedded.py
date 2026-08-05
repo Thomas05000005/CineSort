@@ -21,7 +21,11 @@ existants qui embarquent leur propre separateur litteral DOIVENT rester
 strictement invariants — c'est la garantie qui evite de casser les
 installations utilisateurs.
 
-Pattern reference : test_separator_iter7.py + test_lowercase_extensions_iter7_custom_template.py.
+Pattern reference : test_separator_iter7.py.
+
+NB : la garde jumelle `lowercase_extensions` a disparu avec le reglage lui-meme
+(il ne servait qu'a renommer le fichier video, cf. regle inviolable n1). Voir
+`test_never_rename_video_file.py` pour la garde « template custom = DOSSIER ».
 """
 
 from __future__ import annotations
@@ -43,10 +47,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
     def test_custom_template_underscore_embedded_invariant(self) -> None:
         """Template `{title}_{year}` reste `Inception_2010` quelque soit cfg.separator."""
         tpl = "{title}_{year}"
-        outputs = {
-            sep: format_movie_folder(tpl, self._ctx_for(sep))
-            for sep in self._SEPARATOR_VALUES
-        }
+        outputs = {sep: format_movie_folder(tpl, self._ctx_for(sep)) for sep in self._SEPARATOR_VALUES}
         expected = "Inception_2010"
         for sep, out in outputs.items():
             self.assertEqual(
@@ -60,10 +61,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
     def test_custom_template_dot_embedded_invariant(self) -> None:
         """Template `{title}.{year}` reste `Inception.2010` quelque soit cfg.separator."""
         tpl = "{title}.{year}"
-        outputs = {
-            sep: format_movie_folder(tpl, self._ctx_for(sep))
-            for sep in self._SEPARATOR_VALUES
-        }
+        outputs = {sep: format_movie_folder(tpl, self._ctx_for(sep)) for sep in self._SEPARATOR_VALUES}
         expected = "Inception.2010"
         for sep, out in outputs.items():
             self.assertEqual(
@@ -80,10 +78,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
         fin. Ici le tiret est ENTRE les variables (pas en fin), donc preserve.
         """
         tpl = "{title}-{year}"
-        outputs = {
-            sep: format_movie_folder(tpl, self._ctx_for(sep))
-            for sep in self._SEPARATOR_VALUES
-        }
+        outputs = {sep: format_movie_folder(tpl, self._ctx_for(sep)) for sep in self._SEPARATOR_VALUES}
         expected = "Inception-2010"
         for sep, out in outputs.items():
             self.assertEqual(
@@ -112,8 +107,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
             self.assertEqual(
                 out,
                 "Inception.2010.27205",
-                f"FORK SEMANTIQUE detecte : template '{tpl}' avec "
-                f"separator={sep_value!r} a produit {out!r}.",
+                f"FORK SEMANTIQUE detecte : template '{tpl}' avec separator={sep_value!r} a produit {out!r}.",
             )
 
     def test_default_template_also_invariant_control(self) -> None:
@@ -124,10 +118,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
         rapide pour panneau de bord.
         """
         tpl = "{title} ({year})"
-        outputs = {
-            sep: format_movie_folder(tpl, self._ctx_for(sep))
-            for sep in self._SEPARATOR_VALUES
-        }
+        outputs = {sep: format_movie_folder(tpl, self._ctx_for(sep)) for sep in self._SEPARATOR_VALUES}
         expected = "Inception (2010)"
         for sep, out in outputs.items():
             self.assertEqual(
@@ -143,10 +134,7 @@ class CustomTemplateEmbeddedSeparatorForkGuardTests(unittest.TestCase):
         FAIL alors plus rien ne reagit au selecteur, le fix etape 3 est mort).
         """
         tpl = "{title}{sep}{year}"
-        outputs = {
-            sep: format_movie_folder(tpl, self._ctx_for(sep))
-            for sep in self._SEPARATOR_VALUES
-        }
+        outputs = {sep: format_movie_folder(tpl, self._ctx_for(sep)) for sep in self._SEPARATOR_VALUES}
         self.assertEqual(outputs["_"], "Inception_2010")
         self.assertEqual(outputs["."], "Inception.2010")
         self.assertEqual(outputs["-"], "Inception-2010")

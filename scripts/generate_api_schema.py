@@ -36,7 +36,7 @@ if str(ROOT) not in sys.path:
 def build_schema() -> Dict[str, Any]:
     """Compile le JSON Schema unifie pour les endpoints REELS du run_facade."""
     try:
-        from pydantic import TypeAdapter  # type: ignore
+        from pydantic import TypeAdapter  # type: ignore  # noqa: F401 - sonde de disponibilite de pydantic
 
         from cinesort.domain.report_types import REPORT_ADAPTER  # noqa: F401
         from cinesort.ui.api.schemas import (

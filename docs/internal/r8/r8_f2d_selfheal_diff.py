@@ -11,15 +11,17 @@ S-021 RETRACTE (filet F2-d) : _is_idempotent_error NE swallow PLUS aucun Integri
 
 Usage : PYTHONPATH=. .venv313/Scripts/python.exe docs/internal/r8/r8_f2d_selfheal_diff.py
 """
+
 from __future__ import annotations
+
 import json
 import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
 
-from cinesort.infra.db.sqlite_store import SQLiteStore, REQUIRED_SCHEMA_TABLES, SCHEMA_GROUPS
 from cinesort.infra.db.migration_manager import _is_idempotent_error
+from cinesort.infra.db.sqlite_store import REQUIRED_SCHEMA_TABLES, SCHEMA_GROUPS, SQLiteStore
 
 
 def run():
@@ -61,11 +63,12 @@ def run():
         except sqlite3.Error:
             sm_count = -1
 
-    s019 = (paused_after == PAUSED_AT)
-    s022_reg = ("incremental_row_cache" in REQUIRED_SCHEMA_TABLES
-                and "incremental_row_cache" in SCHEMA_GROUPS["incremental"])
-    s022_recreated = (irc_before is None and irc_after is not None)
-    s020 = (sm_count > 0)
+    s019 = paused_after == PAUSED_AT
+    s022_reg = (
+        "incremental_row_cache" in REQUIRED_SCHEMA_TABLES and "incremental_row_cache" in SCHEMA_GROUPS["incremental"]
+    )
+    s022_recreated = irc_before is None and irc_after is not None
+    s020 = sm_count > 0
     results["S019_paused_at_preserve_au_selfheal"] = s019
     results["S022_incremental_row_cache_dans_registre"] = s022_reg
     results["S022_recreee_par_selfheal"] = s022_recreated
@@ -76,7 +79,9 @@ def run():
     print(f"  paused_at APRES self-heal : {paused_after} (AVANT le fix = None/perte ; attendu {PAUSED_AT})")
     print("\n=== S-022 (incremental_row_cache filet self-heal) ===")
     print(f"  dans REQUIRED_SCHEMA_TABLES + SCHEMA_GROUPS : {s022_reg}")
-    print(f"  droppee puis RECREEE par le self-heal       : {s022_recreated} (before={irc_before}, after={bool(irc_after)})")
+    print(
+        f"  droppee puis RECREEE par le self-heal       : {s022_recreated} (before={irc_before}, after={bool(irc_after)})"
+    )
     print("\n=== S-020 (schema_migrations backfille apres bootstrap) ===")
     print(f"  rows schema_migrations apres self-heal : {sm_count} (attendu > 0)")
 
@@ -93,12 +98,16 @@ def run():
     s021 = (not skip_unique) and (not skip_pk) and (not skip_notnull) and skip_dupcol and skip_exists
     results["S021_integrityerror_NON_swallow_retracte"] = s021
     print("\n=== S-021 RETRACTE (IntegrityError NON swallow = sur) ===")
-    print(f"  UNIQUE/PK/NOTNULL -> NON idempotent (re-leve) : {not skip_unique}/{not skip_pk}/{not skip_notnull} (attendu True/True/True)")
+    print(
+        f"  UNIQUE/PK/NOTNULL -> NON idempotent (re-leve) : {not skip_unique}/{not skip_pk}/{not skip_notnull} (attendu True/True/True)"
+    )
     print(f"  duplicate column / already exists -> idempotent : {skip_dupcol}/{skip_exists} (attendu True/True)")
 
     shutil.rmtree(tmp, ignore_errors=True)
     allok = all(results.values())
-    print(f"\nVERDICT : {'CORRIGE (self-heal coherent : paused_at preserve, cache au filet, backfill, taxonomie)' if allok else 'INCOMPLET'}")
+    print(
+        f"\nVERDICT : {'CORRIGE (self-heal coherent : paused_at preserve, cache au filet, backfill, taxonomie)' if allok else 'INCOMPLET'}"
+    )
     print("RESUME:", json.dumps(results, ensure_ascii=False))
 
 

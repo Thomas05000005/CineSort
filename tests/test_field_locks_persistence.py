@@ -123,7 +123,9 @@ class FieldLocksPersistenceTests(unittest.TestCase):
 
         # Une seule ligne en DB
         conn = sqlite3.connect(str(self.db_path))
-        cur = conn.execute("SELECT COUNT(*) FROM film_field_locks WHERE film_id=? AND field_name=?", ("tmdb:1", "title"))
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM film_field_locks WHERE film_id=? AND field_name=?", ("tmdb:1", "title")
+        )
         self.assertEqual(int(cur.fetchone()[0]), 1)
         conn.close()
 
@@ -161,9 +163,7 @@ class FieldLocksMigration030PersistenceTests(unittest.TestCase):
             cur = conn.execute("PRAGMA user_version")
             self.assertEqual(int(cur.fetchone()[0]), 29, "Fixture doit etre v29")
 
-            tables_before = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_before = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertNotIn("film_field_locks", tables_before, "Table absente avant 030")
             # AC-4 : film_tmdb_overrides existe deja (migration 023)
             self.assertIn("film_tmdb_overrides", tables_before, "film_tmdb_overrides doit coexister")
@@ -194,9 +194,7 @@ class FieldLocksMigration030PersistenceTests(unittest.TestCase):
             conn.execute("PRAGMA user_version = 30")
             conn.commit()
 
-            tables_after = {
-                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            }
+            tables_after = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("film_field_locks", tables_after)
             # AC-4 : film_tmdb_overrides coexiste (pas regresse)
             self.assertIn("film_tmdb_overrides", tables_after)
@@ -206,7 +204,8 @@ class FieldLocksMigration030PersistenceTests(unittest.TestCase):
 
             # Verifier les 3 index (idx_film, idx_field, idx_film_id)
             indexes = {
-                r[0] for r in conn.execute(
+                r[0]
+                for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='film_field_locks'"
                 )
             }

@@ -137,6 +137,29 @@ def _flatten_perceptual_for_modal(report: Dict[str, Any]) -> Dict[str, Any]:
     hdr = vid.get("hdr_analysis")
     if isinstance(hdr, dict) and not report.get("hdr_analysis"):
         report["hdr_analysis"] = hdr
+    # Ultra-audit 2026-08 (N32) : deux champs de MEME FAMILLE que hdr_analysis
+    # etaient oublies par le flatten. `to_dict()` (domain/perceptual/models.py)
+    # les place sous `metrics`, la modale les lit au top-level :
+    #   - audio_perceptual -> perceptual-modal.js:327 (dynamic_range_db) : la
+    #     dynamique audio etait toujours absente ;
+    #   - cross_verdicts   -> perceptual-modal.js:227 et :422 : la section
+    #     « Verdicts croises » etait TOUJOURS vide, pour tous les films.
+    # Les deux lectures sont gardees cote JS (`&&` / Array.isArray) : pas de
+    # crash, juste une information silencieusement perdue.
+    audio = metrics.get("audio_perceptual")
+    if isinstance(audio, dict) and not report.get("audio_perceptual"):
+        flat_audio = dict(audio)
+        # La modale lit `dynamic_range_db`, que le rapport ne porte nulle part :
+        # la valeur existe sous `astats.dynamic_range` (ffmpeg astats, en dB,
+        # cf domain/perceptual/audio_perceptual.py:249). On la derive ici sans
+        # toucher au rapport stocke (copie).
+        astats = audio.get("astats") if isinstance(audio.get("astats"), dict) else {}
+        if flat_audio.get("dynamic_range_db") is None and astats.get("dynamic_range") is not None:
+            flat_audio["dynamic_range_db"] = astats["dynamic_range"]
+        report["audio_perceptual"] = flat_audio
+    cross = metrics.get("cross_verdicts")
+    if isinstance(cross, list) and cross and not report.get("cross_verdicts"):
+        report["cross_verdicts"] = cross
     if report.get("global_tier_v2") and not report.get("display_tier"):
         report["display_tier"] = report["global_tier_v2"]
     payload = report.get("global_score_v2_payload")
@@ -152,10 +175,17 @@ def get_perceptual_report(
     run_id: str,
     row_id: str,
     options: Optional[Dict[str, Any]] = None,
+    *,
+    rows_index: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Analyse perceptuelle d'un film unique."""
+    """Analyse perceptuelle d'un film unique.
+
+    `rows_index` (usage interne, cf `analyze_perceptual_batch`) : index
+    row_id -> PlanRow deja charge. Evite de relire plan.jsonl une fois par
+    film quand le run n'est pas en memoire.
+    """
     try:
-        ctx = _validate_and_load_context(api, run_id, row_id, options)
+        ctx = _validate_and_load_context(api, run_id, row_id, options, rows_index=rows_index)
         if isinstance(ctx, dict):
             return ctx  # erreur de validation
         return _execute_perceptual_analysis(api, run_id, row_id, ctx)
@@ -210,6 +240,8 @@ def _validate_and_load_context(
     run_id: str,
     row_id: str,
     options: Optional[Dict[str, Any]],
+    *,
+    rows_index: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Valide les pre-requis et charge le contexte. Retourne un dict erreur ou un tuple contexte."""
     settings = api.settings.get_settings()
@@ -266,8 +298,19 @@ def _validate_and_load_context(
     state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
     rs = api._get_run(run_id)
-    rows = rs.rows if rs and rs.rows else api._load_rows_from_plan_jsonl(run_paths)
-    row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
+    # Ultra-audit 2026-08 (N24) : sur un run ANTERIEUR au process courant,
+    # `api._runs` est vide (seul start_plan le peuple) -> cette ligne relisait
+    # INTEGRALEMENT plan.jsonl une fois PAR FILM. Mesure sur le plan reel de
+    # l'utilisateur : 1027 relectures, 1.45 Go relus, +33 s, et ~19 Mo de
+    # PlanRow x N workers en pointe. `rows_index` (fourni par
+    # analyze_perceptual_batch) charge le plan UNE fois pour tout le batch.
+    if rs and rs.rows:
+        row = next((r for r in rs.rows if str(r.row_id) == str(row_id)), None)
+    elif rows_index is not None:
+        row = rows_index.get(str(row_id))
+    else:
+        rows = api._load_rows_from_plan_jsonl(run_paths)
+        row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
     if row is None:
         return _err_response(
             "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
@@ -404,6 +447,7 @@ def _execute_perceptual_analysis(
                 str(media_path),
                 duration_s=duration_s,
                 video_height=height,
+                video_width=width,  # #525 : re-upscale a la resolution NATIVE
                 is_animation=grain_local.is_animation,
             )
             video_local.ssim_self_ref = ssim_result.ssim_y
@@ -421,7 +465,9 @@ def _execute_perceptual_analysis(
                     str(media_path),
                 )
         # §7 v7.5.0 : Fake 4K detection FFT 2D + combinaison avec §13 SSIM
-        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height)
+        # #823 : bit_depth transmis, sinon les gardes « frame sombre / uniforme »
+        # restent calibrees 8 bits et ne filtrent quasi rien sur du 10 bits.
+        fft_ratio = compute_fft_hf_ratio_median(frames_local, width, height, bit_depth)
         video_local.fft_hf_ratio_median = fft_ratio
         verdict_fft, _conf_fft = classify_fake_4k_fft(
             fft_ratio, video_height=height, is_animation=grain_local.is_animation
@@ -605,6 +651,33 @@ def _execute_perceptual_analysis(
     return {"ok": True, "cache_hit": False, "perceptual": result_dict}
 
 
+def _build_plan_rows_index(api: Any, run_id: str) -> Optional[Dict[str, Any]]:
+    """Index row_id -> PlanRow charge UNE fois depuis plan.jsonl (cf N24).
+
+    Retourne None quand l'index n'apporte rien (run deja en memoire) ou quand
+    le plan est illisible : les appelants retombent alors sur le chemin
+    historique, film par film. Le dict est lu seulement (jamais mute) par les
+    workers, comme l'est deja `rs.rows` sur le chemin en memoire.
+    """
+    try:
+        rs = api._get_run(run_id)
+        if rs is not None and getattr(rs, "rows", None):
+            return None  # deja en memoire : rien a precharger
+        found = api._find_run_row(run_id)
+        if not found:
+            return None
+        run_row, _store = found
+        state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
+        run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
+        rows = api._load_rows_from_plan_jsonl(run_paths)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:
+        logger.debug("perceptual batch: prechargement du plan impossible (%s)", exc)
+        return None
+    if not rows:
+        return None
+    return {str(r.row_id): r for r in rows}
+
+
 def analyze_perceptual_batch(
     api: Any,
     run_id: str,
@@ -643,6 +716,12 @@ def analyze_perceptual_batch(
 
     cancel_event = _resolve_cancel_event(api)
 
+    # Ultra-audit 2026-08 (N24) : charger le plan UNE seule fois pour tout le
+    # batch. Sans ca, chaque film relisait plan.jsonl en entier (le run n'est
+    # en memoire que s'il a ete lance par CE process). None = le chemin
+    # historique par film reste en place (aucune regression si l'index echoue).
+    rows_index = _build_plan_rows_index(api, run_id) if len(ids) > 1 else None
+
     # Choix du nombre de workers + fast path sequentiel.
     if not parallelism_enabled or len(ids) < 2:
         max_workers = 1
@@ -658,7 +737,7 @@ def analyze_perceptual_batch(
 
     def _worker(rid: str) -> Dict[str, Any]:
         try:
-            return get_perceptual_report(api, run_id, rid, options)
+            return get_perceptual_report(api, run_id, rid, options, rows_index=rows_index)
         finally:
             if progress_cb is not None:
                 with _done_lock:
@@ -1212,6 +1291,7 @@ def _run_perceptual_batch_job(
     _run_perceptual_job pour la meme logique sur les paires).
     """
     try:
+
         def _cb(done: int, _total: int) -> None:
             _record_job_snapshot(job_id, done=done)
 
@@ -1419,8 +1499,8 @@ def get_perceptual_compare_audio(
 
         probe_a = _load_probe(api, store, run_row, media_a)
         probe_b = _load_probe(api, store, run_row, media_b)
-        na = probe_a.get("normalized") if isinstance(probe_a, dict) else {} or {}
-        nb = probe_b.get("normalized") if isinstance(probe_b, dict) else {} or {}
+        na = (probe_a.get("normalized") if isinstance(probe_a, dict) else {}) or {}
+        nb = (probe_b.get("normalized") if isinstance(probe_b, dict) else {}) or {}
         dur_a = float(na.get("duration_s") or 0)
         dur_b = float(nb.get("duration_s") or 0)
 
@@ -1682,9 +1762,10 @@ def _build_tmdb_client(api: Any):
         api_key = str(settings.get("tmdb_api_key") or "").strip()
         if not api_key:
             return None
+        import cinesort.infra.state as _state  # noqa: PLC0415
         from cinesort.infra.tmdb_client import TmdbClient  # noqa: PLC0415
         from cinesort.ui.api.settings_support import normalize_user_path  # noqa: PLC0415
-        import cinesort.infra.state as _state  # noqa: PLC0415
+
         state_dir = normalize_user_path(settings.get("state_dir"), _state.default_state_dir())
         try:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)

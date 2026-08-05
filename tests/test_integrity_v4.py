@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cinesort.domain.integrity_check import check_tail
+from cinesort.domain.integrity_check import check_header, check_tail
 
 
 class TailCheckTests(unittest.TestCase):
@@ -74,6 +74,66 @@ class TailCheckTests(unittest.TestCase):
             ok, detail = check_tail(path)
             self.assertTrue(ok)
             self.assertEqual(detail, "skipped")
+        finally:
+            os.unlink(path)
+
+
+class TsHeaderCheckTests(unittest.TestCase):
+    """Tests pour check_header() sur les conteneurs MPEG-TS et M2TS/MTS."""
+
+    def _write_file(self, ext: str, content: bytes) -> Path:
+        fd, path = tempfile.mkstemp(suffix=ext)
+        os.write(fd, content)
+        os.close(fd)
+        return Path(path)
+
+    @staticmethod
+    def _build_ts(base_offset: int, packet_size: int) -> bytes:
+        """Construit un flux avec sync 0x47 a `base_offset` puis tous les `packet_size` o."""
+        buf = bytearray(b"\x00" * 1024)
+        for i in range(5):
+            buf[base_offset + i * packet_size] = 0x47
+        return bytes(buf)
+
+    def test_classic_ts_valid(self):
+        content = self._build_ts(0, 188)
+        path = self._write_file(".ts", content)
+        try:
+            ok, detail = check_header(path)
+            self.assertTrue(ok)
+            self.assertEqual(detail, "ok")
+        finally:
+            os.unlink(path)
+
+    def test_m2ts_192_packet_valid(self):
+        """M2TS (paquets 192 o, sync a l'offset 4) ne doit PAS etre flag corrompu."""
+        content = self._build_ts(4, 192)
+        path = self._write_file(".m2ts", content)
+        try:
+            ok, detail = check_header(path)
+            self.assertTrue(ok, "M2TS valide faussement classe header_mismatch")
+            self.assertEqual(detail, "ok")
+        finally:
+            os.unlink(path)
+
+    def test_mts_192_packet_valid(self):
+        """MTS (AVCHD camescope, meme layout 192 o) valide."""
+        content = self._build_ts(4, 192)
+        path = self._write_file(".mts", content)
+        try:
+            ok, detail = check_header(path)
+            self.assertTrue(ok)
+        finally:
+            os.unlink(path)
+
+    def test_ts_garbage_still_mismatch(self):
+        """Un vrai flux corrompu (aucun sync a aucun layout) reste header_mismatch."""
+        content = bytes([0x00] * 1024)
+        path = self._write_file(".ts", content)
+        try:
+            ok, detail = check_header(path)
+            self.assertFalse(ok)
+            self.assertEqual(detail, "header_mismatch")
         finally:
             os.unlink(path)
 

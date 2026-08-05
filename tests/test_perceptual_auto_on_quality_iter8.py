@@ -66,9 +66,7 @@ def _wait_recompute_done(api: object, timeout_s: float = 20.0) -> dict:
         if last.get("status") in {"done", "failed", "cancelled"}:
             return last
         time.sleep(0.03)
-    raise AssertionError(
-        f"Timeout {timeout_s}s en attendant un job recompute. Dernier status={last}"
-    )
+    raise AssertionError(f"Timeout {timeout_s}s en attendant un job recompute. Dernier status={last}")
 
 
 class PerceptualAutoOnQualityIter8Tests(unittest.TestCase):
@@ -157,15 +155,18 @@ class PerceptualAutoOnQualityIter8Tests(unittest.TestCase):
         }
         original = api.settings.get_settings
 
-        with mock.patch.object(
-            api.settings,
-            "get_settings",
-            side_effect=self._patched_get_settings(original, overrides),
-        ), mock.patch.object(
-            perceptual_support,
-            "analyze_perceptual_batch",
-            return_value={"ok": True, "success_count": 0, "error_count": 0},
-        ) as mocked:
+        with (
+            mock.patch.object(
+                api.settings,
+                "get_settings",
+                side_effect=self._patched_get_settings(original, overrides),
+            ),
+            mock.patch.object(
+                perceptual_support,
+                "analyze_perceptual_batch",
+                return_value={"ok": True, "success_count": 0, "error_count": 0},
+            ) as mocked,
+        ):
             self._run_scan_with(api, settings)
 
         self.assertEqual(
@@ -189,15 +190,18 @@ class PerceptualAutoOnQualityIter8Tests(unittest.TestCase):
         }
         original = api.settings.get_settings
 
-        with mock.patch.object(
-            api.settings,
-            "get_settings",
-            side_effect=self._patched_get_settings(original, overrides),
-        ), mock.patch.object(
-            perceptual_support,
-            "analyze_perceptual_batch",
-            return_value={"ok": True, "success_count": 2, "error_count": 0},
-        ) as mocked:
+        with (
+            mock.patch.object(
+                api.settings,
+                "get_settings",
+                side_effect=self._patched_get_settings(original, overrides),
+            ),
+            mock.patch.object(
+                perceptual_support,
+                "analyze_perceptual_batch",
+                return_value={"ok": True, "success_count": 2, "error_count": 0},
+            ) as mocked,
+        ):
             run_id = self._run_scan_with(api, settings)
 
         self.assertEqual(
@@ -236,17 +240,19 @@ class PerceptualAutoOnQualityIter8Tests(unittest.TestCase):
         }
         original = api.settings.get_settings
 
-        with mock.patch.object(
-            api.settings,
-            "get_settings",
-            side_effect=self._patched_get_settings(original, overrides),
-        ), mock.patch.object(
-            perceptual_support,
-            "analyze_perceptual_batch",
-            return_value={"ok": True},
-        ) as mocked, self.assertLogs(
-            "cinesort.ui.api.quality_audit_support", level="WARNING"
-        ) as cm:
+        with (
+            mock.patch.object(
+                api.settings,
+                "get_settings",
+                side_effect=self._patched_get_settings(original, overrides),
+            ),
+            mock.patch.object(
+                perceptual_support,
+                "analyze_perceptual_batch",
+                return_value={"ok": True},
+            ) as mocked,
+            self.assertLogs("cinesort.ui.api.quality_audit_support", level="WARNING") as cm,
+        ):
             self._run_scan_with(api, settings)
 
         self.assertEqual(

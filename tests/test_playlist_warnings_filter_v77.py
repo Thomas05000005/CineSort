@@ -4,7 +4,9 @@ _applyPlaylist avait une boucle filters.warnings VIDE et _buildFilters n'emettai
 jamais warnings -> le POST partait sans filtre (toast succes, grille non filtree).
 Le backend filtre par filters.warnings (library_support.py:678).
 """
+
 from __future__ import annotations
+
 import unittest
 from pathlib import Path
 

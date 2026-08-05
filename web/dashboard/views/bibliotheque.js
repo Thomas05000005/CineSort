@@ -1839,10 +1839,30 @@ function _confirmBulkDelete(rowIds, releaseBulkLock = null) {
         const res = await apiPost("library/mark_for_deletion_bulk", { row_ids: rowIds });
         const _payload = (res && res.data) || res || {};
         if (res && _payload.ok !== false) {
-          showToast({
-            type: "success",
-            text: `${n} film${n > 1 ? "s" : ""} marqué${n > 1 ? "s" : ""} pour suppression.`,
-          });
+          // Revue adversaire 2026-07-13 (defaut 7) : le backend renvoie
+          // {count, failed} — un bulk PARTIELLEMENT refuse (row_id absent du
+          // plan, base verrouillee) annoncait quand meme "N films marqués".
+          // Action destructive => on affiche le compte REEL et on avertit.
+          const failed = Array.isArray(_payload.failed) ? _payload.failed : [];
+          const count = Number.isFinite(Number(_payload.count)) ? Number(_payload.count) : n;
+          const plural = (k) => (k > 1 ? "s" : "");
+          if (failed.length) {
+            showToast({
+              type: count > 0 ? "warning" : "error",
+              text: `${count} film${plural(count)} marqué${plural(count)} pour suppression — ${failed.length} non marqué${plural(failed.length)} (introuvable${plural(failed.length)} dans le plan ou base indisponible).`,
+              duration: 9000,
+            });
+          } else if (count === 0) {
+            showToast({
+              type: "info",
+              text: `Aucun nouveau marquage : ${n > 1 ? "ces films étaient déjà marqués" : "ce film était déjà marqué"}.`,
+            });
+          } else {
+            showToast({
+              type: "success",
+              text: `${count} film${plural(count)} marqué${plural(count)} pour suppression.`,
+            });
+          }
           _state.selected.clear();
           _fetchLibrary();
         } else {
@@ -2097,8 +2117,15 @@ export async function initBibliotheque(container, opts) {
       _state.advanced.year_min = Number(decadeMatch[1]);
       _state.advanced.year_max = Number(decadeMatch[1]) + 9;
     } else if (qf === "low_confidence") {
+      // AUDIT 2026-07-15 (M3) : aligne EXACTEMENT sur le KPI Accueil
+      // films_low_confidence = `0 < confidence < CONF_MEDIUM` (60, source
+      // canonique domain/confidence_thresholds). Les filtres confidence_min /
+      // confidence_max sont INCLUSIFS cote backend (_row_matches), donc
+      // [1, 59] == "0 < confidence < 60". Avant : confidence_max=50 sans
+      // borne basse -> incluait conf==0 (non identifie) et excluait 50..59.
       _state.advancedActive = true;
-      _state.advanced.confidence_max = 50;
+      _state.advanced.confidence_min = 1;
+      _state.advanced.confidence_max = 59;
     } else if (chip) {
       _state.activeChips.add(chip);
     } else {
