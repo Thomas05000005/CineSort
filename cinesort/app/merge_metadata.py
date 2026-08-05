@@ -49,6 +49,9 @@ def merge_metadata(
             ne remplace que les champs vides/None de `target`. Si True
             (mode "Tout reconstruire"), ecrase `target` avec `source` sauf
             sur les locked_fields.
+            #638 : "vide" == `None`, chaine blanche, ou collection vide. Un
+            `0`, un `0.0` ou un `False` sont des valeurs PRESENTES et ne sont
+            donc JAMAIS ecrases dans ce mode (cf. `_is_empty`).
 
     Returns:
         Nouveau dict (ne mute jamais ni `source` ni `target`).
@@ -99,15 +102,29 @@ def _normalize_locked_fields(locked_fields: Optional[Iterable[str]]) -> Set[str]
 
 
 def _is_empty(value: Any) -> bool:
-    """Retourne True si value est consideree "manquante" (a remplir)."""
+    """Retourne True si value est consideree "manquante" (a remplir).
+
+    #638 : la branche `isinstance(value, (int, float)) and value == 0` a ete
+    RETIREE. Elle contredisait la docstring du module ("ne remplace que les
+    champs vides/None de target") et confondait deux choses :
+
+    * `0` / `0.0` sont des valeurs PRESENTES (`community_rating=0.0`, un
+      compteur a zero, un seuil volontairement nul). En mode "completer les
+      manques", les ecraser depuis une source externe est une perte de donnee ;
+    * `bool` etant une sous-classe de `int`, `False == 0` : un flag
+      explicitement desactive (`has_subtitles=False`) etait lui aussi traite
+      comme manquant, donc ecrasable.
+
+    Un appelant dont la convention est "0 signifie absent" (c'est le cas de
+    `proposed_year` cote plan, ou 0 encode "annee inconnue") doit normaliser
+    ce champ en `None` AVANT d'appeler `merge_metadata` : la barriere ne peut
+    pas deviner, champ par champ, si un zero est un sentinel ou une mesure.
+    """
     if value is None:
         return True
     if isinstance(value, str) and not value.strip():
         return True
     if isinstance(value, (list, tuple, dict, set)) and len(value) == 0:
-        return True
-    if isinstance(value, (int, float)) and value == 0:
-        # 0/0.0 considere comme "vide" (annee non renseignee, score nul...)
         return True
     return False
 
