@@ -819,6 +819,28 @@ def _real_path(value: Path) -> Path:
     return Path(os.path.normcase(os.path.realpath(str(value))))
 
 
+def _configured_roots(settings: Dict[str, Any]) -> List[str]:
+    """Racines de bibliotheque configurees, sous forme de chaines NON VIDES.
+
+    `settings["roots"]` (pluriel) est la source de verite depuis le multi-root ;
+    `settings["root"]` n'en est que le premier element, conserve pour la
+    retro-compat (cf `settings_support._migrate_root_to_roots`). Un settings
+    ancien ou tronque peut n'avoir que `root` : on retombe dessus.
+
+    Les entrees vides sont ECARTEES : elles ne doivent jamais atteindre
+    `normalize_user_path`, qui rendrait alors le `default` (= la racine par
+    defaut du produit) et elargirait la zone autorisee a un dossier que
+    l'utilisateur n'a pas configure.
+    """
+    raw = settings.get("roots") if isinstance(settings, dict) else None
+    values = raw if isinstance(raw, list) else []
+    out = [str(r).strip() for r in values if str(r or "").strip()]
+    if out:
+        return out
+    single = str(settings.get("root") or "").strip() if isinstance(settings, dict) else ""
+    return [single] if single else []
+
+
 def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: Any) -> Dict[str, Any]:
     try:
         raw_path = str(path or "").strip()
@@ -844,7 +866,7 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
             )
 
         settings = api.settings.get_settings()
-        root_raw = str(settings.get("root") or "").strip()
+        roots_raw = _configured_roots(settings)
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
 
         resolved_path = candidate.resolve()
@@ -878,7 +900,17 @@ def open_path(api: Any, path: str, *, default_root: str, normalize_user_path: An
 
         allowed = False
         allowed_bases: List[Path] = [state_dir]
-        if root_raw:
+        # Issue #471 : la zone autorisee est l'UNION des racines configurees.
+        # Elle se construisait sur `settings["root"]` seul, qui n'est qu'un alias
+        # retro-compatible de `roots[0]` (`settings_support._migrate_root_to_roots`).
+        # Une bibliotheque sur un 2e disque etait donc refusee « Chemin non
+        # autorise » alors que l'apply, lui, travaille bien sur `roots`.
+        # La garde n'est pas desarmee : chaque base reste confinee par le meme
+        # controle de zone sur chemins REELS ci-dessous, et une entree vide est
+        # ecartee par `_configured_roots` (sinon `normalize_user_path` retomberait
+        # sur `default_root`, autorisant une racine que l'utilisateur n'a pas
+        # configuree).
+        for root_raw in roots_raw:
             allowed_bases.append(normalize_user_path(root_raw, Path(default_root)))
 
         # Comparaison de chemins REELS (et non de chaines) des deux cotes :
