@@ -92,14 +92,19 @@ class FetchTmdbExtrasSecretTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _fake_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: Any = None) -> _FakeResponse:
+    def _fake_get(
+        self, url: str, params: Optional[Dict[str, Any]] = None, timeout: Any = None, **_kw: Any
+    ) -> _FakeResponse:
         self.captured.append(dict(params or {}))
         return _FakeResponse(200, _DETAIL_PAYLOAD)
 
     def _run(self, api: _FakeApi) -> Dict[str, Any]:
         with (
             patch("cinesort.infra.tmdb_client.TmdbClient", _FakeTmdbClient),
-            patch("requests.get", side_effect=self._fake_get),
+            # Le GET direct passe desormais par une Session explicite pour
+            # pouvoir etre borne (cf `get_bounded`) : c'est `Session.get` qu'il
+            # faut intercepter, plus le raccourci `requests.get`.
+            patch("requests.Session.get", side_effect=self._fake_get),
         ):
             return film_support._fetch_tmdb_extras(api, _TMDB_ID)
 
@@ -157,7 +162,7 @@ class FetchTmdbExtrasSecretTests(unittest.TestCase):
 
         with (
             patch("cinesort.infra.tmdb_client.TmdbClient", _FakeTmdbClient),
-            patch("requests.get", side_effect=self._fake_get),
+            patch("requests.Session.get", side_effect=self._fake_get),
         ):
             out = film_support._fetch_tmdb_extras(api, 0)
 
@@ -208,7 +213,7 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
     def _call(self) -> Dict[str, Any]:
         with (
             patch("cinesort.infra.tmdb_client.TmdbClient._http_get", self._fake_http_get),
-            patch("requests.get", side_effect=self._fake_raw_get),
+            patch("requests.Session.get", side_effect=self._fake_raw_get),
         ):
             return film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)
 
@@ -243,7 +248,7 @@ class FetchTmdbExtrasCacheTests(unittest.TestCase):
 
         with (
             patch("cinesort.infra.tmdb_client.TmdbClient._http_get", self._fake_http_get),
-            patch("requests.get", side_effect=failing_get),
+            patch("requests.Session.get", side_effect=failing_get),
         ):
             first = film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)
             second = film_support._fetch_tmdb_extras(self._api(), _TMDB_ID)

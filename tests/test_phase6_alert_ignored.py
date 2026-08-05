@@ -12,9 +12,23 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from cinesort.infra.db.sqlite_store import SQLiteStore
+
+
+def _wire_plan(api: MagicMock, rows: list) -> None:
+    """Cable le plan du run sur le chemin de lecture reellement emprunte.
+
+    PERF (ultra-audit 2026-08) : `film_support._find_plan_row` ne demande plus
+    le plan ENTIER via `api.run.get_plan` (qui serialisait et enrichissait les N
+    rows pour n'en garder qu'une) ; il passe par `history_support.get_plan_row`,
+    donc par `api._get_run` + `api._serialize_rows_for_payload`.
+    """
+    api.run.get_plan.return_value = {"ok": True, "rows": rows}
+    api._get_run.return_value = SimpleNamespace(done=True, rows=rows, paths=None)
+    api._serialize_rows_for_payload = lambda rs: [dict(r) for r in rs]
 
 
 class MarkAlertIgnoredBackendTests(unittest.TestCase):
@@ -89,9 +103,9 @@ class GetFilmFullFiltersIgnoredAlertsTests(unittest.TestCase):
     def _build_api_with_ignored(self, ignored_codes: list) -> MagicMock:
         api = MagicMock()
         api.settings.get_settings.return_value = {"state_dir": "/tmp"}
-        api.run.get_plan.return_value = {
-            "ok": True,
-            "rows": [
+        _wire_plan(
+            api,
+            [
                 {
                     "row_id": "f1",
                     "proposed_title": "La Doublure",
@@ -100,7 +114,7 @@ class GetFilmFullFiltersIgnoredAlertsTests(unittest.TestCase):
                     "candidates": [{"tmdb_id": 12345, "title": "La Doublure", "year": 2006}],
                 }
             ],
-        }
+        )
         store = MagicMock()
         store.run.list_runs.return_value = [{"run_id": "r1"}]
         store.perceptual.get_perceptual_report.return_value = None
@@ -164,16 +178,16 @@ class PersistenceAcrossSessionsTests(unittest.TestCase):
             store = SQLiteStore(Path(tmp) / "test.db")
             api = MagicMock()
             api.settings.get_settings.return_value = {"state_dir": tmp}
-            api.run.get_plan.return_value = {
-                "ok": True,
-                "rows": [
+            _wire_plan(
+                api,
+                [
                     {
                         "row_id": "r_persist",
                         "warning_flags": ["alert_a", "alert_b"],
                         "candidates": [],
                     }
                 ],
-            }
+            )
             store_mock = MagicMock(wraps=store)
             # On utilise les vraies methodes du film_modal
             store_mock.film_modal = store.film_modal
