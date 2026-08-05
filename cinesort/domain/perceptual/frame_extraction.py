@@ -186,25 +186,39 @@ def extract_single_frame(
     bit_depth: int = 8,
     timeout_s: float = _FRAME_EXTRACT_TIMEOUT_S,
 ) -> bytes:
-    """Extrait une frame Y brute via ffmpeg, a EXACTEMENT ``width`` x ``height``.
+    """Extrait une frame Y brute via ffmpeg, forcee en ``width`` x ``height``.
 
-    Contrat (issue #559) : la sortie rawvideo doit contenir exactement
-    ``width * height`` echantillons Y (x2 octets en 10-bit), car c'est ce que
-    l'appelant passera a ``parse_raw_frame``. Un filtre ``scale={width}:{height}``
-    est donc TOUJOURS applique des que les deux dimensions sont exploitables.
+    Le buffer retourne doit faire exactement ``width * height`` octets (x2 en
+    10-bit) : c'est avec ces dimensions que les appelants le relisent via
+    ``parse_raw_frame``. Un filtre ``scale=width:height`` est donc TOUJOURS
+    applique (cf issue #559 : il ne l'etait que si ``width`` depassait
+    FRAME_DOWNSCALE_THRESHOLD, donc ffmpeg sortait la frame a la resolution
+    NATIVE du fichier et les pixels relus etaient decales — comparaison de deux
+    fichiers de resolutions differentes silencieusement fausse).
 
-    Auparavant le filtre n'etait pose que si ``width`` depassait
-    FRAME_DOWNSCALE_THRESHOLD, et sous la forme ``scale=1920:-1`` : les dimensions
-    demandees ne servaient qu'au test de seuil, jamais a forcer la sortie. ffmpeg
-    rendait donc la resolution NATIVE, et tout appelant visant une resolution
-    commune plus petite (deep-compare de deux editions, cf ``extract_aligned_frames``)
-    recevait un nombre d'octets incoherent -> frame rejetee en silence.
+    Corollaire (revue PR #845) : sans dimensions valides, aucun ``scale`` ne peut
+    etre construit, donc la fonction n'a AUCUN moyen de tenir ce contrat. Elle
+    retourne alors ``b""`` sans lancer ffmpeg (fail-closed) plutot que de sortir
+    une frame native que l'appelant relirait de travers.
 
-    La politique de downscale 4K+ n'est pas perdue : elle appartient aux appelants,
-    qui calculent les dimensions effectives (cf ``extract_representative_frames``
-    et ``extract_aligned_frames``, tous deux bornes a FRAME_DOWNSCALE_THRESHOLD).
+    La politique de downscale 4K reste chez les appelants, qui sont les seuls a
+    connaitre la resolution native (cf ``extract_representative_frames`` et
+    ``extract_aligned_frames``).
     """
     pix_fmt = "gray16le" if bit_depth >= 10 else "gray"
+    out_w, out_h = int(width), int(height)
+
+    if out_w <= 0 or out_h <= 0:
+        # Probe incomplet (largeur/hauteur inconnues, cf extract_representative_frames
+        # qui recopie `width`/`height` tels quels). parse_raw_frame rejette deja ce
+        # cas (w <= 0 -> array vide), on evite juste de payer un sous-processus
+        # ffmpeg par timestamp pour une frame qui sera jetee.
+        logger.debug(
+            "extract_single_frame: dimensions cible invalides (%dx%d), extraction ignoree",
+            out_w,
+            out_h,
+        )
+        return b""
 
     cmd = [
         ffmpeg_path,
@@ -214,10 +228,9 @@ def extract_single_frame(
         str(media_path),
     ]
 
-    # Resolution de sortie forcee = resolution attendue par le parsing.
-    req_w, req_h = int(width), int(height)
-    if req_w > 0 and req_h > 0:
-        cmd += ["-vf", f"scale={req_w}:{req_h}"]
+    # Resolution de sortie forcee. Les dimensions non positives ont deja ete
+    # rejetees plus haut, donc ce filtre est TOUJOURS present sur une frame rendue.
+    cmd += ["-vf", f"scale={out_w}:{out_h}"]
 
     cmd += [
         "-frames:v",
