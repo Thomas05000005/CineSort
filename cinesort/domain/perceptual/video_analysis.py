@@ -377,9 +377,21 @@ def effective_bit_depth(histogram: List[int], bit_depth: int = 8) -> Dict[str, A
 
 
 def compute_temporal_consistency(filter_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Ecart-type de blockiness et blur entre frames echantillonnees."""
+    """Ecart-type de blockiness et blur entre frames echantillonnees.
+
+    `combined_stddev` (#830) est la grandeur reellement comparee aux seuils
+    TEMPORAL_CONSISTENCY_GOOD/POOR ci-dessous. C'est elle, et non `block_stddev`
+    seul, que doit porter `VideoPerceptual.temporal_stddev` : `_score_temporal`
+    (composite_score) compare ce champ AUX MEMES DEUX CONSTANTES.
+    """
     if not filter_results:
-        return {"block_stddev": 0.0, "blur_stddev": 0.0, "verdict": "unknown", "score": 50}
+        return {
+            "block_stddev": 0.0,
+            "blur_stddev": 0.0,
+            "combined_stddev": 0.0,
+            "verdict": "unknown",
+            "score": 50,
+        }
 
     blocks = [f.get("blockiness", 0.0) for f in filter_results]
     blurs = [f.get("blur", 0.0) for f in filter_results]
@@ -402,6 +414,7 @@ def compute_temporal_consistency(filter_results: List[Dict[str, Any]]) -> Dict[s
     return {
         "block_stddev": round(block_std, 2),
         "blur_stddev": round(blur_std, 4),
+        "combined_stddev": round(avg_std, 2),
         "verdict": verdict,
         "score": score,
     }
@@ -515,11 +528,18 @@ def analyze_video_frames(
 
     # Consistance temporelle + scoring
     temporal = compute_temporal_consistency(filter_results)
-    result.temporal_stddev = temporal["block_stddev"]
+    # #830 — AVANT : `temporal["block_stddev"]`, qui duplique exactement
+    # `result.blockiness_stddev` (meme `_stddev` sur la meme liste). La
+    # composante « consistance temporelle » du score visuel final n'etait donc
+    # qu'un second score de blockiness : la variabilite de FLOU entre frames
+    # (judder, DNR variable) n'entrait dans aucun score persiste, alors que
+    # `compute_temporal_consistency` la prend en compte pour son propre verdict.
+    result.temporal_stddev = temporal["combined_stddev"]
     # #923 : sans resultat de filtre, compute_temporal_consistency rend un
     # stddev de 0.0 (verdict "unknown"), que composite_score._score_temporal
     # note 90/100. Le drapeau distingue « aucune variation mesuree » de
-    # « aucune mesure ».
+    # « aucune mesure ». Les deux correctifs sont INDEPENDANTS : #830 corrige la
+    # GRANDEUR mesuree, #923 dit si elle a ete mesuree.
     result.temporal_measured = bool(filter_results)
     _compute_visual_score(result, multiplier, temporal["score"])
     logger.debug(
@@ -578,20 +598,24 @@ def _aggregate_filter_metrics(result: VideoPerceptual, filter_results: List[Dict
     f_blocks = [fr.get("blockiness", 0.0) for fr in filter_results]
     f_blurs = [fr.get("blur", 0.0) for fr in filter_results]
 
+    # #808 — `sorted(x)[len(x) // 2]` n'est pas une mediane sur un nombre PAIR
+    # d'elements : il rend l'element SUPERIEUR des deux centraux, pas leur
+    # moyenne. Le nombre de keyframes probees est faible et souvent pair, donc
+    # le biais vers le haut etait systematique. `np.median` est deja la
+    # convention du module (cf. block_variance_stats).
+    #
     # #923 : ces deux blocs n'ecrivent RIEN quand `filter_results` est vide (ce
     # que rend run_filter_graph des que ffmpeg sort en rc != 0) ; les champs
     # gardent alors le 0.0 du dataclass, qui est la MEILLEURE note possible.
     # Le drapeau atteste la mesure et rend les deux etats separables en aval.
     if f_blocks:
-        sorted_b = sorted(f_blocks)
         result.blockiness_mean = _mean(f_blocks)
-        result.blockiness_median = sorted_b[len(sorted_b) // 2]
+        result.blockiness_median = float(np.median(f_blocks))
         result.blockiness_stddev = _stddev(f_blocks)
         result.blockiness_measured = True
     if f_blurs:
-        sorted_bl = sorted(f_blurs)
         result.blur_mean = _mean(f_blurs)
-        result.blur_median = sorted_bl[len(sorted_bl) // 2]
+        result.blur_median = float(np.median(f_blurs))
         result.blur_stddev = _stddev(f_blurs)
         result.blur_measured = True
 

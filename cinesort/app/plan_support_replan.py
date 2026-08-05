@@ -9,6 +9,7 @@ serialisation viennent de `plan_support_core.py`.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 from pathlib import Path
@@ -86,10 +87,13 @@ def _try_lookup_row_cache(
         video_stat = video.stat()
         v_size = int(video_stat.st_size)
         v_mtime = int(video_stat.st_mtime_ns)
+        # Issue #637 : ce `stat()` suit les liens, exactement comme celui que
+        # `resolve_incremental_quick_hash` refaisait — on le lui transmet.
         v_hash = resolve_incremental_quick_hash(
             video,
             scan_index=scan_index,
             run_hash_cache=run_hash_cache or {},
+            known_stat=(v_size, v_mtime),
         )
         nfo_path_for_sig = core_mod.find_best_nfo_for_video(folder, video)
         nfo_sig = _nfo_signature(nfo_path_for_sig)
@@ -278,8 +282,6 @@ def _resolve_tmdb_collection(
     nom du dossier source OU avec le titre du candidat. Sinon le collection
     boost est toxique (ex: 'Ca' -> Pirates des Caraibes).
     """
-    import contextlib
-
     if not (tmdb is not None and chosen.tmdb_id):
         return None, None
     coll_id: Optional[int] = None
@@ -662,10 +664,13 @@ def _store_row_cache(
         return
     try:
         v_stat = video.stat()
+        # Issue #637 : meme `stat()` (suivant les liens) que celui refait dans
+        # `resolve_incremental_quick_hash` — on le lui transmet.
         v_hash = resolve_incremental_quick_hash(
             video,
             scan_index=scan_index,
             run_hash_cache=run_hash_cache or {},
+            known_stat=(int(v_stat.st_size), int(v_stat.st_mtime_ns)),
         )
         scan_index.upsert_incremental_row_cache(
             root_path=str(cfg.root),

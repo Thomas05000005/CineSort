@@ -642,8 +642,6 @@ def _build_plan_job_fn(
                         str(getattr(r, "row_id", "") or "") for r in rows if str(getattr(r, "row_id", "") or "").strip()
                     ]
                     if enrich_ids:
-                        import threading as _threading
-
                         from cinesort.ui.api import tmdb_support as _tmdb_support
 
                         def _bg_tmdb_enrich() -> None:
@@ -654,7 +652,7 @@ def _build_plan_job_fn(
                             except Exception as _exc:  # noqa: BLE001 - daemon best-effort
                                 dlog(f"job_fn post-scan tmdb enrich warning: {_exc}")
 
-                        _threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
+                        threading.Thread(target=_bg_tmdb_enrich, name=f"tmdb-enrich-{run_id}", daemon=True).start()
                         dlog(f"job_fn post-scan tmdb enrich launched ({len(enrich_ids)} films)")
             except (ImportError, KeyError, OSError, TypeError, ValueError) as exc:
                 dlog(f"job_fn post-scan tmdb enrich skipped: {exc}")

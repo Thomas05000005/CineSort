@@ -408,7 +408,13 @@ def _score_bits(mean_bits: float) -> int:
 
 
 def _score_temporal(stddev: float) -> int:
-    """Score consistance temporelle."""
+    """Score consistance temporelle.
+
+    `stddev` doit etre la variabilite inter-frames COMBINEE (blockiness + blur
+    normalise) produite par `compute_temporal_consistency` : les deux seuils
+    ci-dessous sont calibres sur cette grandeur, c'est a elle que la fonction
+    les compare la-bas pour rendre son propre verdict (#830).
+    """
     if stddev < TEMPORAL_CONSISTENCY_GOOD:
         return 90
     if stddev < TEMPORAL_CONSISTENCY_POOR:

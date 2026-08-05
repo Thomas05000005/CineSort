@@ -614,4 +614,86 @@ marge non reprise laisse passer une récidive gratuite.
 | 2026-08-04 | `app` | 23 → **25** | PR#852, +2, les deux vérifiés un par un. (a) `cleanup` → `apply_core._append_error_message` : **vrai cycle**, `apply_core.py:15` importe déjà `cleanup`. (b) `apply_batches_reconciliation` → `apply_audit.read_apply_audit` : **pas** de cycle ; conservé pour la raison que révèle le `except ImportError` en dessous — sur un build EXE **amputé**, un import de tête tuerait tout le module de réconciliation, l'import local ne dégrade que la lecture du marqueur. Le commentaire du code affichait une autre raison (« éviter de charger au boot »), corrigée. |
 | 2026-08-05 | `ui` | 113 → **111** | Issue #599, **−2 : conversion, pas relèvement**. `film_support._fetch_tmdb_extras` portait deux imports différés : `from cinesort.infra.tmdb_client import TmdbClient` et `import requests as _req`. Aucun cycle ne les justifiait — le contrat `infra_bounded` interdit à `infra` de remonter vers `ui`, donc un import de tête est sûr, et il est écrit **module-style** (`from cinesort.infra import tmdb_client as _tmdb_client`) pour que les `patch("cinesort.infra.tmdb_client.TmdbClient", …)` des tests restent opérants. Le second a purement disparu : le `requests.get` direct est rapatrié sur `TmdbClient.get_movie_extras`. Nouveau total mesuré : **172**. |
 | 2026-08-04 | — | 170 → **174** | Fusion PR#852 ↔ main. Rien à arbitrer côté bornes : les deux apports portent sur des couches **disjointes** (`app` +2, `ui` +2), et la mesure post-fusion retombe **exactement** sur chaque borne — aucune couche n'a pris de marge dormante. Deux affirmations sont en revanche devenues fausses et ont été corrigées : (a) « le total reste à 170 » — la compensation `app`/`ui` de PR#853 était une coïncidence, pas une règle, seule la borne **par couche** fait foi ; (b) « `apply_audit` n'importe que la stdlib » — main y a ajouté `infra.log_scrubber` (issue #414), qui tire `infra.log_context`. Le verdict de (b) tient quand même : `infra_bounded` interdit à `infra` de remonter vers `app`, donc toujours aucun cycle, et l'argument du build EXE amputé se **renforce** puisque la chaîne d'import s'allonge. |
-| 2026-08-05 | — | inchangées | Issue #923 (« mesure a 0 » vs « non mesure », perceptuel vidéo). **Aucune borne touchée** : le lot n'ajoute ni ne convertit d'import différé — il n'ajoute aucun import inter-module, les cinq fichiers modifiés (`domain/perceptual/{models,video_analysis,composite_score,composite_score_v2,comparison}.py`) n'utilisent que des symboles déjà importés en tête. Mesure de contrôle refaite après coup, pas recopiée : `__root__` 3, `app` 25, `domain` 16, `infra` 17, `ui` 111, `data` 0 — total **172**, chaque couche exactement sur sa borne (marge zéro préservée). |
+| 2026-08-05 | `app` | 25 → **19** | Issues #554/#595, **−6 : conversions stdlib**. Trois n'étaient que des **alias redondants** — le module était déjà importé en tête : `apply_core.sha1_quick` (`import time as _time_mod`, dont le commentaire « local pour éviter shadow du module `time` haut » décrit un shadow qui **n'existe plus** : vérifié, aucun paramètre ni variable locale nommée `time` dans la fonction), `apply_batches_reconciliation._close_batch` (`json`), `plan_support_core.wait_while_paused` (`time`). Trois vrais ajouts en tête : `os` (`plan_support_core.folder_signature`), `contextlib` (`plan_support_replan._resolve_tmdb_collection`), `concurrent.futures.ThreadPoolExecutor` (`_local_candidate`). |
+| 2026-08-05 | `domain` | 16 → **15** | Issue #595 (élargie), **−1** : `perceptual/lpips_compare._resolve_model_path` importait `sys` dans la fonction pour lire `sys.frozen`. |
+| 2026-08-05 | `infra` | 17 → **11** | Issues #554/#595, **−6**. Les **2 sites nommés par #554** (`probe/tools_manager` lignes 154/338 à l'époque, 158/342 aujourd'hui, `import sys as _sys`) sont les seuls de cette issue encore présents : les 2 autres (`settings_support` `secrets`/`re`) avaient déjà été convertis en M-03 — **#554 était à moitié périmée**. S'y ajoutent `poster_proxy` ×2 (`json`), `rest_server._handle_get` (`urllib.parse.parse_qs`, alors que le module importe déjà `urlsplit` de la même provenance en tête) et `probe/service.__init__` (`shutil.which`). **Restent 6 imports différés stdlib**, tous justifiés et volontairement conservés : `msvcrt`/`fcntl` ×4 (`single_instance`, spécifiques à la plateforme — `import msvcrt` lève `ImportError` sur Linux) et `ctypes` ×1 (`db/pragma_profile.detect_storage_type`, sous garde `except ImportError` : un import de tête transformerait une dégradation best-effort en échec de chargement du module). |
+| 2026-08-05 | `ui` | 111 → **66** | Issues #554/#595/#779, **−45**. C'est le « chantier de conversion de la couche `ui` » que la ligne PR#847 ci-dessus renvoyait à plus tard. **11 stdlib** (#595) : `cinesort_api` (`io`, `webbrowser`, `datetime`, `subprocess`, `sys`), `perceptual_support` (`base64` ×3, `io`), plus deux alias redondants (`time` dans `library_actions_support`, `threading` dans `run_flow_support`, déjà en tête). **34 internes** (#779) : les clusters n°2 et n°3 nommés par l'issue — `dashboard_support` 13 → 0, `history_support` 11 → 1, plus `library_audit_support` ×4, `quality_audit_support` ×2, `profiles_support_import_export` ×3, `library_actions_support` ×1. Les cibles `ui/api` sont importées **module-style** (`from cinesort.ui.api import run_read_support` puis `run_read_support.effective_flags(...)`), jamais par symbole : cf. §11.2, un import de symbole en tête casse silencieusement les `patch(...)` des tests. Nouveau total mesuré : **114**. |
+
+### 11.1 Cartographie des cycles `ui/api` (issue #779, mesure du 2026-08-05)
+
+L'issue #779 annonçait « 89 imports différés intra-couche formant un
+enchevêtrement de cycles ». La mesure AST au moment d'attaquer le lot en compte
+**59** (le décompte de l'issue, daté du 2026-07-19, est périmé — plusieurs PR
+sont passées entre-temps).
+
+Méthode : construire le graphe des imports de **tête** (module-level) du paquet,
+puis, pour chaque import différé `A → B`, chercher un chemin `B → … → A` **par
+imports de tête uniquement**. S'il existe, un import de tête `A → B` fermerait le
+cycle et casserait le chargement du paquet : l'import différé est nécessaire.
+Sinon c'est un import différé posé « au cas où ».
+
+| | nb |
+|---|---:|
+| imports différés intra-`ui/api` (avant lot) | 59 |
+| dont posés sur une **vraie** arête de retour | **4** |
+| dont sans aucun cycle à contourner | 55 |
+
+Les 4 vrais cycles :
+
+- `library_support` → `library_actions_support` ×3 (`migrate_legacy_deletion_marks`,
+  `remove_legacy_deletion_mark`) — retour direct : `library_actions_support`
+  importe en tête `library_support._build_library_rows`.
+- `reset_support` → `cinesort_api` — retour direct : `cinesort_api` importe
+  `reset_support` en tête (ligne 60, dans le bloc des 26 `*_support`).
+
+**Le second argument invoqué par ces imports différés — le coût de démarrage —
+n'existe pas non plus** : `cinesort/ui/api/__init__.py` importe `cinesort_api`,
+qui importe **en tête** 26 modules `*_support`. Ils sont donc tous chargés au
+boot quoi qu'il arrive ; différer un import de l'un vers l'autre ne fait
+qu'échanger l'ordre, jamais le coût.
+
+**Ce que ce lot laisse volontairement en place** (et pourquoi) :
+
+| site | raison |
+|---|---|
+| `library_support` ↔ `library_actions_support` (3), `reset_support` → `cinesort_api` (1) | vrai cycle, mesuré |
+| `run_flow_support` ×5, `quality_audit_support` ×1 | le `try` englobant attrape **`ImportError` en tête de tuple** : l'import différé y est un contrat de dégradation (enrichissements post-scan best-effort). Un import de tête transformerait la panne d'une option en échec de boot — sur un build EXE amputé, c'est le même raisonnement que celui déjà retenu pour `apply_batches_reconciliation` (PR#852) |
+| `runtime_support._safe_read_settings_for_diag` | sa docstring dit « on évite tout import top-level pour ne pas créer de cycle » : **c'est faux**, la mesure ne trouve aucune arête de retour `settings_support → runtime_support`. Mais la fonction est un **diagnostic** entouré d'un `except Exception` — elle doit rendre `{}` plutôt que d'exploser quand `settings_support` est cassé, ce qui est justement le cas où on l'appelle. Conservé pour cette raison-là, pas pour la raison affichée |
+| `film_support` ↔ `history_support` | référence mutuelle réelle : une des deux directions doit rester différée. Arbitrer laquelle (et sur quel critère de « couche basse ») dépasse ce lot |
+| imports différés `ui → app`/`infra`/`domain` restants | hors périmètre #779 (intra-couche). Aucun ne peut être un cycle : `app_bounded`/`infra_bounded` interdisent le retour vers `ui` |
+
+### 11.2 Le piège qui a mordu : `from X import f` fige le binding
+
+Première rédaction de ce lot : `history_support` importait en tête
+`from cinesort.ui.api.library_support import _get_store`. C'est **faux**, et le
+mode de panne est silencieux dans un cas et bruyant dans l'autre :
+
+`tests/test_get_plan_ignored_alerts_v77.py` fait
+`patch("cinesort.ui.api.library_support._get_store", return_value=store)`. Avec
+l'import **différé**, l'import s'exécute pendant l'appel, donc *après* la pose du
+patch : le test contrôle réellement le store. Avec un import de **symbole en
+tête**, `history_support._get_store` est lié à l'objet original au chargement du
+module, et le patch ne l'atteint plus. Ici le test a viré au rouge (il assertait
+sur le résultat filtré) — mais le même mécanisme, sur un patch dont le test
+n'observe que l'absence d'effet, laisserait un test **vert qui ne teste plus
+rien**.
+
+Règle appliquée dans ce lot, et déjà énoncée par la convention « module-style
+imports pour tests mockés » : quand la cible est un module `ui/api`, on importe
+le **module** (`from cinesort.ui.api import run_read_support`) et on appelle
+`run_read_support.effective_flags(...)`. La résolution reste tardive, donc
+patchable. Les imports de symbole en tête ne sont conservés que pour les
+helpers `domain.*` purs (`to_int`, `_normalize_iso639`,
+`strip_trailing_year_if_equal`) et les constantes, qui ne sont jamais mockés.
+
+Ce défaut a été trouvé par la mutation, pas par la relecture.
+
+**Ce qui reste à faire sur #779** : mesure après ce lot = **32** imports différés
+intra-`ui/api` (59 − 27 convertis), dont **4 nécessaires** (les vrais cycles
+ci-dessus) et 6 conservés pour leur `except ImportError`. Le solde (~22) est du
+découplage réel, pas de la conversion mécanique — extraire
+`library_support._get_store` dans un module feuille (la « PR pilote » proposée
+par l'issue) casserait à lui seul le cluster n°2 (`run_read_support` ×2,
+`history_support` ×2), et arbitrer le couple `film_support`/`history_support` en
+réglerait un de plus.
+| 2026-08-05 | — | inchangées | Issue #923 (« mesure a 0 » vs « non mesure », perceptuel vidéo). **Aucune borne touchée** : le lot n'ajoute ni ne convertit d'import différé — les cinq fichiers modifiés (`domain/perceptual/{models,video_analysis,composite_score,composite_score_v2,comparison}.py`) n'utilisent que des symboles déjà importés en tête. Mesure de contrôle **refaite après fusion** avec le lot #554/#595/#779, pas recopiée : `__root__` 3, `app` 19, `domain` 15, `infra` 11, `ui` 66, `data` 0 — total **114**, chaque couche exactement sur sa borne. La valeur annoncée avant fusion (172) était juste à son moment et périmée à l'arrivée : c'est la raison même pour laquelle ce journal exige une mesure, pas un report. |

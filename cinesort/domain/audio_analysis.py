@@ -19,7 +19,7 @@ from cinesort.domain.codec_ranks import (
 logger = logging.getLogger(__name__)
 
 # --- Hierarchie des formats audio (rang → label) --------------------------
-# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/AC3(2) > AAC/MP3(1)
+# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/DTS-HD HRA/AC3(2) > AAC/MP3(1)
 # Definition centralisee dans cinesort.domain.codec_ranks._CODEC_RANK reste
 # l'alias local utilise par _classify_codec.
 
@@ -100,13 +100,12 @@ def _classify_codec(codec: str, title: str) -> Tuple[int, str]:
     if "truehd" in codec and "atmos" in combined:
         return 6, "Atmos"
 
-    # DTS-HD MA specifique (avant le match DTS generique).
-    # On collapse les variantes "dts-hd ma" et "dts-hd hra" sur le meme rang 4
-    # car en pratique les rips taggent presque exclusivement MA et la difference
-    # de rang ne pesait rien dans le scoring (cf audit 2026-06-19).
-    if "dts-hd" in codec or "dtshd" in codec:
-        return 4, "DTS-HD MA"
-
+    # #807 — le cas special « DTS-HD » a disparu : il retournait exactement ce
+    # que la table `_CODEC_RANK` produit deja (les motifs `dts-hd` / `dtshd` y
+    # precedent `dts`), donc il ne faisait que court-circuiter la table. Depuis
+    # que celle-ci distingue DTS-HD HRA (lossy, rang 2) de DTS-HD MA (lossless,
+    # rang 4), ce court-circuit renvoyait le LABEL FAUX « DTS-HD MA » et le tier
+    # gold pour un flux HRA. Une seule source de verite : la table.
     for pattern, rank, label in _CODEC_RANK:
         if pattern == "atmos":
             continue  # Deja traite ci-dessus
