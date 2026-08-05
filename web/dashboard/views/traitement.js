@@ -204,6 +204,38 @@ function _signal() {
   return _abortController ? _abortController.signal : undefined;
 }
 
+/** Relecture adversaire de la PR #873 (point 1) — l'abort de `unmountTraitement`
+ *  n'est PAS un echec de l'operation.
+ *
+ *  `unmountTraitement()` appelle `_abortController.abort()` : toute requete en
+ *  vol emise avec `_signal()` rejette alors un `AbortError`. Ce rejet ne dit
+ *  RIEN du sort de l'operation cote serveur — le POST est deja parti et le
+ *  backend continue son travail. Sur un chemin destructif (apply, undo), le
+ *  presenter comme « Erreur lors de l'apply. » est le pire message possible :
+ *  l'utilisateur croit son apply mort pendant que les fichiers bougent, et il
+ *  relance.
+ *
+ *  Le declencheur reel est l'auditeur `cinesort:refresh` (`_refreshCurrentView`,
+ *  core/keyboard.js) : F5 — ou l'entree « Rafraichir la vue » de Ctrl+K —
+ *  re-monte la route courante, ce qui passe par le cleanup de la vue, donc par
+ *  cet abort. (Fusion main <- PR #873 : ce lot avait pose cet auditeur dans
+ *  app.js, main dans core/keyboard.js ; un seul a ete conserve, cf. app.js.)
+ *
+ *  Choix assume : on GARDE `_signal()` sur ces requetes (plutot que de les
+ *  detacher comme `_handleSaveValidation({detached:true})`) et on filtre
+ *  l'AbortError. Detacher ferait survivre la CONTINUATION (toast, puis
+ *  `_loadRunInfo()` + `_renderInPlace()`) a la destruction de la vue —
+ *  exactement le NPE + « state set sur ancien run » que l'abort a ete
+ *  introduit pour empecher (cf. le commentaire de `_abortController`).
+ *  `_handleSaveValidation` peut se detacher parce que son resultat est
+ *  volontairement ignore (`if (detached) return;`) : il n'a pas de
+ *  continuation. Ici il y en a une. Apres remount, `initTraitement()` refait
+ *  `_loadRunInfo()` et relance le polling : l'utilisateur retrouve l'apply
+ *  reel en cours, ce qui est l'information juste. */
+function _abortedByViewTeardown(err) {
+  return err?.name === "AbortError";
+}
+
 /* --- Step nav helpers --- */
 
 function _readStep() {
@@ -1384,6 +1416,14 @@ async function _onUndoPreview() {
   }
 }
 
+/** Ultra-audit 2026-08-03 (N01) — signale un undo REUSSI au shell.
+ *  app.js recharge les compteurs de sidebar sur cet evenement. Best-effort :
+ *  un environnement sans CustomEvent ne doit jamais faire echouer l'undo. */
+function _emitUndoDone() {
+  try { window.dispatchEvent(new CustomEvent("cinesort:undo")); }
+  catch (e) { console.warn("[traitement] dispatch cinesort:undo", e); }
+}
+
 function _onUndoExecute() {
   if (!_runInfo?.runId) return;
   const undo = _runInfo?.pendingUndo;
@@ -1419,9 +1459,18 @@ function _onUndoExecute() {
           return;
         }
         showToast({ type: "success", text: "Annulation appliquée. Restauration effectuée.", duration: 6000 });
+        // Ultra-audit 2026-08-03 (N01) : app.js ecoute `cinesort:undo` pour
+        // rafraichir immediatement les compteurs de la sidebar (#92 quick
+        // win #2). Personne n'emettait plus cet evenement depuis la migration
+        // ESM : les badges restaient stales jusqu'au tick 30 s.
+        _emitUndoDone();
         await _loadRunInfo();
         _renderInPlace();
-      } catch {
+      } catch (err) {
+        // Relecture adversaire PR #873 (point 1), meme cause et meme gravite :
+        // un F5 pendant l'undo aborte la requete alors que le backend RESTAURE
+        // les fichiers. Un toast rouge inviterait a relancer une restauration.
+        if (_abortedByViewTeardown(err)) return;
         showToast({ type: "error", text: "Erreur lors de l'annulation." });
       }
     },
@@ -2296,8 +2345,120 @@ async function _applyBulkApprove(targetIds, approvedCount) {
   });
 }
 
+/** Relecture adversaire de la PR #873 (point 2) — REGISTRE des operations disque
+ *  annoncees par la modale de confirmation d'apply.
+ *
+ *  INVARIANT : toute operation que `run/apply` peut declencher sur le disque
+ *  DOIT avoir une entree ici, sinon la derniere confirmation avant que des
+ *  fichiers bougent SOUS-ANNONCE. Le test
+ *  `test_invariant_aucune_operation_disque_prevue_ne_manque_a_la_modale`
+ *  verrouille les trois maillons : cle du payload run/apply -> entree de ce
+ *  registre -> texte effectivement rendu dans la modale.
+ *
+ *  `source` dit d'ou vient le compte :
+ *   - "preview" : `_applyPreview.totals`, calcule par `build_apply_preview` ;
+ *   - "client"  : le plan backend NE PEUT PAS le donner, il est calcule ici.
+ *     C'est le cas de la quarantaine : `build_apply_preview` force
+ *     `quarantine_unapproved=False` (apply_support.py:3133), donc ses totals
+ *     n'en portent JAMAIS — alors que l'apply reel envoie
+ *     `_applyOptions.quarantine` et que `apply_core.py:2009` deplace CHAQUE
+ *     film non approuve vers `_review/` en incrementant `res.quarantined`,
+ *     jamais `renames` ni `moves`.
+ *
+ *  Regle de direction (memo « actions dangereuses ») : sur cette modale,
+ *  SUR-annoncer est tolerable, SOUS-annoncer ne l'est pas. Le compte client de
+ *  quarantaine est donc un MAJORANT assume (toutes les rows non approuvees,
+ *  y compris celles qu'apply_core pourrait ecarter avant le deplacement).
+ */
+const _APPLY_DISK_OPS = [
+  { key: "renames", source: "preview", text: (n) => `${n} renommage${n > 1 ? "s" : ""} de dossier` },
+  { key: "moves", source: "preview", text: (n) => `${n} déplacement${n > 1 ? "s" : ""} de fichier` },
+  {
+    key: "quarantined",
+    source: "client",
+    text: (n) => `${n} mise${n > 1 ? "s" : ""} en quarantaine (_review/)`,
+  },
+];
+
+/** Compte, pour chaque entree du registre, le nombre d'operations prevues.
+ *  @returns {{key: string, count: number, text: string}[]} */
+function _plannedApplyOps({ totals, clientCounts }) {
+  return _APPLY_DISK_OPS.map((op) => {
+    const raw = op.source === "client" ? (clientCounts || {})[op.key] : (totals || {})[op.key];
+    const count = Math.max(0, Number(raw) || 0);
+    return { key: op.key, count, text: op.text(count) };
+  });
+}
+
+/** Ligne d'operations affichee sur la DERNIERE confirmation avant modification
+ *  du disque. N'annonce que ce qui va REELLEMENT se produire.
+ *
+ *  `op.text(0)` rend « 0 renommage de dossier », jamais une chaine vide : la
+ *  ligne annoncait donc des operations NULLES sur l'ecran precisement gouverne
+ *  par la regle « action destructive = confirmation listant les elements et
+ *  leurs consequences ». Un « 0 mise en quarantaine » y est du bruit qui dilue
+ *  ce qui compte.
+ *
+ *  Le defaut touchait les DEUX branches d'affichage, pas seulement le repli :
+ *  `_plannedApplyOps` ne filtre rien et les deux joignaient toutes les entrees.
+ *
+ *  Cas limite traite explicitement : si RIEN n'est prevu, on ne rend pas une
+ *  chaine vide — sur une confirmation destructive, une ligne vide est pire
+ *  qu'un zero, l'utilisateur ne saurait pas s'il manque une information.
+ *  @returns {string} */
+function _opsLineText(plannedOps) {
+  const reelles = (plannedOps || []).filter((o) => o.count > 0);
+  if (!reelles.length) return "aucune opération sur le disque";
+  return reelles.map((o) => o.text).join(" · ");
+}
+
+/** Ultra-audit 2026-08-03 (N35) — nombre d'operations en ECHEC dans la reponse
+ *  de run/apply.
+ *
+ *  apply_support.py retourne `{"ok": True, "result": ApplyResult.__dict__}`
+ *  SANS aucune condition sur `result.errors` : un fichier verrouille (seeding
+ *  torrent, VLC, indexeur Windows) donne ok=True avec errors>=1 et le film n'a
+ *  pas bouge. Le front ne testait que `data.ok !== false` et affichait un toast
+ *  VERT « Apply termine » — le seul canal ou l'echec etait visible etait
+ *  ui_log.txt sur disque. On lit desormais le compteur reel.
+ *
+ *  @returns {{count: number, messages: string[]}}
+ */
+function _applyResultErrors(res) {
+  const result = (res && res.data && res.data.result) || {};
+  const count = Number(result.errors || 0);
+  const messages = Array.isArray(result.error_messages) ? result.error_messages.map(String) : [];
+  return { count: count > 0 ? count : 0, messages };
+}
+
+/** Toast de fin d'apply : vert si zero echec, orange (warning) sinon, avec le
+ *  premier message d'erreur backend pour que l'utilisateur sache QUOI regarder. */
+function _showApplyDoneToast(res, { dryRun }) {
+  const { count, messages } = _applyResultErrors(res);
+  if (count > 0) {
+    const detail = messages.length ? ` — ${messages[0]}` : "";
+    showToast({
+      type: "warning",
+      text: `${dryRun ? "Dry-run terminé" : "Apply terminé"} avec ${count} échec${count > 1 ? "s" : ""}${detail}`,
+      duration: 12000,
+    });
+    return;
+  }
+  showToast({
+    type: "success",
+    text: dryRun ? "Dry-run terminé. Aucun fichier modifié." : "Apply terminé · Undo possible 24h",
+    duration: dryRun ? 5000 : 7000,
+  });
+}
+
 async function _handleApplyNow() {
   if (!_runInfo?.runId) return;
+  // Ultra-audit 2026-08-03 (N13) : la modale danger se ferme maintenant AVANT
+  // de lancer l'apply (pour laisser voir la barre de progression), ce qui
+  // re-expose le bouton « Appliquer maintenant ». Sans cette garde, un second
+  // clic partirait pendant l'apply en cours et se ferait rejeter en 409 par
+  // le slot guard backend, avec un toast d'erreur trompeur.
+  if (_applyStatus?.running) return;
   const decisions = _buildDecisions();
   const opCount = Object.values(decisions).filter((d) => d.ok).length;
 
@@ -2331,7 +2492,7 @@ async function _handleApplyNow() {
       }, { signal: _signal() });
       if (res?.data?.ok !== false) {
         if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
-        showToast({ type: "success", text: "Dry-run terminé. Aucun fichier modifié.", duration: 5000 });
+        _showApplyDoneToast(res, { dryRun: true });
         await _loadRunInfo();
         _renderInPlace();
       } else {
@@ -2349,6 +2510,10 @@ async function _handleApplyNow() {
         });
       }
     } catch (err) {
+      // Relecture adversaire PR #873 (point 1) : un F5 pendant le dry-run
+      // aborte la requete cote client ; ce n'est pas un echec (cf.
+      // `_abortedByViewTeardown`). Retour silencieux.
+      if (_abortedByViewTeardown(err)) return;
       // Fix audit 2026-05-25 (v1.5.5) Vague J : meme exception, on tente de
       // remonter le message si l'erreur porte un payload (apiPost levee).
       const exMsg = err?.data?.user_message || err?.data?.message || err?.message;
@@ -2361,12 +2526,64 @@ async function _handleApplyNow() {
     return;
   }
 
+  // Ultra-audit 2026-08-03 (N07) : la modale annoncait `${opCount} fichiers
+  // renommés/déplacés`, or opCount est le nombre de FILMS APPROUVÉS, pas le
+  // nombre d'opérations disque. Les deux divergent réellement : apply_core
+  // marque `NOOP_DEJA_CONFORME` et sort AVANT d'incrémenter `res.renames`, donc
+  // sur une bibliothèque déjà rangée la modale annonçait « 250 » quand 12
+  // dossiers seulement allaient bouger — en contredisant le « Résumé des
+  // opérations » affiché juste au-dessus, qui lit `_applyPreview.totals`.
+  // Second mensonge corrigé : apply ne renomme JAMAIS le fichier vidéo (règle
+  // projet, seeding torrent), uniquement le dossier parent.
+  //
+  // Relecture adversaire de la PR #873 (point 2) : ce libelle etait juste en
+  // NATURE mais SOUS-annoncait. Bibliotheque deja rangee + quarantaine cochee
+  // + 50 films refuses, il affichait « 0 renommage de dossier · 0 deplacement
+  // de fichier » pour un apply qui allait deplacer 50 dossiers vers `_review/`.
+  // Les operations annoncees viennent desormais du registre `_APPLY_DISK_OPS`,
+  // qui inclut la quarantaine comptee cote client (le plan backend ne peut pas
+  // la donner, cf. le commentaire du registre).
+  const previewTotals = _applyPreview?.totals || null;
+  // Majorant assume : toutes les rows non approuvees partent en `_review/`
+  // quand l'option est cochee (apply_core.py:2009, branche `else`).
+  const quarantineCount = _applyOptions.quarantine
+    ? Math.max(0, Object.keys(decisions).length - opCount)
+    : 0;
+  const plannedOps = _plannedApplyOps({
+    totals: previewTotals,
+    clientCounts: { quarantined: quarantineCount },
+  });
+  const opsLine = previewTotals
+    ? _opsLineText(plannedOps)
+    // Repli sans plan backend : on annonce des FILMS approuves en le disant,
+    // et on n'oublie la quarantaine que si elle est NULLE — elle est connue
+    // cote client, donc quand elle vaut zero c'est une certitude, pas une
+    // ignorance. Sans ce filtre la ligne se terminait aussi par un « · »
+    // orphelin des que le texte etait vide.
+    : [
+        `${opCount} film${opCount > 1 ? "s" : ""} approuvé${opCount > 1 ? "s" : ""} (plan exact non calculé)`,
+        ...(quarantineCount > 0 ? [plannedOps.find((o) => o.key === "quarantined").text] : []),
+      ].join(" · ");
+
   // Apply reel : modale danger avec countdown 3s
   dangerConfirmModal({
     title: "Confirmer l'application sur le filesystem ?",
+    // Ultra-audit 2026-08-03 (N13) : la modale se fermait dans le `finally` de
+    // `await onConfirm()`. `apply_changes` étant synchrone côté backend, son
+    // overlay (position fixed, z-index 10100, noir 65 % + blur) restait
+    // plusieurs minutes au-dessus de la barre de progression que `onConfirm`
+    // venait justement de démarrer : bouton grisé, aucun spinner, progression
+    // floutée. La confirmation ayant déjà rempli son office au clic, on ferme
+    // avant de lancer l'action.
+    closeBeforeConfirm: true,
     items: [
-      `${opCount} fichiers renommés/déplacés`,
-      `Quarantaine : ${_applyOptions.quarantine ? "activée" : "désactivée"}`,
+      opsLine,
+      // Relecture adversaire PR #873 (point 2) : « activée » tout court ne
+      // disait pas COMBIEN de films allaient bouger, et le plan backend ne les
+      // comptait pas non plus (quarantine_unapproved=False au preview).
+      `Quarantaine : ${_applyOptions.quarantine
+        ? `activée — ${quarantineCount} film${quarantineCount > 1 ? "s" : ""} non approuvé${quarantineCount > 1 ? "s" : ""} déplacé${quarantineCount > 1 ? "s" : ""} vers _review/`
+        : "désactivée"}`,
       `CSV : ${_applyOptions.export_csv ? "exporté" : "non exporté"}`,
       // Vague P / VP-A : indicateur mode atomique dans le recap pre-apply
       `Mode atomique : ${_applyOptions.apply_atomic ? "activé (rollback en cas d'echec)" : "désactivé"}`,
@@ -2408,7 +2625,7 @@ async function _handleApplyNow() {
         }, { signal: _signal() });
         if (res?.data?.ok !== false) {
           if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
-          showToast({ type: "success", text: "Apply terminé · Undo possible 24h", duration: 7000 });
+          _showApplyDoneToast(res, { dryRun: false });
           await _loadRunInfo();
           _renderInPlace();
         } else {
@@ -2416,7 +2633,12 @@ async function _handleApplyNow() {
           showToast({ type: "error", text: "Échec de l'apply." });
           _renderInPlace();
         }
-      } catch {
+      } catch (err) {
+        // Relecture adversaire PR #873 (point 1) : F5 (ou « Rafraichir la vue »
+        // de Ctrl+K) pendant l'apply -> `unmountTraitement()` -> abort. Le
+        // backend, lui, CONTINUE de deplacer les fichiers : annoncer une erreur
+        // ici pousse l'utilisateur a relancer un apply destructif.
+        if (_abortedByViewTeardown(err)) return;
         if (_applyStatus) { _applyStatus.running = false; _applyStatus.done = true; }
         showToast({ type: "error", text: "Erreur lors de l'apply." });
         _renderInPlace();

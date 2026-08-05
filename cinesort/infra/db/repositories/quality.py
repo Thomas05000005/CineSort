@@ -489,19 +489,33 @@ class QualityRepository(_BaseRepository):
         dict (``GROUP BY`` ne produit pas de ligne vide) — l'appelant doit donc
         utiliser ``.get(run_id, {})``.
 
-        #472 : ``premium_count`` / ``low_count`` s'agregent sur la colonne
-        ``tier`` PERSISTEE, pas sur des seuils de score en dur. Les anciens
-        ``score >= 85`` / ``score < 55`` etaient les seuils Platinum/Silver de
-        l'echelle PRE-v1.5.5 (85/68/54/30) : depuis la recalibration en
-        70/66/55/40, un film affiche Platinum a 75 n'etait pas compte premium.
-        Le tier, lui, a ete calcule avec le profil actif au moment du scoring :
-        le KPI est donc coherent avec le tier affiche film par film, y compris
-        pour les runs scores sous un autre profil (``remux_strict`` 90/76/60/40).
-        Les bandes viennent de ``domain.tiers_helpers`` (source unique).
-
         La docstring precedente annoncait ``{run_id: {tier: count, ...}}``,
-        c'est-a-dire une distribution PAR TIER : cette forme n'a jamais ete
+        c'est-a-dire une distribution PAR TIER : cette forme n'a JAMAIS ete
         produite ici (c'est ``get_global_tier_distribution`` qui la rend).
+
+        #472 — `premium_count` et `low_count` se calculaient en re-seuillant le
+        `score` brut avec 85 et 55 ecrits dans le SQL. Or le tier d'un film n'est
+        PAS decide par ces deux nombres : il l'est par les seuils du profil
+        qualite actif, que l'utilisateur peut reconfigurer, et le resultat est
+        DEJA persiste dans la colonne `tier` au moment du scan. Les deux
+        surfaces divergeaient donc dans le meme payload `get_global_stats` :
+        `tier_distribution` (qui agrege `LOWER(q.tier)`, cf.
+        `get_global_tier_distribution` plus haut) et `summary.premium_pct` (qui
+        agregeait le score) ne parlaient pas du meme decoupage.
+
+        Le 85 n'etait meme plus le seuil d'aucun tier : c'etait le seuil
+        Platinum d'AVANT la recalibration v1.5.7, qui a aligne tous les profils
+        sur 70/66/55/40 (cf. `domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS`).
+        Un film Platinum a 78/100 n'etait pas compte comme premium alors que la
+        page Qualite l'affichait Platinum.
+
+        On agrege donc sur le tier persiste, sans redefinir ce que « premium »
+        veut dire : c'est toujours le tier le PLUS HAUT (Platinum, et son alias
+        historique Premium d'avant la migration 011), pas Platinum+Gold. De
+        meme `low_count` reste « sous Silver » = Bronze + Reject, ce qui, avec
+        le profil par defaut (silver=55), redonne exactement l'ancien
+        `score < 55` — le comptage ne bouge que pour les profils personnalises,
+        c'est-a-dire exactement les cas ou il etait faux.
         """
         self._ensure_quality_tables()
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]

@@ -1452,12 +1452,26 @@ export async function initAccueil(container) {
 function _updateSidebarForActiveRun(hasActiveRun) {
   const el = document.querySelector('.v5-sidebar-item[data-route="processing"]');
   if (!el) return;
+  // Ultra-audit 2026-08-03 (N15) — deux defauts corriges ici :
+  //  1. le libelle mentait : l'item reste 100 % cliquable (seule l'opacite
+  //     baisse, cf. .v5-sidebar-item--dimmed), et c'est justement de la que
+  //     l'utilisateur lance son premier scan. On dit donc quoi faire au lieu
+  //     d'annoncer une indisponibilite qui n'existe pas ;
+  //  2. la branche « run actif » faisait removeAttribute("title") au lieu de
+  //     RESTAURER le titre d'origine ("Traitement (Alt+2)") : l'item perdait
+  //     son tooltip, seule source du raccourci en sidebar repliee. On memorise
+  //     le titre d'origine comme le fait deja markIntegrationState().
+  if (el.dataset.titleDefault == null) {
+    el.dataset.titleDefault = el.getAttribute("title") || "";
+  }
   el.classList.toggle("v5-sidebar-item--dimmed", !hasActiveRun);
   if (!hasActiveRun) {
     el.setAttribute("data-no-active-run", "1");
-    el.setAttribute("title", "Aucun run actif — Traitement disponible quand un scan est lancé");
+    el.setAttribute("title", "Aucun run actif — lance un scan depuis cette vue");
   } else {
     el.removeAttribute("data-no-active-run");
-    el.removeAttribute("title");
+    const defaultTitle = el.dataset.titleDefault || "";
+    if (defaultTitle) el.setAttribute("title", defaultTitle);
+    else el.removeAttribute("title");
   }
 }

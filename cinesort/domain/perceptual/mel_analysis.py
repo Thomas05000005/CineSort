@@ -53,7 +53,16 @@ class MelAnalysisResult:
     mel_spectral_flatness_mean: float
     mel_score: int
     mel_verdict: str
-    # "clean" | "soft_clipped" | "mp3_encoded" | "aac_low_bitrate" | "insufficient_data"
+    # "clean" | "soft_clipped" | "mp3_encoded" | "aac_low_bitrate" | "degraded"
+    #   | "insufficient_data"
+    #
+    # #381 — "insufficient_data" designe UNIQUEMENT l'absence de mesure (signal
+    # trop court, STFT vide). Un signal MESURE dont le score est bas sans motif
+    # dominant rend "degraded" : il portait lui aussi "insufficient_data", si
+    # bien que le seul champ lisible de ce module disait « je n'ai pas pu
+    # mesurer » a propos d'une mesure parfaitement reussie. Meme classe que
+    # #752 (DRC) et #923 (score video) : une non-mesure et une mesure basse
+    # devenaient indiscernables.
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +442,18 @@ def compute_mel_score(
       1. "mp3_encoded" si shelf detecte
       2. "aac_low_bitrate" si hole_ratio severe
       3. "soft_clipped" si soft_clip severe
-      4. sinon "clean" si score >= 70, "insufficient_data" sinon
+      4. sinon "clean" si score >= 70, "degraded" sinon
+
+    #381 — le dernier cas rendait "insufficient_data". Toutes les entrees de
+    cette fonction viennent pourtant de detections qui ont ABOUTI : y arriver
+    signifie « mesure faite, qualite basse, aucun motif dominant », l'exact
+    contraire de « donnees insuffisantes ». Cette valeur est le seul champ
+    lisible que le module expose (`AudioPerceptual.to_dict()["mel"]["verdict"]`,
+    `models.py`) ; l'afficher tel quel aurait montre a l'utilisateur une panne
+    d'analyse la ou son fichier est simplement mediocre. "insufficient_data"
+    reste emis, mais seulement la ou il est vrai : les deux gardes de
+    `analyze_mel` (signal plus court que la fenetre FFT, STFT vide) et la
+    branche « segment audio non extractible » de `audio_perceptual`.
     """
     s_soft = _score_from_soft_clip(soft_clip)
     s_mp3 = _score_from_mp3_shelf(mp3_shelf)
@@ -460,7 +480,7 @@ def compute_mel_score(
     elif score >= 70:
         verdict = "clean"
     else:
-        verdict = "insufficient_data"
+        verdict = "degraded"
 
     return (score, verdict)
 

@@ -845,10 +845,11 @@ function _handleDecision(groupKey, side, winnerRowId, payload) {
 
 // Fix audit 2026-05-24 (v1.5.2) : auto-décide tous les groupes non décidés en
 // utilisant comparison.winner ("a" ou "b") calculé par le backend (winner score
-// qualité). Pas d'endpoint bulk -> boucle séquentielle d'appels
-// mark_duplicate_winner avec mutex per-group + progress toast tous les 5
-// groupes. dangerConfirmModal car action irréversible côté UI (rollback
+// qualité). dangerConfirmModal car action irréversible côté UI (rollback
 // nécessite de re-cliquer sur chaque carte).
+// Issue #406 : la boucle séquentielle de N `run/mark_duplicate_winner` est
+// remplacée par UN `run/mark_duplicate_winners_bulk`. Les mutex per-groupe (F25)
+// sont conservés : ils filtrent le lot juste avant l'envoi.
 async function _autoDecideAll() {
   if (!_state || _state.bulkInFlight) return;
   const candidates = _state.groups.filter((g) => {
@@ -890,22 +891,35 @@ async function _autoDecideAll() {
       let ko = 0;
       let skipped = 0;
       try {
-        for (let i = 0; i < candidates.length; i++) {
-          if (!_state) return; // unmount pendant la boucle
-          const g = candidates[i];
+        // Issue #406 : UN SEUL aller-retour au lieu de N. Cote serveur, chaque
+        // `run/mark_duplicate_winner` refaisait la detection de doublons
+        // ENTIERE (check_duplicates : relecture du plan, _find_dups, enrichis-
+        // sement qualite, annotation DB) : 1000 groupes = 1000 recalculs
+        // complets EN PLUS des 1000 requetes HTTP.
+        //
+        // F25 : les gardes restent evalues groupe par groupe, dans CE bloc
+        // synchrone, juste avant l'envoi. JS etant mono-thread, aucune decision
+        // manuelle ne peut s'intercaler entre cette boucle et le POST. Et une
+        // fois le POST parti, `autoDecideInFlight` (pose plus haut) interdit
+        // d'en demarrer une : `_decideFromCard` refuse (avec un toast) et
+        // `_openComparator` refuse. Les seules decisions concurrentes possibles
+        // sont donc celles DEJA en vol a cet instant — precisement ce que
+        // `decisionInFlightByGroup` (pose synchroniquement par `_decideFromCard`
+        // avant son await) et `comparatorPendingByGroup` (pose par
+        // `_openComparator`) signalent ici.
+        //
+        // Sans ces gardes, le lot upsert un winner different (ON CONFLICT DO
+        // UPDATE = dernier ecrit gagne) et `_loadGroups(true)` resynchronise
+        // l'UI dessus : le fichier choisi par l'utilisateur partait en
+        // _review/_duplicates_user_decided/ a l'apply.
+        const decisions = [];
+        // Aligne INDEX PAR INDEX sur `decisions` : deux groupes distincts
+        // peuvent legitimement porter la meme cle (collision title|year, cf F28
+        // revue R1), donc une Map indexee par group_key en perdrait un.
+        const planned = [];
+        for (const g of candidates) {
+          if (!_state) return; // unmount pendant la preparation
           const groupKey = _groupKey(g);
-          // F25 : `candidates` est un snapshot fige AVANT la confirmation. JS est
-          // mono-thread : ce test et l'apiPost du tour de boucle sont dans le meme
-          // bloc synchrone, donc toute decision manuelle terminee (winner_decided)
-          // ou en vol (decisionInFlightByGroup) est vue ici et respectee. Sans ce
-          // garde, la boucle upsert un winner different (ON CONFLICT DO UPDATE =
-          // dernier ecrit gagne) et _loadGroups(true) resynchronise l'UI dessus :
-          // le fichier choisi par l'utilisateur partait en
-          // _review/_duplicates_user_decided/ a l'apply.
-          // F25 (revue adversaire R1) : `comparatorPendingByGroup` couvre le
-          // troisieme emetteur de decisions, invisible des deux autres gardes :
-          // le modal comparateur (module + verrou distincts, callback onDecided
-          // perdu si l'utilisateur ferme sur Echap pendant son POST).
           if (
             g.winner_decided
             || _state.decisionInFlightByGroup.has(groupKey)
@@ -919,32 +933,55 @@ async function _autoDecideAll() {
           const winnerRow = (g.rows || [])[winnerIdx];
           const winnerRowId = winnerRow ? winnerRow.row_id : null;
           if (!winnerRowId) { ko += 1; continue; }
+          planned.push({ group: g, side, winnerRowId, groupKey });
+          decisions.push({
+            group_key: groupKey,
+            winner_row_id: winnerRowId,
+            notes: "auto-decide:score_v2",
+          });
+        }
+
+        if (decisions.length > 0) {
           try {
-            const res = await apiPost("run/mark_duplicate_winner", {
+            const res = await apiPost("run/mark_duplicate_winners_bulk", {
               run_id: _state.runId,
-              group_key: groupKey,
-              winner_row_id: winnerRowId,
-              notes: "auto-decide:score_v2",
+              decisions,
             }, { signal: _signal() });
             if (!_state) return;
             const data = _payload(res);
-            if (data.ok === false) { ko += 1; }
-            else {
-              ok += 1;
-              g.winner_decided = true;
-              g.winner_side = side;
-              g.winner_row_id = winnerRowId;
-              if (data.losers) g.losers = data.losers;
+            const results = Array.isArray(data.results) ? data.results : [];
+            if (data.ok === false) {
+              ko += decisions.length;
+              showToast({ type: "error", text: data.message || data.error || "Échec de l'auto-décision" });
+            } else {
+              for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                const p = planned[i];
+                // Le serveur repond dans l'ordre du lot. Si ce n'etait plus le
+                // cas, on ne devinerait PAS a quel groupe rattacher la reponse :
+                // on compte en echec plutot que de marquer le mauvais film.
+                const aligned = Boolean(r) && Boolean(p) && String(r.group_key) === p.groupKey;
+                if (r && r.ok && aligned) {
+                  ok += 1;
+                  p.group.winner_decided = true;
+                  p.group.winner_side = p.side;
+                  p.group.winner_row_id = p.winnerRowId;
+                  if (r.losers) p.group.losers = r.losers;
+                } else {
+                  ko += 1;
+                }
+              }
+              // Une decision non CONFIRMEE n'est pas une decision reussie : le
+              // reliquat (reponse partielle, ou reponse sans `results` du tout)
+              // compte en echec. Sans cela un backend muet passerait pour un
+              // succes complet.
+              if (results.length < decisions.length) {
+                ko += decisions.length - results.length;
+              }
             }
           } catch (_e) {
             if (!_state) return;
-            ko += 1;
-          }
-          // Progress feedback tous les 5 groupes
-          if ((i + 1) % 5 === 0 && _state) {
-            _state.decidedCount = _state.groups.filter((x) => x.winner_decided).length;
-            _state.pendingCount = _state.groups.length - _state.decidedCount;
-            _render();
+            ko += decisions.length;
           }
         }
       } finally {

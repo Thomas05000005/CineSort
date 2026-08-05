@@ -308,6 +308,24 @@ class RunFacade(_BaseFacade):
         """
         return self._api._mark_duplicate_winner_impl(run_id, group_key, winner_row_id, notes)
 
+    def mark_duplicate_winners_bulk(
+        self,
+        run_id: str,
+        decisions: list = None,
+    ) -> Dict[str, Any]:
+        """Issue #406 : persiste N decisions de doublons en UN aller-retour.
+
+        `decisions` = `[{group_key, winner_row_id, notes?}, ...]`. Memes gardes
+        que `mark_duplicate_winner` pour chaque entree, mais UNE seule recharge
+        des groupes pour tout le lot (l'appel unitaire refaisait la detection de
+        doublons entiere a chaque decision).
+
+        Returns:
+            {ok, run_id, results: [{group_key, ok, winner_row_id|error, ...}],
+             decided, failed}. `failed > 0` signale des decisions refusees.
+        """
+        return self._api._mark_duplicate_winners_bulk_impl(run_id, decisions or [])
+
     # ---------- Pass 1 cleanup : 12 endpoints legacy migres vers /api/run/* ----------
 
     def get_dashboard(self, run_id: str = "latest") -> Dict[str, Any]:
