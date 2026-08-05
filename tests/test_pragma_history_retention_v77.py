@@ -16,6 +16,7 @@ sont les plus recentes (les anciennes sont purgees).
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import unittest
@@ -55,6 +56,7 @@ class PragmaHistoryRetentionTests(unittest.TestCase):
 
     def test_table_is_bounded_after_many_inserts(self) -> None:
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _apply_migration_028(conn)
             cap = _PRAGMA_HISTORY_MAX_ROWS
@@ -67,6 +69,7 @@ class PragmaHistoryRetentionTests(unittest.TestCase):
 
     def test_keeps_most_recent_rows(self) -> None:
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _apply_migration_028(conn)
             cap = _PRAGMA_HISTORY_MAX_ROWS
@@ -83,6 +86,7 @@ class PragmaHistoryRetentionTests(unittest.TestCase):
     def test_under_cap_keeps_all(self) -> None:
         # Sous le plafond, aucune purge : usage normal (peu de connexions).
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             _apply_migration_028(conn)
             self._seed(conn, db_path, 5)
@@ -94,6 +98,7 @@ class PragmaHistoryRetentionTests(unittest.TestCase):
     def test_purge_does_not_break_when_table_missing(self) -> None:
         # DB v27 sans migration 028 : apply_pragmas reste best-effort (pas de crash).
         db_path, conn = existing_db_fixture(27)
+        self.addCleanup(shutil.rmtree, db_path.parent, ignore_errors=True)
         try:
             snapshot = apply_pragmas(
                 conn,

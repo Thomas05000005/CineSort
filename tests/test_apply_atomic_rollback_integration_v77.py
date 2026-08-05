@@ -15,7 +15,6 @@ unit tests, et integration full apply_changes au niveau test_apply_undo_*).
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 import sys
 import tempfile
@@ -33,6 +32,7 @@ from cinesort.app.apply_rollback import (
 )
 from cinesort.infra.db.sqlite_store import SQLiteStore
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 
 
 def _make_store() -> tuple[SQLiteStore, Path]:
@@ -54,7 +54,7 @@ class RollbackForwardEmptyBatchTests(unittest.TestCase):
         self.store, self._tmp = _make_store()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_empty_batch_id_returns_failed(self) -> None:
         result = rollback_forward(self.store, "")
@@ -87,7 +87,7 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         self.dst_root.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_rollback_reverts_move_file(self) -> None:
         """AC-3 : fichier au dst doit revenir au src apres rollback."""
@@ -271,7 +271,7 @@ class RollbackForwardMixedBatchTests(unittest.TestCase):
         self.dst_root.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_rollback_5_of_10_partial(self) -> None:
         """Plan VP-A test integration : 5 sur 10 deplacements echouent.
@@ -352,7 +352,7 @@ class RollbackForwardDbFailureTests(unittest.TestCase):
         self.dst_root.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_db_mark_failure_degrades_to_partial(self) -> None:
         """Si mark_rollback_status final echoue, on retourne ROLLBACK_PARTIAL
@@ -418,7 +418,7 @@ class RollbackForwardCoordinationUndoTests(unittest.TestCase):
         self.dst_root.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def test_rollback_marks_undo_status_done(self) -> None:
         # R8-012 (F2-c) : apres un revert atomique REUSSI, l'undo_status OP-LEVEL doit
@@ -520,7 +520,7 @@ class ApplyChangesAtomicRollbackIntegrationTests(unittest.TestCase):
         self._patcher.stop()
         # rmtree tolerant : sous Windows le store SQLite du JobRunner peut
         # garder un handle quelques instants apres le test.
-        shutil.rmtree(self._base, ignore_errors=True)
+        cleanup_test_tree(self._base)
 
     # -- helpers ----------------------------------------------------------
     def _settings(self) -> dict:

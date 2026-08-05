@@ -16,6 +16,7 @@ Pattern : on patch `OmdbClient._session.get` pour controller la reponse HTTP.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,8 +90,9 @@ class TestConnectionEnrichedTests(unittest.TestCase):
     """Tests des 6 etats du test_connection (cf spec §3)."""
 
     def _make_client(self, api_key="VALIDKEY"):
-        tmp = Path(tempfile.mkdtemp()) / "omdb_cache.json"
-        return OmdbClient(api_key=api_key, cache_path=tmp, timeout_s=5.0)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="omdb_enriched_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        return OmdbClient(api_key=api_key, cache_path=tmp_dir / "omdb_cache.json", timeout_s=5.0)
 
     def test_empty_key_state(self):
         """État 1 : pas de cle → error_code='empty_key' + tous les champs quota None."""

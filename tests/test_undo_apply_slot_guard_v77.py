@@ -13,7 +13,6 @@ exactement comme apply. La dry-run reste hors slot (lecture seule).
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +20,7 @@ from unittest import mock
 
 import cinesort.domain.core as core
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 from tests._helpers import wait_run_done as _wait_done
 
 
@@ -41,7 +41,7 @@ class UndoSlotGuardTests(unittest.TestCase):
         self.addCleanup(_p.stop)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _apply_one(self):
         src = self.root / "Slot.Guard.2021.1080p"

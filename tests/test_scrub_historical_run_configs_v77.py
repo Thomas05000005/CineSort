@@ -12,6 +12,7 @@ Memoire projet : migrations/cleanups SQLite testes sur base PRE-EXISTANTE
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 import unittest
@@ -64,6 +65,7 @@ def _get_config(conn: sqlite3.Connection, run_id: str) -> str:
 class ScrubHistoricalRunConfigsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.db_path, self.conn = existing_db_fixture(5)
+        self.addCleanup(shutil.rmtree, self.db_path.parent, ignore_errors=True)
         self.store = _StoreShim(self.conn)
 
     def tearDown(self) -> None:

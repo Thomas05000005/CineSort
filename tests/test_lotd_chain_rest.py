@@ -91,7 +91,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pytest
 
-from tests._helpers import find_free_port
+from tests._helpers import find_free_port, join_background_threads
 
 # Demarre un serveur REST reel -> exclu des sweeps rapides (marker projet).
 pytestmark = pytest.mark.runtime
@@ -255,8 +255,10 @@ def chain():
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
-    # Sur Windows le fichier SQLite peut rester ouvert par le process : le
-    # tempdir a ete cree avec ignore_cleanup_errors=True.
+    # #960 : le handle SQLite est tenu par les threads de fond de l'app. On
+    # les joint d'abord, sinon le dossier reste dans %TEMP% pour de bon
+    # (l'OS ne le purge pas).
+    join_background_threads()
     with contextlib.suppress(OSError, PermissionError):
         tmp.cleanup()
 

@@ -125,3 +125,9 @@ FAIL_*.png
 # Logs pytest bruts régénérables (étape squash-merge) — on garde les VRAIES preuves
 # R8 (R8_CORRECTIONS.md, scripts *_diff.py, baseline_r8/, *.out.txt) mais pas ces dumps.
 docs/internal/r8/suite_*.txt
+
+# Dossiers de travail des sessions pytest FILLES de tests/test_temp_leak_guard_960.py.
+# Sous le depot (et non dans %TEMP%) pour que la session fille charge le vrai
+# tests/conftest.py et n'ait pas a parcourir un %TEMP% que d'autres processus
+# modifient pendant sa collecte. Le point initial les met hors collecte.
+tests/.sessions_filles/

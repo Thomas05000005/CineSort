@@ -6,7 +6,6 @@ secrets masques dans get_settings.
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import threading
 import time
@@ -16,6 +15,7 @@ from unittest import mock
 
 from cinesort.ui.api import settings_support
 from cinesort.ui.api.cinesort_api import CineSortApi
+from tests._helpers import cleanup_test_tree
 
 
 class SettingsRobustnessTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class SettingsRobustnessTests(unittest.TestCase):
         self.settings_path = settings_support.settings_path(self.state_dir)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        cleanup_test_tree(self._tmp)
 
     def _write(self, content: str) -> None:
         self.settings_path.write_text(content, encoding="utf-8")

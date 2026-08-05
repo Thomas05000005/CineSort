@@ -14,6 +14,7 @@ On teste :
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -107,6 +108,7 @@ class FilmIdentityTests(unittest.TestCase):
 class MigrateLocksTests(unittest.TestCase):
     def setUp(self) -> None:
         self.db_path = _setup_db_with_030()
+        self.addCleanup(shutil.rmtree, self.db_path.parent, ignore_errors=True)
         self.repo = FieldLocksRepository(_FakeStore(self.db_path))
 
     def test_migrate_all_locks_from_path_to_tmdb(self):

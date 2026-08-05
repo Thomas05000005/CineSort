@@ -29,6 +29,7 @@ fraiche, ou une cascade n'aurait rien a supprimer.
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -80,6 +81,7 @@ PRAGMA user_version = 2;
 class DisableFkMarkerStrictTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_root = Path(tempfile.mkdtemp(prefix="cinesort_disable_fk_623_"))
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
         self.migrations_dir = self.tmp_root / "migrations"
         self.migrations_dir.mkdir(parents=True)
         self.db_path = self.tmp_root / "store.sqlite3"

@@ -24,6 +24,7 @@ Ces tests verrouillent :
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -154,8 +155,9 @@ class OmdbTestConnectionContractTests(unittest.TestCase):
     """
 
     def _client(self, api_key: str = "DEMOKEY") -> OmdbClient:
-        tmp = Path(tempfile.mkdtemp()) / "omdb_test.json"
-        return OmdbClient(api_key=api_key, cache_path=tmp, timeout_s=2.0)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="omdb_status_"))
+        self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
+        return OmdbClient(api_key=api_key, cache_path=tmp_dir / "omdb_test.json", timeout_s=2.0)
 
     def test_empty_key_returns_error_code(self) -> None:
         client = self._client(api_key="")
