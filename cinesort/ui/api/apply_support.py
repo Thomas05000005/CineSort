@@ -25,7 +25,7 @@ import cinesort.infra.plex_client as _plex_mod
 import cinesort.infra.state as state
 from cinesort.app.apply_audit import ApplyAuditLogger, read_apply_audit
 from cinesort.app.apply_core import apply_rows as _apply_rows_fn
-from cinesort.app.apply_core import sha1_quick_cached
+from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
@@ -38,7 +38,7 @@ from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import requires_valid_run_id
+from cinesort.ui.api._validators import clamp_timeout, requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path, read_settings
 
 logger = logging.getLogger(__name__)
@@ -608,7 +608,45 @@ def _execute_undo_ops(
                     continue
 
                 undo_conflicts_root.mkdir(parents=True, exist_ok=True)
-                conflict_dst = api._unique_path(undo_conflicts_root / current_path.name)
+                # REGLE INVIOLABLE n1 : le nom du fichier reste INTACT. L'ancien
+                # `api._unique_path` resolvait une collision dans le bac en
+                # renommant le FICHIER (`Rocky.1976.1080p.mkv` ->
+                # `Rocky.1976.1080p_2.mkv`) — 4e site de renommage du depot,
+                # celui-ci sur le chemin de l'UNDO, donc sur le filet de secours.
+                # `unique_bucket_path` porte l'index sur un DOSSIER a la place.
+                conflict_dst = unique_bucket_path(
+                    undo_conflicts_root / current_path.name,
+                    bucket_root=undo_conflicts_root,
+                    use_dup_suffix=False,
+                )
+                if conflict_dst is None:
+                    # Aucune desambiguisation de dossier possible. On REFUSE le
+                    # deplacement plutot que d'ecraser la cible ou de renommer le
+                    # fichier : sur un chemin destructif l'erreur va dans le sens
+                    # restrictif, et le fichier source reste ou il est.
+                    _log.error(
+                        "undo: quarantaine impossible sans renommer le fichier, abandon: %s",
+                        current_path,
+                    )
+                    failed += 1
+                    _mark_undo_status(
+                        store,
+                        log_fn,
+                        op_id=op_id,
+                        undo_status="FAILED",
+                        error_message=(
+                            "Quarantaine d'undo impossible sans renommer le fichier video "
+                            f"({current_path.name}) : deplacement refuse, le fichier est laisse en place."
+                        ),
+                    )
+                    continue
+                # `unique_bucket_path` INSERE un dossier d'index quand la cible est
+                # prise ; ce dossier n'existe pas encore. Sans ce mkdir, `shutil.move`
+                # leve FileNotFoundError, que la branche ci-dessous interprete comme
+                # « fichier disparu » et compte en SKIPPED — le fichier serait reste
+                # en place sans que rien ne signale d'echec. Constate par le test du
+                # site d'appel, avec deux conflits homonymes.
+                conflict_dst.parent.mkdir(parents=True, exist_ok=True)
                 # M3 : TOCTOU possible — current_path peut disparaitre entre exists() et move()
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
@@ -912,10 +950,27 @@ def build_undo_by_row_preview(api: Any, run_id: str, batch_id: Optional[str] = N
     except (FileNotFoundError, OSError):
         pass
 
+    # Ultra-audit 2026-08 (N25) : cette boucle appelait
+    # `list_apply_operations_by_row` PAR ROW. Chaque appel repo ouvre 2
+    # connexions SQLite neuves (_ensure_apply_journal_tables -> _existing_tables,
+    # puis la requete), soit 2N connexions pour N films. Mesure sur un batch de
+    # 5000 films : 165 s, contre 88 ms pour la requete unique + regroupement
+    # Python. `list_apply_operations` selectionne les MEMES colonnes avec le
+    # MEME `ORDER BY op_index ASC, id ASC` (repositories/apply.py:314-346 vs
+    # :460-489), donc l'ordre et le contenu des `ops` sont inchanges.
+    # Seule la convention du row_id NULL differe : le repo serialise NULL en ""
+    # (:341) alors que `get_batch_rows_summary` groupe sur
+    # COALESCE(row_id, '__legacy__') (:433). On realigne donc "" -> "__legacy__".
+    # Aucune ambiguite : `record_apply_operation` ecrit `str(row_id) if row_id
+    # else None` (:176), une chaine vide est donc stockee NULL, jamais "".
+    ops_by_row: Dict[str, List[Dict[str, Any]]] = {}
+    for op in store.apply.list_apply_operations(batch_id=bid):
+        ops_by_row.setdefault(str(op.get("row_id") or "") or "__legacy__", []).append(op)
+
     rows_out: List[Dict[str, Any]] = []
     for summary in rows_summary:
         rid = str(summary["row_id"])
-        ops = store.apply.list_apply_operations_by_row(batch_id=bid, row_id=rid)
+        ops = ops_by_row.get(rid, [])
         reversible_pending = [
             op for op in ops if int(op.get("reversible") or 0) == 1 and str(op.get("undo_status")) == "PENDING"
         ]
@@ -1992,6 +2047,20 @@ def _execute_apply(
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
                 _r.proposed_year = int(_ov["proposed_year"])
+    # Ultra-audit 2026-08 (N31) — l'absence de `sqlite3.Error` dans l'except
+    # ci-dessous est DELIBEREE, contrairement au bloc duplicate_decisions
+    # juste au-dessus. Ne pas « aligner » les deux tuples.
+    #
+    # Cet overlay materialise la DERNIERE volonte explicite de l'utilisateur, et
+    # la boucle porte sur TOUTES les rows. Degrader une sqlite3.Error en WARN
+    # ferait continuer l'apply avec un overlay PARTIEL (rows 0..k-1 overridees,
+    # k..n non) et renommerait des dossiers avec le titre auto-matche, en
+    # ecrasant silencieusement le choix manuel.
+    #
+    # Laisser remonter est fail-closed et sans perte : ce bloc s'execute AVANT
+    # tout appel a `_apply_rows_fn`, et les deux appelants de `_execute_apply`
+    # l'encadrent d'un try ; la boundary d'`apply_changes` clot alors le batch
+    # en FAILED. Aucun fichier n'a bouge, rien n'est a annuler.
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         log_fn("WARN", f"Overlay overrides TMDb impossible: {exc}")
 
@@ -2462,7 +2531,8 @@ def _make_jellyfin_client(data: Dict[str, Any]) -> Any:
     """Cree un JellyfinClient depuis les settings. Retourne None si impossible."""
     url = str(data.get("jellyfin_url") or "").strip()
     api_key = str(data.get("jellyfin_api_key") or "").strip()
-    timeout_s = float(data.get("jellyfin_timeout_s") or 10.0)
+    # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+    timeout_s = clamp_timeout(data.get("jellyfin_timeout_s"), default=10.0)
     return JellyfinClient(url, api_key, timeout_s=timeout_s)
 
 
@@ -2504,7 +2574,8 @@ def _trigger_plex_refresh(api: Any, log_fn: Callable[[str, str], None], *, dry_r
     if not plex_url or not plex_token or not plex_lib:
         return
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)
@@ -2565,7 +2636,8 @@ def refresh_plex_library_now(api: Any) -> Dict[str, Any]:
             log_module=__name__,
         )
     try:
-        timeout_s = float(settings.get("plex_timeout_s") or 10)
+        # Cf issue #434 : clamp_timeout coherent avec cinesort_api.py (endpoints de test).
+        timeout_s = clamp_timeout(settings.get("plex_timeout_s"), default=10.0)
         # NB : accede via module pour permettre patch("cinesort.infra.plex_client.PlexClient").
         client = _plex_mod.PlexClient(plex_url, plex_token, timeout_s=timeout_s)
         client.refresh_library(plex_lib)

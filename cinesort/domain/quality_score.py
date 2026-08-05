@@ -34,6 +34,15 @@ from cinesort.domain.genre_rules import (
 # quand le probe est PARTIAL/FAILED (ex: SMB obsolete, fichier corrompu).
 from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_name
 
+# Lot #641/#682/#745/#806 : echelle de resolution LARGEUR-primaire, partagee
+# avec `encode_analysis` et `genre_rules` (source unique).
+from cinesort.domain.resolution_class import (
+    RES_720P,
+    RES_1080P,
+    RES_2160P,
+    classify_resolution,
+)
+
 # VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026). OPT-IN
 # strict (toggle default OFF) - aucune redistribution de tier sur 853 films
 # biblio sans validation user. AC-2 : applique AVANT _cap_tier securite
@@ -84,8 +93,13 @@ DEFAULT_PROFILE_VERSION = 1
 #
 # A INCREMENTER a chaque changement de regle qui modifie un score ou un tier.
 # Historique : 1 (implicite, champ absent) = avant le lot « classe de resolution
-# et codec audio canoniques » ; 2 = ce lot.
-SCORING_RULES_VERSION = 2
+# et codec audio canoniques » ; 2 = ce lot ; 3 = lot #641/#682/#745/#806
+# (`analyze_encode_quality` choisit sa bande sur la CLASSE de resolution et non
+# plus sur la hauteur brute, palier re-encode 2160p ajoute, fin du gating par
+# codec). Les flags d'encode changent donc les scores deja persistes des films
+# cinemascope, des 4K severement re-encodees et des 1080p en codec exotique :
+# sans ce bump, ces rapports resteraient caches avec leur ancien verdict.
+SCORING_RULES_VERSION = 3
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -615,8 +629,6 @@ _RELEASE_4K_LIGHT_RE = re.compile(r"\b(4klight|hdlight|uhdrip)\b", re.IGNORECASE
 
 def _resolution_label(*, width: int, height: int, release_name: str = "") -> Tuple[str, str]:
     # Prefer measured probe dimensions when available.
-    w = max(0, int(width or 0))
-    h = max(0, int(height or 0))
     # Fix audit 2026-05-30 (v1.5.7) bug 178 faux 720p : utiliser short_edge=min(w,h)
     # classait les films cinema 1920x800 (ratio 2.35:1) en 720p car 800<1000. Or
     # ce sont des 1080p natifs croppes ou matted (les bandes noires retirees).
@@ -626,12 +638,15 @@ def _resolution_label(*, width: int, height: int, release_name: str = "") -> Tup
     # toujours, peu importe l aspect ratio). VERIFIE par ffprobe direct sur 15
     # echantillons de la biblio utilisateur : 15/15 = 1920x[784-818] etaient
     # tous des vrais 1080p mal classes en 720p avec l ancienne logique.
-    if w >= 3800 or h >= 2100:
-        return "2160p", "probe"
-    if w >= 1900 or h >= 1000:
-        return "1080p", "probe"
-    if w >= 1280 or h >= 680:
-        return "720p", "probe"
+    #
+    # Lot #641/#682/#745/#806 : l'echelle elle-meme vit dans
+    # `cinesort.domain.resolution_class`, pour que `encode_analysis` et
+    # `genre_rules` tranchent EXACTEMENT comme ici. Une classe SD ou inconnue
+    # ne s'annonce pas "probe" : elle laisse la main au nom de release, comme
+    # avant ce lot.
+    measured = classify_resolution(width, height)
+    if measured in (RES_2160P, RES_1080P, RES_720P):
+        return measured, "probe"
 
     rel = str(release_name or "").strip().lower()
     if rel:
@@ -1073,15 +1088,10 @@ def _score_video(
     # P4.2 : ajuster le seuil selon le genre (animation tolère bitrate bas,
     # action exige plus). Applique le multiplicateur bitrate_leniency.
     if threshold_kbps > 0 and primary_genre:
-        try:
-            adjusted = _adj_th(threshold_kbps, primary_genre)
-            if adjusted != threshold_kbps:
-                reasons.append(
-                    f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s"
-                )
-                threshold_kbps = adjusted
-        except ImportError:
-            pass
+        adjusted = _adj_th(threshold_kbps, primary_genre)
+        if adjusted != threshold_kbps:
+            reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
+            threshold_kbps = adjusted
 
     if bitrate_kbps is None:
         video_sub -= 8
@@ -1687,6 +1697,10 @@ def _apply_genre_adjustments_helper(
     if not primary_genre:
         return video_sub, audio_sub, extras_sub, primary_genre
     height_g = _to_int(video.get("height"), 0)
+    # #682 : la largeur accompagne desormais la hauteur, pour que `genre_rules`
+    # tranche sur la CLASSE de resolution meme si un futur appelant lui passait
+    # des dimensions brutes (1920x800 = 1080p, pas « resolution modeste »).
+    width_g = _to_int(video.get("width"), 0)
     codec_g = str(video.get("codec") or "")
     has_hdr_g = bool(video.get("hdr10") or video.get("hdr10_plus") or video.get("hdr_dolby_vision"))
     has_atmos_g = False
@@ -1698,6 +1712,7 @@ def _apply_genre_adjustments_helper(
         primary_genre,
         video_codec=codec_g,
         height=height_g,
+        width=width_g,
         has_hdr=has_hdr_g,
         has_atmos=has_atmos_g,
         has_heavy_grain=has_grain_g,

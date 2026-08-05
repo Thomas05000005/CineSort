@@ -643,7 +643,15 @@ def _build_library_rows(rows: list, reports: list) -> list:
                 "row_id": rid,
                 "proposed_title": str(row.proposed_title or ""),
                 "proposed_year": int(row.proposed_year or 0),
-                "resolution": str(detected.get("resolution_label") or ""),
+                # Issue #866 : la cle ecrite par le producteur unique de
+                # `metrics.detected` (quality_score._build_metrics:1960) est
+                # `resolution`, pas `resolution_label` -- ce dernier n'est qu'un
+                # nom de variable LOCAL dans le scoring. `resolution_label`
+                # n'existant dans aucun `detected` produit, le `.get()` rendait
+                # None sur 100% des films et la colonne Resolution de ces rows
+                # etait vide par construction. `_classify_resolution` (l.448)
+                # lit deja la bonne cle sur le meme dict, dans ce meme fichier.
+                "resolution": str(detected.get("resolution") or ""),
                 "score": q.get("score"),
                 "confidence": int(getattr(row, "confidence", 0) or 0),
                 "source": str(row.proposed_source or ""),
@@ -1050,7 +1058,7 @@ def _build_row_payload(
     # un faux subtitle_missing_<lang> sur les films dont la piste est muxee (non
     # vue au scan), en contradiction directe avec l'ecran Verification du meme run.
     from cinesort.domain.subtitle_helpers import _normalize_iso639
-    from cinesort.ui.api.run_read_support import reconcile_subtitle_flags
+    from cinesort.ui.api.run_read_support import full_langs_from_embedded, reconcile_subtitle_flags
 
     present_langs: set = set()
     for _lang in getattr(row, "subtitle_languages", None) or []:
@@ -1071,7 +1079,10 @@ def _build_row_payload(
     # _subtract_ignored_flags (filtre de liste, PAS effective_flags qui renvoie un set non trie).
     _ignored_codes = {str(_c) for _c in (ignored_alerts or ())}
     _raw_flags = [str(_f) for _f in (getattr(row, "warning_flags", None) or []) if str(_f) not in _ignored_codes]
-    _flags = reconcile_subtitle_flags(_raw_flags, present_langs)
+    # F12 (2026-08-03) : un `subtitle_forced_only_<lang>` n'est perime que si une
+    # piste MUXEE COMPLETE existe -> `full_langs_from_embedded` (qui lit `forced`),
+    # surtout pas `present_langs` (qui contient deja la langue du fichier force).
+    _flags = reconcile_subtitle_flags(_raw_flags, present_langs, full_langs_from_embedded(_embedded))
     _missing = [
         str(_l)
         for _l in (getattr(row, "subtitle_missing_langs", None) or [])
@@ -2098,7 +2109,10 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         # et le KPI "Cas a verifier" (_build_dashboard_section). Sans ca le badge
         # comptait tout flag BRUT (le FR muxe non vu au scan pose un faux
         # subtitle_missing_fr) -> ~898 alors que l'ecran annonce ~186.
-        from cinesort.ui.api.history_support import _present_langs_from_payload
+        from cinesort.ui.api.history_support import (
+            _full_langs_from_payload,
+            _present_langs_from_payload,
+        )
         from cinesort.ui.api.run_read_support import (
             build_qr_by_id,
             reconcile_subtitle_flags,
@@ -2126,7 +2140,12 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
                 {"row_id": rid, "subtitle_languages": getattr(r, "subtitle_languages", None) or []},
                 qr_by_id,
             )
-            if reconcile_subtitle_flags(eff, present):
+            # F12 (2026-08-03) : meme reconciliation que l'ecran Verification, y
+            # compris pour `subtitle_forced_only_<lang>`. Sans le 3e argument, une
+            # row dont l'unique alerte est un forced_only DEMENTI par une piste
+            # muxee complete gonflerait ce badge sans apparaitre a l'ecran — la
+            # divergence exacte que HIGH-4 a corrigee.
+            if reconcile_subtitle_flags(eff, present, _full_langs_from_payload({"row_id": rid}, qr_by_id)):
                 quality += 1
 
         # AUDIT 2026-06-13 (R5-E) : badge "Doublons" = films dans un groupe de
