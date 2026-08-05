@@ -119,12 +119,16 @@ class TestDetectCrossRootDuplicates(unittest.TestCase):
         self.assertEqual(count, 0)
 
     def test_detects_cross_root_duplicate(self):
+        # #686 : UN film present dans deux racines = 1 film, meme si DEUX
+        # rangees sont flaguees. La valeur retournee est celle que
+        # `plan_multi_roots` annonce sous le libelle « N film(s) » ; elle
+        # comptait les rangees, donc annoncait le double.
         rows = [
             self._make_row("Inception", 2010, r"C:\Films"),
             self._make_row("Inception", 2010, r"D:\Films"),
         ]
         count = _detect_cross_root_duplicates(rows)
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 1)
         for row in rows:
             self.assertIn("duplicate_cross_root", row.warning_flags)
 
@@ -142,7 +146,8 @@ class TestDetectCrossRootDuplicates(unittest.TestCase):
             self._make_row("INCEPTION", 2010, r"D:\Films"),
         ]
         count = _detect_cross_root_duplicates(rows)
-        self.assertEqual(count, 2)
+        # #686 : un seul film, deux rangees (cf. test_detects_cross_root_duplicate).
+        self.assertEqual(count, 1)
 
 
 # ── plan_multi_roots ─────────────────────────────────────────────────

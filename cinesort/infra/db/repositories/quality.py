@@ -481,7 +481,32 @@ class QualityRepository(_BaseRepository):
         return max(0, int(total_rows) - scored)
 
     def get_quality_counts_for_runs(self, run_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Retourne {run_id: {tier: count, ...}} pour la liste de runs donnee (agregation bulk)."""
+        """Retourne {run_id: {tier: count, ...}} pour la liste de runs donnee (agregation bulk).
+
+        #472 — `premium_count` et `low_count` se calculaient en re-seuillant le
+        `score` brut avec 85 et 55 ecrits dans le SQL. Or le tier d'un film n'est
+        PAS decide par ces deux nombres : il l'est par les seuils du profil
+        qualite actif, que l'utilisateur peut reconfigurer, et le resultat est
+        DEJA persiste dans la colonne `tier` au moment du scan. Les deux
+        surfaces divergeaient donc dans le meme payload `get_global_stats` :
+        `tier_distribution` (qui agrege `LOWER(q.tier)`, cf.
+        `get_global_tier_distribution` plus haut) et `summary.premium_pct` (qui
+        agregeait le score) ne parlaient pas du meme decoupage.
+
+        Le 85 n'etait meme plus le seuil d'aucun tier : c'etait le seuil
+        Platinum d'AVANT la recalibration v1.5.7, qui a aligne tous les profils
+        sur 70/66/55/40 (cf. `domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS`).
+        Un film Platinum a 78/100 n'etait pas compte comme premium alors que la
+        page Qualite l'affichait Platinum.
+
+        On agrege donc sur le tier persiste, sans redefinir ce que « premium »
+        veut dire : c'est toujours le tier le PLUS HAUT (Platinum, et son alias
+        historique Premium d'avant la migration 011), pas Platinum+Gold. De
+        meme `low_count` reste « sous Silver » = Bronze + Reject, ce qui, avec
+        le profil par defaut (silver=55), redonne exactement l'ancien
+        `score < 55` — le comptage ne bouge que pour les profils personnalises,
+        c'est-a-dire exactement les cas ou il etait faux.
+        """
         self._ensure_quality_tables()
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]
         if not ids:
@@ -494,8 +519,8 @@ class QualityRepository(_BaseRepository):
                   run_id,
                   COUNT(*) AS scored_movies,
                   AVG(score) AS score_avg,
-                  SUM(CASE WHEN score >= 85 THEN 1 ELSE 0 END) AS premium_count,
-                  SUM(CASE WHEN score < 55 THEN 1 ELSE 0 END) AS low_count
+                  SUM(CASE WHEN LOWER(tier) IN ('platinum', 'premium') THEN 1 ELSE 0 END) AS premium_count,
+                  SUM(CASE WHEN LOWER(tier) IN ('bronze', 'reject') THEN 1 ELSE 0 END) AS low_count
                 FROM quality_reports
                 WHERE run_id IN ({placeholders})
                 GROUP BY run_id

@@ -510,6 +510,12 @@ document.addEventListener("v5:notif-count", (ev) => {
 // Cf #92 quick win #2 : refresh immediat des badges sidebar apres un undo.
 // Sans ca, les compteurs restent stales jusqu'au tick 30s de l'interval,
 // donnant l'impression que l'undo n'a pas fonctionne (perte de confiance).
+//
+// Ultra-audit 2026-08-03 (N01) : ce listener etait ORPHELIN — aucun module
+// n'emettait plus `cinesort:undo` depuis la migration ESM, donc les badges
+// restaient bien stales jusqu'au tick 30 s. Les deux proprietaires reels de
+// l'undo (views/traitement.js `_onUndoExecute` et views/historique.js
+// `_doUndoApply`) emettent desormais l'evenement apres un undo REUSSI.
 window.addEventListener("cinesort:undo", () => {
   // Best-effort : si la fonction n'est pas encore declaree (avant boot
   // complet), l'event est juste ignore.
@@ -517,6 +523,23 @@ window.addEventListener("cinesort:undo", () => {
     _loadSidebarCounters().catch(() => { /* silencieux */ });
   }
 });
+
+// Ultra-audit 2026-08-03 (N09) : `cinesort:refresh` etait dispatche a DEUX
+// endroits (F5 dans core/keyboard.js, entree « Rafraichir la vue » de la
+// palette Ctrl+K) et ecoute a ZERO. La palette se fermait sans rien
+// rafraichir, alors que son hint annonce « Equivalent F5 ».
+//
+// Fusion main <- PR #873 : les deux branches avaient corrige ce meme defaut,
+// chacune de son cote — ce lot posait l'auditeur ICI (`currentRoute()` +
+// navigateTo), la revue post-merge le posait dans `core/keyboard.js`
+// (`_refreshCurrentView`, au plus pres du dispatch). Les garder tous les deux
+// aurait fait DEUX `navigateTo` par F5, donc deux hashchange synchrones, donc
+// un double cleanup + double init() de la vue : double refetch reseau, et le
+// second remontage annulant les requetes du premier (abortCurrentNav). On ne
+// garde donc que celui de core/keyboard.js, deja sur main, dont l'auditeur est
+// une reference de module NOMMEE (addEventListener idempotent sur un double
+// initKeyboard) et qui preserve la query du hash courant.
+// L'unicite est verrouillee par `test_un_seul_auditeur_de_cinesort_refresh`.
 
 /* === Sync sidebar/breadcrumb au changement de route ====== */
 

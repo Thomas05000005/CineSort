@@ -29,7 +29,7 @@ from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
-from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
+from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
@@ -543,6 +543,19 @@ def _execute_undo_ops(
         op_id = int(op.get("id") or 0)
         current_path = Path(str(op.get("dst_path") or ""))
         target_path = Path(str(op.get("src_path") or ""))
+        # Un op_type `*_DIR` remet un DOSSIER entier en place. `shutil.move` degrade
+        # en copytree+rmtree des que `os.rename` echoue, y compris sur un banal
+        # verrou Windows d'UN fichier interne : la source ressort eventree et le
+        # contenu dedouble (mesure detaillee dans
+        # `move_journal._rename_or_cross_device_copy`). Sur l'undo — le filet de
+        # secours de l'utilisateur — l'erreur doit aller dans le sens RESTRICTIF :
+        # ne rien deplacer plutot que dedoubler, l'op est alors comptee FAILED et
+        # reste annulable. Les op_type `*_FILE` gardent `shutil.move`, dont la copie
+        # fait justement aboutir le deplacement d'un fichier verrouille en lecture
+        # partagee. Defaut `MOVE_FILE` pour une op sans type, comme
+        # `_resolve_hashed_target` : le comportement de ces lignes ne change pas.
+        _op_type_undo = str(op.get("op_type") or "MOVE_FILE").upper()
+        _undo_move = shutil.move if _op_type_undo.endswith("_FILE") else _rename_or_cross_device_copy
         try:
             if not current_path.exists():
                 skipped += 1
@@ -652,7 +665,7 @@ def _execute_undo_ops(
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
                     with journaled_move(store, src=current_path, dst=conflict_dst, op_type="UNDO_QUARANTINE"):
-                        shutil.move(str(current_path), str(conflict_dst))
+                        _undo_move(str(current_path), str(conflict_dst))
                 except FileNotFoundError:
                     _log.warning("undo: fichier disparu entre check et move (conflict): %s", current_path)
                     skipped += 1
@@ -695,7 +708,7 @@ def _execute_undo_ops(
             # CR-1 : journal write-ahead pour atomicite undo
             try:
                 with journaled_move(store, src=current_path, dst=target_path, op_type="UNDO_RESTORE"):
-                    shutil.move(str(current_path), str(target_path))
+                    _undo_move(str(current_path), str(target_path))
             except FileNotFoundError:
                 _log.warning("undo: fichier disparu entre check et move: %s", current_path)
                 skipped += 1
@@ -1060,9 +1073,20 @@ def undo_selected_rows(
         return _err_response(t("errors.no_reversible_batch"), category="state", level="info", log_module=__name__)
 
     bid = str(batch["batch_id"])
+    # Issue #593 : une SEULE coercition, partagee par la branche dry_run et par
+    # l'undo reel. Avant, le dry_run testait `r["row_id"] in row_ids` :
+    #   - `row_ids` etant une LISTE, chaque test etait O(M) -> O(N*M) au total ;
+    #   - et surtout SANS `str()`, alors que l'undo reel comparait
+    #     `set(str(r) for r in row_ids)`. Le corps REST est decode par
+    #     `json.loads` (rest_server.py:1267) : des row_ids envoyes en NOMBRES
+    #     JSON ne matchaient AUCUNE ligne du preview (ou `row_id` est toujours
+    #     une chaine, cf build_undo_by_row_preview:972) alors que l'undo reel,
+    #     lui, les retrouvait. L'apercu d'une action destructive annoncait donc
+    #     « 0 ligne » avant d'en annuler N.
+    target_row_ids = {str(r) for r in row_ids}
     if bool(dry_run):
         preview = build_undo_by_row_preview(api, run_id, batch_id=bid)
-        selected = [r for r in preview.get("rows", []) if r["row_id"] in row_ids]
+        selected = [r for r in preview.get("rows", []) if str(r["row_id"]) in target_row_ids]
         return {
             "ok": True,
             "batch_id": bid,
@@ -1088,7 +1112,7 @@ def undo_selected_rows(
         )
 
     # Collect all reversible PENDING ops for the selected row_ids.
-    target_row_ids = set(str(r) for r in row_ids)
+    # `target_row_ids` est construit plus haut (cf #593), partage avec le dry_run.
     all_ops = store.apply.list_apply_operations(batch_id=bid)
     selected_ops = [
         op
@@ -2067,8 +2091,30 @@ def _execute_apply(
             _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
             if not _ov:
                 continue
-            if int(_ov.get("tmdb_id") or 0) > 0:
-                _r.tmdb_id = int(_ov["tmdb_id"])
+            # Issue #805 : `_r.tmdb_id = int(_ov["tmdb_id"])` se trouvait ICI et
+            # ne servait a RIEN. `PlanRow` (domain/core.py:680) est un dataclass
+            # SANS champ `tmdb_id` et sans `__slots__` : l'affectation ne levait
+            # pas, elle fabriquait un attribut d'instance que personne ne relit
+            # jamais (les seuls lecteurs de `tmdb_id` visent `Candidate`, cf
+            # jellyfin_validation.py:20, radarr_sync.py:34). `apply_core` ne
+            # contient pas une seule occurrence du mot `tmdb_id` : la
+            # destination sur disque se calcule sur `proposed_title` et
+            # `proposed_year`, overlayes juste en dessous.
+            #
+            # Le retrait ne change donc AUCUN comportement observable — et c'est
+            # precisement le point : la ligne faisait croire a un mainteneur que
+            # l'identite TMDb choisie a la main voyageait jusqu'au renommage. Un
+            # attribut fantome sur un objet du chemin destructif est un piege,
+            # pas une fonctionnalite : le meme motif rend un test vert des mois
+            # durant alors que le code est mort en production.
+            #
+            # Ce que le retrait NE fait PAS : rendre l'override effectif sur
+            # l'identite. Un override qui ne change QUE le `tmdb_id` (remake au
+            # titre et a l'annee identiques) reste sans effet a l'apply. Le
+            # rendre effectif imposerait de resoudre ce `tmdb_id` en titre/annee
+            # canoniques, donc de reecrire un titre depuis le reseau au moment
+            # d'un apply : c'est un chemin de mutilation de titre, il se traite
+            # separement et sous test, pas en marge de cette suppression.
             if _ov.get("proposed_title"):
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
