@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import fnmatch
+import functools
 import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ from cinesort.domain.scan_helpers import (
     collect_non_video_extensions as _collect_non_video_extensions,
 )
 from cinesort.domain.scan_helpers import (
-    iter_videos,
+    iter_videos as _scan_iter_videos,
 )
 from cinesort.domain.title_helpers import (
     _expand_tmdb_queries,
@@ -58,10 +60,271 @@ if TYPE_CHECKING:
 # Aucun caller externe identifie (grep cinesort/ tests/). Si besoin futur,
 # importer depuis cinesort.app.cleanup directement.
 
-_COMPAT_SCAN_EXPORTS = (
-    _collect_non_video_extensions,
-    iter_videos,
-)
+_COMPAT_SCAN_EXPORTS = (_collect_non_video_extensions,)
+
+
+# =========================================================
+# PERIMETRE DU SCAN — patterns d'exclusion
+# =========================================================
+#
+# Le reglage UI « Patterns d'exclusion (glob) » (parametres.js, section
+# Sources > Exclusions) etait persiste depuis le fix du 2026-05-24 mais n'avait
+# AUCUN lecteur backend : ce que l'utilisateur croyait exclure du pipeline
+# destructif etait planifie et deplace comme le reste. Mesure du 2026-08-03 sur
+# un bac a sable de 5 films : 2 patterns designant 2 dossiers -> 5 lignes de
+# plan et 5 renommages de dossier en dry-run, exactement comme sans patterns.
+#
+# SEMANTIQUE RETENUE (volontairement explicite, elle est documentee ici parce
+# qu'un reglage de perimetre qui surprend est aussi dangereux qu'un reglage
+# inerte) :
+#
+#   - Un pattern est un glob de style fnmatch, insensible a la casse, les
+#     separateurs `\` et `/` etant equivalents (bibliotheque Windows).
+#   - Il est confronte, pour chaque fichier video candidat, a :
+#       * le nom du fichier               -> `*.tmp`
+#       * son chemin RELATIF a la racine  -> `_review/*`, `sauvegarde/*`
+#       * son chemin ABSOLU               -> `d:/films/_old/*`
+#       * les memes trois formes pour chacun de ses dossiers ANCETRES situes
+#         STRICTEMENT sous la racine      -> `sauvegarde` (dossier entier)
+#   - Le prefixe `**/` (« a n'importe quelle profondeur, y compris zero ») est
+#     couvert SANS traitement special : `fnmatch.translate` rend `*` capable de
+#     franchir les separateurs, et la forme ABSOLUE en contient toujours au
+#     moins un. `**/sample.*` matche donc aussi un `sample.mkv` pose a la
+#     racine. On ne depend ni du `**` de `PurePath.match` (non recursif) ni de
+#     `full_match()` (3.13 seulement) : la prod tourne aussi en 3.12.
+#   - `fnmatch.translate` ancre le motif de bout en bout (`\\Z`). Un pattern
+#     confronte a la forme absolue doit donc decrire le chemin ENTIER : une
+#     racine du genre `D:/Sauvegarde/Films` n'est pas emportee par un pattern
+#     `sauvegarde` destine a un sous-dossier.
+#
+# GARDE-FOU « une valeur deja saisie ne doit pas effacer la bibliotheque » :
+# le reglage n'ayant jamais eu d'effet, personne n'a jamais VALIDE sa saisie.
+# Trois regles de REFUS, et trois seulement, bornent donc le cablage. Elles sont
+# syntaxiques et exhaustivement enumerees a dessein : une heuristique du genre
+# « ce glob a-t-il l'air trop large ? » se serait iteree en cascade de cas
+# tordus, ce que ce depot proscrit.
+#   1. Pattern sans AUCUNE information discriminante — compose uniquement de
+#      jokers, separateurs, points et espaces (`*`, `**`, `**/*`, `*.*`, `.`,
+#      `/`...). Il matcherait tout chemin : scorie ou faute de frappe, jamais
+#      l'expression d'un perimetre.
+#   2. Pattern qui designe la RACINE elle-meme (`d:/films`, `d:/*`) : exclure la
+#      bibliotheque revient a ne rien scanner.
+#   3. Pattern de la forme `<racine>/<non discriminant>` (`d:/films/*`) : meme
+#      effet que 2, ecrit autrement. C'est la confusion plausible avec un champ
+#      « dossier a analyser ».
+# Les regles 2 et 3 dependent de la racine ; elles sont appliquees a la
+# construction du matcher, pas a la saisie.
+# Le reste (`*.mkv`, `films/*`) est applique tel quel : restreindre beaucoup
+# reste un choix legitime de l'utilisateur, et cette direction est la direction
+# SURE (moins de fichiers touches par l'apply, jamais plus). Les ancetres
+# confrontes s'arretent par ailleurs STRICTEMENT sous la racine : aucun dossier
+# situe au niveau de la racine ou au-dessus n'entre dans la comparaison.
+
+# Caracteres qui, seuls, ne discriminent rien. Un pattern entierement compose de
+# ces caracteres matche tout chemin -> refuse (regle de refus 1 ci-dessus).
+_EXCLUDE_NON_DISCRIMINANT_CHARS = frozenset("*/. \t")
+
+EXCLUDE_PATTERN_REASON = "ignore_pattern_exclu"
+
+
+def normalize_excluded_patterns(raw: Any) -> Tuple[str, ...]:
+    """Normalise la saisie utilisateur en patterns d'exclusion canoniques.
+
+    Accepte une liste/tuple/set de chaines ou une chaine unique (separateurs
+    `;`, `,`, retour a la ligne — les memes que le champ multi-path de l'UI).
+
+    Forme canonique : minuscules, `\\` remplace par `/`, separateurs de tete et
+    de queue retires, doublons supprimes en preservant l'ordre de saisie. Les
+    patterns non discriminants sont REFUSES (journalises en WARNING), cf. la
+    regle de refus 1 documentee plus haut. Les refus 2 et 3 (patterns qui
+    designent la racine) ont besoin de la racine : ils sont appliques par
+    `_compiled_exclude_matcher`.
+
+    Retourne un tuple (hashable) : il alimente un matcher compile en cache.
+    """
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        items: Iterable[Any] = re.split(r"[;,\r\n]", raw)
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = list(raw)
+    else:
+        logger.warning("excluded_patterns: type non supporte (%s) -> reglage ignore", type(raw).__name__)
+        return ()
+
+    out: List[str] = []
+    seen: Set[str] = set()
+    for item in items:
+        pattern = str(item or "").strip().strip('"').strip("'").replace("\\", "/").lower()
+        while "//" in pattern:
+            pattern = pattern.replace("//", "/")
+        pattern = pattern.strip("/").strip()
+        if not pattern:
+            continue
+        if not (set(pattern) - _EXCLUDE_NON_DISCRIMINANT_CHARS):
+            logger.warning(
+                "excluded_patterns: pattern %r REFUSE (il matcherait toute la bibliotheque)",
+                str(item),
+            )
+            continue
+        if pattern in seen:
+            continue
+        seen.add(pattern)
+        out.append(pattern)
+    return tuple(out)
+
+
+def _canonical_root(cfg: "Config") -> str:
+    """Racine sous forme canonique (minuscules, `/`, sans `/` final)."""
+    return str(getattr(cfg, "root", "") or "").replace("\\", "/").lower().rstrip("/")
+
+
+def _pattern_targets_root(pattern: str, root_canonical: str) -> bool:
+    """True si `pattern` reviendrait a exclure la racine entiere (refus 2 et 3).
+
+    Refus 2 : le pattern matche la racine elle-meme (`d:/films`, `d:/*`).
+    Refus 3 : le pattern vaut `<racine>/<non discriminant>` (`d:/films/**/*`).
+    """
+    if not root_canonical:
+        return False
+    if re.compile(fnmatch.translate(pattern)).match(root_canonical):
+        return True
+    prefix = root_canonical + "/"
+    if not pattern.startswith(prefix):
+        return False
+    remainder = pattern[len(prefix) :]
+    return not (set(remainder) - _EXCLUDE_NON_DISCRIMINANT_CHARS)
+
+
+@functools.lru_cache(maxsize=32)
+def _compiled_exclude_matcher(patterns: Tuple[str, ...], root_canonical: str) -> Optional[re.Pattern]:
+    """Compile les patterns en UNE regex (fnmatch.translate ancre chaque terme).
+
+    Applique au passage les refus 2 et 3 (patterns qui designent la racine), qui
+    ont besoin de la racine et ne pouvaient donc pas etre traites a la saisie.
+    Le cache evite de recompiler — et de re-journaliser — a chaque fichier : un
+    scan confronte le meme jeu de patterns a des milliers de chemins.
+    """
+    effective: List[str] = []
+    for pattern in patterns:
+        if _pattern_targets_root(pattern, root_canonical):
+            logger.warning(
+                "excluded_patterns: pattern %r REFUSE (il designe la racine %s)",
+                pattern,
+                root_canonical,
+            )
+            continue
+        effective.append(pattern)
+    if not effective:
+        return None
+    return re.compile("|".join(f"(?:{fnmatch.translate(p)})" for p in effective))
+
+
+def _exclusion_candidate_forms(cfg: "Config", path: Path) -> List[str]:
+    """Formes confrontees aux patterns pour `path` (cf. semantique documentee).
+
+    N'inclut JAMAIS la racine ni un dossier au-dessus d'elle : un pattern ne
+    peut donc pas exclure la bibliotheque entiere par son chemin.
+    """
+    full = str(path).replace("\\", "/").lower()
+    forms: List[str] = [full, path.name.lower()]
+
+    root_full = _canonical_root(cfg)
+    if not root_full or not full.startswith(root_full + "/"):
+        # Chemin hors racine (ne devrait pas arriver pendant un scan) : on ne
+        # fabrique aucun ancetre, faute de point d'ancrage fiable.
+        return forms
+
+    rel = full[len(root_full) :].lstrip("/")
+    if not rel:
+        return forms
+    forms.append(rel)
+
+    segments = rel.split("/")
+    # `range(len - 1, 0, -1)` : ancetres du fichier, du plus proche au plus
+    # haut, en s'arretant AVANT la racine (i >= 1 => au moins un segment).
+    for i in range(len(segments) - 1, 0, -1):
+        ancestor_rel = "/".join(segments[:i])
+        forms.append(ancestor_rel)
+        forms.append(segments[i - 1])
+        forms.append(f"{root_full}/{ancestor_rel}")
+    return forms
+
+
+def path_is_excluded(cfg: "Config", path: Path) -> bool:
+    """True si `path` tombe sous au moins un pattern d'exclusion de `cfg`."""
+    patterns = tuple(getattr(cfg, "excluded_patterns", ()) or ())
+    if not patterns:
+        return False
+    matcher = _compiled_exclude_matcher(patterns, _canonical_root(cfg))
+    if matcher is None:
+        return False
+    return any(matcher.match(form) for form in _exclusion_candidate_forms(cfg, path))
+
+
+def _bump_exclusion_reject(stats: Any) -> None:
+    """Compte un rejet « pattern d'exclusion » dans le bucket de `stats`.
+
+    Meme contrat defensif que `scan_helpers._bump_stats_reject` : `stats` peut
+    etre None (appelants historiques) ou un bucket local de worker qui ne porte
+    que `analyse_ignores_par_raison` (cf. `app/_local_candidate._LocalStats`).
+    """
+    if stats is None:
+        return
+    try:
+        bucket = getattr(stats, "analyse_ignores_par_raison", None)
+        if bucket is None:
+            return
+        bucket[EXCLUDE_PATTERN_REASON] = int(bucket.get(EXCLUDE_PATTERN_REASON, 0)) + 1
+    except (AttributeError, TypeError, ValueError):
+        return
+
+
+def iter_videos(
+    cfg: "Config",
+    folder: Path,
+    *,
+    min_video_bytes: int,
+    stats: Any = None,
+) -> List[Path]:
+    """`scan_helpers.iter_videos` + application des patterns d'exclusion.
+
+    C'est le point de passage OBLIGE des deux chemins de scan (sequentiel :
+    `app/plan_support_core._filter_dossiers_phase` ; parallele :
+    `app/_local_candidate.extract_local_candidate`), qui appellent tous deux
+    `core_mod.iter_videos`. Un fichier exclu ne produit donc aucune ligne de
+    plan, et un dossier dont TOUTES les videos sont exclues retombe dans la
+    branche `videos == []` : il n'est ni planifie ni deplace.
+
+    Le filtre est pose ICI et pas dans `scan_helpers` parce que la decouverte
+    des dossiers (`discover_candidate_folders`) reste volontairement inchangee :
+    elle continue de descendre dans un dossier exclu (cout en temps de scan,
+    aucun effet sur le plan). Fermer aussi cette porte est une optimisation, pas
+    une garantie supplementaire.
+    """
+    videos = _scan_iter_videos(cfg, folder, min_video_bytes=min_video_bytes, stats=stats)
+    patterns = tuple(getattr(cfg, "excluded_patterns", ()) or ())
+    if not patterns or not videos:
+        return videos
+
+    kept: List[Path] = []
+    excluded_count = 0
+    for video in videos:
+        if path_is_excluded(cfg, video):
+            excluded_count += 1
+            _bump_exclusion_reject(stats)
+            continue
+        kept.append(video)
+    if excluded_count:
+        # WARNING et pas DEBUG : une video qui disparait du plan sans trace est
+        # exactement le « reglage muet » que ce cablage corrige.
+        logger.warning(
+            "scan: %d video(s) exclue(s) par pattern dans %s (patterns=%s)",
+            excluded_count,
+            folder,
+            ";".join(patterns),
+        )
+    return kept
 
 
 # =========================================================
@@ -242,6 +505,11 @@ class Config:
     side_exts: Set[str] = None
     generic_side_files: Set[str] = None
 
+    # Reglage UI « Patterns d'exclusion (glob) ». Tuple (dataclass frozen) de
+    # patterns CANONIQUES : cf. `normalize_excluded_patterns` et la semantique
+    # documentee en tete de module. Vide = aucun filtre (defaut historique).
+    excluded_patterns: Tuple[str, ...] = ()
+
     detect_extras_in_single_folder: bool = True
     extras_size_ratio: float = 4.0
     skip_tv_like: bool = True
@@ -322,6 +590,11 @@ class Config:
             video_exts=set(x.lower() for x in (self.video_exts or VIDEO_EXTS_DEFAULT)),
             side_exts=set(x.lower() for x in (self.side_exts or SIDE_EXTS_DEFAULT)),
             generic_side_files=set(x.lower() for x in (self.generic_side_files or GENERIC_SIDE_FILES_DEFAULT)),
+            # Re-normalise ici comme `separator` : `plan_support_core` appelle
+            # `cfg.normalized()` et un Config fabrique a la main (tests, replace(),
+            # settings.json edite hors UI) doit obtenir la meme forme canonique
+            # ET le meme refus des patterns non discriminants.
+            excluded_patterns=normalize_excluded_patterns(self.excluded_patterns),
             detect_extras_in_single_folder=self.detect_extras_in_single_folder,
             extras_size_ratio=float(self.extras_size_ratio),
             skip_tv_like=self.skip_tv_like,
@@ -1467,6 +1740,7 @@ ANALYSE_IGNORE_LABELS_FR = {
     # de fichier video assez gros (ou pas de video du tout).
     "ignore_non_supporte": "Ignoré (aucun fichier vidéo exploitable)",
     "ignore_chemin_invalide": "Ignoré (chemin invalide)",
+    EXCLUDE_PATTERN_REASON: "Ignoré (pattern d'exclusion)",
     "ignore_autre": "Ignoré (autre)",
 }
 
