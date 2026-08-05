@@ -5,7 +5,6 @@ import io
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -91,7 +90,12 @@ from cinesort.ui.api import (
 )
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._responses import safe_integration_error as _safe_integration_error
-from cinesort.ui.api._validators import clamp_non_negative_int, clamp_timeout
+from cinesort.ui.api._validators import (
+    RUN_ID_RE,  # noqa: F401  (back-compat re-export, cf issue #427)
+    clamp_non_negative_int,
+    clamp_timeout,
+    is_valid_run_id,
+)
 from cinesort.ui.api.facades import (
     IntegrationsFacade,
     LibraryFacade,
@@ -162,7 +166,9 @@ DEFAULT_RESIDUAL_CLEANUP_FOLDER_NAME = "_Dossier Nettoyage"
 DEFAULT_PROBE_BACKEND = "auto"
 MAX_RUN_LOG_ITEMS = 5000
 MAX_TERMINAL_RUNS_IN_MEMORY = 50
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{4,80}$")
+# `RUN_ID_RE` n'est plus DEFINI ici : l'invariant vit dans `_validators`, seul
+# domicile ou tout le paquet `ui` peut le prendre en import top-level (cf #427).
+# Le nom reste accessible via le re-export en tete de fichier.
 
 
 def _cleanup_scope_label(scope: str) -> str:
@@ -283,8 +289,7 @@ class CineSortApi:
             pass  # Ne jamais bloquer pour un email
 
     def _is_valid_run_id(self, run_id: Any) -> bool:
-        rid = str(run_id or "").strip()
-        return bool(RUN_ID_RE.fullmatch(rid))
+        return is_valid_run_id(run_id)
 
     def _resolve_payload_state_dir(self, settings: Dict[str, Any]) -> Tuple[Path, bool]:
         return settings_support.resolve_payload_state_dir(settings, default_state_dir=self._get_state_dir())
