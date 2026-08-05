@@ -17,6 +17,7 @@ garantie d'atomicite mais l'apply continue.
 
 from __future__ import annotations
 
+import errno
 import logging
 import shutil
 import sqlite3
@@ -25,6 +26,40 @@ from pathlib import Path
 from typing import Any, Iterator, Optional, Union
 
 _logger = logging.getLogger(__name__)
+
+# ERROR_NOT_SAME_DEVICE : Windows ne renseigne pas toujours errno.EXDEV sur un
+# rename inter-volumes, on teste donc aussi le winerror brut.
+_WINERROR_NOT_SAME_DEVICE = 17
+
+
+def _is_cross_device(exc: OSError) -> bool:
+    return getattr(exc, "errno", None) == errno.EXDEV or getattr(exc, "winerror", None) == _WINERROR_NOT_SAME_DEVICE
+
+
+def _rename_or_cross_device_copy(src: Union[Path, str], dst: Union[Path, str]) -> None:
+    """`os.rename` d'abord ; ne degrade en copie que sur un VRAI EXDEV.
+
+    `shutil.move` retombe sur copytree + rmtree des que `os.rename` echoue, y
+    compris sur un banal verrou Windows sur UN fichier interne (indexeur,
+    antivirus, apercu Explorateur, editeur de .nfo). Mesure sur Windows 11 avec
+    un simple `open()` sur `BBB/film.srt` :
+
+    - `Path.rename` -> PermissionError WinError 5, source INTACTE (3 fichiers),
+      destination ABSENTE ; rien n'a bouge.
+    - `shutil.move`  -> PermissionError WinError 32, destination contenant les
+      3 fichiers ET source amputee de `film.nfo` : contenu dedouble, source
+      eventree.
+
+    Sur un chemin destructif, l'erreur doit aller dans le sens RESTRICTIF : ne
+    rien deplacer plutot que dedoubler. La copie reste le seul recours quand les
+    deux chemins sont sur des volumes differents, et ce cas-la seul la declenche.
+    """
+    try:
+        Path(src).rename(dst)
+    except OSError as exc:
+        if not _is_cross_device(exc):
+            raise
+        shutil.move(str(src), str(dst))
 
 
 @contextmanager
@@ -190,18 +225,28 @@ def atomic_move(
     src_sha1: Optional[str] = None,
     src_size: Optional[int] = None,
     row_id: Optional[str] = None,
+    allow_copy_fallback: bool = True,
 ) -> None:
     """Helper drop-in pour remplacer `shutil.move(str(src), str(dst))` dans
     apply_core.py / cleanup.py.
 
     Si record_op est un RecordOpWithJournal (ou tout objet avec attribut
-    journal_store), on enrobe shutil.move dans journaled_move(). Sinon on
-    fait juste shutil.move direct (rétro-compatibilite tests).
+    journal_store), on enrobe le deplacement dans journaled_move(). Sinon on
+    deplace direct (rétro-compatibilite tests).
+
+    `allow_copy_fallback=False` (chemins qui deplacent un DOSSIER entier, cf.
+    `cleanup._move_dirs_to_bucket`) : `os.rename` d'abord, degradation en copie
+    UNIQUEMENT sur un vrai EXDEV. Cf. `_rename_or_cross_device_copy` — un verrou
+    Windows sur un seul fichier interne ne doit pas dedoubler le contenu et
+    eventrer la source. Le journal write-ahead reste pose dans les deux cas :
+    c'est lui qui rend le deplacement reconciliable si l'app meurt entre le
+    deplacement et le `record_apply_op` du call site.
     """
+    move_fn = shutil.move if allow_copy_fallback else _rename_or_cross_device_copy
     store = getattr(record_op, "journal_store", None)
     batch_id = getattr(record_op, "journal_batch_id", None)
     if store is None:
-        shutil.move(str(src), str(dst))
+        move_fn(str(src), str(dst))
         return
     with journaled_move(
         store,
@@ -213,4 +258,4 @@ def atomic_move(
         src_size=src_size,
         row_id=row_id,
     ):
-        shutil.move(str(src), str(dst))
+        move_fn(str(src), str(dst))

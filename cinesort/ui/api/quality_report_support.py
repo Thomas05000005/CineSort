@@ -164,7 +164,8 @@ def _probe_and_score(
                 tmdb_id_lookup = int(c.tmdb_id)
                 break
         if tmdb_id_lookup > 0:
-            # Fix ultra-audit 2026-08-03 : `api._tmdb_client()` n'existe PAS sur
+            # Fix ultra-audit 2026-08-03 (= AUDIT 2026-07-17 / PR#761, meme
+            # defaut trouve deux fois) : `api._tmdb_client()` n'existe PAS sur
             # CineSortApi (aucun `def _tmdb_client` ni `self._tmdb_client =` dans
             # le depot). Le `hasattr` avalait l'absence en silence -> `tmdb` etait
             # TOUJOURS None -> `tmdb_genres` toujours vide -> tout le scoring
