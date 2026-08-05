@@ -199,7 +199,10 @@ def _empty_dashboard_payload(mode: str, runs_history: List[Dict[str, Any]]) -> D
         "anomalies_top": [],
         "outliers": {"low_bitrate": [], "sdr_4k": [], "vo_missing": []},
         "runs_history": runs_history,
-        "message": "Aucun run disponible pour le dashboard.",
+        # #494 : ce `message` part tel quel dans le JSON lu par le dashboard ET
+        # par les clients REST externes. Ecrit en dur, il court-circuitait
+        # l'i18n : un utilisateur en locale `en` recevait du francais.
+        "message": t("dashboard.no_run_available"),
     }
 
 
@@ -1459,24 +1462,35 @@ def _compute_score_trend(quality_counts: Dict[str, Dict[str, Any]], run_ids: Lis
 
 
 def _compute_health_trend(timeline: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calcule le delta de sante entre les 2 derniers runs ayant un snapshot."""
+    """Calcule le delta de sante entre les 2 derniers runs ayant un snapshot.
+
+    #494 : les CINQ messages sont traduits, pas seulement celui que l'issue
+    citait. N'en traduire qu'un aurait produit un payload bilingue — un client
+    en locale `en` aurait lu "No data" au premier run puis
+    "↑ +3% depuis le dernier run" au second.
+    """
     points_with_hs = [p for p in reversed(timeline) if p.get("health_score") is not None]
     if len(points_with_hs) < 1:
-        return {"arrow": "→", "delta": 0, "message": "Pas de donnees", "current": None}
+        return {"arrow": "→", "delta": 0, "message": t("dashboard.health_trend_no_data"), "current": None}
     current = int(points_with_hs[0].get("health_score", 0))
     if len(points_with_hs) < 2:
-        return {"arrow": "→", "delta": 0, "message": f"Sante : {current}%", "current": current}
+        return {
+            "arrow": "→",
+            "delta": 0,
+            "message": t("dashboard.health_trend_current", score=current),
+            "current": current,
+        }
     previous = int(points_with_hs[1].get("health_score", 0))
     delta = current - previous
     if delta > 0:
         arrow = "↑"
-        msg = f"↑ +{delta}% depuis le dernier run"
+        msg = t("dashboard.health_trend_up", delta=delta)
     elif delta < 0:
         arrow = "↓"
-        msg = f"↓ {delta}% depuis le dernier run"
+        msg = t("dashboard.health_trend_down", delta=delta)
     else:
         arrow = "→"
-        msg = "→ Stable"
+        msg = t("dashboard.health_trend_stable")
     return {"arrow": arrow, "delta": delta, "message": msg, "current": current}
 
 

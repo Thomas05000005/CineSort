@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.conversions import to_bool
 from cinesort.infra import state
+from cinesort.infra.log_context import clear_run_id, set_run_id
 from cinesort.ui.api import library_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import normalize_user_path
@@ -310,8 +311,23 @@ def _set_job_status(job_id: str, **changes: Any) -> None:
 
 
 def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) -> None:
-    """Thread worker qui rescore tous les films d'un run via la facade quality."""
+    """Thread worker qui rescore tous les films d'un run via la facade quality.
+
+    #594 — `threading.Thread` ne copie PAS le contexte `contextvars` du parent
+    (cf. la note de `infra/log_context.py`). Sans le `set_run_id` ci-dessous,
+    TOUTES les lignes emises depuis ce thread sortent avec `[run=-]` : les
+    echecs par film (`recompute_worker error row_id=...`) et le plantage fatal
+    ne sont plus rattachables au run qu'ils decrivent, alors que le job dure
+    plusieurs minutes en concurrence avec le reste de l'application. Meme
+    pattern que `JobRunner._run_worker` (`app/job_runner.py:515`).
+
+    Le `request_id` n'est deliberement PAS propage : `recompute_all_scores` a
+    deja rendu sa reponse HTTP quand ce thread demarre. L'estampiller
+    attribuerait a une requete terminee des lignes emises des minutes plus
+    tard — une valeur fausse, pire que la valeur absente.
+    """
     total = len(row_ids)
+    set_run_id(run_id)
     _set_job_status(job_id, status="running", started_ts=time.time(), progress=0, total=total)
 
     processed = 0
@@ -397,6 +413,11 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
             errors=errors,
             ended_ts=time.time(),
         )
+    finally:
+        # Le ContextVar meurt avec le thread, mais on ne parie pas la-dessus :
+        # une future execution du worker dans un pool reutiliserait le thread
+        # et heriterait d'un run_id perime.
+        clear_run_id()
 
 
 def recompute_all_scores(api: Any) -> Dict[str, Any]:
