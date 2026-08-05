@@ -2078,8 +2078,30 @@ def _execute_apply(
             _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
             if not _ov:
                 continue
-            if int(_ov.get("tmdb_id") or 0) > 0:
-                _r.tmdb_id = int(_ov["tmdb_id"])
+            # Issue #805 : `_r.tmdb_id = int(_ov["tmdb_id"])` se trouvait ICI et
+            # ne servait a RIEN. `PlanRow` (domain/core.py:680) est un dataclass
+            # SANS champ `tmdb_id` et sans `__slots__` : l'affectation ne levait
+            # pas, elle fabriquait un attribut d'instance que personne ne relit
+            # jamais (les seuls lecteurs de `tmdb_id` visent `Candidate`, cf
+            # jellyfin_validation.py:20, radarr_sync.py:34). `apply_core` ne
+            # contient pas une seule occurrence du mot `tmdb_id` : la
+            # destination sur disque se calcule sur `proposed_title` et
+            # `proposed_year`, overlayes juste en dessous.
+            #
+            # Le retrait ne change donc AUCUN comportement observable — et c'est
+            # precisement le point : la ligne faisait croire a un mainteneur que
+            # l'identite TMDb choisie a la main voyageait jusqu'au renommage. Un
+            # attribut fantome sur un objet du chemin destructif est un piege,
+            # pas une fonctionnalite : le meme motif rend un test vert des mois
+            # durant alors que le code est mort en production.
+            #
+            # Ce que le retrait NE fait PAS : rendre l'override effectif sur
+            # l'identite. Un override qui ne change QUE le `tmdb_id` (remake au
+            # titre et a l'annee identiques) reste sans effet a l'apply. Le
+            # rendre effectif imposerait de resoudre ce `tmdb_id` en titre/annee
+            # canoniques, donc de reecrire un titre depuis le reseau au moment
+            # d'un apply : c'est un chemin de mutilation de titre, il se traite
+            # separement et sous test, pas en marge de cette suppression.
             if _ov.get("proposed_title"):
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
