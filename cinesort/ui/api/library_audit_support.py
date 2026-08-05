@@ -353,9 +353,19 @@ def _fetch_collection_parts(
             return None
         cache_key = f"collection_parts|{int(collection_id)}"
         cached = tmdb._cache_get(cache_key)
-        # isinstance(list) et pas `is not None` : une entree de cache corrompue
-        # (JSON venu du disque) ne doit pas etre servie telle quelle.
-        if isinstance(cached, list):
+        # La garde ne validait que le CONTENEUR : `isinstance(cached, list)`
+        # acceptait `["corrompu"]`, et `get_incomplete_sagas` appelait ensuite
+        # `part.get("title")` sur une chaine -> AttributeError, endpoint en
+        # echec. Le commentaire promettait pourtant qu'une entree corrompue
+        # « ne doit pas etre servie telle quelle » : il decrivait une intention
+        # que le code ne tenait pas.
+        #
+        # On valide donc chaque ELEMENT contre la forme normalisee que le
+        # chemin d'ecriture produit plus bas (`tmdb_id` / `title` / `year`).
+        # Un cache malforme est traite comme ABSENT : on re-interroge TMDb.
+        # C'est le bon sens de l'erreur — un miss de cache coute un appel
+        # reseau, un endpoint en echec coute la fonctionnalite entiere.
+        if _parts_cache_valide(cached):
             return cached
         # Appel direct collection/{id}
         url = f"https://api.themoviedb.org/3/collection/{int(collection_id)}"
@@ -387,6 +397,19 @@ def _fetch_collection_parts(
     except Exception as exc:  # noqa: BLE001
         logger.debug("_fetch_collection_parts error cid=%s: %s", collection_id, exc)
         return None
+
+
+def _parts_cache_valide(cached: Any) -> bool:
+    """Le cache porte-t-il bien une liste d'entrees a la forme attendue ?
+
+    Forme normalisee produite par `_fetch_collection_parts` : des dicts portant
+    `tmdb_id`, `title` et `year`. Une liste VIDE est valide — c'est le resultat
+    legitime d'une collection sans partie manquante, et la refuser relancerait
+    un appel TMDb a chaque consultation.
+    """
+    if not isinstance(cached, list):
+        return False
+    return all(isinstance(part, dict) and "title" in part and "year" in part for part in cached)
 
 
 def get_incomplete_sagas(api: Any) -> Dict[str, Any]:

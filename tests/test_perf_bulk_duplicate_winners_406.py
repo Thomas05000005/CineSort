@@ -76,6 +76,11 @@ class BulkReloadCountTests(_BulkTestBase):
         """MESURE : appels a check_duplicates. AVANT : N. APRES : 1."""
         for count in (3, 40):
             with self.subTest(decisions=count):
+                # `unittest` a DEJA appele setUp avant cette methode : sans ce
+                # tearDown, le premier tour reassignait `self._tmp` et le
+                # dossier initial n'etait jamais supprime. Un `cs_406_bulk_*`
+                # restait dans le repertoire temporaire a chaque execution.
+                self.tearDown()
                 self.setUp()
                 try:
                     reload_probe = _CountingReload(_groups(count))
