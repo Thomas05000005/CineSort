@@ -1,0 +1,590 @@
+"""Invariants anti « fonctionnalite silencieusement morte » (issues #441/#447/#729/#730).
+
+La famille de bugs visee :
+
+    du code lit un attribut ou une clef qui N'EXISTE PAS, un fallback falsy
+    (`getattr(x, "y", None)`, `r.get("z") or 0`) masque le contrat rompu, donc
+    aucune exception n'est levee, aucun log n'est emis, et la fonctionnalite
+    est morte pour toujours.
+
+Elle a survecu si longtemps parce que les tests etaient VERTS : les mocks
+(`api._store = MagicMock()`) CREENT l'attribut que la production n'a jamais
+eu. Les deux verrous ci-dessous suppriment cette echappatoire :
+
+1. `PlanRowKeyContractTests` : passe de vraies PlanRow serialisees a
+   `_build_library_rows`, encapsulees dans un dict qui LEVE des qu'on lit une
+   clef absente du dataclass `PlanRow` et hors de la liste — courte et
+   documentee — des clefs d'enrichissement reellement posees en production.
+2. `ApiAttributeContractTests` : enumere par AST toutes les lectures
+   d'attribut sur `api` dans `cinesort/ui/api/` — forme `getattr`/`hasattr`
+   ET forme `api._x` directe — et exige que le nom existe reellement sur
+   `CineSortApi` (introspection + `self._x = ...` du corps de la classe +
+   `api._x = ...` pose en lazy-init par un module *_support).
+"""
+
+from __future__ import annotations
+
+import ast
+import os
+import pathlib
+import tempfile
+import unittest
+from dataclasses import asdict, fields
+from typing import Any, Dict, List, Set, Tuple
+from unittest import mock
+
+from cinesort.domain.core import PlanRow
+from cinesort.ui.api import library_support
+from cinesort.ui.api.cinesort_api import CineSortApi
+from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY
+
+_REPO_ROOT = pathlib.Path(library_support.__file__).resolve().parents[3]
+_PKG_ROOT = _REPO_ROOT / "cinesort"
+_UI_API_ROOT = _PKG_ROOT / "ui" / "api"
+
+# Clefs ABSENTES de PlanRow mais reellement posees sur le payload avant qu'il
+# n'atteigne les consommateurs. Toute autre clef lue est un bug.
+_ENRICHMENT_KEYS = {
+    # film_support.overlay_tmdb_override (choix manuel de candidat TMDb)
+    "tmdb_id",
+    "chosen_tmdb_id",
+    # Marqueur fail-closed pose par overlay_tmdb_override / apply_tmdb_overrides_bulk
+    # (PR #849). Ce n'est PAS un champ de PlanRow et ne doit pas le devenir : c'est
+    # un accuse de reception passe entre deux etages du pipeline, et son absence
+    # signifie « overlay pas applique », d'ou la relecture unitaire. Importe plutot
+    # que recopie en litteral : une renomme du marqueur casserait le contrat en
+    # silence si ce test en gardait sa propre copie.
+    TMDB_OVERLAY_DONE_KEY,
+    # history_support._enrich_plan_payload
+    "display_title",
+    "auto_approvable",
+    # DETTE CONNUE : `nfo_title` n'existe sur aucun contrat (ni PlanRow ni
+    # enrichissement). Il n'est lu qu'en 2e terme d'un `or` dont le 1er
+    # (`proposed_title`) est toujours present, donc l'effet est nul — mais le
+    # meme idiome est copie dans 5 modules ui/api + le frontend. A traiter en
+    # une passe dediee, pas en rustine locale.
+    "nfo_title",
+}
+
+_PLAN_ROW_FIELDS = {f.name for f in fields(PlanRow)}
+_ALLOWED_PLAN_ROW_KEYS = _PLAN_ROW_FIELDS | _ENRICHMENT_KEYS
+
+# Modules dont ce test exige ZERO attribut fantome (perimetre du correctif).
+_OWNED_MODULES = {"library_support.py", "quality_simulator_support.py"}
+
+# Ratchet : attributs fantomes deja presents ailleurs dans ui/api, chacun
+# rattache a une issue ouverte. Un NOUVEAU nom fait echouer le test. On teste
+# l'inclusion (et non l'egalite) pour qu'une correction concurrente sur une
+# autre branche ne casse pas ce test au merge.
+_KNOWN_PHANTOM_ATTRS = {
+    "_tmdb_client",  # issues #760 / #801 — library_audit_support, quality_report_support
+    "_close_infra",  # reset_support.py:472 — hasattr toujours False
+}
+
+
+# ---------------------------------------------------------------------------
+# 1. Contrat de clefs des PlanRow serialisees
+# ---------------------------------------------------------------------------
+
+
+class _PhantomKeyError(AssertionError):
+    pass
+
+
+class _PlanRowCanary(dict):
+    """PlanRow serialisee qui refuse d'etre interrogee sur une clef fantome.
+
+    En production ces lectures renvoient `None` en silence ; ici elles levent.
+
+    `strict=False` passe en mode ENREGISTREUR : la lecture fantome est notee
+    dans `seen` mais ne leve pas. Ce mode sert au ratchet des consommateurs
+    de PlanRow situes HORS du perimetre de ce correctif (cf
+    `PlanRowConsumerRatchetTests`) : on veut mesurer leur dette sans faire
+    echouer la barriere sur un fichier qu'on n'a pas le droit de corriger.
+    """
+
+    def __init__(self, data: Dict[str, Any], seen: Set[str], strict: bool = True):
+        super().__init__(data)
+        self._seen = seen
+        self._strict = strict
+
+    def _check(self, key: Any) -> None:
+        self._seen.add(str(key))
+        if key not in _ALLOWED_PLAN_ROW_KEYS and self._strict:
+            raise _PhantomKeyError(
+                f"lecture de la clef fantome {key!r} sur une PlanRow serialisee. "
+                f"PlanRow ne declare pas ce champ et aucun enrichissement ne le pose : "
+                f"la valeur vaudra None EN PERMANENCE et le fallback falsy la rendra "
+                f"invisible. Champs disponibles : {sorted(_PLAN_ROW_FIELDS)}"
+            )
+
+    def get(self, key, default=None):  # type: ignore[override]
+        self._check(key)
+        return super().get(key, default)
+
+    def __getitem__(self, key):  # type: ignore[override]
+        self._check(key)
+        return super().__getitem__(key)
+
+
+class _FakeRepo:
+    def __init__(self, rows: List[Dict[str, Any]]):
+        self._rows = rows
+
+    def list_perceptual_reports(self, run_id=None):
+        return list(self._rows)
+
+    def list_quality_reports(self, run_id=None):
+        return list(self._rows)
+
+
+class _FakeFilmModalRepo:
+    def __init__(self):
+        self.marks: List[Dict[str, Any]] = []
+
+    def get_tmdb_override(self, run_id=None, row_id=None):
+        return None
+
+    def mark_for_deletion(self, *, run_id, row_id, source_path=""):
+        self.marks.append({"run_id": run_id, "row_id": row_id, "source_path": source_path})
+        return {"ok": True, "marked_at": 1234.5}
+
+
+class _FakeStore:
+    def __init__(self):
+        self.perceptual = _FakeRepo([])
+        self.quality = _FakeRepo([])
+        self.film_modal = _FakeFilmModalRepo()
+
+
+class _FakeSettingsFacade:
+    def __init__(self, state_dir: str):
+        self._state_dir = state_dir
+
+    def get_settings(self):
+        return {"state_dir": self._state_dir}
+
+
+class _FakeRunFacade:
+    def __init__(self, rows: List[Dict[str, Any]]):
+        self._rows = rows
+
+    def get_plan(self, run_id):
+        return {"ok": True, "rows": self._rows}
+
+
+class _FakeIntegrationsFacade:
+    def get_tmdb_posters(self, tmdb_ids, size):
+        return {"ok": True, "posters": {}}
+
+
+class _FakeApi:
+    """Surface REELLE de CineSortApi utilisee par `_build_library_rows`.
+
+    Deliberement pas un MagicMock : un MagicMock cree a la volee l'attribut
+    manquant, ce qui est precisement l'angle mort qui a laisse vivre #441.
+    """
+
+    def __init__(self, rows: List[Dict[str, Any]], state_dir: str):
+        self.settings = _FakeSettingsFacade(state_dir)
+        self.run = _FakeRunFacade(rows)
+        self.integrations = _FakeIntegrationsFacade()
+        self.store = _FakeStore()
+
+    def _get_or_create_infra(self, state_dir):
+        return (self.store, None)
+
+
+def _make_plan_row(folder: str, video: str) -> Dict[str, Any]:
+    row = PlanRow(
+        row_id="ROW1",
+        kind="single",
+        folder=folder,
+        video=video,
+        proposed_title="Blade Runner 2049",
+        proposed_year=2017,
+        proposed_source="nfo",
+        confidence=95,
+        confidence_label="high",
+        candidates=[],
+    )
+    return asdict(row)
+
+
+class PlanRowKeyContractTests(unittest.TestCase):
+    """#447 / #730 : `_build_library_rows` ne doit lire QUE des champs reels."""
+
+    def _build(self, tmp: pathlib.Path) -> Tuple[List[Dict[str, Any]], Set[str]]:
+        folder = tmp / "Blade Runner 2049 (2017)"
+        folder.mkdir(parents=True, exist_ok=True)
+        video = folder / "Blade.Runner.2049.2017.1080p.BluRay.x264-GRP.mkv"
+        video.write_bytes(b"x" * 4096)
+
+        seen: Set[str] = set()
+        payload = _PlanRowCanary(_make_plan_row(str(folder), video.name), seen)
+        api = _FakeApi([payload], str(tmp))
+        rows = library_support._build_library_rows(api, "RUN1")
+        return rows, seen
+
+    def test_no_phantom_key_is_read_on_plan_rows(self):
+        """ROUGE avant le correctif : `mtime`, `source_path` et `size_bytes`.
+
+        Aucune des trois n'est un champ de PlanRow ; elles renvoyaient None,
+        `or 0` / `or ""` les avalait, et `added_ts`/`path`/`size_bytes`
+        etaient donc morts pour tous les films.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            rows, seen = self._build(pathlib.Path(td))
+        self.assertEqual(len(rows), 1)
+        # Le canari LEVE des la 1re clef fantome, donc arriver ici suffit
+        # deja. On verifie en plus qu'il a bien ete SOLLICITE : un canari que
+        # `_build_library_rows` n'interrogerait plus (payload remplace,
+        # court-circuit...) passerait sinon en silence, ce qui serait le meme
+        # faux vert que celui qu'on corrige.
+        self.assertTrue({"folder", "video", "row_id"} <= seen, f"canari non sollicite : {sorted(seen)}")
+        phantom = sorted(k for k in seen if k not in _ALLOWED_PLAN_ROW_KEYS)
+        self.assertEqual(phantom, [], f"clefs fantomes lues : {phantom}")
+
+    def test_path_added_ts_and_size_are_derived_from_folder_and_video(self):
+        """Le correctif doit produire des valeurs REELLES, pas juste ne pas lever."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            rows, _ = self._build(tmp)
+            row = rows[0]
+            video = tmp / "Blade Runner 2049 (2017)" / "Blade.Runner.2049.2017.1080p.BluRay.x264-GRP.mkv"
+
+            self.assertEqual(row["path"], str(video))
+            self.assertEqual(row["size_bytes"], 4096)
+            self.assertAlmostEqual(row["added_ts"], video.stat().st_mtime, places=3)
+            # Non-regression : la date reelle rend le chip "recemment modifie"
+            # a nouveau capable de repondre True (il etait fige a False).
+            self.assertTrue(library_support._row_recently_modified(row, video.stat().st_mtime, 60.0))
+
+    def test_missing_media_degrades_without_raising(self):
+        """Root debranche / dossier deplace : (0.0, 0), jamais d'exception."""
+        row = {"folder": r"Z:\introuvable", "video": "absent.mkv"}
+        self.assertEqual(library_support.plan_row_fs_facts(row, {}), (0.0, 0))
+        self.assertTrue(library_support.plan_row_media_path(row).endswith("absent.mkv"))
+
+    def test_media_path_falls_back_to_folder_when_video_unknown(self):
+        self.assertEqual(library_support.plan_row_media_path({"folder": "/a/b", "video": ""}), "/a/b")
+        self.assertEqual(library_support.plan_row_media_path({"folder": "", "video": ""}), "")
+
+    def test_fs_facts_on_folder_only_row(self):
+        """PlanRow "single" dont le fichier n'a pas ete resolu : on stat le dossier.
+
+        Couvre la branche `os.stat` de `plan_row_fs_facts` et l'appel sans
+        cache explicite (le defaut `None` doit s'auto-initialiser).
+        """
+        with tempfile.TemporaryDirectory() as td:
+            folder = pathlib.Path(td) / "Film sans video"
+            folder.mkdir()
+            mtime, size = library_support.plan_row_fs_facts({"folder": str(folder), "video": ""})
+            expected_mtime = folder.stat().st_mtime
+        self.assertAlmostEqual(mtime, expected_mtime, places=3)
+        self.assertGreaterEqual(size, 0)
+
+    def test_fs_facts_on_empty_row(self):
+        """Ni folder ni video : (0.0, 0), sans toucher au disque."""
+        self.assertEqual(library_support.plan_row_fs_facts({}), (0.0, 0))
+        self.assertEqual(library_support.plan_row_fs_facts({"folder": "  ", "video": ""}), (0.0, 0))
+
+    def test_fs_facts_on_missing_folder_only_row(self):
+        """Dossier absent et pas de video : (0.0, 0), pas d'exception."""
+        self.assertEqual(library_support.plan_row_fs_facts({"folder": r"Z:\introuvable", "video": ""}), (0.0, 0))
+
+    def test_one_unreadable_entry_does_not_kill_the_whole_folder(self):
+        """Un fichier illisible ne doit pas priver les AUTRES films du dossier.
+
+        Sans le `except OSError: continue` par entree, un seul fichier
+        verrouille (antivirus, WinError 32) rendrait `added_ts`/`size_bytes`
+        morts pour tous les films du meme dossier — la regression exacte
+        qu'on vient de corriger, en plus discret.
+        """
+
+        class _Boom:
+            name = "verrouille.mkv"
+
+            def stat(self, **kwargs):
+                raise PermissionError("verrouille")
+
+        class _Ok:
+            name = "lisible.mkv"
+
+            def stat(self, **kwargs):
+                return os.stat_result((0o100644, 0, 0, 1, 0, 0, 4096, 0, 1234.5, 0))
+
+        class _FakeScandir:
+            def __enter__(self):
+                return iter([_Boom(), _Ok()])
+
+            def __exit__(self, *exc):
+                return False
+
+        with mock.patch.object(library_support.os, "scandir", return_value=_FakeScandir()):
+            facts = library_support._folder_fs_facts("peu importe", {})
+
+        self.assertNotIn("verrouille.mkv", facts)
+        self.assertEqual(facts["lisible.mkv"], (1234.5, 4096))
+
+    def test_fs_facts_reuses_one_scandir_per_folder(self):
+        """Les K rows d'un dossier partage (collection/extra) coutent 1 scandir."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = pathlib.Path(td) / "Trilogie"
+            folder.mkdir()
+            names = []
+            for i in range(3):
+                video = folder / f"Volet {i}.mkv"
+                video.write_bytes(b"y" * (10 + i))
+                names.append(video.name)
+
+            cache: dict = {}
+            sizes = [library_support.plan_row_fs_facts({"folder": str(folder), "video": n}, cache)[1] for n in names]
+
+        self.assertEqual(sizes, [10, 11, 12])
+        self.assertEqual(list(cache), [str(folder)])
+
+
+# ---------------------------------------------------------------------------
+# 1 bis. Ratchet sur les AUTRES consommateurs de PlanRow serialisees
+# ---------------------------------------------------------------------------
+# `_build_library_rows` n'est pas le seul a consommer `api.run.get_plan()`.
+# Le canari strict ci-dessus ne couvre que lui ; la famille peut donc se
+# reconstituer chez un voisin. Ce ratchet fait passer le MEME canari (en mode
+# enregistreur) chez les autres consommateurs et fige leur dette exacte : une
+# clef fantome NOUVELLE fait echouer, une clef fantome CORRIGEE fait echouer
+# aussi (il faut alors resserrer la constante — c'est voulu).
+#
+# Inventaire etabli par balayage AST de TOUS les consommateurs de plan brut du
+# depot (`api.run.get_plan` : film_support, history_support,
+# library_actions_support, library_audit_support, library_support,
+# quality_audit_support, quality_support, run_flow_support, tmdb_support), en
+# distinguant les rows BRUTES des rows DEJA construites par
+# `_build_library_rows` — seules les premieres sont concernees. Resultat : DEUX
+# lectures fantomes de `source_path` sur PlanRow, et deux seulement.
+#
+#   1. library_support._mark_for_deletion_impl — CORRIGEE par ce PR (le site
+#      est dans le perimetre de fichiers), d'ou l'entree a `set()` ci-dessous :
+#      elle n'est pas decorative, c'est elle qui rend le test rouge si la clef
+#      fantome revient.
+#   2. library_actions_support._plan_source_paths:195 — dette FIGEE, hors
+#      perimetre de fichiers. Le `or r.get("folder")` qui suit masque
+#      l'absence, donc la fonction n'est pas morte : elle rend TOUJOURS le
+#      dossier, jamais le chemin du fichier video. Ce que ca degrade : la
+#      valeur alimente `source_path=` des marques de suppression (L239, L340).
+#      Pour un kind "collection"/"extra" le dossier est PARTAGE entre
+#      plusieurs films, donc la marque designe un conteneur au lieu du media.
+#      Le correctif est le meme qu'en 1 : `library_support.plan_row_media_path(r)`.
+_KNOWN_PHANTOM_PLAN_ROW_KEYS = {
+    "library_actions_support._plan_source_paths": {"source_path"},
+    "library_support._mark_for_deletion_impl": set(),
+}
+
+
+class PlanRowConsumerRatchetTests(unittest.TestCase):
+    """#447 / #730 : figer la dette des autres lecteurs de PlanRow serialisees."""
+
+    def _phantom_keys_read_by(self, fn, *args, **kwargs) -> Set[str]:
+        seen: Set[str] = set()
+        row = _PlanRowCanary(_make_plan_row(r"C:\Films\Dune (2021)", "Dune.2021.mkv"), seen, strict=False)
+        fn(_FakeApi([row], "state"), *args, **kwargs)
+        self.assertIn("row_id", seen, "canari non sollicite — collecteur casse")
+        return {k for k in seen if k not in _ALLOWED_PLAN_ROW_KEYS}
+
+    def test_plan_source_paths_phantom_keys_are_frozen(self):
+        from cinesort.ui.api import library_actions_support
+
+        phantom = self._phantom_keys_read_by(library_actions_support._plan_source_paths, "RUN1")
+        expected = _KNOWN_PHANTOM_PLAN_ROW_KEYS["library_actions_support._plan_source_paths"]
+        self.assertEqual(
+            phantom,
+            expected,
+            "la dette de _plan_source_paths a change. Si une clef a ete AJOUTEE : "
+            "c'est la famille #447/#730 qui repousse, corriger via "
+            "library_support.plan_row_media_path(). Si une clef a ete CORRIGEE : "
+            "retirer l'entree de _KNOWN_PHANTOM_PLAN_ROW_KEYS.",
+        )
+
+    def test_mark_for_deletion_reads_no_phantom_key(self):
+        """3e site de la famille, dans le fichier corrige par ce PR.
+
+        ROUGE avant le correctif : `_mark_for_deletion_impl` lisait
+        `row.get("source_path")` sur la PlanRow BRUTE rendue par
+        `_find_plan_row`. L'entree du ratchet vaut `set()` — zero clef
+        fantome toleree ici, contrairement au voisin hors perimetre.
+        """
+        phantom = self._phantom_keys_read_by(library_support._mark_for_deletion_impl, "RUN1", "ROW1")
+        self.assertEqual(
+            phantom,
+            _KNOWN_PHANTOM_PLAN_ROW_KEYS["library_support._mark_for_deletion_impl"],
+            "clef fantome lue par _mark_for_deletion_impl : corriger via "
+            "library_support.plan_row_media_path(), pas en elargissant le ratchet.",
+        )
+
+    def test_mark_for_deletion_persists_the_media_path_not_the_shared_folder(self):
+        """Preuve du symptome : la marque doit designer le MEDIA, pas le conteneur.
+
+        Pour un kind "collection"/"extra" le dossier est partage entre
+        plusieurs films ; enregistrer le dossier faisait pointer toutes les
+        marques du meme dossier sur la meme valeur.
+        """
+        folder = r"C:\Films\Trilogie Le Parrain"
+        video = "Le.Parrain.1972.mkv"
+        api = _FakeApi([_make_plan_row(folder, video)], "state")
+        res = library_support._mark_for_deletion_impl(api, "RUN1", "ROW1")
+
+        expected = os.path.join(folder, video)
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res["source_path"], expected)
+        self.assertEqual([m["source_path"] for m in api.store.film_modal.marks], [expected])
+
+    def test_mark_for_deletion_falls_back_to_the_folder_when_video_is_unknown(self):
+        """PlanRow sans `video` : on garde le dossier, pas de chaine vide."""
+        folder = r"C:\Films\Dune (2021)"
+        api = _FakeApi([_make_plan_row(folder, "")], "state")
+        res = library_support._mark_for_deletion_impl(api, "RUN1", "ROW1")
+        self.assertEqual(res["source_path"], folder)
+
+    def test_plan_source_paths_currently_returns_the_folder_not_the_video(self):
+        """Preuve du symptome, pas seulement de la lecture fantome.
+
+        Ce test documente le comportement ACTUEL (degrade). Quand
+        `_plan_source_paths` passera a `plan_row_media_path`, il deviendra
+        rouge et devra etre retourne en `assertEqual(..., video_path)`.
+        """
+        from cinesort.ui.api import library_actions_support
+
+        folder = r"C:\Films\Dune (2021)"
+        api = _FakeApi([_make_plan_row(folder, "Dune.2021.mkv")], "state")
+        out = library_actions_support._plan_source_paths(api, "RUN1")
+        self.assertEqual(out, {"ROW1": folder})
+        self.assertNotIn("Dune.2021.mkv", out["ROW1"])
+
+
+# ---------------------------------------------------------------------------
+# 2. Contrat d'attributs de CineSortApi
+# ---------------------------------------------------------------------------
+
+
+def _collect_api_attr_reads() -> List[Tuple[str, int, str]]:
+    """Retourne [(fichier, ligne, nom)] pour toute LECTURE d'attribut sur `api`.
+
+    Deux formes, parce que le bug #441 les utilisait toutes les deux :
+      - `getattr(api, "_x", ...)` / `hasattr(api, "_x")` — la forme qui masque
+        activement l'absence derriere un defaut falsy ;
+      - `api._x` en lecture directe — la forme qui leverait AttributeError...
+        si un `except` trop large ne l'avalait pas (c'etait le cas de
+        `_resolve_latest_run_id`).
+    Les ECRITURES (`api._x = ...`) sont exclues : ce sont elles qui definissent
+    legitimement les attributs poses en lazy-init.
+    """
+    found: List[Tuple[str, int, str]] = []
+    for path in sorted(_UI_API_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and len(node.args) >= 2:
+                fn = node.func
+                obj, name = node.args[0], node.args[1]
+                if (
+                    isinstance(fn, ast.Name)
+                    and fn.id in {"getattr", "hasattr"}
+                    and isinstance(obj, ast.Name)
+                    and obj.id == "api"
+                    and isinstance(name, ast.Constant)
+                    and isinstance(name.value, str)
+                ):
+                    found.append((path.name, node.lineno, name.value))
+            elif (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.ctx, ast.Load)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "api"
+            ):
+                found.append((path.name, node.lineno, node.attr))
+    return found
+
+
+def _assign_targets(node: ast.AST) -> List[Any]:
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        return [node.target]
+    return []
+
+
+def _collect_defined_api_attrs() -> Set[str]:
+    """Noms d'attributs qu'un objet `api` porte reellement.
+
+    Trois sources, et TROIS SEULEMENT — c'est la precision de cet ensemble
+    qui fait la valeur du test. La definition tentante « n'importe quel
+    `x.<nom> = ...` dans cinesort/ » serait bien trop large : `_store` y
+    serait declare « existant » parce que `JobRunner.__init__` fait
+    `self._store = store`, et le bug #441 repasserait au vert.
+      1. l'introspection de la classe `CineSortApi` ;
+      2. les `self.<nom> = ...` du corps de la classe `CineSortApi` ;
+      3. les `api.<nom> = ...` de `cinesort/` (attributs poses en lazy-init
+         sur l'objet api par un module *_support, ex.
+         `api._perceptual_cancel_event`).
+    """
+    names: Set[str] = set(dir(CineSortApi))
+
+    api_module = ast.parse((_UI_API_ROOT / "cinesort_api.py").read_text(encoding="utf-8"))
+    class_nodes = [n for n in ast.walk(api_module) if isinstance(n, ast.ClassDef) and n.name == "CineSortApi"]
+    assert class_nodes, "classe CineSortApi introuvable — collecteur casse"
+    for node in ast.walk(class_nodes[0]):
+        for target in _assign_targets(node):
+            if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
+                names.add(target.attr)
+
+    for path in sorted(_PKG_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            for target in _assign_targets(node):
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "api"
+                ):
+                    names.add(target.attr)
+    return names
+
+
+class ApiAttributeContractTests(unittest.TestCase):
+    """#441 / #729 : un `getattr(api, "_x")` dont `_x` n'existe pas est un bug."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.reads = _collect_api_attr_reads()
+        cls.defined = _collect_defined_api_attrs()
+
+    def _offenders(self) -> List[Tuple[str, int, str]]:
+        return [site for site in self.reads if site[2] not in self.defined]
+
+    def test_scan_is_not_empty(self):
+        """Garde-fou du garde-fou : un collecteur casse rendrait tout vert."""
+        self.assertGreater(len(self.reads), 10)
+        names = {name for _, _, name in self.reads}
+        # forme getattr(api, "...") ...
+        self.assertIn("_state_dir", names)
+        # ... et forme `api.<attr>` en lecture directe.
+        self.assertIn("_get_or_create_infra", names)
+
+    def test_owned_modules_have_no_phantom_api_attribute(self):
+        """ROUGE avant le correctif : quality_simulator_support.py `_store`."""
+        bad = [site for site in self._offenders() if site[0] in _OWNED_MODULES]
+        self.assertEqual(bad, [], f"attributs fantomes sur api : {bad}")
+
+    def test_store_is_never_read_on_the_api_object(self):
+        """`api._store` n'a jamais existe : les stores vivent dans `_infra_by_state_dir`."""
+        self.assertNotIn("_store", dir(CineSortApi))
+        sites = [site for site in self.reads if site[2] == "_store"]
+        self.assertEqual(sites, [], f"api._store lu en {sites}")
+
+    def test_no_new_phantom_api_attribute_anywhere_in_ui_api(self):
+        """Ratchet : la famille ne doit pas se reconstituer dans un autre module."""
+        new = sorted({name for _, _, name in self._offenders() if name not in _KNOWN_PHANTOM_ATTRS})
+        self.assertEqual(new, [], f"nouveaux attributs fantomes sur api : {new}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
