@@ -208,6 +208,8 @@ const DANGER_MODAL_ID = "dashDangerModal";
  * @param {string} [opts.confirmLabel="Confirmer"] - libelle du bouton dangereux
  * @param {string} [opts.cancelLabel="Annuler"] - libelle du bouton d'annulation
  * @param {Function} opts.onConfirm - callback (peut etre async), execute apres confirmation
+ * @param {boolean} [opts.closeBeforeConfirm=false] - fermer la modale AVANT de
+ *        lancer onConfirm au lieu d'attendre sa resolution (cf plus bas).
  * @returns {Promise<void>} resolue apres affichage (pas attente de l'utilisateur)
  */
 export function dangerConfirmModal(opts) {
@@ -228,6 +230,17 @@ export function dangerConfirmModal(opts) {
     // bibliotheque laissait _state.bulkInFlight=true apres une annulation (boutons
     // bulk disabled jusqu'au reload). N'est jamais appele apres onConfirm.
     onCancel = null,
+    // Ultra-audit 2026-08-03 (N13) : par defaut la modale reste affichee tant
+    // que `onConfirm` n'a pas resolu — ce qui est le bon comportement pour une
+    // action breve (on evite un double-clic sur le declencheur sous-jacent).
+    // Pour une action LONGUE dont l'avancement est rendu DERRIERE la modale
+    // (l'apply reel et sa barre de progression), l'overlay opaque devient au
+    // contraire un ecran de veille : il masque la seule information utile
+    // pendant plusieurs minutes. Ces appelants passent closeBeforeConfirm:true
+    // et doivent porter leur PROPRE garde de re-entrance (cf _handleApplyNow).
+    // Opt-in deliberement : les ~20 autres sites d'appel gardent la semantique
+    // historique, aucun n'est modifie par ce correctif.
+    closeBeforeConfirm = false,
   } = opts || {};
 
   const overlay = document.createElement("div");
@@ -341,6 +354,15 @@ export function dangerConfirmModal(opts) {
       // Fix audit 2026-06-07 UX high : marquer _confirmed avant close() pour
       // que onCancel ne soit PAS appele dans ce cas (cf close()).
       overlay._confirmed = true;
+      if (closeBeforeConfirm) {
+        // N13 : la confirmation a rempli son office des le clic. On demonte
+        // l'overlay AVANT de lancer l'action pour que l'UI de progression
+        // qu'elle declenche soit reellement visible. `_confirmed` etant deja
+        // pose, close() n'appelle pas onCancel.
+        close();
+        await Promise.resolve(onConfirm());
+        return;
+      }
       try {
         await Promise.resolve(onConfirm());
       } finally {
