@@ -447,7 +447,7 @@ def export_nfo_for_run(
             # dossier) a chaque export reussi : la borne « au plus un residu »
             # qu'offrait l'ancien `.tmp` fixe est ainsi retablie.
             sweep_atomic_tmp_orphans(nfo_path.parent, target_name=nfo_path.name)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             # Le nettoyage du `.tmp` que #834 faisait ici est desormais dans le
             # `finally` d'`atomic_write_bytes` : il s'execute sur TOUS les
             # chemins de sortie, y compris l'echec du controle de taille.

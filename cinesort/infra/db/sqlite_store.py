@@ -645,7 +645,7 @@ class _StoreBase:
         ts = time.time()
         try:
             backups = list_backups(self._backup_dir(), stem_filter=self.db_path.stem)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("auto_restore: list_backups echoue (%s)", exc)
             backups = []
 
@@ -687,7 +687,7 @@ class _StoreBase:
             logger.warning("DB corrompue, tentative auto-restore depuis %s", candidate)
             try:
                 restore_backup(candidate, self.db_path)
-            except (sqlite3.Error, OSError, FileNotFoundError) as exc:
+            except (sqlite3.Error, OSError) as exc:
                 logger.error(
                     "auto_restore: restore depuis %s a echoue: %s",
                     candidate,
@@ -822,7 +822,7 @@ class _StoreBase:
         """
         try:
             all_backups = list_backups(self._backup_dir(), stem_filter=self.db_path.stem)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("rollback_migration: list_backups echoue (%s)", exc)
             return None
         # Filtrer pour ne garder que les backups pre_migration (les plus pertinents
@@ -834,7 +834,7 @@ class _StoreBase:
         most_recent = pre_migration[0]  # list_backups trie plus recent d'abord
         try:
             restore_backup(most_recent, self.db_path)
-        except (sqlite3.Error, OSError, FileNotFoundError) as exc:
+        except (sqlite3.Error, OSError) as exc:
             logger.error("rollback_migration: restore depuis %s echoue: %s", most_recent, exc)
             return None
         return most_recent

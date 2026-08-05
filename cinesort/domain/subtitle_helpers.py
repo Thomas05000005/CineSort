@@ -444,7 +444,7 @@ def find_subtitles_in_folder(folder: Path) -> List[SubtitleInfo]:
     results: List[SubtitleInfo] = []
     try:
         entries = list(folder.iterdir())
-    except (PermissionError, OSError):
+    except OSError:
         return []
 
     for entry in entries:

@@ -37,6 +37,15 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
+def _handler_exception_names(handler: ast.ExceptHandler) -> list[str]:
+    """Noms d'exceptions attrapes par un `except`, tuple ou non (`[]` si nu)."""
+    if handler.type is None:
+        return []
+    if isinstance(handler.type, ast.Tuple):
+        return [ast.unparse(elt) for elt in handler.type.elts]
+    return [ast.unparse(handler.type)]
+
+
 class TestApplyPermissionErrorMessage(unittest.TestCase):
     """Vague H fix 1 : PermissionError lors d'un apply produit un message
     contextualise (nom du film + cause VLC) et alimente error_messages.
@@ -72,13 +81,43 @@ class TestApplyPermissionErrorMessage(unittest.TestCase):
         # res.error_messages.append doit etre appele dans le handler.
         self.assertIn("res.error_messages.append", source)
 
-        # Le except PermissionError doit apparaitre AVANT le except OSError
-        # (sinon il serait masque par le fourre-tout).
-        idx_perm = source.find("except PermissionError as exc")
-        idx_os = source.find("except (FileNotFoundError, FileExistsError, OSError) as exc")
-        self.assertGreater(idx_perm, -1, "except PermissionError introuvable")
-        self.assertGreater(idx_os, -1, "except OSError introuvable")
-        self.assertLess(idx_perm, idx_os, "except PermissionError doit etre avant except OSError")
+        # Le handler `PermissionError` doit precede le fourre-tout `OSError`,
+        # sinon il est MORT : `PermissionError` herite d'`OSError`, donc un
+        # `except OSError` place avant l'attrape en premier et le message clair
+        # ci-dessus n'est jamais construit.
+        #
+        # Verifie par AST, et handler par handler DANS LE MEME `try`. La version
+        # d'origine comparait deux `source.find(...)` sur le fichier ENTIER : elle
+        # aurait ete verte avec les deux handlers dans des `try` differents (donc
+        # sans rien prouver), et elle tombait des que le texte exact du tuple
+        # changeait (c'est arrive avec le nettoyage #585, qui n'a pourtant touche
+        # ni l'ordre ni l'ensemble reellement attrape).
+        checked = 0
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Try):
+                continue
+            caught = [_handler_exception_names(h) for h in node.handlers]
+            perm = [i for i, names in enumerate(caught) if "PermissionError" in names]
+            oserr = [i for i, names in enumerate(caught) if "OSError" in names]
+            if not (perm and oserr):
+                continue
+            checked += 1
+            self.assertLess(
+                min(perm),
+                min(oserr),
+                msg=(
+                    f"apply_core.py, try ligne {node.lineno} : le handler `OSError` precede "
+                    "`PermissionError`, qui devient donc du code mort (PermissionError herite "
+                    "d'OSError)."
+                ),
+            )
+        # Anti-test-vacant : sans cette borne, supprimer les deux handlers rendrait
+        # la boucle vide et le test vert.
+        self.assertGreaterEqual(
+            checked,
+            5,
+            msg=f"seulement {checked} try associent PermissionError et OSError dans apply_core.py (5 attendus)",
+        )
 
     def test_apply_handler_simulated_permission_error_appends_message(self) -> None:
         """Simule directement la logique du handler : un PermissionError sur un

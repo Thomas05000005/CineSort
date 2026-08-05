@@ -1138,12 +1138,12 @@ def _read_report_meta(run_paths: Any) -> Tuple[str, List[str]]:
     """Lit le resume et les derniers logs d'un run."""
     try:
         summary_text = state.read_text_safe(run_paths.summary_txt).strip()
-    except (KeyError, OSError, PermissionError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         summary_text = ""
     try:
         all_logs = run_paths.ui_log_txt.read_text(encoding="utf-8").splitlines()
         log_tail = all_logs[-200:]
-    except (KeyError, OSError, PermissionError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         log_tail = []
     return summary_text, log_tail
 

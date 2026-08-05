@@ -644,7 +644,7 @@ def read_saved_root_candidates(*state_dirs: Path) -> str:
     for state_dir in state_dirs:
         try:
             data = read_settings(state_dir)
-        except (OSError, PermissionError, ValueError):
+        except (OSError, ValueError):
             data = {}
         root_raw = str(data.get("root") or "").strip()
         if root_raw:
@@ -657,7 +657,7 @@ def read_saved_roots_candidates(*state_dirs: Path) -> list:
     for state_dir in state_dirs:
         try:
             data = read_settings(state_dir)
-        except (KeyError, OSError, PermissionError, TypeError, ValueError):
+        except (KeyError, OSError, TypeError, ValueError):
             data = {}
         _migrate_root_to_roots(data)
         roots = data.get("roots", [])
@@ -2247,7 +2247,7 @@ def test_jellyfin_connection(
             try:
                 libraries = client.get_libraries(user_id)
                 movies_count = client.get_movies_count(user_id)
-            except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+            except (JellyfinError, KeyError, OSError, TypeError, ValueError) as exc:
                 logger.debug("Jellyfin: erreur récupération bibliothèques: %s", exc)
 
         return {
@@ -2266,7 +2266,7 @@ def test_jellyfin_connection(
     # echoue cote serveur, ou erreur reseau bas niveau remontee comme
     # JellyfinError), on retourne un err() proprement plutot que de laisser
     # l'exception remonter au caller (qui afficherait une stacktrace dans l'UI).
-    except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+    except (JellyfinError, KeyError, OSError, TypeError, ValueError) as exc:
         return err(f"Jellyfin connection failed: {exc}", category="runtime", level="error")
 
 

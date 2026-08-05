@@ -118,7 +118,7 @@ def _try_lookup_row_cache(
                     return row_obj
         if row_cache_stats is not None:
             row_cache_stats["row_misses"] = row_cache_stats.get("row_misses", 0) + 1
-    except (FileNotFoundError, PermissionError, OSError):
+    except OSError:
         pass
     return None
 
@@ -619,7 +619,7 @@ def _apply_not_a_movie_detection(video: Path, result_row: "PlanRow") -> None:
 
     try:
         video_size = video.stat().st_size if video.exists() else 0
-    except (OSError, PermissionError):
+    except OSError:
         video_size = 0
     nam_score = not_a_movie_score(
         video_name=video.name,
@@ -642,7 +642,7 @@ def _apply_integrity_check(video: Path, result_row: "PlanRow") -> None:
         hdr_valid, _hdr_detail = check_header(video)
         if not hdr_valid and "integrity_header_invalid" not in result_row.warning_flags:
             result_row.warning_flags.append("integrity_header_invalid")
-    except (OSError, PermissionError, FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         pass  # ne jamais bloquer le scan pour un check d'integrite
 
 
@@ -685,7 +685,7 @@ def _store_row_cache(
             row_json=plan_row_to_jsonable(result_row),
             run_id=str(run_id),
         )
-    except (FileNotFoundError, PermissionError, OSError):
+    except OSError:
         pass
 
 
@@ -1140,7 +1140,7 @@ def _plan_tv_episode(
                     if ep_title:
                         episode_title = ep_title
                         confidence = 85
-        except (FileNotFoundError, PermissionError, OSError):
+        except OSError:
             pass
 
     if season is not None and episode is not None:

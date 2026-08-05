@@ -461,7 +461,7 @@ def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
                     unreadable += 1
                 elif data.get("row_id"):
                     count += 1
-    except (OSError, PermissionError):
+    except OSError:
         return int(fallback or 0)
     if unreadable:
         # Issue #519 : ce compteur est la source unique de verite du "nombre de
@@ -493,11 +493,11 @@ def load_decisions_from_validation(api: Any, run_paths: Any, *, env_truthy_fn: A
             if isinstance(key, str) and isinstance(value, dict):
                 decisions[key] = dict(value)
         return decisions
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         state_dir_guess = api._state_dir
         try:
             state_dir_guess = run_paths.run_dir.parent.parent
-        except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
             state_dir_guess = api._state_dir
         api._debug_log(
             state_dir=state_dir_guess,

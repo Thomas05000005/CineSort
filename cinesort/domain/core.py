@@ -786,7 +786,7 @@ def looks_tv_like(folder: Path, videos: List[Path]) -> bool:
         for p in folder.iterdir():
             if p.is_dir() and _TV_SEASON_RE.match(p.name.strip()):
                 return True
-    except (OSError, PermissionError):
+    except OSError:
         pass
     return False
 
@@ -800,7 +800,7 @@ def detect_single_with_extras(cfg: Config, videos: List[Path]) -> bool:
     for v in videos:
         try:
             sizes.append(v.stat().st_size)
-        except (OSError, PermissionError):
+        except OSError:
             sizes.append(0)
     sizes_sorted = sorted(sizes, reverse=True)
     if len(sizes_sorted) < 2:
@@ -824,7 +824,7 @@ def classify_sidecars(cfg: Config, folder: Path, video: Path, *, is_collection: 
     out: List[Path] = []
     try:
         entries = list(folder.iterdir())
-    except (OSError, PermissionError):
+    except OSError:
         return out
     # F03 : arbitrage LONGEST-MATCH. `is_sidecar_for_video` matche par prefixe :
     # dans un dossier PARTAGE, "Alien 2.srt" matche aussi "Alien.mkv". Sans
@@ -919,7 +919,7 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
         try:
             content = nfo_path.read_text(encoding=enc)
             break
-        except (UnicodeDecodeError, FileNotFoundError, PermissionError, OSError):
+        except (UnicodeDecodeError, OSError):
             continue
     if not content:
         return None
@@ -952,7 +952,7 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
 def find_best_nfo_for_video(folder: Path, video: Path) -> Optional[Path]:
     try:
         nfos = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".nfo"]
-    except (PermissionError, OSError):
+    except OSError:
         return None
     if not nfos:
         return None

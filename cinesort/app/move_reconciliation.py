@@ -79,7 +79,7 @@ def _file_matches_fingerprint(path: Path, expected_sha1: str, expected_size: int
     """True / False / None (verification impossible : lecture en echec)."""
     try:
         actual_size = path.stat().st_size
-    except (OSError, PermissionError):
+    except OSError:
         return None
     if actual_size != expected_size:
         # Ce n'est PAS qu'une optimisation, c'est une garde a part entiere :
@@ -110,7 +110,7 @@ def _dir_contains_fingerprint(dst: Path, expected_sha1: str, expected_size: int)
     """
     try:
         entries = [child for child in dst.iterdir() if child.is_file()]
-    except (OSError, PermissionError):
+    except OSError:
         return None
     unverifiable = False
     for child in entries:
@@ -163,11 +163,11 @@ def _classify_pending(entry: Dict[str, Any]) -> str:
     dst_exists = False
     try:
         src_exists = src.exists()
-    except (OSError, PermissionError):
+    except OSError:
         src_exists = False
     try:
         dst_exists = dst.exists()
-    except (OSError, PermissionError):
+    except OSError:
         dst_exists = False
 
     if not src_exists and dst_exists:
