@@ -44,13 +44,17 @@ class TestDetectLanguageFromSuffix(unittest.TestCase):
     def test_special_tags(self):
         self.assertEqual(detect_language_from_suffix("Movie.vostfr.srt"), "fr")
         self.assertEqual(detect_language_from_suffix("Movie.vf.srt"), "fr")
-        self.assertEqual(detect_language_from_suffix("Movie.vo.srt"), "en")
+        # #610 : 'vo' (version originale) n'est PAS l'anglais. Voir
+        # tests/test_subtitle_lang_vocab.py pour le contrat complet.
+        self.assertEqual(detect_language_from_suffix("Movie.vo.srt"), "")
 
     def test_non_language_tags(self):
         self.assertEqual(detect_language_from_suffix("Movie.forced.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.sdh.srt"), "")
-        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "")
         self.assertEqual(detect_language_from_suffix("Movie.cc.srt"), "")
+        # #679 : 'hi' seul est le code ISO du HINDI, pas un tag malentendant
+        # (la convention du projet pour le malentendant est 'sdh').
+        self.assertEqual(detect_language_from_suffix("Movie.hi.srt"), "hi")
 
     def test_no_suffix(self):
         self.assertEqual(detect_language_from_suffix("Movie.srt"), "")

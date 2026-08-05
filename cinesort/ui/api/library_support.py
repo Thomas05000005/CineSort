@@ -17,6 +17,7 @@ import logging
 import sqlite3
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
@@ -532,8 +533,14 @@ def _build_library_rows(api: Any, run_id: str, *, with_posters: bool = True) -> 
             "warnings": _extract_row_warnings(perc),
             "grain_era_v2": None,  # extrait du metrics si dispo
             "grain_nature": None,
-            "added_ts": float(r.get("mtime") or 0),
-            "path": r.get("source_path") or "",
+            # PlanRow ne porte aucun timestamp : dériver added_ts = os.stat() par
+            # row (I/O dans une boucle sur potentiellement des milliers de films).
+            # Traité séparément (#730) ; en l'état, indisponible sans stat FS.
+            "added_ts": 0.0,
+            # PlanRow n'a ni source_path ni mtime : le chemin réel est folder/video
+            # (cf apply_core Path(row.folder)/row.video). Sans ce fallback, `path`
+            # était toujours vide → lien "ouvrir le dossier" cassé + podiums faussés.
+            "path": (str(Path(r.get("folder")) / (r.get("video") or "")) if r.get("folder") else ""),
             "poster_url": poster_url,
             # v7.6.0 Vague 7 : champs pour get_scoring_rollup
             "tmdb_collection_name": r.get("tmdb_collection_name"),

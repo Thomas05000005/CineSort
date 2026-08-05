@@ -158,6 +158,70 @@ class TestClassifyCrop(unittest.TestCase):
         self.assertEqual(info.verdict, "unknown")
 
 
+class TestCropReferenceSegment(unittest.TestCase):
+    """#828 : le segment de reference ne doit pas etre l'intro (t=0..60s).
+
+    `detect_crop_multi_segments` place son premier segment a t=0 exactement :
+    logos de studio et cartons noirs y faussent le ratio detecte.
+    """
+
+    def _seg(self, start_s: float, w: int, h: int, x: int = 0, y: int = 0) -> CropSegment:
+        ar = w / h if h > 0 else 0.0
+        return CropSegment(float(start_s), w, h, x, y, ar)
+
+    def test_median_segment_used_not_first_nor_last(self):
+        segments = [
+            self._seg(0.0, 1440, 800, 240, 140),  # intro : logo centre -> windowbox
+            self._seg(3570.0, 1920, 804, 0, 138),  # coeur du film : letterbox 2.39
+            self._seg(7140.0, 1920, 1080),  # generique de fin : plein cadre
+        ]
+        info = classify_crop(segments, 1920, 1080)
+        # "windowbox" trahirait segments[0], "full_frame" trahirait segments[-1]
+        self.assertEqual(info.verdict, "letterbox_2_39")
+        self.assertEqual((info.detected_w, info.detected_h), (1920, 804))
+
+    def test_median_of_five_segments(self):
+        segments = [
+            self._seg(0.0, 1440, 800, 240, 140),
+            self._seg(1000.0, 1920, 1080),
+            self._seg(2000.0, 1920, 804, 0, 138),  # median (index 2)
+            self._seg(3000.0, 1920, 1080),
+            self._seg(4000.0, 1440, 1080, 240, 0),
+        ]
+        info = classify_crop(segments, 1920, 1080)
+        self.assertEqual(info.verdict, "letterbox_2_39")
+
+    def test_single_segment_still_usable(self):
+        info = classify_crop([self._seg(0.0, 1920, 804, 0, 138)], 1920, 1080)
+        self.assertEqual(info.verdict, "letterbox_2_39")
+
+    def test_end_to_end_intro_does_not_decide_verdict(self):
+        """Chaine reelle : detect_crop_multi_segments -> classify_crop.
+
+        Le crop rendu depend du `-ss` reellement passe a ffmpeg, pas de l'ordre
+        d'execution (les 3 segments tournent dans un pool de threads).
+        """
+
+        def _fake_run(cmd, *args, **kwargs):
+            start = float(cmd[cmd.index("-ss") + 1])
+            if start <= 0.0:
+                return _fake_completed(stderr="crop=1440:800:240:140")  # intro
+            if start >= 7000.0:
+                return _fake_completed(stderr="crop=1920:1080:0:0")  # generique
+            return _fake_completed(stderr="crop=1920:804:0:138")  # film
+
+        with patch(
+            "cinesort.domain.perceptual.metadata_analysis.tracked_run",
+            side_effect=_fake_run,
+        ):
+            segs = detect_crop_multi_segments("ffmpeg", "x.mkv", 7200.0, n_segments=3)
+        # Le 1er segment demarre bien a t=0 : c'est le constat de #828.
+        self.assertEqual([s.start_s for s in segs], [0.0, 3570.0, 7140.0])
+        info = classify_crop(segs, 1920, 1080)
+        self.assertEqual(info.verdict, "letterbox_2_39")
+        self.assertEqual((info.detected_w, info.detected_h), (1920, 804))
+
+
 class TestDetectCropSingleSegment(unittest.TestCase):
     def test_end_to_end(self):
         stderr = "crop=1920:800:0:140\ncrop=1920:800:0:140"
@@ -315,6 +379,54 @@ class TestClassifyImax(unittest.TestCase):
         segs = [self._seg(2.39), self._seg(1.78)]
         info = classify_imax(1920, 1080, segs, [])
         self.assertEqual(info.imax_type, "expansion")
+
+
+class TestClassifyImaxNegativeConfidence(unittest.TestCase):
+    """#827 : « pas IMAX » ne doit jamais valoir 1.0 sur un repli sans mesure."""
+
+    def _seg(self, ar: float) -> CropSegment:
+        return CropSegment(0.0, 1920, int(1920 / ar) if ar > 0 else 1080, 0, 0, ar)
+
+    def test_negative_is_never_certain(self):
+        info = classify_imax(1920, 1080, [], [])
+        self.assertFalse(info.is_imax)
+        self.assertLess(info.confidence, 1.0)
+
+    def test_no_signal_at_all_gets_floor_confidence(self):
+        # probe illisible (0x0) -> container_ar = 0 : methodes 2 et 3 muettes ;
+        # cropdetect en echec -> [] : methode 1 jamais evaluee ;
+        # TMDb muet -> [] : methode 4 sans donnee. Aucune mesure du tout.
+        info = classify_imax(0, 0, [], [])
+        self.assertFalse(info.is_imax)
+        self.assertEqual(info.imax_type, "none")
+        self.assertAlmostEqual(info.confidence, 0.30)
+        # ... et non 0.0, qui est le DEFAUT de VideoPerceptual.imax_confidence :
+        # « mesure impossible » doit rester distinct de « jamais calcule ».
+        self.assertGreater(info.confidence, 0.0)
+
+    def test_confidence_strictly_increases_with_available_signals(self):
+        # delta AR 0.01 << IMAX_EXPANSION_AR_DELTA (0.3) : pas d'expansion,
+        # donc la methode 1 a bien ete EVALUEE et a conclu « non ».
+        stable = [self._seg(2.39), self._seg(2.40)]
+        results = [
+            classify_imax(0, 0, [], []),  # 0 signal
+            classify_imax(1920, 1080, [], []),  # probe seul
+            classify_imax(1920, 1080, stable, []),  # probe + cropdetect
+            classify_imax(1920, 1080, stable, ["drama", "biography"]),  # + TMDb
+        ]
+        for info in results:
+            self.assertFalse(info.is_imax)
+            self.assertEqual(info.imax_type, "none")
+        confidences = [info.confidence for info in results]
+        for weaker, stronger in zip(confidences, confidences[1:]):
+            self.assertLess(weaker, stronger)
+
+    def test_negative_never_stronger_than_best_positive(self):
+        expansion = classify_imax(1920, 1080, [self._seg(2.39), self._seg(1.78)], [])
+        best_negative = classify_imax(1920, 1080, [self._seg(2.39), self._seg(2.40)], ["drama"])
+        self.assertTrue(expansion.is_imax)
+        self.assertFalse(best_negative.is_imax)
+        self.assertLessEqual(best_negative.confidence, expansion.confidence)
 
 
 # ---------------------------------------------------------------------------

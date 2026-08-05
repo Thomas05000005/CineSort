@@ -361,13 +361,22 @@ def get_or_create_infra(
                 notify = getattr(api, "_notify", None)
                 report = reconcile_at_boot(store, notify=notify)
                 if report.get("examined", 0) > 0:
+                    # Issue #512 : la ligne de synthese doit compter AUSSI
+                    # `mismatched` (destination occupee par un AUTRE fichier,
+                    # verdict critique) et `unverified` (identite non verifiable).
+                    # Sans eux, une reconciliation qui detecte une incoherence
+                    # s'affichait « 1 examinee, 0 completed, 0 rolled_back,
+                    # 0 duplicated, 0 lost » : la synthese mentait.
                     _logger.info(
-                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, %d duplicated, %d lost",
+                        "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, "
+                        "%d duplicated, %d lost, %d mismatched, %d unverified",
                         report["examined"],
                         report.get("completed", 0),
                         report.get("rolled_back", 0),
                         len(report.get("duplicated", [])),
                         len(report.get("lost", [])),
+                        len(report.get("mismatched", [])),
+                        len(report.get("unverified", [])),
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
@@ -381,11 +390,18 @@ def get_or_create_infra(
             # post-crash, ce qui est precisement le cas le plus frequent. On force
             # max_age_hours=0.0 pour capturer tous les PENDING avec started_ts<now.
             try:
-                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
+                # PR#852 : `state_dir` permet a la reconciliation de lire le
+                # marqueur `apply_end` du journal d'audit JSONL, seule preuve
+                # HORS SQLite qu'un apply reste PENDING parce que la DB etait
+                # indisponible et non parce qu'il a ete tue en cours de route.
+                # Sans elle, l'undo d'un tel apply reste mort a vie.
+                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0, state_dir=state_dir)
                 if batches_report.get("pending_found", 0) > 0:
                     _logger.info(
-                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned "
+                        "(%d finalized DONE, %d completed, %d rolled_back)",
                         batches_report["pending_found"],
+                        batches_report.get("finalized_done", 0),
                         batches_report.get("completed", 0),
                         batches_report.get("rolled_back", 0),
                     )
