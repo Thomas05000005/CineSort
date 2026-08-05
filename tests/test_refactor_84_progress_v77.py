@@ -194,7 +194,20 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     #     + `run_read_support.effective_flags(...)`) et NON en import de symbole,
     #     pour que les `patch("cinesort.ui.api.<mod>.<fn>")` des tests restent
     #     operants — cf. le piege decrit dans le docstring.
-    "ui": 66,
+    #
+    # 66 -> 63 (lot perf #448/#406/#467/#593, -3) : `library_audit_support`
+    # construisait un TmdbClient DANS le corps de `_fetch_collection_parts`,
+    # avec 3 imports differes (infra.state, infra.tmdb_client.TmdbClient,
+    # settings_support.normalize_user_path). Le client est desormais construit
+    # une seule fois par appel via `_build_tmdb_client_optional`, deja present
+    # dans `library_actions_support` : les 3 imports remontent en tete, sans
+    # cycle (lint-imports : 3 contrats KEPT).
+    #
+    # 63 est MESURE sur l'arbre fusionne, pas 66-3. Les deux conversions sont
+    # arrivees en parallele et le 2026-08-05 deux PR ont deja calcule leur
+    # valeur de tete a partir d'une base commune : elles concordaient PAR
+    # CHANCE. Ici, la mesure d'abord, l'ecriture ensuite.
+    "ui": 63,
 }
 
 # Borne globale = somme des bornes par couche (114 apres le lot #554/#595/#779).
