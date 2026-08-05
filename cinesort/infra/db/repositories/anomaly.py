@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
 
 
 class AnomalyRepository(_BaseRepository):
@@ -38,23 +39,30 @@ class AnomalyRepository(_BaseRepository):
         self._ensure_schema_group("anomalies")
 
     def get_anomaly_counts_for_runs(self, run_ids: List[str]) -> Dict[str, int]:
-        """Retourne {run_id: nb_anomalies} pour la liste de runs donnee (agregation bulk)."""
+        """Retourne {run_id: nb_anomalies} pour la liste de runs donnee (agregation bulk).
+
+        Issue #448 : decoupe en paquets. Le `GROUP BY run_id` rend une ligne par
+        run, donc l'union des paquets redonne exactement le meme dictionnaire.
+        """
         self._ensure_anomalies_table()
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]
         if not ids:
             return {}
-        placeholders = ",".join("?" for _ in ids)
+        out: Dict[str, int] = {}
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT run_id, COUNT(*) AS cnt
-                FROM anomalies
-                WHERE run_id IN ({placeholders})
-                GROUP BY run_id
-                """,
-                tuple(ids),
-            )
-            return {str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()}
+            for chunk in chunked(ids, SQL_CHUNK):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT run_id, COUNT(*) AS cnt
+                    FROM anomalies
+                    WHERE run_id IN ({placeholders})
+                    GROUP BY run_id
+                    """,
+                    tuple(chunk),
+                )
+                out.update({str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()})
+        return out
 
     def get_anomaly_stats(self, *, run_id: str) -> Dict[str, Any]:
         """Retourne {count, max_ts} pour les anomalies de ce run."""

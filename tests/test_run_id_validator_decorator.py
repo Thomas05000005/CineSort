@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from unittest.mock import MagicMock
 
 import cinesort.ui.api._validators as _validators
 import cinesort.ui.api.cinesort_api as cinesort_api
 import cinesort.ui.api.export_support as ui_export_support
+import cinesort.ui.api.probe_support as probe_support
+import cinesort.ui.api.quality_report_support as quality_report_support
+from cinesort.domain.i18n_messages import t
 from cinesort.ui.api._validators import is_valid_run_id, requires_valid_run_id
 
 
@@ -210,6 +214,81 @@ class RunIdNormaliseEnAvalTests(unittest.TestCase):
 
         fn(self._api(), "  run_1234  ", "ROW9", mode="strict")
         self.assertEqual(vus, {"run_id": "run_1234", "row_id": "ROW9", "mode": "strict"})
+
+
+class EndpointsNeRedisentPasLInvariantRunIdTests(unittest.TestCase):
+    """Issue #526 — deux endpoints re-testaient `not run_id` derriere le decorateur.
+
+    `probe_support._get_probe_impl` et `quality_report_support.get_quality_report`
+    ouvraient sur `if not run_id or not row_id: ...« run_id et row_id sont
+    requis »`. Le `not run_id` etait inatteignable — `@requires_valid_run_id` a
+    deja repondu `errors.run_invalid_id` pour toute valeur falsy — et le message
+    envoyait l'utilisateur verifier un champ qui n'etait jamais en cause.
+
+    Ces tests exercent les endpoints PUBLICS (le chemin d'appel reel des facades),
+    pas les corps prives : c'est la seule facon de constater que le decorateur
+    tranche avant le corps. `api._is_valid_run_id` est lie au VRAI validateur —
+    un `MagicMock` nu rendrait un truthy et fabriquerait le passage qu'on teste.
+
+    Les deux modules sont importes en TETE de fichier, pas dans les helpers :
+    un import differe ici n'aurait aucune justification (`tests/` ne participe a
+    aucun cycle) et le cliquet `test_refactor_84_progress_v77` ne scanne que
+    `cinesort/`, donc rien ne l'aurait signale.
+    """
+
+    def _api(self) -> MagicMock:
+        api = MagicMock()
+        api._is_valid_run_id = staticmethod(is_valid_run_id)
+        return api
+
+    def _appelle_probe(self, api: MagicMock, run_id: Any, row_id: Any) -> dict:
+        return probe_support.get_probe(api, run_id, row_id, detect_probe_tools_fn=lambda *a, **kw: {})
+
+    def _appelle_quality(self, api: MagicMock, run_id: Any, row_id: Any) -> dict:
+        return quality_report_support.get_quality_report(api, run_id, row_id)
+
+    def test_run_id_vide_est_tranche_par_le_decorateur_pas_par_le_corps(self) -> None:
+        """Le corps n'est jamais atteint : c'est ce qui rendait `not run_id` mort."""
+        for nom, appel in (("get_probe", self._appelle_probe), ("get_quality_report", self._appelle_quality)):
+            for run_id in ("", None, "   "):
+                with self.subTest(endpoint=nom, run_id=run_id):
+                    api = self._api()
+                    res = appel(api, run_id, "row_1")
+                    self.assertFalse(res["ok"])
+                    self.assertEqual(res["message"], t("errors.run_invalid_id"))
+                    # Preuve que le corps n'a pas tourne : sa premiere action
+                    # apres la garde est de resoudre le run.
+                    api._find_run_row.assert_not_called()
+
+    def test_row_id_manquant_ne_met_plus_en_cause_run_id(self) -> None:
+        """Le message doit designer le SEUL champ qui peut encore manquer."""
+        attendu = "Identifiant de ligne (row_id) requis."
+        for nom, appel in (("get_probe", self._appelle_probe), ("get_quality_report", self._appelle_quality)):
+            for row_id in ("", None, "   "):
+                with self.subTest(endpoint=nom, row_id=row_id):
+                    api = self._api()
+                    res = appel(api, "20260803_141500_123", row_id)
+                    self.assertFalse(res["ok"])
+                    # Texte COMPLET : une assertion par sous-chaine passerait
+                    # aussi sur l'ancien message, qui contenait « row_id ».
+                    self.assertEqual(res["message"], attendu)
+                    self.assertNotIn("run_id", res["message"])
+                    api._find_run_row.assert_not_called()
+
+    def test_row_id_valide_laisse_passer_vers_le_corps(self) -> None:
+        """La garde ne doit pas se refermer sur un appel legitime.
+
+        Sans ce controle, remplacer la garde par un `return` inconditionnel
+        resterait vert : les deux tests precedents n'observent que des rejets.
+        """
+        for nom, appel in (("get_probe", self._appelle_probe), ("get_quality_report", self._appelle_quality)):
+            with self.subTest(endpoint=nom):
+                api = self._api()
+                api._find_run_row.return_value = None  # -> « Run introuvable », donc le corps a tourne
+                res = appel(api, "20260803_141500_123", "row_1")
+                self.assertFalse(res["ok"])
+                self.assertEqual(res["message"], "Run introuvable.")
+                api._find_run_row.assert_called_once_with("20260803_141500_123")
 
 
 if __name__ == "__main__":

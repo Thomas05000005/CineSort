@@ -23,28 +23,17 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from cinesort.infra.db.repositories._base import _BaseRepository
+from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
 
 # Taille de paquet pour les clauses `IN (...)` construites dynamiquement.
-# SQLite borne le nombre de parametres lies (SQLITE_MAX_VARIABLE_NUMBER) ET la
-# profondeur de l'arbre d'expression ; 200 laisse une marge confortable sous les
-# deux, tout en tenant en UNE requete les tailles reelles (<= 100 runs).
-_SQL_CHUNK = 200
-
-
-def _chunked(values: Sequence[str], size: Optional[int] = None) -> Iterator[List[str]]:
-    """Decoupe une sequence en paquets de `size` (jamais de paquet vide).
-
-    `size=None` lit `_SQL_CHUNK` A L'APPEL, pas a la definition : une valeur par
-    defaut liee a la definition aurait rendu la taille de paquet intestable
-    (le chemin multi-paquet ne serait jamais exerce).
-    """
-    step = max(1, int(_SQL_CHUNK if size is None else size))
-    for start in range(0, len(values), step):
-        yield list(values[start : start + step])
+# Alias LOCAL de la constante partagee (cf. `_sql.SQL_CHUNK` pour le pourquoi du
+# chiffre) : les appels de ce module la lisent A L'APPEL, ce qui laisse les
+# tests la reduire pour exercer le chemin multi-paquet.
+_SQL_CHUNK = SQL_CHUNK
 
 
 def _dedup_str(values: Optional[Iterable[Any]]) -> List[str]:
@@ -366,29 +355,35 @@ class ApplyRepository(_BaseRepository):
         runs.stats_json.applied_count, une cle JAMAIS ecrite apres un apply ->
         "Appliques 0" partout malgre un apply reussi. Helper BULK (miroir de
         run.get_error_counts_for_runs) pour eviter un N+1 sur la liste des runs.
+
+        Issue #448 : decoupe en paquets. La dedup prealable est ce qui rend le
+        decoupage sur : un run_id ne peut alors tomber que dans UN paquet, donc
+        le « 1er vu = dernier batch DONE » garde son sens (le `ORDER BY` reste
+        interne au paquet qui contient ce run).
         """
-        ids = [str(x) for x in (run_ids or []) if str(x).strip()]
+        ids = _dedup_str(run_ids)
         if not ids:
             return {}
         self._ensure_apply_journal_tables()
-        placeholders = ",".join("?" for _ in ids)
         out: Dict[str, int] = {}
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT run_id, summary_json, started_ts
-                FROM apply_batches
-                WHERE run_id IN ({placeholders}) AND dry_run=0 AND status='DONE'
-                ORDER BY started_ts DESC
-                """,
-                tuple(ids),
-            )
-            for row in cur.fetchall():
-                rid = str(row["run_id"])
-                if rid in out:
-                    continue  # ORDER BY started_ts DESC -> 1er vu = dernier batch DONE
-                summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
-                out[rid] = int(summary.get("applied_count") or 0)
+            for chunk in chunked(ids, _SQL_CHUNK):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT run_id, summary_json, started_ts
+                    FROM apply_batches
+                    WHERE run_id IN ({placeholders}) AND dry_run=0 AND status='DONE'
+                    ORDER BY started_ts DESC
+                    """,
+                    tuple(chunk),
+                )
+                for row in cur.fetchall():
+                    rid = str(row["run_id"])
+                    if rid in out:
+                        continue  # ORDER BY started_ts DESC -> 1er vu = dernier batch DONE
+                    summary = self._decode_row_json(row, "summary_json", default={}, expected_type=dict)
+                    out[rid] = int(summary.get("applied_count") or 0)
         return out
 
     def list_apply_operations(self, *, batch_id: str) -> List[Dict[str, Any]]:
@@ -510,7 +505,7 @@ class ApplyRepository(_BaseRepository):
         lim = int(limit_per_run)
         out: Dict[str, List[Dict[str, Any]]] = {}
         with self._managed_conn() as conn:
-            for chunk in _chunked(ids):
+            for chunk in chunked(ids, _SQL_CHUNK):
                 placeholders = ",".join("?" for _ in chunk)
                 cur = conn.execute(
                     f"""
@@ -626,6 +621,16 @@ class ApplyRepository(_BaseRepository):
         (batch, row) — jusqu'a `runs x batches` allers-retours, chacun avec sa
         propre connexion SQLite. Ici, une requete par paquet de batches.
 
+        Issue #448 : `row_ids` etait, lui, injecte ENTIER dans le predicat de
+        chaque paquet de batches — un `IN` non borne qui levait « too many SQL
+        variables » au-dela de SQLITE_MAX_VARIABLE_NUMBER. Les deux dimensions
+        sont desormais decoupees ; chaque couple (batch, row) tombe dans
+        EXACTEMENT une combinaison de paquets, donc aucune operation n'est
+        rendue deux fois. Le predicat `row_id IS NULL` ne peut pas, lui, etre
+        repete par paquet de lignes : il forme son propre groupe, sinon les
+        operations legacy seraient dupliquees autant de fois qu'il y a de
+        paquets.
+
         Le sentinelle `"__legacy__"` garde exactement le sens de la version
         unitaire : il designe les operations dont `row_id` est NULL en base, et
         c'est sous cette clef qu'elles ressortent.
@@ -642,34 +647,33 @@ class ApplyRepository(_BaseRepository):
         if not concrete_rows and not want_legacy:
             return {}
 
-        row_clauses: List[str] = []
-        row_params: List[str] = []
-        if concrete_rows:
-            row_clauses.append(f"row_id IN ({','.join('?' for _ in concrete_rows)})")
-            row_params.extend(concrete_rows)
+        row_groups: List[Tuple[str, List[str]]] = [
+            (f"row_id IN ({','.join('?' for _ in row_chunk)})", row_chunk)
+            for row_chunk in chunked(concrete_rows, _SQL_CHUNK)
+        ]
         if want_legacy:
-            row_clauses.append("row_id IS NULL")
-        row_predicate = " OR ".join(row_clauses)
+            row_groups.append(("row_id IS NULL", []))
 
         out: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         with self._managed_conn() as conn:
-            for chunk in _chunked(batches):
+            for chunk in chunked(batches, _SQL_CHUNK):
                 placeholders = ",".join("?" for _ in chunk)
-                cur = conn.execute(
-                    f"""
-                    SELECT id, batch_id, op_index, op_type, src_path, dst_path,
-                           reversible, undo_status, error_message, ts, row_id,
-                           src_sha1, src_size
-                    FROM apply_operations
-                    WHERE batch_id IN ({placeholders}) AND ({row_predicate})
-                    ORDER BY op_index ASC, id ASC
-                    """,
-                    tuple(chunk) + tuple(row_params),
-                )
-                for r in cur.fetchall():
-                    raw_row_id = r["row_id"]
-                    key = (str(r["batch_id"]), "__legacy__" if raw_row_id is None else str(raw_row_id))
-                    out.setdefault(key, []).append(_apply_operation_row_to_dict(r))
+                for row_predicate, row_params in row_groups:
+                    cur = conn.execute(
+                        f"""
+                        SELECT id, batch_id, op_index, op_type, src_path, dst_path,
+                               reversible, undo_status, error_message, ts, row_id,
+                               src_sha1, src_size
+                        FROM apply_operations
+                        WHERE batch_id IN ({placeholders}) AND ({row_predicate})
+                        ORDER BY op_index ASC, id ASC
+                        """,
+                        tuple(chunk) + tuple(row_params),
+                    )
+                    for r in cur.fetchall():
+                        raw_row_id = r["row_id"]
+                        key = (str(r["batch_id"]), "__legacy__" if raw_row_id is None else str(raw_row_id))
+                        out.setdefault(key, []).append(_apply_operation_row_to_dict(r))
         return out
 
     # =====================================================================
