@@ -42,11 +42,22 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Format : (pattern_substring, rang, label_canonique)
 # Ordre : priorite decroissante (le premier match l'emporte)
-# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/AC3(2) > AAC/MP3/Opus(1)
+# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/DTS-HD HRA/AC3(2) > AAC/MP3/Opus(1)
+#
+# #807 — DTS-HD HRA (High Resolution Audio) est LOSSY, contrairement a DTS-HD MA
+# (Master Audio, lossless). Les motifs HRA sont places AVANT `dts-hd`/`dtshd`
+# parce que les deux consommateurs s'arretent au PREMIER motif qui matche : sans
+# eux, `dts-hd hra` matchait `dts-hd` et heritait du rang 4 (tier gold, reserve
+# au lossless) et surtout du LABEL « DTS-HD MA », faux. Le rang 2 retenu n'est
+# pas un arbitrage nouveau : c'est celui que `quality_score` applique deja a HRA
+# en trois endroits (`_AUDIO_CANONICAL_RANK_ALIAS['dts-hd hra'] = 'dts'`,
+# `_hierarchy_audio_codec_token`, `_is_premium_multichannel_codec`).
 
 AUDIO_CODEC_RANK_PATTERNS: List[Tuple[str, int, str]] = [
     ("atmos", 6, "Atmos"),  # Atmos dans codec OU title
     ("truehd", 5, "TrueHD"),
+    ("dts-hd hra", 2, "DTS-HD HRA"),  # lossy — AVANT le `dts-hd` generique
+    ("dtshd hra", 2, "DTS-HD HRA"),
     ("dts-hd", 4, "DTS-HD MA"),
     ("dtshd", 4, "DTS-HD MA"),
     ("eac3", 3, "EAC3"),
