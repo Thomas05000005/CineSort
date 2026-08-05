@@ -117,9 +117,7 @@ class BuildLibraryRowsMergesEmbeddedSubsTests(unittest.TestCase):
         """`fra`, `fre`, `french`, `FRENCH` doivent tous normaliser vers `fr`."""
         for tag in ("fra", "fre", "fr", "french", "FRENCH"):
             api = MagicMock()
-            plan_rows = [
-                _plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])
-            ]
+            plan_rows = [_plan_row("R1", subtitle_languages=[], subtitle_missing_langs=["fr"])]
             quality_list = [
                 _quality_report(
                     "R1",

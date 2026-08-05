@@ -1,0 +1,14 @@
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 9 items
+
+tests/test_lotd_chain_exports.py::test_facade_endpoints_exist PASSED     [ 11%]
+tests/test_lotd_chain_exports.py::test_csv_export_columns_encoding_and_escaping PASSED [ 22%]
+tests/test_lotd_chain_exports.py::test_csv_no_blank_lines_between_records XFAIL [ 33%]
+tests/test_lotd_chain_exports.py::test_html_report_single_file PASSED    [ 44%]
+tests/test_lotd_chain_exports.py::test_nfo_dry_run_then_real_then_skip_then_overwrite PASSED [ 55%]
+tests/test_lotd_chain_exports.py::test_long_path_240_chars_exports_do_not_crash PASSED [ 66%]
+tests/test_lotd_chain_exports.py::test_json_export_and_negative_paths PASSED [ 77%]
+tests/test_lotd_chain_exports.py::test_ui_report_download_contract XFAIL [ 88%]
+tests/test_lotd_chain_exports.py::test_ui_nfo_count_contract XFAIL (...) [100%]
+
+======================== 6 passed, 3 xfailed in 3.29s =========================

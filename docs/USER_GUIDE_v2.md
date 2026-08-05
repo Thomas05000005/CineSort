@@ -212,6 +212,7 @@ alerte est mappée à un libellé humain + icône + description + niveau de sév
 |---|---|---|---|
 | `subtitle_missing_fr` | 💬 | Sous-titres FR manquants | warning |
 | `subtitle_missing` | 💬 | Sous-titres manquants | warning |
+| `subtitle_forced_only_fr` | 💬 | Sous-titres FR forcés uniquement (pas de piste FR complète) | warning |
 | `nfo_title_mismatch` | 🏷 | Titre NFO incohérent | warning |
 | `nfo_year_mismatch` | 📅 | Année NFO incohérente | critical |
 | `title_ambiguity_detected` | 🏷 | Titre ambigu (ex : Dune 1984 vs 2021) | warning |

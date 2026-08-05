@@ -127,7 +127,10 @@ export const PARAMETRES_GROUPS = [
         // windows_safe() est appliquée INCONDITIONNELLEMENT (apply_core/duplicate_support,
         // aucun gate settings) -> l'échappement Windows est toujours actif (sécurité), le
         // toggle laissait croire qu'on pouvait le désactiver.
-        { key: "lowercase_extensions", label: "Extensions en minuscule (.mkv vs .MKV)", type: "toggle" },
+        // Toggle "lowercase_extensions" (.mkv vs .MKV) RETIRÉ : son seul effet était de
+        // RENOMMER le fichier vidéo cible, ce qu'interdit la règle inviolable n°1 (le nom
+        // du fichier doit rester synchrone avec le torrent, sinon le seeding casse).
+        // Aucun nom de DOSSIER n'en dépendait. Ne pas le réintroduire.
         { key: "separator", label: "Séparateur entre éléments", type: "select", options: [
           {v:" ",l:"Espace (Inception 2010)"},
           {v:".",l:"Point (Inception.2010)"},
@@ -261,15 +264,12 @@ export const PARAMETRES_GROUPS = [
   {
     id: "apparence", label: "Apparence", icon: "🎨",
     sections: [
-      // Fix audit 2026-06-07 UX high : selecteur de langue manquant alors que
-      // le backend persiste deja `locale` (cinesort_api._apply_locale_setting).
-      // Sans ce champ, l'utilisateur ne peut pas changer la langue UI depuis
-      // les parametres (memoire user : francais).
-      { id: "langue", label: "Langue", fields: [
-        { key: "locale", label: "Langue de l'interface", type: "select", options: [
-          { v: "fr", l: "Français" }, { v: "en", l: "English" },
-        ], hint: "Le changement est appliqué à la prochaine ouverture des pages." },
-      ]},
+      // [FR-only 2026-07-10 / PHASE5_ARBITRAGES §1] Sélecteur de langue RETIRÉ :
+      // les 9 vues principales sont en français en dur (zéro appel t()), donc
+      // proposer « English » était une promesse trompeuse (seuls la sidebar, la
+      // top-bar et les messages backend basculaient). Le backend garde la
+      // machinerie `locale` (en.json + /api/settings/set_locale) pour un usage
+      // avancé via settings.json ; l'UI assume le français.
       { id: "theme", label: "Thème", fields: [
         { key: "theme", label: "Thème de l'interface", type: "select", options: [
           {v:"studio",l:"Studio"},{v:"cinema",l:"Cinéma"},{v:"luxe",l:"Luxe"},{v:"neon",l:"Neon"},
@@ -340,10 +340,12 @@ export const PARAMETRES_GROUPS = [
           hint: "Force un appel à GitHub Releases pour détecter une nouvelle version." },
       ]},
       { id: "retention", label: "Rétention historique", fields: [
+        // "retention_days" RETIRE (2026-08-03) : le champ promettait une purge des
+        // "analyses perceptuelles et scores qualité" qui n'existe nulle part cote
+        // backend (aucun lecteur du reglage). Il ne restait que le seul reglage
+        // reellement branche, sur le cron de purge des runs.
         { key: "history_retention_days", label: "Conserver l'historique (jours)", type: "number", min: 7, max: 365, default: 90,
           hint: "Au-delà, les runs sont purgés automatiquement.", advanced: true },
-        { key: "retention_days", label: "Rétention scores et analyses (jours)", type: "number", min: 7, max: 730, default: 180,
-          hint: "Durée de conservation des analyses perceptuelles et scores qualité.", advanced: true },
       ]},
       // VQ-2 QUARANTAINE-TTL : TTL filesystem du bucket _review + viewer + bouton vider.
       // Cron 24h cote backend purge _review/_conflicts, _conflicts_sidecars,
@@ -382,8 +384,19 @@ const _state = {
   activeCategory: "sources",
   searchQuery: "",
   saveTimer: null,
+  // F04 (revue post-merge 2026-07-18) : promesse du POST save_settings en vol.
+  // Permet a _loadSettings d'attendre la fin d'un flush declenche par
+  // unmountParametres avant de relire l'etat serveur (sinon on relit un etat
+  // pre-save et on ecrase l'edition de l'utilisateur au remontage).
+  saveInFlight: null,
   savedAt: null,
   saveError: null,
+  // F04 (revue adversaire R1) : `saveError` est de l'etat de VUE (remis a null
+  // par unmountParametres), or le flush part justement AU demontage : un refus
+  // backend (ok:false, 401, 5xx apres les 3 retries de core/api.js) arrivait
+  // donc quand la vue etait deja partie et ne laissait AUCUNE trace. Ce champ-ci
+  // survit au demontage et est re-affiche au prochain montage de la vue.
+  lastFlushError: null,
   // Profils qualite
   profilesList: [],
   activeProfileId: "",
@@ -488,7 +501,12 @@ function _flushPendingScroll() {
   }, 80);
 }
 
-const _DEFAULT_TIERS = { platinum: 85, gold: 68, silver: 54, bronze: 30 };
+// Audit ultra 2026-07-13 (M5) : recalibre sur la grille backend CANONIQUE
+// v1.5.7 (cinesort/domain/quality_score.default_quality_profile()["tiers"] ==
+// cinesort/domain/tiers_helpers.DEFAULT_TIER_THRESHOLDS = 70/66/55/40). L'ancienne
+// grille 85/68/54/30 (pre-v1.5.5) etait ECRITE en base au save de profil et
+// divergeait des seuils reellement appliques par le scoring.
+const _DEFAULT_TIERS = { platinum: 70, gold: 66, silver: 55, bronze: 40 };
 const _DEFAULT_WEIGHTS = {
   resolution: 0.25,
   bitrate: 0.20,
@@ -981,7 +999,7 @@ function _renderProbeToolsTable(status) {
     </table>
     <div class="parametres-tools-actions">
       <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="recheck" title="Re-détecter les outils installés sur le système (ignore le cache)">↻ Vérifier (forcer la détection)</button>
-      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~30-60s, ~50 Mo)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
+      <button type="button" class="v5-btn v5-btn--sm v5-btn--primary" data-probe-tools-action="auto_install" title="Télécharger et installer ffprobe + MediaInfo (~110 Mo, empreinte SHA256 vérifiée avant installation)">⬇ Installer automatiquement (ffprobe + MediaInfo)</button>
       <button type="button" class="v5-btn v5-btn--sm" data-probe-tools-action="update" title="Mettre à jour via winget (nécessite Windows Package Manager)">⇧ Mettre à jour (winget)</button>
     </div>
     <p class="parametres-tools-message" data-probe-tools-message></p>
@@ -1648,23 +1666,58 @@ async function _saveProfileAsNew() {
   });
 }
 
+/* Revue post-merge 2026-08-03 — deux defauts cumules sur la saisie du nom :
+ *
+ * (1) MESSAGE D'ERREUR INVISIBLE. components/modal.js appelle `onClick()` PUIS
+ *     `closeModal()` sans condition, et closeModal fait `overlay.remove()` de
+ *     maniere synchrone : le texte etait donc ecrit dans un noeud DEJA DETACHE
+ *     et n'atteignait jamais l'ecran. La modale rouverte repartait en plus de la
+ *     valeur par defaut, effacant la saisie. Symptome vecu : le champ redevient
+ *     « MonProfil_v1 », rien n'explique pourquoi, l'utilisateur reboucle.
+ *     Correctif : on transmet la saisie ET le motif du refus a la modale
+ *     rouverte, au lieu d'ecrire dans un noeud mort.
+ *
+ * (2) REGEX ASCII DANS UNE UI FRANCAISE. `[A-Za-z0-9 _-]` refusait tout accent :
+ *     « Qualité max », « Ciné 4K » etaient rejetes — le cas courant, pas un cas
+ *     tordu. On accepte desormais lettres et chiffres Unicode, espace,
+ *     apostrophe, tiret et underscore. `/`, `\`, `.`, `:` et les caracteres de
+ *     controle restent exclus (le nom sert d'`id` de profil ; il n'est jamais
+ *     transforme en chemin cote backend — il est stocke dans
+ *     settings.custom_quality_profiles — mais on garde la liste courte).
+ *
+ *     `\p{M}` (marques combinantes) est inclus en plus de `\p{L}` : un « é »
+ *     colle depuis un texte en forme NFD est la sequence « e » + U+0301, que
+ *     `\p{L}` seul refuse. Mesure faite avec la regex reelle : « Qualité max »
+ *     passe en NFC et echouait en NFD. Une marque combinante ne peut etre ni un
+ *     separateur de chemin ni un caractere de controle.
+ */
+const _PROFILE_NAME_RE = /^[\p{L}\p{M}\p{N} '’_-]{3,40}$/u;
+const _PROFILE_NAME_HELP =
+  "3 à 40 caractères. Lettres (accents acceptés), chiffres, espaces, apostrophes, tirets, underscores.";
+const _PROFILE_NAME_DEFAULT = "MonProfil_v1";
+
 /**
  * Modale custom pour demander un nom de profil. Remplace window.prompt() natif
  * (incompatible WebView2, viole la memoire user "JAMAIS window.prompt/confirm/alert").
- * Validation inline : regex [A-Za-z0-9 _-]+, longueur 3..40.
+ *
+ * @param {Function} onSubmit - appele avec le nom valide.
+ * @param {{initialValue?: string, errorMessage?: string}} [opts] - etat reinjecte
+ *        quand la modale se rouvre apres un refus de validation.
  */
-function _promptNewProfileName(onSubmit) {
+function _promptNewProfileName(onSubmit, opts) {
   return new Promise((resolve) => {
-    const NAME_RE = /^[A-Za-z0-9 _\-]{3,40}$/;
+    const initialValue = opts && opts.initialValue != null ? String(opts.initialValue) : _PROFILE_NAME_DEFAULT;
+    const errorMessage = opts && opts.errorMessage ? String(opts.errorMessage) : "";
     const bodyHtml = `
       <p>Saisissez un nom pour le nouveau profil qualité.</p>
       <label class="parametres-profile-name-label" for="parametres-profile-name-input">Nom du profil</label>
-      <input id="parametres-profile-name-input" type="text" class="v5-input" value="MonProfil_v1"
+      <input id="parametres-profile-name-input" type="text" class="v5-input" value="${escapeHtml(initialValue)}"
              autocomplete="off" spellcheck="false" data-parametres-profile-name-input
              style="width:100%;margin-top:4px;">
       <p class="text-muted font-sm mt-2" data-parametres-profile-name-error
-         style="min-height:1.2em;color:#DC2626;">
-        3 à 40 caractères. Lettres, chiffres, espaces, tirets, underscores uniquement.
+         ${errorMessage ? 'role="alert"' : ""}
+         style="min-height:1.2em;${errorMessage ? "color:#DC2626;font-weight:600;" : ""}">
+        ${escapeHtml(errorMessage || _PROFILE_NAME_HELP)}
       </p>
     `;
     showModal({
@@ -1675,15 +1728,17 @@ function _promptNewProfileName(onSubmit) {
         { label: "Créer", cls: "btn-primary", onClick: () => {
           const overlay = document.getElementById("dashModal");
           const input = overlay?.querySelector("[data-parametres-profile-name-input]");
-          const errEl = overlay?.querySelector("[data-parametres-profile-name-error]");
           const value = input?.value?.trim() || "";
-          if (!NAME_RE.test(value)) {
-            if (errEl) {
-              errEl.textContent = "Nom invalide : 3 à 40 caractères, lettres / chiffres / espaces / - / _.";
-              errEl.style.color = "#DC2626";
-            }
-            // Empecher closeModal automatique en re-ouvrant
-            setTimeout(() => { _promptNewProfileName(onSubmit).then(resolve); }, 0);
+          if (!_PROFILE_NAME_RE.test(value)) {
+            // modal.js va fermer la modale quoi qu'il arrive : inutile d'ecrire
+            // dans l'overlay courant (il sera detache). On rouvre en portant le
+            // motif du refus ET la saisie de l'utilisateur.
+            setTimeout(() => {
+              _promptNewProfileName(onSubmit, {
+                initialValue: value,
+                errorMessage: `Nom invalide. ${_PROFILE_NAME_HELP}`,
+              }).then(resolve);
+            }, 0);
             return;
           }
           // OK : execute la callback puis resolve
@@ -1793,25 +1848,72 @@ function _readFieldValue(field, fieldEl) {
   }
 }
 
-function _scheduleSave() {
-  if (_state.saveTimer) clearTimeout(_state.saveTimer);
-  _state.saveTimer = setTimeout(async () => {
-    try {
-      const res = await apiPost("settings/save_settings", { settings: _state.settings });
-      if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+// F04 (revue adversaire R1) : borne d'attente du flush au montage de la vue
+// (cf. _loadSettings). Un save local repond en < 100 ms ; au-dela, mieux vaut
+// afficher les parametres que geler l'ecran sur son skeleton.
+const FLUSH_WAIT_MAX_MS = 1500;
+
+// F04 (revue post-merge 2026-07-18) : corps du save extrait du setTimeout pour
+// pouvoir etre declenche AUSSI hors debounce (flush au demontage de la vue).
+// Aucun `opts.signal` volontairement : le flush doit survivre a
+// `abortCurrentNav()` que le router appelle juste apres `_currentCleanup()`.
+async function _saveSettingsNow() {
+  // Seul `savedAt` est garde par `_state.containerRef` : c'est lui qui produisait
+  // le badge fantome « ✓ Sauvegarde a HH:MM » au remontage de la vue.
+  // F04 (revue adversaire R1) : l'ECHEC, lui, doit etre pose INCONDITIONNELLEMENT
+  // (etat module, pas du DOM) et memorise dans `lastFlushError` qui survit au
+  // demontage — sinon un flush refuse par le backend perdait l'edition en
+  // silence, exactement comme avant le correctif.
+  try {
+    const res = await apiPost("settings/save_settings", { settings: _state.settings });
+    if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
+      _state.lastFlushError = null;
+      if (_state.containerRef) {
         _state.savedAt = new Date();
         _state.saveError = null;
-        invalidateSettingsCache();
-        _updateSavedIndicator();
-      } else {
-        _state.saveError = res?.data?.message || "Erreur inconnue";
-        _updateSavedIndicator();
       }
-    } catch (err) {
-      _state.saveError = err?.message || "Erreur réseau";
+      invalidateSettingsCache();
+      _updateSavedIndicator();
+    } else {
+      const msg = res?.data?.message || "Erreur inconnue";
+      _state.saveError = msg;
+      _state.lastFlushError = msg;
       _updateSavedIndicator();
     }
+  } catch (err) {
+    const msg = err?.message || "Erreur réseau";
+    _state.saveError = msg;
+    _state.lastFlushError = msg;
+    _updateSavedIndicator();
+  }
+}
+
+// F04 (revue adversaire R1) : re-affiche au montage l'echec d'un flush survenu
+// pendant que la vue etait demontee. Sans ce rappel, l'utilisateur retrouvait
+// son ANCIEN reglage (ecrase par _loadSettings) sans aucun message.
+function _surfacePendingFlushError() {
+  if (!_state.lastFlushError) return;
+  _state.savedAt = null;
+  _state.saveError = `Dernière modification NON enregistrée (${_state.lastFlushError}) — vérifiez la valeur et ressaisissez-la.`;
+  _updateSavedIndicator();
+}
+
+function _scheduleSave() {
+  if (_state.saveTimer) clearTimeout(_state.saveTimer);
+  _state.saveTimer = setTimeout(() => {
+    _state.saveTimer = null;
+    _state.saveInFlight = _saveSettingsNow();
   }, 500);
+}
+
+// F04 : envoie immediatement le save en attente (debounce non echu). Appele par
+// unmountParametres — sans lui, quitter la vue < 500 ms apres une frappe perdait
+// silencieusement l'edition (clearTimeout nu, aucun beforeunload dans le dashboard).
+function _flushPendingSave() {
+  if (!_state.saveTimer) return;
+  clearTimeout(_state.saveTimer);
+  _state.saveTimer = null;
+  _state.saveInFlight = _saveSettingsNow();
 }
 
 function _updateSavedIndicator() {
@@ -1836,6 +1938,27 @@ function _updateSavedIndicator() {
 }
 
 async function _loadSettings() {
+  // F04 : si un flush de sauvegarde est encore en vol (quitte puis revenu sur
+  // la vue en moins d'un aller-retour reseau), on l'attend avant de relire le
+  // serveur — sinon on recharge un etat pre-save et l'edition est perdue.
+  //
+  // F04 (revue adversaire R1) : attente BORNEE. Cet await est sur le chemin de
+  // MONTAGE de la vue (initParametres, bloc aria-busy) et l'apiPost du flush
+  // part sans `timeoutMs`, avec jusqu'a 3 retries + backoff (core/api.js) : sans
+  // borne, l'ecran Parametres restait fige sur son skeleton tant que le POST
+  // n'avait pas repondu. Au-dela de la borne on relit le serveur sans attendre ;
+  // un echec tardif reste signale par `lastFlushError`.
+  const pendingSave = _state.saveInFlight;
+  if (pendingSave) {
+    let waitTimer = null;
+    const bound = new Promise((resolve) => { waitTimer = setTimeout(resolve, FLUSH_WAIT_MAX_MS); });
+    try {
+      await Promise.race([Promise.resolve(pendingSave).catch(() => {}), bound]);
+    } finally {
+      if (waitTimer) clearTimeout(waitTimer);
+    }
+    if (_state.saveInFlight === pendingSave) _state.saveInFlight = null;
+  }
   const res = await apiPost("settings/get_settings", {});
   // BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est
   // un objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
@@ -2177,11 +2300,50 @@ function _bindFields(container) {
   });
 
   // API-key show/hide
+  // LOTC-B3 : le GET settings renvoie le masque SEC-H3 ('••••••••') pour
+  // rest_api_token — basculer input.type revelait (et 📋 copiait) le MASQUE,
+  // 401 garanti cote appareil distant. On resout le vrai Bearer via
+  // settings/reveal_rest_token (R7-10, refuse hors localhost) avant d'afficher.
+  let _realRestToken = null;
+  const _isMaskedToken = (v) => /^[•*]+$/.test(String(v || "").trim());
+  const _restMsg = (text, isError) => {
+    const el = container.querySelector("[data-rest-token-msg]");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "parametres-test-result" + (text ? (isError ? " parametres-test-result--error" : " parametres-test-result--ok") : "");
+  };
+  const _getRealRestToken = async () => {
+    if (_realRestToken != null) return _realRestToken;
+    try {
+      const res = await apiPost("settings/reveal_rest_token");
+      const d = (res && res.data) || res || {};
+      if (d.ok && d.rest_api_token) {
+        _realRestToken = String(d.rest_api_token);
+        return _realRestToken;
+      }
+    } catch (_e) { /* refuse (distant) ou reseau : message cote appelant */ }
+    return null;
+  };
   container.querySelectorAll("[data-api-key-toggle]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const id = btn.dataset.apiKeyToggle;
       const input = container.querySelector("#" + id);
-      if (input) input.type = input.type === "password" ? "text" : "password";
+      if (!input) return;
+      const reveal = input.type === "password";
+      if (input.dataset.fieldKey === "rest_api_token") {
+        if (reveal && _isMaskedToken(input.value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé révélable en local uniquement.", true); return; }
+          input.value = real;
+          _restMsg("", false);
+        } else if (!reveal && _realRestToken != null && input.value === _realRestToken) {
+          // Re-masquage : restaurer le masque du GET pour ne pas laisser le
+          // vrai token dans le DOM (sans toucher _state.settings ni l'autosave ;
+          // une saisie manuelle de l'utilisateur est preservee telle quelle).
+          input.value = String(_state.settings.rest_api_token || "");
+        }
+      }
+      input.type = reveal ? "text" : "password";
     });
   });
 
@@ -2272,7 +2434,15 @@ function _bindFields(container) {
   if (copyBtn && tokenInput) {
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(tokenInput.value);
+        // LOTC-B3 : le champ peut contenir le masque SEC-H3 -> copier la vraie
+        // valeur revelee, jamais les puces.
+        let value = tokenInput.value;
+        if (_isMaskedToken(value)) {
+          const real = await _getRealRestToken();
+          if (!real) { _restMsg("Clé copiable en local uniquement.", true); return; }
+          value = real;
+        }
+        await navigator.clipboard.writeText(value);
         if (msgEl) { msgEl.textContent = "✓ Copié"; msgEl.className = "parametres-test-result parametres-test-result--ok"; setTimeout(() => { msgEl.textContent = ""; }, 1800); }
       } catch (_e) { if (msgEl) msgEl.textContent = "Échec copie"; }
     });
@@ -2293,6 +2463,8 @@ function _bindFields(container) {
           tokenInput.value = b64;
           tokenInput.type = "text";
           _state.settings.rest_api_token = b64;
+          _realRestToken = b64; // LOTC-B3 : l'ancien token revele est perime
+
           if (msgEl) { msgEl.textContent = "✓ Nouveau token"; msgEl.className = "parametres-test-result parametres-test-result--ok"; }
           _scheduleSave();
         },
@@ -2398,6 +2570,12 @@ function _bindFields(container) {
       try {
         // 1) On interroge le bucket pour avoir un decompte fiable (declenche
         // le countdown 3s si > 50 fichiers, exigence memoire utilisateur).
+        // FIX #2/#6/#10 : la modale doit refleter ce que "Vider maintenant"
+        // supprime REELLEMENT (purge_review_bucket_all scope <root>/_review sauf
+        // _duplicates_user_decided), pas l'agregat viewer files_count qui inclut
+        // aussi les buckets runs et les decisions preservees -> l'utilisateur
+        // confirmait N et obtenait deleted << N. On utilise donc le perimetre
+        // purgeable (purge_scope_*) et un echantillon filtre au meme perimetre.
         let total = 0;
         let sample = [];
         let sizeMo = "0";
@@ -2405,9 +2583,17 @@ function _bindFields(container) {
           const listRes = await apiPost("run/list_quarantine_bucket", { limit: 50 });
           const listData = listRes && listRes.data ? listRes.data : listRes;
           if (listData && listData.ok !== false) {
-            total = Number(listData.files_count || 0);
-            sample = (listData.files || []).slice(0, 10).map((f) => f.rel || f.path);
-            const sizeBytes = Number(listData.total_size_bytes || 0);
+            total = Number(listData.purge_scope_files_count || 0);
+            // R2 : echantillon backend aligne sur le perimetre purgeable
+            // (purge_scope_sample) — l'ancien filtre sur `files` (top-50 toutes
+            // buckets) pouvait etre vide alors que total > 0. Fallback conserve.
+            sample = Array.isArray(listData.purge_scope_sample) && listData.purge_scope_sample.length
+              ? listData.purge_scope_sample.slice(0, 10)
+              : (listData.files || [])
+                  .filter((f) => !f.source_root && f.subdir !== "_duplicates_user_decided")
+                  .slice(0, 10)
+                  .map((f) => f.rel || f.path);
+            const sizeBytes = Number(listData.purge_scope_size_bytes || 0);
             sizeMo = sizeBytes > 0 ? (sizeBytes / 1024 / 1024).toFixed(1) : "0";
           }
         } catch (_listErr) {
@@ -2879,12 +3065,13 @@ function _bindProbeToolsActions(container) {
           await _loadProbeToolsStatus(container, { force: true });
           _setProbeToolsMessage(container, "✓ Statut rafraîchi.", "ok");
         } else if (action === "auto_install") {
-          // Confirmation : DL HTTP ~50 Mo + écriture dans %LOCALAPPDATA% — action sensible.
+          // Confirmation : DL HTTPS ~110 Mo + écriture dans %LOCALAPPDATA% — action sensible.
           const ok = (typeof window !== "undefined" && typeof window.confirm === "function")
             ? window.confirm(
                 "Installer automatiquement ffprobe et MediaInfo ?\n\n"
-                + "• Téléchargement HTTP : environ 50 Mo\n"
-                + "• Durée estimée : 30 à 60 secondes\n"
+                + "• Téléchargement HTTPS : environ 110 Mo\n"
+                + "• Durée estimée : 1 à 3 minutes\n"
+                + "• Empreinte SHA256 vérifiée avant installation : en cas d'écart, rien n'est installé\n"
                 + "• Destination : dossier utilisateur (pas besoin d'admin)\n\n"
                 + "Confirmer l'installation ?",
               )
@@ -3374,6 +3561,34 @@ function _uninstallCtrlK() {
   }
 }
 
+/* Ctrl+S — la table de raccourcis de core/keyboard.js (ligne 44) annonce
+ * « Enregistrer » a l'utilisateur, et le handler global fait bien un
+ * preventDefault() puis emet `cinesort:save-request`. Mais AUCUNE vue n'ecoutait
+ * cet evenement : le raccourci bloquait le « Enregistrer » natif du navigateur
+ * et ne faisait rien — une promesse affichee mais jamais tenue.
+ *
+ * Les Parametres sont le seul ecran ou « Enregistrer » a un sens : on y branche
+ * le flush du debounce, exactement ce que fait deja la sortie de vue. Ailleurs
+ * l'evenement reste sans effet (comportement inchange). */
+let _saveRequestHandler = null;
+
+function _installSaveRequest() {
+  if (_saveRequestHandler || typeof window === "undefined") return;
+  _saveRequestHandler = () => {
+    // Pas de save en vol et rien en attente -> ne rien faire (pas de POST inutile).
+    if (!_state.saveTimer) return;
+    _flushPendingSave();
+  };
+  window.addEventListener("cinesort:save-request", _saveRequestHandler);
+}
+
+function _uninstallSaveRequest() {
+  if (_saveRequestHandler && typeof window !== "undefined") {
+    window.removeEventListener("cinesort:save-request", _saveRequestHandler);
+  }
+  _saveRequestHandler = null;
+}
+
 /* =============================================================
  * 15) ENTRY POINTS
  * ============================================================= */
@@ -3405,7 +3620,11 @@ export async function initParametres(container) {
   }
 
   _refreshAll();
+  // F04 (revue adversaire R1) : APRES _refreshAll (qui (re)cree l'indicateur
+  // dans le DOM), on re-affiche l'echec d'un flush parti au demontage.
+  _surfacePendingFlushError();
   _installCtrlK();
+  _installSaveRequest();
   _flushPendingScroll();
 
   // Listener hashchange : si on est deja sur /parametres et que l'utilisateur
@@ -3427,8 +3646,12 @@ export async function initParametres(container) {
 }
 
 export function unmountParametres() {
-  if (_state.saveTimer) { clearTimeout(_state.saveTimer); _state.saveTimer = null; }
+  // F04 : NE PAS annuler le debounce sans l'envoyer. Quitter la vue < 500 ms
+  // apres une frappe partait sinon sans jamais POSTer settings/save_settings,
+  // et _loadSettings ecrasait l'edition au retour (perte silencieuse).
+  _flushPendingSave();
   _uninstallCtrlK();
+  _uninstallSaveRequest();
   if (_state.hashChangeHandler && typeof window !== "undefined") {
     window.removeEventListener("hashchange", _state.hashChangeHandler);
     _state.hashChangeHandler = null;
@@ -3437,5 +3660,9 @@ export function unmountParametres() {
   _state.containerRef = null;
   _state.searchQuery = "";
   _state.savedAt = null;
+  // savedAt/saveError sont de l'etat de VUE : ils repartent a zero.
+  // F04 (revue adversaire R1) : `lastFlushError` N'EST PAS remis a zero ici —
+  // c'est lui qui porte l'echec du flush declenche par ce demontage meme, et il
+  // doit survivre pour etre affiche au prochain montage.
   _state.saveError = null;
 }

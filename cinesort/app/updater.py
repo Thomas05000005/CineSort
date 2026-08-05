@@ -24,6 +24,8 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from cinesort.infra.state import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -115,17 +117,48 @@ def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
         return None
     if not isinstance(data, dict):
         return None
-    if time.time() - float(data.get("ts", 0)) >= cache_ttl_s:
+    # `ts` peut etre absent, null ou non-numerique si le fichier a ete tronque
+    # (ecriture partielle) ou edite a la main : float() leverait ValueError/
+    # TypeError hors du except ci-dessus. On traite ce cas comme un cache
+    # illisible (return None) plutot que de laisser remonter l'exception, fidele
+    # a la philosophie du module ("cache illisible -> refetch, jamais crash").
+    try:
+        ts = float(data.get("ts") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if time.time() - ts >= cache_ttl_s:
         return None
     payload = data.get("payload")
     return payload if isinstance(payload, dict) else None
 
 
 def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
+    """Ecrit le cache de maniere atomique ET durable (helper commun).
+
+    Le check tourne dans un thread daemon (check_for_update_async) pendant que
+    l'UI peut lire via get_cached_info : une ecriture directe write_text() peut
+    etre lue tronquee, ou laisser un JSON partiel apres crash/coupure. Le
+    `os.replace` interne au helper est atomique -> un lecteur voit soit
+    l'ancien fichier, soit le nouveau, jamais un melange. Meme couple
+    (tmp unique + fsync + controle de taille) que tmdb_client, poster_proxy et
+    quarantine_ttl, qui passent tous par `cinesort.infra.state`.
+    """
     if not cache_path:
         return
     try:
-        cache_path.write_text(json.dumps({"ts": time.time(), "payload": payload}), encoding="utf-8")
+        # Fix #787 : `write_text` tronque le fichier EN PLACE avant d'ecrire.
+        # Une coupure a cet instant laissait un `update_cache.json` vide ou
+        # partiel que `_read_cache` rejetait ensuite a chaque boot -> un appel
+        # GitHub par demarrage, jusqu'au rate limit 60/h.
+        #
+        # Conflit avec #789 (main) : meme issue #787, meme intention. Main
+        # ecrivait `tmp.write_text(...)` puis `os.replace` — SANS fsync, donc
+        # sans la moitie de l'invariant qui protege du crash systeme, et avec
+        # un `.tmp` suffixe du seul pid (deux threads du meme processus
+        # partagent ce nom). Le helper unique fait les deux moities ensemble
+        # et nettoie son `.tmp` en `finally` : la version inline de main est
+        # retiree, pas conservee en double.
+        atomic_write_json(cache_path, {"ts": time.time(), "payload": payload}, indent=None)
     except OSError as exc:
         logger.debug("Updater: ecriture cache impossible (%s)", exc)
 

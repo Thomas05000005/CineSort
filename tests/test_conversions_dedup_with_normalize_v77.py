@@ -99,14 +99,24 @@ class TestConversionsDedup(unittest.TestCase):
 
     def test_optional_bool_preserves_native_false_and_zero(self) -> None:
         """Audit 2026-06-25 : un booleen/entier natif falsy ne doit pas
-        devenir None (confusion sentinelle absent vs False)."""
-        self.assertIs(to_optional_bool(False), False)
-        self.assertIs(to_optional_bool(True), True)
-        self.assertIs(to_optional_bool(0), False)
-        self.assertIs(to_optional_bool(1), True)
-        self.assertIs(to_optional_bool(0.0), False)
-        self.assertIsNone(to_optional_bool(None))
-        self.assertIsNone(to_optional_bool(""))
+        devenir None (confusion sentinelle absent vs False).
+
+        La delegation est verifiee sur les types NATIFS, pas seulement sur les
+        str de `test_bool_from_text_delegates` : c'est ce que consomme
+        `_normalize_ffprobe`, qui arbitre sur `forced_tag is not None` et
+        distingue donc reellement None de False.
+        """
+        for raw, expected in [
+            (False, False),
+            (True, True),
+            (0, False),
+            (1, True),
+            (0.0, False),
+            (None, None),
+            ("", None),
+        ]:
+            self.assertIs(to_optional_bool(raw), expected, f"{raw!r}")
+            self.assertIs(_bool_from_text(raw), expected, f"_bool_from_text({raw!r})")
 
     def test_canonical_module_does_not_import_probe(self) -> None:
         """cinesort.domain.conversions ne doit pas dependre de cinesort.infra.*."""

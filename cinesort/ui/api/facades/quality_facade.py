@@ -364,9 +364,7 @@ class QualityFacade(_BaseFacade):
 
         Cf cinesort.ui.api.profiles_support_import_export.import_recyclarr_yaml.
         """
-        return profiles_support_import_export.import_recyclarr_yaml(
-            self._api, yaml_text, activate=activate
-        )
+        return profiles_support_import_export.import_recyclarr_yaml(self._api, yaml_text, activate=activate)
 
     # ---------- VP-F — Preset TRaSH 2026 embarque (AC-3 : OFF par defaut) ----------
 

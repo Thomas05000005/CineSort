@@ -1,0 +1,5 @@
+clean_title_guess('Le.Grand.Voyage.2005')       -> 'Le Grand Voyage'
+clean_title_guess('Le.Grand.Voyage.2005.720p')  -> 'Le Grand Voyage 2005'
+{"row_id": "S|798451e6", "folder": "C:\\Users\\blanc\\AppData\\Local\\Temp\\dbg_titleyear_j_6pgs7o\\rootA\\Le.Grand.Voyage.2005", "proposed_title": "Le Grand Voyage", "proposed_year": 2005}
+{"row_id": "S|937c605c", "folder": "C:\\Users\\blanc\\AppData\\Local\\Temp\\dbg_titleyear_j_6pgs7o\\rootB\\Le.Grand.Voyage.2005.720p", "proposed_title": "Le Grand Voyage 2005", "proposed_year": 2005}
+total_groups = 0 (attendu par l'utilisateur : 1 — meme film, meme annee, 2 roots)

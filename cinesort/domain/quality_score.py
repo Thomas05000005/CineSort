@@ -34,6 +34,15 @@ from cinesort.domain.genre_rules import (
 # quand le probe est PARTIAL/FAILED (ex: SMB obsolete, fichier corrompu).
 from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_name
 
+# Lot #641/#682/#745/#806 : echelle de resolution LARGEUR-primaire, partagee
+# avec `encode_analysis` et `genre_rules` (source unique).
+from cinesort.domain.resolution_class import (
+    RES_720P,
+    RES_1080P,
+    RES_2160P,
+    classify_resolution,
+)
+
 # VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026). OPT-IN
 # strict (toggle default OFF) - aucune redistribution de tier sur 853 films
 # biblio sans validation user. AC-2 : applique AVANT _cap_tier securite
@@ -41,9 +50,11 @@ from cinesort.domain.release_name_parser import ReleaseNameInfo, parse_release_n
 from cinesort.domain.tiers_helpers import (
     apply_tier_hierarchy as _apply_tier_hierarchy,
 )
+from cinesort.domain.tiers_helpers import cap_tier as _cap_tier_central
 from cinesort.domain.tiers_helpers import (
     default_hierarchy_config as _default_hierarchy_config,
 )
+from cinesort.domain.tiers_helpers import determine_tier as _determine_tier_central
 from cinesort.domain.tiers_helpers import (
     normalize_hierarchy_config as _normalize_hierarchy_config,
 )
@@ -58,6 +69,37 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE_ID = "CinemaLux_v1"
 DEFAULT_PROFILE_VERSION = 1
+
+# Version des REGLES de scoring, c'est-a-dire du CODE de ce module.
+#
+# Fix revue adversaire PR#854. Le gate de cache de `quality_report_support`
+# (:224) reutilisait un rapport existant des que `engine_version` +
+# `profile_id` + `profile_version` correspondaient. Or ces trois valeurs
+# viennent toutes du PROFIL, et le profil est PERSISTE dans la base
+# (`ensure_quality_profile` le sauvegarde au premier usage, puis
+# `validate_quality_profile` recopie son `engine_version` tel quel) : bumper
+# `default_quality_profile()["engine_version"]` est donc INERTE pour tout
+# utilisateur existant -- son profil stocke continue de dire "CinemaLux_v1" des
+# deux cotes de la comparaison, et le cache continue de matcher.
+#
+# Ce compteur-ci appartient au code et n'existe dans aucun profil. Les rapports
+# deja persistes ne le portent pas (chaine vide != "2"), donc ils sont tous
+# invalides au premier acces, y compris via l'analyse en masse dont l'option
+# `reuse_existing` vaut True par defaut (`quality_support._parse_options`:30).
+# Le re-scoring relit le probe depuis le cache de `ProbeService` quand le fichier
+# n'a pas bouge ; et si le media n'est plus atteignable du tout (run deja
+# applique), `get_quality_report` rend l'ancien score marque `scoring_rules_stale`
+# plutot qu'une erreur.
+#
+# A INCREMENTER a chaque changement de regle qui modifie un score ou un tier.
+# Historique : 1 (implicite, champ absent) = avant le lot « classe de resolution
+# et codec audio canoniques » ; 2 = ce lot ; 3 = lot #641/#682/#745/#806
+# (`analyze_encode_quality` choisit sa bande sur la CLASSE de resolution et non
+# plus sur la hauteur brute, palier re-encode 2160p ajoute, fin du gating par
+# codec). Les flags d'encode changent donc les scores deja persistes des films
+# cinemascope, des 4K severement re-encodees et des 1080p en codec exotique :
+# sans ce bump, ces rapports resteraient caches avec leur ancien verdict.
+SCORING_RULES_VERSION = 3
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -512,28 +554,33 @@ def _codec_bonus(codec: str, profile: Dict[str, Any]) -> int:
 
 
 def _normalize_video_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
-    # Hotfix C5 (2026-06-02) : detection d'unite robuste pour 4K UHD REMUX.
-    # ANCIEN : `if n > 100000: n /= 1000` traitait tout > 100 Mbps comme bps.
-    # Or les 4K UHD REMUX reels atteignent legitiment 100-150 Mbps (= 100000-
-    # 150000 kbps), classes a tort en ~150 kbps (penalite -8 "bitrate faible"
-    # sur du contenu premium). FIX : seuil bps eleve a 500000 (= 500 Mbps,
-    # plafond physique sur tout disque BluRay/UHD-BD ; jamais atteint en
-    # kbps puisque ca correspondrait a 500 Gbps).
-    # Plages realistes VIDEO :
-    #   - kbps  : 500 - 200000  (SD a 4K UHD REMUX)
-    #   - Mbps  : 1 - 200       (peu probable car probe expose generalement kbps)
-    #   - bps   : 500000+       (> 500 Mbps = forcement bps)
+    # F16 (2026-08) : le bitrate video stocke est TOUJOURS en bits/s, exactement
+    # comme le bitrate audio (meme invariant, deja corrige cote audio par
+    # R8-038). La couche probe est le SEUL producteur de `video.bitrate` :
+    #   - infra/probe/_normalize_ffprobe.py:93  -> _to_bitrate_int(...)
+    #   - infra/probe/_normalize_mediainfo.py:84 -> _to_bitrate_int(...)
+    #   -> cinesort/domain/conversions.py:109 to_optional_bitrate, qui rend
+    #      TOUJOURS des bits/s (toute unite Kb/s / Mb/s / Gb/s est convertie).
+    # Les name-hints ne remplissent JAMAIS video.bitrate (_enrich_probe_with_
+    # name_hints ne synthetise qu'une piste AUDIO a bitrate 0), donc aucune
+    # autre unite n'entre ici.
+    # ANCIEN (hotfix C5, devenu faux) : `if n > 500000 -> /1000 sinon tel quel`.
+    # Un 1080p a 450 kb/s reels (= 450000 bps) etait lu comme 450000 kb/s ->
+    # "+18 Debit excellent" au lieu du malus -18, et _estimate_file_size rendait
+    # 303 GB au lieu de ~304 MB (x1000 sur metrics.detected + custom rules
+    # bitrate_kbps / file_size_gb).
+    # FIX : division INCONDITIONNELLE bps -> kbps.
     if raw_bitrate is None:
         return None
     n = _to_float(raw_bitrate, -1.0)
     if n <= 0:
         return None
-    # > 500000 : forcement bps (500 Mbps n'existe pas en kbps cinema video)
-    if n > 500000.0:
-        return int(round(n / 1000.0))
-    # < 1.0 : suspect, probablement Mbps fractionnel (ex: 0.8 Mbps SD legacy)
-    # mais on retourne tel quel int(0) -> None apres clamp. On laisse passer.
-    return int(round(n))
+    kbps = int(round(n / 1000.0))
+    # `or None` : une entree < 500 bps arrondirait a 0, et 0 n'est PAS None ->
+    # il serait traite comme un debit MESURE (ratio 0 -> penalite maximale) et
+    # accorderait +4 de confiance "debit present" (defaut note
+    # AUDIT_RELECTURE_2026-06-10.md:1050). On rend None = "debit non detecte".
+    return kbps or None
 
 
 def _normalize_audio_bitrate_kbps(raw_bitrate: Any) -> Optional[int]:
@@ -582,8 +629,6 @@ _RELEASE_4K_LIGHT_RE = re.compile(r"\b(4klight|hdlight|uhdrip)\b", re.IGNORECASE
 
 def _resolution_label(*, width: int, height: int, release_name: str = "") -> Tuple[str, str]:
     # Prefer measured probe dimensions when available.
-    w = max(0, int(width or 0))
-    h = max(0, int(height or 0))
     # Fix audit 2026-05-30 (v1.5.7) bug 178 faux 720p : utiliser short_edge=min(w,h)
     # classait les films cinema 1920x800 (ratio 2.35:1) en 720p car 800<1000. Or
     # ce sont des 1080p natifs croppes ou matted (les bandes noires retirees).
@@ -593,12 +638,15 @@ def _resolution_label(*, width: int, height: int, release_name: str = "") -> Tup
     # toujours, peu importe l aspect ratio). VERIFIE par ffprobe direct sur 15
     # echantillons de la biblio utilisateur : 15/15 = 1920x[784-818] etaient
     # tous des vrais 1080p mal classes en 720p avec l ancienne logique.
-    if w >= 3800 or h >= 2100:
-        return "2160p", "probe"
-    if w >= 1900 or h >= 1000:
-        return "1080p", "probe"
-    if w >= 1280 or h >= 680:
-        return "720p", "probe"
+    #
+    # Lot #641/#682/#745/#806 : l'echelle elle-meme vit dans
+    # `cinesort.domain.resolution_class`, pour que `encode_analysis` et
+    # `genre_rules` tranchent EXACTEMENT comme ici. Une classe SD ou inconnue
+    # ne s'annonce pas "probe" : elle laisse la main au nom de release, comme
+    # avant ce lot.
+    measured = classify_resolution(width, height)
+    if measured in (RES_2160P, RES_1080P, RES_720P):
+        return measured, "probe"
 
     rel = str(release_name or "").strip().lower()
     if rel:
@@ -621,6 +669,40 @@ def _resolution_rank(label: str) -> int:
     return 480
 
 
+def _effective_resolution_height(*, video: Dict[str, Any], vr: Dict[str, Any]) -> int:
+    """Hauteur CANONIQUE (celle de la classe de resolution), pas la hauteur brute.
+
+    Fix ultra-audit 2026-08-03. La hauteur ffprobe est celle du flux encode,
+    bandes noires deja retirees : un 1080p scope 2.35:1 mesure 1920x800 et un
+    2160p scope 3840x1600. Tout comparateur ecrit `height >= 1080` sur cette
+    valeur brute declasse les films cinemascope, qui sont la norme au catalogue
+    patrimoine. `_resolution_label` (:590) resout deja l'ambiguite en tranchant
+    sur la LARGEUR ; on rejoue simplement son verdict ici.
+
+    La MESURE prime sur le NOM (fix revue adversaire PR#854). `_resolution_label`
+    retombe sur le nom de release quand les dimensions mesurees sont sous les
+    seuils : un fichier reellement mesure 700x400 mais nomme `.1080p.` obtenait
+    sinon une hauteur effective de 1080, donc le bonus « patrimoine en HD »
+    (+8) et un ecart de 20 points face au meme fichier sans le tag dans son nom.
+    C'est exactement la garde que `tiers_helpers` (F01) applique deja en
+    ignorant la dimension resolution quand `resolution_source != "probe"`.
+
+    Ordre de decision :
+    1. pas d'etiquette du tout (`vr` tronque, contrat defensif) -> hauteur brute ;
+    2. une hauteur a ete MESUREE mais l'etiquette vient du nom -> hauteur mesuree ;
+    3. sinon -> classe canonique. Le cas « aucune mesure + etiquette deduite du
+       nom » passe donc toujours par la classe : c'est le fix Vague K
+       (2026-05-25) qui fait vivre les bonus d'ere quand le probe a echoue.
+    """
+    label = str(vr.get("resolution_label") or "")
+    measured_height = _to_int(video.get("height"), 0)
+    if not label:
+        return measured_height
+    if measured_height > 0 and str(vr.get("resolution_source") or "") != "probe":
+        return measured_height
+    return _resolution_rank(label)
+
+
 def _extract_languages(audio_tracks: List[Dict[str, Any]]) -> List[str]:
     out: List[str] = []
     for track in audio_tracks:
@@ -638,11 +720,110 @@ def _has_vf(langs: List[str]) -> bool:
     return any(lang in {"fr", "fra", "fre", "french", "vf", "vff", "vfi"} for lang in langs)
 
 
+# Etiquettes canoniques composees -> cle de rang equivalente dans
+# `codec_ranks.AUDIO_CODEC_RANK` (lookup exact). Fix ultra-audit 2026-08-03 :
+# sans cette table, "truehd atmos" ou "dts:x" retomberaient a 0 (sous AAC).
+# Les alias preservent EXACTEMENT le rang d'avant pour les variantes lossy
+# (atmos JOC reste au rang de son porteur eac3/ac3, HRA reste au rang dts).
+# Marqueurs d'une etiquette DEJA canonique : la derivation les laisse passer.
+_ALREADY_CANONICAL_AUDIO_TOKENS = ("atmos", "dts-hd", "dtshd", "dts:x", "dts-x")
+
+_AUDIO_CANONICAL_RANK_ALIAS = {
+    "truehd atmos": "truehd",
+    "eac3 atmos": "eac3",
+    "e-ac-3 atmos": "eac3",
+    "ac3 atmos": "ac3",
+    # Revue Sourcery PR#854 : la table couvrait 'e-ac-3 atmos' mais aucune des
+    # formes HYPHENEES, que produit pourtant le backend MediaInfo (son champ
+    # `Format` vaut 'AC-3' / 'E-AC-3', cf. infra/probe/_normalize_mediainfo:97).
+    # Elles retombaient a 0, soit SOUS l'AAC (1) : `_best_audio_track` pouvait
+    # elire une piste AAC secondaire face a la piste AC-3 principale. Aucun rang
+    # ne baisse -- ces trois cles n'en avaient aucun.
+    "ac-3": "ac3",
+    "ac-3 atmos": "ac3",
+    "e-ac-3": "eac3",
+    "dts:x": "dts-hd ma",
+    "dts-hd hra": "dts",
+}
+
+
+def _canonical_audio_codec(track: Dict[str, Any]) -> str:
+    """Etiquette canonique d'une piste audio : codec de BASE + variante.
+
+    Fix ultra-audit 2026-08-03. ffprobe range le codec de base dans `codec`
+    ('dts', 'truehd', 'eac3') et la variante dans des champs SEPARES : `profile`
+    ('DTS-HD MA'), `is_atmos`, `is_dts_x` (cf. infra/probe/_normalize_ffprobe).
+    Or les consommateurs font tous du substring sur `codec` seul, donc un remux
+    BluRay DTS-HD MA etait lu 'dts' PARTOUT :
+
+    - `_audio_codec_bonus` : +6 « Audio DTS » au lieu de +10 « Audio DTS-HD MA »
+      (et en preset remux_strict, +5 alors que dts_hd_ma_bonus vaut 12 : le
+      profil « exigeant home-cinema » notait le DTS-HD MA moins bien que le
+      profil equilibre) ;
+    - `_hierarchy_audio_codec_token` : 'dts' au lieu de 'dts_hd_ma', et
+      'truehd' au lieu de 'truehd_atmos' -> planchers de tier inatteignables ;
+    - `_best_audio_track` : rang 2 (comme AC3) donc une piste FLAC secondaire
+      (rang 3) etait elue « meilleure piste » ;
+    - `metrics.detected.audio_best_codec`, qui alimente le bucket dashboard
+      « DTS-HD MA » (injoignable), les regles utilisateur (champ `audio_codec`)
+      et le comparateur de doublons (DTS-HD MA vs EAC3 -> egalite) ;
+    - inversion la plus visible : quand le probe ECHOUE, le fallback par le NOM
+      de release synthetise 'dts-hd ma' -> le fichier scorait MIEUX (59/Silver)
+      que le meme fichier avec un probe REUSSI (55/Silver).
+
+    Le codec de base est preserve tel quel quand aucune variante n'est detectee,
+    et une valeur deja canonique (fallback par le nom, ou couche probe corrigee
+    en amont) traverse la fonction inchangee : l'operation est idempotente.
+    """
+    if not isinstance(track, dict):
+        return ""
+    c = str(track.get("codec") or "").strip().lower()
+    # Vide, ou deja canonique (fallback par le nom de release, ou couche probe
+    # corrigee en amont) : valeur rendue telle quelle -> l'operation est idempotente.
+    if not c or any(token in c for token in _ALREADY_CANONICAL_AUDIO_TOKENS):
+        return c
+    prof = str(track.get("profile") or "").strip().lower()
+    if "truehd" in c:
+        return "truehd atmos" if (bool(track.get("is_atmos")) or "atmos" in prof) else "truehd"
+    if ("ac3" in c) or ("ac-3" in c):
+        joc = bool(track.get("is_atmos")) or ("atmos" in prof) or ("joc" in prof)
+        return f"{c} atmos" if joc else c
+    if "dts" in c:
+        return _canonical_dts_codec(c, prof, bool(track.get("is_dts_x")))
+    return c
+
+
+def _canonical_dts_codec(codec: str, profile: str, is_dts_x: bool) -> str:
+    """Variante DTS deduite du `profile` ffprobe ('DTS-HD MA', 'DTS-HD HRA'...).
+
+    Le profil est tokenise (tirets et slashs remplaces par des espaces) pour ne
+    pas confondre le 'ma' de 'DTS-HD MA' avec une sous-chaine d'un autre mot.
+    """
+    if is_dts_x:
+        return "dts:x"
+    tokens = set(profile.replace("-", " ").replace("/", " ").split())
+    if ("ma" in tokens) or ("master" in tokens):
+        return "dts-hd ma"
+    if ("hra" in tokens) or ("high" in tokens):
+        return "dts-hd hra"
+    return codec
+
+
 def _audio_codec_rank(track: Dict[str, Any]) -> int:
     """R8-039 (F4) : rang codec audio (source de vérité `codec_ranks`, lookup exact),
-    aligné sur `duplicate_compare._audio_codec_rank_value`."""
-    codec = str(track.get("codec") or "").strip().lower()
-    return _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+    aligné sur `duplicate_compare._audio_codec_rank_value`.
+
+    Fix ultra-audit 2026-08-03 : le rang se lit sur l'etiquette CANONIQUE (donc
+    DTS-HD MA = 4 et non 2), via une table d'alias pour les etiquettes composees.
+    Aucune valeur ne peut baisser par rapport a l'ancien lookup.
+    """
+    canonical = _canonical_audio_codec(track)
+    if not canonical:
+        return 0
+    rank = _AUDIO_CODEC_RANK.get(canonical)
+    if rank is None:
+        rank = _AUDIO_CODEC_RANK.get(_AUDIO_CANONICAL_RANK_ALIAS.get(canonical, ""), 0)
+    return rank
 
 
 def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -679,7 +860,11 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
     """
     if not isinstance(best_audio, dict):
         return ""
-    c = str(best_audio.get("codec") or "").strip().lower()
+    # Fix ultra-audit 2026-08-03 : etiquette CANONIQUE (le probe ffprobe range
+    # 'DTS-HD MA' dans `profile` et l'Atmos dans `is_atmos`, pas dans `codec`),
+    # sinon les tokens 'dts_hd_ma' / 'truehd_atmos' / 'dts_x' sont inatteignables
+    # et les planchers de tier correspondants sont du code mort.
+    c = _canonical_audio_codec(best_audio)
     if not c:
         return ""
     if ("truehd" in c) and ("atmos" in c):
@@ -690,6 +875,14 @@ def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
     # 'qualite_max_audio' (audio_floors.dts_x=Gold) etait dead code.
     if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c) or (" dts x" in (" " + c)):
         return "dts_x"
+    # Fix revue adversaire PR#854 : DTS-HD HRA est LOSSY. Depuis que ce helper
+    # lit l'etiquette canonique, `{"codec": "dts", "profile": "DTS-HD HRA"}`
+    # produit 'dts-hd hra', qui matche le substring 'dts-hd' ci-dessous et
+    # rendait un flux lossy eligible au plancher de tier du lossless (il valait
+    # 'dts' avant ce lot). `_audio_codec_bonus` (:851) et
+    # `_AUDIO_CANONICAL_RANK_ALIAS` traitent deja HRA au rang `dts` : on aligne.
+    if ("hra" in c) and ("dts" in c):
+        return "dts"
     if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
         return "dts_hd_ma"
     if "truehd" in c:
@@ -734,13 +927,56 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
     # BUG-3 (v7.8.0) : parentheses explicites. Avant : `... or "ma" in c and "dts" in c`
     # se lisait comme `or ("ma" in c and "dts" in c)` (precedence Python : and > or).
     # Comportement preserve, juste rendu lisible et resistant au refactor.
-    if ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
-        return int(bonuses["dts_hd_ma_bonus"]), "Audio DTS-HD MA"
+    #
+    # Fix ultra-audit 2026-08-03 : DTS:X est porte par un flux DTS-HD MA
+    # (lossless + objets). Il tombait sur la branche `dts` generique (bonus
+    # lossy) alors que `_hierarchy_audio_codec_token` lui donne deja son propre
+    # token 'dts_x'. Cle de profil dediee optionnelle, sinon parite DTS-HD MA.
+    is_dts_x = ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c)
+    if is_dts_x or ("dts-hd" in c) or ("dtshd" in c) or ("ma" in c and "dts" in c):
+        if is_dts_x:
+            lossless = int(bonuses.get("dts_x_bonus", bonuses["dts_hd_ma_bonus"]))
+            lossless_label = "Audio DTS:X"
+        else:
+            lossless = int(bonuses["dts_hd_ma_bonus"])
+            lossless_label = "Audio DTS-HD MA"
+        return lossless, lossless_label
     if "dts" in c:
         return int(bonuses["dts_bonus"]), "Audio DTS"
     if "aac" in c:
         return int(bonuses["aac_bonus"]), "Audio AAC"
     return 0, ""
+
+
+def _is_premium_multichannel_codec(canonical_codec: str) -> bool:
+    """True si l'etiquette canonique designe un codec « haut de gamme ».
+
+    Revue CodeRabbit PR#854 : depuis que `_score_audio` lit l'etiquette CANONIQUE
+    (`_canonical_audio_codec`), le test litteral `"dts-hd" in a_codec` ne couvrait
+    plus les memes codecs que le reste du lot :
+
+    - DTS:X est etiquete 'dts:x' (aucun 'dts-hd' dedans) alors que
+      `_audio_codec_bonus`:920 et `_hierarchy_audio_codec_token`:857 le classent
+      lossless premium -> un DTS:X 7.1 perdait le +4 multicanal ;
+    - DTS-HD HRA est etiquete 'dts-hd hra', qui CONTIENT 'dts-hd', alors que ce
+      profil est LOSSY : `_audio_codec_bonus`:908 et
+      `_hierarchy_audio_codec_token`:866 le ramenent deja au rang `dts`. Il
+      touchait donc un bonus « haut de gamme » que les deux autres consommateurs
+      lui refusent.
+
+    Un seul predicat pour les trois, pour que la classification ne rediverge plus.
+    """
+    c = str(canonical_codec or "").lower()
+    if not c:
+        return False
+    # DTS-HD HRA : lossy. Teste AVANT le substring 'dts-hd' generique.
+    if ("hra" in c) and ("dts" in c):
+        return False
+    if ("truehd" in c) or ("atmos" in c):
+        return True
+    if ("dts:x" in c) or ("dts-x" in c) or ("dtsx" in c):
+        return True
+    return ("dts-hd" in c) or ("dtshd" in c)
 
 
 def _channels_bonus(channels: int, profile: Dict[str, Any]) -> Tuple[int, str]:
@@ -852,15 +1088,10 @@ def _score_video(
     # P4.2 : ajuster le seuil selon le genre (animation tolère bitrate bas,
     # action exige plus). Applique le multiplicateur bitrate_leniency.
     if threshold_kbps > 0 and primary_genre:
-        try:
-            adjusted = _adj_th(threshold_kbps, primary_genre)
-            if adjusted != threshold_kbps:
-                reasons.append(
-                    f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s"
-                )
-                threshold_kbps = adjusted
-        except ImportError:
-            pass
+        adjusted = _adj_th(threshold_kbps, primary_genre)
+        if adjusted != threshold_kbps:
+            reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
+            threshold_kbps = adjusted
 
     if bitrate_kbps is None:
         video_sub -= 8
@@ -976,7 +1207,9 @@ def _score_audio(
         audio_sub -= 25
         add_reason(-25, "Aucune piste audio exploitable")
     else:
-        a_codec = str(best_audio.get("codec") or "").lower()
+        # Fix ultra-audit 2026-08-03 : etiquette CANONIQUE (codec + profile +
+        # is_atmos/is_dts_x), sinon un remux DTS-HD MA est lu 'dts'.
+        a_codec = _canonical_audio_codec(best_audio)
         a_bonus, a_label = _audio_codec_bonus(a_codec, prof)
         audio_sub += a_bonus
         if a_bonus > 0:
@@ -1005,7 +1238,7 @@ def _score_audio(
         # ce qui declenchait le bonus +4 multicanal pour du TrueHD/Atmos 2.0
         # ou 5.1 (channels < 8). Le parenthesage explicite restaure la
         # semantique attendue : codec premium ET >= 8 canaux.
-        if (("truehd" in a_codec) or ("atmos" in a_codec) or ("dts-hd" in a_codec)) and channels >= 8:
+        if _is_premium_multichannel_codec(a_codec) and channels >= 8:
             audio_sub += 4
             add_reason(+4, "Audio haut de gamme multicanal")
 
@@ -1095,8 +1328,7 @@ def _score_extras(
     elif probe_quality == "UNKNOWN":
         # Pas de penalite ni de bonus : on log un warning a la place du malus.
         logger.warning(
-            "scoring/_score_extras: probe_quality=UNKNOWN (champ absent), "
-            "neutre - ni bonus ni penalite metadata."
+            "scoring/_score_extras: probe_quality=UNKNOWN (champ absent), neutre - ni bonus ni penalite metadata."
         )
     else:
         # FAILED (ou valeur fallback FAILED): probe a echoue, penalite normale.
@@ -1177,48 +1409,18 @@ def _apply_weights(
     return _clamp_0_100(score_f)
 
 
+# Verif totale 2026-07 (Phase 5) : _determine_tier / _cap_tier ne
+# reimplementent plus la logique tiers — delegation directe a tiers_helpers
+# (source unique de verite, retro-compat legacy premium/bon/moyen + cap
+# canonique). Les noms prives restent pour les call sites internes.
 def _determine_tier(score: int, tiers: Dict[str, Any]) -> str:
-    """Retourne le tier (Platinum / Gold / Silver / Bronze / Reject).
-
-    SCORE-02 (Vague M, M-06) : delegation a tiers_helpers.normalize_tiers pour
-    la retro-compat legacy (premium/bon/moyen). Defaults v1.5.7 70/66/55/40.
-    """
-    seuils = _normalize_tiers_central(tiers)
-    s = _to_int(score, 0)
-    if s >= seuils["platinum"]:
-        return "Platinum"
-    if s >= seuils["gold"]:
-        return "Gold"
-    if s >= seuils["silver"]:
-        return "Silver"
-    if s >= seuils["bronze"]:
-        return "Bronze"
-    return "Reject"
-
-
-# Fix audit 2026-05-26 (v1.5.6) Vague L : ordre des tiers, du meilleur au pire,
-# pour pouvoir CAPER un tier a un maximum (on ne descend jamais, on plafonne).
-_TIER_ORDER = ["Platinum", "Gold", "Silver", "Bronze", "Reject"]
+    """Tier (Platinum/Gold/Silver/Bronze/Reject) — delegue a tiers_helpers."""
+    return _determine_tier_central(score, tiers)
 
 
 def _cap_tier(tier: str, max_tier: str) -> str:
-    """Plafonne `tier` a `max_tier` (ne remonte jamais un tier vers le haut).
-
-    Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : quand le probe a echoue,
-    on ne peut PAS certifier Platinum/Gold sur un simple nom de fichier
-    declaratif (non verifie). On cape donc le tier a Silver maximum. Idem pour
-    une captation degradee (CAM) qui est plafonnee bien plus bas.
-    """
-    try:
-        cur = _TIER_ORDER.index(tier)
-    except ValueError:
-        return tier
-    try:
-        cap = _TIER_ORDER.index(max_tier)
-    except ValueError:
-        return tier
-    # Index plus grand = tier plus bas. On garde le plus bas des deux.
-    return _TIER_ORDER[max(cur, cap)]
+    """Plafonne `tier` a `max_tier` — delegue a tiers_helpers.cap_tier."""
+    return _cap_tier_central(tier, max_tier)
 
 
 # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : normaliseur central.
@@ -1255,6 +1457,77 @@ _PENALTY_UPSCALE = -8
 _PENALTY_REENCODE = -6
 _PENALTY_4K_LIGHT = -3
 _PENALTY_COMMENTARY_ONLY = -15
+# F32 : plancher dur des sous-scores video/audio d'une captation degradee
+# (CAM / TS / Screener). Re-applique APRES toutes les mutations de sous-scores
+# (compensations probe FAILED/PARTIAL, bonus Atmos deduit du nom, helpers
+# ere/encode/commentary/genre) pour que les tokens premium menteurs ne
+# puissent pas remonter le score au-dessus du plancher voulu.
+_CAM_SUBSCORE_CEILING = 14.0
+
+# F32 (revue R1) : les tokens CAM COURTS de ``release_name_parser._PATTERNS_CAM``
+# (CAM / TS / TC / WP / SCR) sont ambigus. Places en TETE du nom de fichier ils
+# sont le TITRE du film, pas un marqueur de captation : "Cam" (2018, Netflix),
+# "Ts", "Tc", "Wp"... Le re-plancher F32 ecrasant video_sub/audio_sub a 14 en
+# TOUTE FIN de calcul, il amplifiait ce faux positif pre-existant jusqu'a faire
+# basculer un vrai UHD REMUX de Bronze a Reject sur les chemins probe
+# FAILED/PARTIAL (SMB, fichier corrompu, probe_backend="none").
+#
+# Perimetre volontairement etroit :
+#   - on ne touche NI au detecteur (release_name_parser, hors perimetre de ce
+#     lot) NI au plancher initial (bloc `if cam_detected:` du scoring V1) NI au
+#     cap de tier Bronze (_cap_tier, autorite finale de securite). Une vraie
+#     CAM reste donc plafonnee exactement comme avant ;
+#   - seule la RE-application F32 est conditionnee, ce qui restaure le
+#     comportement d'avant-F32 sur la seule classe de faux positifs prouvee.
+# Le sens de l'erreur residuelle est conservateur : au moindre doute (token
+# ambigu present AILLEURS qu'en tete, forme longue non ambigue, nom vide) on
+# RE-APPLIQUE le plancher.
+_CAM_UNAMBIGUOUS_RE = re.compile(
+    r"\b(?:TELESYNC|TELECINE|CAMRIP|HDCAM|HDTS|DVDSCR|BDSCR|SCREENER|WORKPRINT)\b",
+    re.IGNORECASE,
+)
+_CAM_SHORT_TOKEN_RE = re.compile(r"\b(?:CAM|TS|TC|WP|SCR)\b", re.IGNORECASE)
+# Meme retrait d'extension que release_name_parser.parse_release_name, pour que
+# la position 0 se calcule sur exactement la meme chaine que la detection.
+_CAM_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,4}$")
+
+
+def _cam_signal_is_plausible(release_name: str) -> bool:
+    """False quand le SEUL signal CAM du nom est une abreviation en TETE (F32).
+
+    Un marqueur de captation reel est toujours pose APRES le titre (et le plus
+    souvent apres l'annee) : ``Film.2026.CAM.2160p...``. Un token CAM/TS/TC/WP/
+    SCR situe au tout debut du nom est le premier mot du TITRE.
+
+    >>> _cam_signal_is_plausible("Film.2026.CAM.2160p.REMUX.x265-GRP.mkv")
+    True
+    >>> _cam_signal_is_plausible("Cam.2018.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv")
+    False
+    >>> _cam_signal_is_plausible("Cam (2018) 1080p.mkv")
+    False
+    >>> _cam_signal_is_plausible("Ts.2019.2160p.UHD.BluRay.REMUX-GRP.mkv")
+    False
+    >>> # forme longue non ambigue n'importe ou -> vraie captation
+    >>> _cam_signal_is_plausible("Cam.2018.1080p.HDCAM.x264-GRP.mkv")
+    True
+    >>> # 2e occurrence ailleurs qu'en tete -> vraie captation du film "Cam"
+    >>> _cam_signal_is_plausible("Cam.2018.CAM.XviD-GRP.mkv")
+    True
+    >>> # nom absent : on ne relache rien
+    >>> _cam_signal_is_plausible("")
+    True
+    """
+    text = _CAM_EXT_RE.sub("", str(release_name or "")).strip()
+    if not text:
+        return True
+    if _CAM_UNAMBIGUOUS_RE.search(text):
+        return True
+    matches = list(_CAM_SHORT_TOKEN_RE.finditer(text))
+    if not matches:
+        # ``is_cam`` provient d'un pattern qu'on ne sait pas requalifier ici :
+        # on ne relache pas le plancher.
+        return True
+    return any(m.start() > 0 for m in matches)
 
 
 def _build_invalid_profile_result(
@@ -1273,6 +1546,12 @@ def _build_invalid_profile_result(
         "reasons": errs,
         "metrics": {
             "engine_version": "CinemaLux_v1",
+            # Meme estampille que `_build_quality_metrics_helper` : TOUT `metrics`
+            # produit par ce module porte la version du code qui l'a produit,
+            # sinon le gate de cache lit une version inconnue ("") et re-score ce
+            # rapport a CHAQUE ouverture de fiche, indefiniment. Chemin defensif :
+            # `ensure_quality_profile` repare un profil invalide en amont.
+            "scoring_rules_version": SCORING_RULES_VERSION,
             "profile_id": str(profile.get("id") if isinstance(profile, dict) else DEFAULT_PROFILE_ID),
             "profile_version": _to_int(
                 profile.get("version") if isinstance(profile, dict) else DEFAULT_PROFILE_VERSION,
@@ -1400,6 +1679,15 @@ def _apply_genre_adjustments_helper(
 ) -> Tuple[float, float, float, Optional[str]]:
     """Applique les ajustements genre-aware TMDb.
 
+    `video["height"]` doit porter la hauteur CANONIQUE de la classe de
+    resolution (cf. `_effective_resolution_height`), pas la hauteur brute du
+    flux. Fix ultra-audit 2026-08-03 : `genre_rules` ecrit `height < 1080`
+    (:245, malus `low_resolution_malus`) sur la valeur recue ; avec la hauteur
+    BRUTE, tout 1080p scope (1920x800) prenait un malus « resolution modeste »
+    alors que `detected.resolution` affichait '1080p'. Le defaut etait jusqu'ici
+    invisible car le chemin genre etait mort (client TMDb jamais construit, cf.
+    quality_report_support) : on le desamorce AVANT de le rallumer.
+
     Modifie factors et reasons en place ; retourne (video_sub, audio_sub, extras_sub, primary_genre).
     """
     primary_genre: Optional[str] = None
@@ -1409,6 +1697,10 @@ def _apply_genre_adjustments_helper(
     if not primary_genre:
         return video_sub, audio_sub, extras_sub, primary_genre
     height_g = _to_int(video.get("height"), 0)
+    # #682 : la largeur accompagne desormais la hauteur, pour que `genre_rules`
+    # tranche sur la CLASSE de resolution meme si un futur appelant lui passait
+    # des dimensions brutes (1920x800 = 1080p, pas « resolution modeste »).
+    width_g = _to_int(video.get("width"), 0)
     codec_g = str(video.get("codec") or "")
     has_hdr_g = bool(video.get("hdr10") or video.get("hdr10_plus") or video.get("hdr_dolby_vision"))
     has_atmos_g = False
@@ -1420,6 +1712,7 @@ def _apply_genre_adjustments_helper(
         primary_genre,
         video_codec=codec_g,
         height=height_g,
+        width=width_g,
         has_hdr=has_hdr_g,
         has_atmos=has_atmos_g,
         has_heavy_grain=has_grain_g,
@@ -1466,6 +1759,7 @@ def _apply_custom_rules_helper(
     # le caller passe un NormalizedProbe dataclass (le call site compute_quality_score
     # transmettait la variable brute non convertie, cf bug critique fix).
     normalized_probe = _normalize_probe_arg(normalized_probe)
+
     # Hotfix BUG-010 FIX COMPLET (2026-06-02) : helper defensif applique PARTOUT
     # dans le helper + rule_context. _vr a remplace les acces direct vr["..."]
     # qui levaient KeyError silencieusement (degrade silencieux par le
@@ -1483,7 +1777,19 @@ def _apply_custom_rules_helper(
         rule_context = {
             "detected": {
                 "video_codec": _vr("video_codec", "") or "",
+                # Revue CodeRabbit PR#854 : le champ `audio_codec` des regles
+                # utilisateur garde le codec de BASE tel que le probe le rapporte.
+                # Le passer a l'etiquette canonique cassait EN SILENCE les regles
+                # deja enregistrees : `audio_codec = "dts"` (operateur `=`, egalite
+                # STRICTE cf. custom_rules._op_eq) cessait de matcher un remux
+                # DTS-HD MA, qui vaut desormais 'dts-hd ma'. Idem 'truehd' ->
+                # 'truehd atmos', 'eac3' -> 'eac3 atmos'.
+                # L'etiquette canonique reste accessible, mais via un champ
+                # DISTINCT et explicite (`audio_codec_canonical`), pour que
+                # `audio_codec_canonical = "dts-hd ma"` soit enfin exprimable
+                # sans reecrire les regles existantes.
                 "audio_best_codec": str(best_audio.get("codec") or ""),
+                "audio_best_codec_canonical": _canonical_audio_codec(best_audio),
                 "resolution": _vr("resolution_label", "") or "",
                 "bitrate_kbps": _vr("bitrate_kbps"),
                 "audio_best_channels": _to_int(best_audio.get("channels"), 0),
@@ -1570,9 +1876,7 @@ def _compute_confidence_helper(
         confidence_reasons.append("Probe partielle (certaines metadonnees manquent).")
     elif probe_quality == "UNKNOWN":
         # Neutre : ni bonus ni malus. Warning deja log dans _score_extras.
-        confidence_reasons.append(
-            "Probe non renseignee (UNKNOWN): confidence neutre, donnees a interpreter."
-        )
+        confidence_reasons.append("Probe non renseignee (UNKNOWN): confidence neutre, donnees a interpreter.")
     else:
         # FAILED : probe explicite a echoue.
         confidence_value -= 28
@@ -1644,6 +1948,11 @@ def _build_quality_metrics_helper(
     vt = prof["video_thresholds"]
     return {
         "engine_version": str(prof.get("engine_version") or "CinemaLux_v1"),
+        # Fix revue adversaire PR#854 : estampille du CODE de scoring, distincte
+        # de `engine_version` qui appartient au profil utilisateur (et qui, etant
+        # persiste, ne bouge pas quand le code change). Lue par le gate de cache
+        # de `quality_report_support` pour invalider les rapports d'avant ce lot.
+        "scoring_rules_version": SCORING_RULES_VERSION,
         "profile_id": str(prof.get("id") or DEFAULT_PROFILE_ID),
         "profile_version": _to_int(prof.get("version"), DEFAULT_PROFILE_VERSION),
         "probe_quality": probe_quality,
@@ -1659,7 +1968,11 @@ def _build_quality_metrics_helper(
             "hdr10_plus": vr["has_hdr10p"],
             "hdr10": vr["has_hdr10"],
             "audio_tracks_count": len(audio_tracks),
-            "audio_best_codec": str(best_audio.get("codec") or ""),
+            # Fix ultra-audit 2026-08-03 : etiquette canonique (cf.
+            # `_canonical_audio_codec`). Alimente le bucket audio du dashboard
+            # (« DTS-HD MA » etait injoignable) et le pseudo-probe du
+            # comparateur de doublons.
+            "audio_best_codec": _canonical_audio_codec(best_audio),
             "audio_best_channels": _to_int(best_audio.get("channels"), 0),
             "languages": langs,
             "duration_s": float(normalized_probe.get("duration_s") or 0),
@@ -1916,8 +2229,8 @@ def compute_quality_score(
             # Valeur vide explicite ou non reconnue : on degrade vers FAILED
             # avec un warning explicite (pas silencieux comme avant).
             logger.warning(
-                "scoring: probe_quality present mais invalide (%r), "
-                "fallback FAILED", raw_probe_quality,
+                "scoring: probe_quality present mais invalide (%r), fallback FAILED",
+                raw_probe_quality,
             )
             probe_quality = "FAILED"
 
@@ -2007,9 +2320,11 @@ def compute_quality_score(
     if cam_detected:
         cam_label = f"Captation degradee ({name_info.cam_token.upper() or 'CAM'}) - qualite reelle tres faible"
         # Plancher dur : peu importe les tokens premium menteurs, une CAM ne
-        # peut pas avoir un bon subscore video/audio.
-        video_sub = min(float(video_sub), 14.0)
-        audio_sub = min(float(audio_sub), 14.0)
+        # peut pas avoir un bon subscore video/audio. (F32 : ce plancher est
+        # RE-applique juste avant _apply_weights, car les compensations probe
+        # et les helpers V4 qui suivent le contournaient.)
+        video_sub = min(float(video_sub), _CAM_SUBSCORE_CEILING)
+        audio_sub = min(float(audio_sub), _CAM_SUBSCORE_CEILING)
         factors.append({"category": "video", "delta": -30, "label": cam_label})
         reasons.append(f"-30 {cam_label}")
 
@@ -2020,11 +2335,13 @@ def compute_quality_score(
     if name_info.audio_is_atmos or name_info.audio_is_dts_x:
         # Verifier qu'on n'a pas deja un bonus atmos via le probe (best_audio)
         best_codec_lower = str(best_audio.get("codec") or "").lower()
-        if ("atmos" not in best_codec_lower) and ("dts:x" not in best_codec_lower) and ("dts-x" not in best_codec_lower):
+        if (
+            ("atmos" not in best_codec_lower)
+            and ("dts:x" not in best_codec_lower)
+            and ("dts-x" not in best_codec_lower)
+        ):
             atmos_bonus = +3
-            atmos_label = (
-                "Atmos detecte dans le nom" if name_info.audio_is_atmos else "DTS:X detecte dans le nom"
-            )
+            atmos_label = "Atmos detecte dans le nom" if name_info.audio_is_atmos else "DTS:X detecte dans le nom"
             audio_sub = max(0.0, min(100.0, float(audio_sub) + atmos_bonus))
             factors.append({"category": "audio", "delta": atmos_bonus, "label": atmos_label})
             reasons.append(f"+{atmos_bonus} {atmos_label}")
@@ -2067,17 +2384,13 @@ def compute_quality_score(
         # Penalite d'incertitude residuelle (le nom n'est pas le probe).
         uncertainty_penalty = 5
         video_sub = max(0.0, float(video_sub) - uncertainty_penalty)
-        factors.append(
-            {"category": "probe", "delta": -uncertainty_penalty, "label": "Incertitude : probe absent"}
-        )
+        factors.append({"category": "probe", "delta": -uncertainty_penalty, "label": "Incertitude : probe absent"})
         reasons.append(f"-{uncertainty_penalty} Incertitude : score base sur le nom de fichier seul")
     elif probe_quality == "PARTIAL" and name_filled_fields:
         # Compensation partielle : le probe a quand meme apporte qqch.
         if "audio_track_synth" in name_filled_fields:
             audio_sub = min(100.0, float(audio_sub) + 6)
-            factors.append(
-                {"category": "probe", "delta": 6, "label": "Compensation audio (synthese nom)"}
-            )
+            factors.append({"category": "probe", "delta": 6, "label": "Compensation audio (synthese nom)"})
             reasons.append("+6 Compensation audio (synthese depuis le nom)")
         # Compense le debit non mesure quand on n'a pas de bitrate.
         if not _to_int(video.get("bitrate"), 0):
@@ -2089,13 +2402,24 @@ def compute_quality_score(
     # Fix audit 2026-05-25 (v1.5.5) Vague K : derive la hauteur effective depuis
     # la resolution label (qui integre deja le fallback nom) pour que les
     # bonus d'ere s'appliquent meme sans probe.
-    height = _to_int(video.get("height"), 0)
-    if height <= 0 and vr.get("resolution_label"):
-        height = _resolution_rank(vr["resolution_label"])
+    #
+    # Fix ultra-audit 2026-08-03 : la derivation est desormais INCONDITIONNELLE,
+    # plus seulement quand le probe n'a rien mesure. La hauteur ffprobe est
+    # BRUTE (bandes noires retirees a l'encodage) : un 1080p scope 2.35:1 porte
+    # height=800, donc `height >= 1080` etait faux et le film perdait le bonus
+    # patrimoine (+8) au profit du bonus classique (+4) -- soit un tier entier
+    # (Silver -> Bronze) sur toute la plage de debit realiste, uniquement a cause
+    # du ratio d'image. `_resolution_label` tranche deja sur la LARGEUR depuis le
+    # fix bug 178 (:590-608, 15/15 echantillons 1920x[784-818] = vrais 1080p) et
+    # tout le reste de `_score_video` raisonne sur `resolution_rank` (:854, :856,
+    # :874, :900, :921) : ce helper etait le dernier consommateur de la hauteur
+    # brute, et le payload etait auto-contradictoire (detected.resolution =
+    # '1080p' avec la raison « Film classique en HD »).
+    effective_height = _effective_resolution_height(video=video, vr=vr)
     video_codec_v4 = str(video.get("codec") or "").strip().lower()
     video_sub = _apply_era_bonuses_helper(
         film_year=film_year,
-        height=height,
+        height=effective_height,
         video_codec=video_codec_v4,
         video_sub=video_sub,
         factors=factors,
@@ -2117,7 +2441,10 @@ def compute_quality_score(
     # --- P4.2 : ajustements genre-aware TMDb ---
     video_sub, audio_sub, extras_sub, primary_genre = _apply_genre_adjustments_helper(
         tmdb_genres=tmdb_genres,
-        video=video,
+        # `height` remplace par la hauteur CANONIQUE : genre_rules:245 teste
+        # `height < 1080` et collerait sinon un malus « resolution modeste » a
+        # tous les 1080p scope. Copie locale, le dict `video` n'est pas mute.
+        video={**video, "height": effective_height},
         audio_analysis=audio_analysis,
         encode_warnings=encode_warnings,
         video_sub=video_sub,
@@ -2126,6 +2453,43 @@ def compute_quality_score(
         factors=factors,
         reasons=reasons,
     )
+
+    # --- F13 : re-clamp des sous-scores dans [0, 100] ---
+    # Les clamps internes (_score_video / _score_audio / _score_extras) sont
+    # suivis de mutations NON re-clampees : compensations probe FAILED/PARTIAL,
+    # bonus Atmos deduit du nom, helpers ere / encode_warnings / commentary /
+    # genre. Sans ce re-clamp, metrics.subscores et build_rich_explanation
+    # exposent des valeurs hors bornes (ex. video = -4 ou 102) et _apply_weights
+    # pondere ces valeurs, ce qui devie du modele documente
+    # (explain_score.py:5 : "chacun 0..100 apres clamp").
+    # NOTE : on n'utilise PAS _clamp_0_100 (qui arrondit en int) et on ne
+    # reaffecte QUE les valeurs hors bornes, pour ne changer ni la valeur ni le
+    # type (int/float) des sous-scores deja en plage.
+    if not (0.0 <= float(video_sub) <= 100.0):
+        video_sub = max(0.0, min(100.0, float(video_sub)))
+    if not (0.0 <= float(audio_sub) <= 100.0):
+        audio_sub = max(0.0, min(100.0, float(audio_sub)))
+    if not (0.0 <= float(extras_sub) <= 100.0):
+        extras_sub = max(0.0, min(100.0, float(extras_sub)))
+
+    # --- F32 : re-application du plancher CAM ---
+    # Le plancher pose plus haut (bloc `if cam_detected:` juste apres le bonus
+    # de source deduit du nom) est contourne par QUATRE chemins :
+    # compensation probe FAILED, compensation PARTIAL, bonus Atmos deduit du
+    # nom, helpers V4 (ere/encode/commentary/genre). On le re-applique ici, en
+    # dernier, pour que "Film.CAM.2160p.REMUX.TrueHD.7.1" ne vaille pas 2x le
+    # plancher d'une CAM honnete. extras_sub reste HORS plancher (il mesure les
+    # metadonnees et le nommage, pas la qualite image/son).
+    # Revue R1 : ne PAS re-appliquer le plancher quand le seul signal CAM est
+    # une abreviation ambigue en tete de nom (= le titre du film, cf.
+    # _cam_signal_is_plausible). Le plancher initial, le facteur -30 et le cap
+    # de tier Bronze restent poses : on ne relache que l'ecrasement final, qui
+    # est la seule partie que F32 a ajoutee.
+    if cam_detected and _cam_signal_is_plausible(release_name):
+        if float(video_sub) > _CAM_SUBSCORE_CEILING:
+            video_sub = _CAM_SUBSCORE_CEILING
+        if float(audio_sub) > _CAM_SUBSCORE_CEILING:
+            audio_sub = _CAM_SUBSCORE_CEILING
 
     # --- Score pondere & tier ---
     score = _apply_weights(video_sub, audio_sub, extras_sub, prof["weights"])
@@ -2178,27 +2542,43 @@ def compute_quality_score(
             "resolution_source": vr.get("resolution_source"),
             "video_codec": vr.get("video_codec"),
             "hdr": (
-                "dolby_vision" if (vr.get("has_dv") and hdr_is_probe)
-                else "hdr10_plus" if (vr.get("has_hdr10p") and hdr_is_probe)
-                else "hdr10" if (vr.get("has_hdr10") and hdr_is_probe)
+                "dolby_vision"
+                if (vr.get("has_dv") and hdr_is_probe)
+                else "hdr10_plus"
+                if (vr.get("has_hdr10p") and hdr_is_probe)
+                else "hdr10"
+                if (vr.get("has_hdr10") and hdr_is_probe)
                 else ""
             ),
             "audio_codec": _hierarchy_audio_codec_token(best_audio),
             "release_group": str(name_info.release_group or "").lower() if name_info else "",
         }
         new_tier, hierarchy_decisions = _apply_tier_hierarchy(
-            tier, hierarchy_dimensions, hierarchy_config,
+            tier,
+            hierarchy_dimensions,
+            hierarchy_config,
         )
-        if new_tier != tier:
+        # F01 (revue R1) : le gate etait `if new_tier != tier`, donc un floor
+        # utilisateur INTEGRALEMENT neutralise par un plafond n'emettait NI
+        # facteur NI raison : l'ecran Qualite n'expliquait nulle part pourquoi
+        # le floor configure n'avait pas pris. On rend maintenant tout l'audit
+        # trail non vide (les entrees `floor_capped` peuvent avoir from == to) ;
+        # `tier = new_tier` reste un no-op quand rien n'a bouge.
+        if hierarchy_decisions:
             for dec in hierarchy_decisions:
-                factors.append({
-                    "category": "video" if dec["dimension"] in ("resolution", "video_codec", "hdr") else "audio",
-                    "delta": 0,
-                    "label": f"Hierarchy {dec['type']} ({dec['dimension']}={dec['value']}): {dec['from']} -> {dec['to']}",
-                })
-                reasons.append(
-                    f"+0 Hierarchie qualite {dec['type']} ({dec['dimension']}): {dec['from']} -> {dec['to']}"
-                )
+                category = "video" if dec["dimension"] in ("resolution", "video_codec", "hdr") else "audio"
+                if dec["type"] == "floor_capped":
+                    detail = (
+                        f"floor {dec.get('requested') or '?'} demande, plafond "
+                        f"{dec.get('ceiling') or '?'} -> {dec['to']}"
+                    )
+                    label = f"Hierarchy floor borne ({dec['dimension']}={dec['value']}): {detail}"
+                    reason = f"+0 Hierarchie qualite floor borne ({dec['dimension']}) : {detail}"
+                else:
+                    label = f"Hierarchy {dec['type']} ({dec['dimension']}={dec['value']}): {dec['from']} -> {dec['to']}"
+                    reason = f"+0 Hierarchie qualite {dec['type']} ({dec['dimension']}): {dec['from']} -> {dec['to']}"
+                factors.append({"category": category, "delta": 0, "label": label})
+                reasons.append(reason)
             tier = new_tier
 
     # --- Fix audit 2026-05-26 (v1.5.6) Vague L (scoring-1) : CAP de tier ---
@@ -2213,9 +2593,7 @@ def compute_quality_score(
                 f"Tier plafonne a Silver : probe indisponible, qualite non verifiee "
                 f"(tier brut {tier} non certifiable sur le seul nom de fichier)"
             )
-            factors.append(
-                {"category": "probe", "delta": 0, "label": f"Cap probe FAILED: {tier} -> {capped}"}
-            )
+            factors.append({"category": "probe", "delta": 0, "label": f"Cap probe FAILED: {tier} -> {capped}"})
             tier = capped
     if cam_detected:
         # Une CAM/TS/Screener est plafonnee a Bronze maximum (jamais Silver+).

@@ -87,7 +87,11 @@ class PerceptualBatchJobTests(unittest.TestCase):
         api, run_id, ids = self._scan(3)
         seen = []
         perceptual_support.analyze_perceptual_batch(
-            api, run_id, ids, None, progress_cb=lambda d, t: seen.append((d, t)),
+            api,
+            run_id,
+            ids,
+            None,
+            progress_cb=lambda d, t: seen.append((d, t)),
         )
         self.assertEqual(len(seen), len(ids), f"progress_cb appele {len(seen)}x pour {len(ids)} films")
         # le dernier tick doit etre (total, total)

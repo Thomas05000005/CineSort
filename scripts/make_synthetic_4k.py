@@ -20,6 +20,7 @@ d'autres pathologies (block size, kerberos...) non couvertes ici.
 
 NE PAS modifier code produit (cinesort/).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,17 +41,28 @@ def _build_ffmpeg_cmd(ffmpeg: str, out_path: Path, duration: int) -> list[str]:
         ffmpeg,
         "-y",
         "-hide_banner",
-        "-loglevel", "error",
-        "-f", "lavfi",
-        "-i", f"color=c=darkblue:s=3840x2160:d={duration}:r=24",
-        "-f", "lavfi",
-        "-i", f"anullsrc=channel_layout=5.1:sample_rate=48000:d={duration}",
-        "-c:v", "libx265",
-        "-preset", "ultrafast",
-        "-x265-params", "log-level=error",
-        "-c:a", "aac",
-        "-b:a", "640k",
-        "-t", str(duration),
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=darkblue:s=3840x2160:d={duration}:r=24",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=channel_layout=5.1:sample_rate=48000:d={duration}",
+        "-c:v",
+        "libx265",
+        "-preset",
+        "ultrafast",
+        "-x265-params",
+        "log-level=error",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "640k",
+        "-t",
+        str(duration),
         str(out_path),
     ]
 
@@ -67,8 +79,7 @@ def make_clips(out_dir: Path, count: int, duration: int) -> dict:
             "count": count,
             "duration_s": duration,
             "note": (
-                "ffmpeg introuvable dans PATH. Manifest seul, fichiers non crees. "
-                "Installer ffmpeg puis relancer."
+                "ffmpeg introuvable dans PATH. Manifest seul, fichiers non crees. Installer ffmpeg puis relancer."
             ),
             "files": [],
         }
@@ -86,12 +97,14 @@ def make_clips(out_dir: Path, count: int, duration: int) -> dict:
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             ok = proc.returncode == 0 and clip.exists()
-            created.append({
-                "path": str(clip),
-                "ok": ok,
-                "size_bytes": clip.stat().st_size if clip.exists() else 0,
-                "stderr_tail": (proc.stderr or "")[-400:],
-            })
+            created.append(
+                {
+                    "path": str(clip),
+                    "ok": ok,
+                    "size_bytes": clip.stat().st_size if clip.exists() else 0,
+                    "stderr_tail": (proc.stderr or "")[-400:],
+                }
+            )
         except subprocess.TimeoutExpired:
             created.append({"path": str(clip), "ok": False, "error": "timeout_120s"})
         except OSError as exc:

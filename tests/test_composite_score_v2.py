@@ -27,11 +27,13 @@ from cinesort.domain.perceptual.constants import (
     GLOBAL_WEIGHT_AUDIO_V2,
     GLOBAL_WEIGHT_COHERENCE_V2,
     GLOBAL_WEIGHT_VIDEO_V2,
+    GRAIN_VINTAGE_ERAS_V2,
     VIDEO_WEIGHT_HDR,
     VIDEO_WEIGHT_LPIPS,
     VIDEO_WEIGHT_PERCEPTUAL,
     VIDEO_WEIGHT_RESOLUTION,
 )
+from cinesort.domain.perceptual.grain_signatures import classify_film_era_v2
 from cinesort.domain.perceptual.models import (
     AudioPerceptual,
     CategoryScore,
@@ -187,6 +189,13 @@ class TestBuildVideoSubscores(unittest.TestCase):
         _, flags = build_video_subscores(v, None, probe, None)
         self.assertIn("hdr_metadata_missing", flags)
 
+    def test_hdr10_with_zero_maxcll_flag(self):
+        # Cas reel : hdr_analysis emet 0.0 (float) quand MaxCLL/MaxFALL absents, jamais None.
+        v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
+        probe = {"video": {"hdr10": True, "max_cll": 0.0, "max_fall": 0.0}}
+        _, flags = build_video_subscores(v, None, probe, None)
+        self.assertIn("hdr_metadata_missing", flags)
+
     def test_labels_fr_present(self):
         v = VideoPerceptual(visual_score=70, resolution_width=1920, resolution_height=1080, frames_analyzed=10)
         subs, _ = build_video_subscores(v, None, None, None)
@@ -224,10 +233,22 @@ class TestBuildAudioSubscores(unittest.TestCase):
         self.assertEqual(spec.tier, "platinum")
 
     def test_low_bitrate_lossy_bronze(self):
-        a = AudioPerceptual(lossy_verdict="low_bitrate_lossy", lossy_confidence=0.85)
+        a = AudioPerceptual(lossy_verdict="lossy_low", lossy_confidence=0.85)
         subs = build_audio_subscores(a)
         spec = next(s for s in subs if s.name == "spectral_cutoff")
         self.assertEqual(spec.tier, "bronze")
+
+    def test_high_bitrate_lossy_gold(self):
+        a = AudioPerceptual(lossy_verdict="lossy_high", lossy_confidence=0.85)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "gold")
+
+    def test_mid_bitrate_lossy_silver(self):
+        a = AudioPerceptual(lossy_verdict="lossy_mid", lossy_confidence=0.85)
+        subs = build_audio_subscores(a)
+        spec = next(s for s in subs if s.name == "spectral_cutoff")
+        self.assertEqual(spec.tier, "silver")
 
     def test_drc_cinema_highest(self):
         a = AudioPerceptual(drc_category="cinema", drc_confidence=0.9)
@@ -483,6 +504,35 @@ class TestContextualAdjustments(unittest.TestCase):
         self.assertEqual(vs.value, 77.0)
         self.assertTrue(any("vintage_master_tolerance" in t for t in trace))
 
+    def _rule9_value_for_era(self, era: str) -> float:
+        grain = GrainAnalysis(grain_nature="film_grain", is_animation=False, film_era_v2=era)
+        v, _, _ = apply_contextual_adjustments(_v_subs(70), _a_subs(70), grain, None, None, None, [], False, era)
+        return next(s for s in v if s.name == "perceptual_visual").value
+
+    def test_rule9_applies_to_every_declared_vintage_era(self):
+        """#444 : la regle testait "35mm_golden"/"early_color", inexistants.
+
+        Consequence : seule `16mm_era` declenchait la tolerance, `35mm_classic`
+        — la deuxieme ere pellicule de la spec — recevait le bonus grain PLEIN.
+        """
+        for era in GRAIN_VINTAGE_ERAS_V2:
+            with self.subTest(era=era):
+                self.assertEqual(self._rule9_value_for_era(era), 77.0)
+        # Contre-exemple : une ere numerique garde le bonus plein.
+        self.assertEqual(self._rule9_value_for_era("digital_modern"), 80.0)
+
+    def test_vintage_eras_all_exist_in_grain_era_v2(self):
+        """Verrou anti-valeur fantome : chaque ere listee doit etre PRODUCTIBLE.
+
+        C'est exactement ce qui manquait : "35mm_golden" et "early_color"
+        n'etaient la sortie de `classify_film_era_v2` pour aucune entree, donc
+        les deux branches correspondantes etaient mortes.
+        """
+        producible = {classify_film_era_v2(y) for y in range(1890, 2036)}
+        producible.add(classify_film_era_v2(2023, film_format="70mm"))
+        for era in GRAIN_VINTAGE_ERAS_V2:
+            self.assertIn(era, producible, f"{era} n'est produit par aucune annee ni format")
+
 
 # ---------------------------------------------------------------------------
 # compute_category + orchestrator
@@ -541,7 +591,7 @@ class TestOrchestrator(unittest.TestCase):
             resolution_height=2160,
             fake_4k_verdict_combined="fake_4k_confirmed",
         )
-        a = AudioPerceptual(audio_score=55, lossy_verdict="low_bitrate_lossy", lossy_confidence=0.9)
+        a = AudioPerceptual(audio_score=55, lossy_verdict="lossy_low", lossy_confidence=0.9)
         g = GrainAnalysis(is_animation=False, grain_nature="encode_noise")
         r = compute_global_score_v2(v, a, g, None, duration_s=7200)
         # Video subscores penalises lourdement, audio aussi

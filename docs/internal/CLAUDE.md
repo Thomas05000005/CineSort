@@ -1,7 +1,19 @@
-# CLAUDE.md — Instructions pour Claude Code
+# CLAUDE.md — état détaillé du projet (référence)
 
-Ce fichier est le contexte projet pour les sessions Claude (CLI, GitHub Action, IDE).
-L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
+> ⚠️ **Ce fichier n'est PAS chargé automatiquement.** Claude Code ne lit que
+> `./CLAUDE.md` (racine) et `./.claude/CLAUDE.md`. Pendant des mois, ces 570
+> lignes n'ont donc été lues par aucune session, sauf si quelqu'un pointait
+> explicitement le chemin.
+>
+> **Les instructions vivent désormais dans [`/CLAUDE.md`](../../CLAUDE.md)** à la
+> racine — court (< 200 lignes), limité à ce qui change ce qu'un agent ferait.
+> Anthropic documente qu'au-delà, l'adhérence baisse et les instructions
+> finissent ignorées.
+>
+> Ce fichier-ci reste la **référence détaillée** : état des campagnes, patterns
+> architecturaux, journal des sessions. À consulter à la demande, pas à charger
+> à chaque session. L'historique ancien est dans
+> [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
 
 ---
 
@@ -25,20 +37,65 @@ L'historique complet des sessions passees est dans [CLAUDE_HISTORY.md](CLAUDE_HI
 
 ---
 
-## Etat actuel du projet (4 juin 2026)
+## Etat actuel du projet (3 août 2026)
 
-### Version
-- **v1.5.2-beta** (publique). Iteration beta consolidant la cloture de la roadmap initiale 6 vagues (M / N / O / P / Q / R) livree en juin 2026. Build EXE stable a 53.7 MB. Roadmap : v1.0 stable apres retours beta + Vague S+ (Linux port, B8 cleanup, 8 methodes orphelines UI), puis v1.1 features, v2.0 port Linux/Mac.
+### ⚠️ À lire en premier — état de la CI et du backlog
+- **La CI est VERTE sur `main`** depuis le 2026-08-03. Elle avait été rouge pendant des mois avec
+  **DEUX verrous empilés**, le second invisible tant que le premier tenait (le job s'arrêtait au lint,
+  donc l'étape de tests n'était jamais atteinte) :
+  1. `ruff check` + `ruff format` — 279 erreurs, 326 fichiers non formatés.
+  2. Les tests — **46 ERREURS de setup** (invisibles à un grep `FAILED` : ce sont des `ERROR at
+     setup`) parce que le job installait `pytest-playwright` sans les navigateurs, alors que 46 tests
+     `[chromium]` vivent dans `tests/` ; puis 25 échecs pré-existants.
+- **⚠️ PIÈGE : ne JAMAIS lancer `ruff --fix` en aveugle sur ce dépôt.** `cinesort/app/plan_support.py`
+  et `cinesort/domain/probe_models.py` sont des **modules de RE-EXPORT** : leurs symboles privés,
+  consommés par les tests, ne sont pas dans `__all__`, donc F401 les supprime. Mesure : 37 ré-exports
+  effacés, 2 fichiers de tests ne collectaient plus, et pytest s'arrêtait AVANT d'exécuter quoi que
+  ce soit — un « 0 échec » trompeur sur une batterie amputée. Les deux modules sont désormais en
+  `per-file-ignores` F401.
+- **ruff est ÉPINGLÉ EXACTEMENT** (`ruff==0.15.22`). Trois versions coexistaient — hook pre-commit
+  `0.15.6`, `uv.lock` `0.15.16`, CI `0.15.22` via une borne flottante : un développeur formatait avec
+  une version que la CI rejetait. La garde `test_ruff_version_is_identical_everywhere` échoue si le
+  hook et `requirements-dev.txt` divergent. Toute montée doit être **délibérée**, avec le
+  reformatage dans le même commit.
+- **Le bot d'audit quotidien est BORNÉ.** Il tourne en Opus 5 / `--effort max`, et son document
+  d'instructions (`.github/audit-prompt.md`) impose désormais un **budget d'ouverture** : au plus
+  3 PR et 5 issues par exécution, **zéro** tant que le total ouvert dépasse 150, et un ordre de
+  non-duplication (déjà corrigé sur main ? déjà décrit ? sinon seulement, ouvrir). Sans cela il
+  produisait ~4 éléments/jour sans jamais dédupliquer — d'où un backlog de 177 PR + 248 issues.
+- **Types de titre de PR autorisés** : `feat fix docs ci refactor test chore perf build style revert
+  deps sec rel`. `sec` et `rel` ont été ajoutés le 2026-08-03 : leur absence recalait 11 PR ouvertes,
+  dont 3 correctifs de sécurité, via un check OBLIGATOIRE.
 
-> Note : depuis le 17 mai 2026, plusieurs itérations beta (v1.1.x, v1.2.0-beta, v1.5.x-beta) ont consolidé l'audit C19 — alignement documentaire (README/architecture/SECURITY), refactor architectural (#83, #84), et roadmap 6 vagues (juin 2026). Aucune regression fonctionnelle, bundle EXE stabilise a 53.7 MB.
+### Version & branches
+- `VERSION` = **1.5.2-beta** (inchangée ; les jalons se marquent par des tags `+build`).
+- Tags jalons récents : `v1.5.2-beta+ultra-audit-2026-07-13`,
+  `v1.5.2-beta+revue-post-merge-2026-08-02`.
+- **Campagne « revue post-merge » (2026-08-02)** : les 35 findings de la revue logique du 2026-07-18
+  (11 HIGH, 20 MEDIUM, 4 LOW) sont corrigés et poussés. Ils n'existaient que dans un journal de
+  workflow et n'avaient jamais été traités. Chaque correctif est prouvé par **mutation** (rouge sans
+  le fix / vert avec) ; une revue adversaire a ensuite trouvé **63 défauts DANS ces correctifs**,
+  tous traités ou réfutés preuve d'exécution à l'appui.
+- **Campagnes antérieures** : « vérification totale » (`f486f98`, tag `verif-totale-2026-07`),
+  sécurité Opus (`ecb99ea`), arbitrages produit (`cd10c58`), ultra-audit 41 findings (`529fcd0`).
+  Traçabilité : `docs/internal/verif_totale_2026_07/`.
+- ⚠️ La consigne « NE PAS corriger la sécu en session Fable » reste valable pour Fable ; Opus peut
+  la traiter.
 
-### Cycle adversarial en cours (3-4 juin 2026)
-- **Branche** : `fix/v150-batch-bugs` (152 commits ahead vs origin, jamais pousses)
-- **Etat** : 30 fichiers modifies en working tree, 543 commits sur 30 derniers jours
-- **Vagues** : M / N / O / P / Q / **R completes** (tags `vague-r-complete`, `vague-r-hotfix1/2/3-full`)
-- **Hotfix cycles** : 5 rounds adversarial bug hunts (R1=10crit, R2=5crit, R3=3, R4=1crit+17high, audit=0crit+16high) + 4 hotfixes precedents (post-fix rates 79%/93%/100%/100%) + hotfix6 (92% postfix, 1 revert auto)
-- **Hotfix7 EN COURS** (worktree `w4yqqdf25`) : BugHunt R6 sur 10 angles + sequence corrigee. Tests biblio virtuelle: 11 bugs identifies -> 3 reels confirmes, 8 false positives.
-- **Tag le plus recent** : `verify-fix-retest-complete` (2026-06-04)
+### Ce que la campagne a livré (2026-07)
+- **8 matrices de câblage** rejouables (`matrices/mX_*.json`) + **5 tests de contrat CI**
+  (`tests/test_contract_*.py`) qui verrouillent le câblage UI↔API, settings, i18n, CSS, façades.
+- **Runtime** (Lot C) : 13 vues balayées Playwright, 17 findings runtime corrigés (dont la course
+  racine dedup+abort de `core/api.js`), 6 sweeps permanents `tests/e2e_dashboard/test_lotc_sweep_*`.
+- **Métier** (Lot D) : 7 chaînes bout-en-bout `tests/test_lotd_chain_*` (biblio virtuelle jetable),
+  18 findings dont la régression titre « Blade Runner 2049 » (titre proposé INTACT, tolérance
+  d'année portée UNIQUEMENT par la clé de dédup).
+- **Purge Phase 5** : ~4 160 lignes de JS mort supprimées (6 vues + 20 modules non routés +
+  bootstrap-bisect hors prod), famille i18n `qij.*` (144 clés), bloc CSS `.omdb-status*` mort ;
+  cloud-sync par segment (fini le faux WARNING `xbox`), docstrings B8/6-façades à jour, tiers
+  délégués à `tiers_helpers` (dedup), `wip/b4` de Thomas réconcilié (PAGE_SIZE 200, To, etc.).
+- **Décisions produit en attente** (`PHASE5_ARBITRAGES.md`) : i18n FR-only vs câbler, ~21 settings
+  fantômes, ~60 méthodes façade sans UI, R8-079, tag release.
 - **Mega-hotfix** : tag `mega-hotfix` (2026-06-04) consolide les fixes B01-B05 du verify-cycle
 - **Worktrees actifs** : 2 (CineSort principal sur fix/v150-batch-bugs + CineSort-B4 sur main)
 
@@ -89,7 +146,7 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 - **SQLite WAL** (31 migrations, schema v31 — derniere: `031_tri_etat_decisions.sql`)
 - **Dependances clefs** : `requests`, `rapidfuzz` (matching), `segno` (QR), `onnxruntime` + `numpy` (LPIPS perceptuel)
 - **Probe** : ffprobe + mediainfo (binaires externes)
-- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **441 fichiers test_*.py** (396 racine + 45 sous-dossiers), 35 tests v77, top modules: phase (54), perceptual (15), apply (13), quality (12), tmdb (10)
+- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **~497 fichiers test_*.py** (446 racine + sous-dossiers), **6062 tests collectés** (unitaires + contrats CI + chaînes Lot D + sweeps runtime Lot C). Les 74 fichiers morts « Legacy frontend removed » ont été supprimés (Phase 0.4). Config pytest dans `[tool.pytest.ini_options]`. **Lancer avec `.venv/Scripts/python.exe` (3.13)** — le `python` global est un 3.12 qui produit des faux échecs ; périmètre CI = `--ignore` e2e/e2e_dashboard/e2e_desktop/manual/live/stress, SANS `--timeout`.
 - **Qualite** : ruff (lint + format), import-linter, pre-commit, codecov (coverage), bandit, mypy
 - **Build** : PyInstaller (~54 MB onefile EXE Windows — **`dist/CineSort.exe` est le livrable final**, `build/CineSort/` est intermediaire PyInstaller a ignorer)
 
@@ -147,6 +204,61 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, p
 ---
 
 ## Sessions recentes
+
+### 2-3 août 2026 — Revue post-merge (35 findings) + déblocage de la CI + tri du backlog ✅
+
+**1. Les 35 findings de la revue du 2026-07-18.** Ils n'existaient que dans un journal de workflow.
+Extraits, puis corrigés par clusters de fichiers **disjoints** (aucun agent ne partage un fichier avec
+un autre — c'est ce qui permet de paralléliser sans conflit). Chacun prouvé par mutation.
+Marquants : `sqlite3.Error` n'hérite pas de `OSError` et traversait tout le journal des ops d'apply ;
+un plafond de résolution n'était pas verrouillant (un 720p pouvait finir Platinum) ; un sidecar était
+attribué par simple préfixe (le sous-titre d'un film partait avec un autre, voire au bucket de
+suppression) ; la pré-passe collection vivait hors du `try` per-row.
+
+**2. Une revue adversaire a trouvé 63 défauts DANS ces correctifs** (5 HIGH). Dont une erreur
+d'« alignement » qui élargissait la surface destructive : ajouter `sqlite3.Error` à l'except
+d'`insert_apply_batch` laissait un apply s'exécuter **sans aucun journal**, donc sans undo possible.
+Règle retenue : la tolérance à un échec de journal ne vaut QUE pour les opérations postérieures à un
+déplacement déjà fait.
+
+**3. La CI, rouge depuis des mois, est verte** (cf. section « à lire en premier »).
+
+**4. Le backlog trié** : 425 éléments (177 PR + 248 issues) relus **contre le code**, un par un.
+126 fermés avec motif nominatif. ⚠️ Piège évité : 4 paires de PR se déclaraient **mutuellement**
+doublons — les fermer toutes aurait supprimé le correctif avec elles, dont un contournement SSRF
+exploitable. ⚠️ Autre mécanisme à connaître : **une PR Dependabot ouverte bloque ses propres mises à
+jour** ; la fermer fait régénérer à la version courante.
+
+**5. Défauts produit corrigés au passage** : la garde d'`open_path` comparait des CHAÎNES
+(`str(resolve()) != str(absolute())`) et refusait un dossier légitime derrière une jonction NTFS ;
+la purge des runs en mémoire déclenchait un `get_status()` par entrée qui retombait en base
+(3 connexions SQLite chacune) à **chaque lecture d'état**, d'où des scans successifs en O(n²) ;
+`Ctrl+S` était annoncé « Enregistrer » et ne faisait rien tout en bloquant le raccourci natif.
+
+### 7-9 juillet 2026 — Campagne « vérification totale » (Lots A→D + Phases 5/6/7) ✅
+
+Grande campagne sur `verif/totale-2026-07` (base `650d162` = origin/main, ~76 commits, jamais poussée).
+Objectif : prouver le câblage A→Z de chaque fonction (UI→JS→REST→façade→backend→DB→rendu→CSS), le
+verrouiller par des tests de contrat permanents, puis corriger tout ce qui pêche. Détail complet :
+`docs/internal/verif_totale_2026_07/RAPPORT_VERIF_TOTALE.md`.
+
+- **Lot A** : assainissement (36 artefacts debug dé-trackés, 74 tests morts supprimés, locks pydantic
+  régénérés, baseline verte nominative) + **8 matrices de câblage** rejouables (M1 UI→API … M8 timers).
+- **Lot B** : **5 tests de contrat CI** (`tests/test_contract_*.py`) — chaque `apiPost` matche une
+  méthode façade, chaque clé settings a un lecteur, i18n ⊆ locales, hex tiers ∈ tokens.css, façades.
+- **Lot E** : 5 boutons UI cassés réparés + fuite codepoints token DEBUG soldée + 12 bugs de revue.
+- **Lot C** (runtime Playwright, 13 vues) : 17 findings dont la **course racine dedup+abort** de
+  `core/api.js` (accueil vide au boot, historique gelé…). Gate groupé 45/45.
+- **Lot D** (7 chaînes métier, biblio virtuelle) : 18 findings dont exports UI jamais fonctionnels,
+  crash `get_quality_report`, R8-080, et la **régression titre « Blade Runner 2049 »** (titre proposé
+  INTACT, tolérance d'année UNIQUEMENT dans la clé de dédup `strip_trailing_year_if_equal`).
+- **Phases 5/6/7** : purge ~4 160 l. JS mort + i18n `qij.*` + CSS `.omdb-status*` mort ; cloud-sync
+  par segment ; docstrings B8/6-façades ; tiers délégués à `tiers_helpers` ; `wip/b4` réconcilié ;
+  a11y (dead omdb) ; docs de clôture.
+- **Méthodologie** : multi-agents en parallèle (worktrees), **2-3 rounds de revue adversaire** avant
+  chaque clôture — a attrapé des bugs réels DANS les fixes à chaque vague (règle validée).
+- **Sécurité → Opus** (`SECURITE_POUR_OPUS.md`), **arbitrages produit → Thomas**
+  (`PHASE5_ARBITRAGES.md`), **push/tag → Thomas**.
 
 ### 14 juin 2026 — Vagues R6 + R7 + audit patterns (44 fixes) ✅
 
@@ -432,7 +544,14 @@ Notes :
 - Triggers, permissions, concurrency, `--allowedTools` et structure des steps inchanges.
 - Historique modeles : Opus 4.5 / 4.6 / 4.7 → remplaces par Opus 4.8 (juin 2026).
 
-*Last updated : 2026-06-14 (Vagues R6 + R7 + audit patterns : 44 fixes, 0 regression, 166 GATEs verts, import-linter 3/3, EXE rebuild ; cf AUDIT_PATTERNS_R6_2026-06-14.md).*
+*Last updated : 2026-08-03 — revue post-merge (35 findings corrigés, prouvés par mutation ; 63 défauts
+trouvés DANS ces correctifs par revue adversaire), CI rendue VERTE après des mois de rouge (deux
+verrous empilés : ruff, puis 46 erreurs de setup Playwright + 25 échecs pré-existants), ruff épinglé
+exactement (3 versions coexistaient), bot d'audit passé en Opus 5 + effort max ET borné par un budget
+d'ouverture, backlog trié contre le code (425 éléments relus, 126 fermés avec motif).
+Historique antérieur : 2026-07-09 campagne vérif totale (`f486f98`, tag verif-totale-2026-07) ;
+2026-07-10 cycle SÉCURITÉ Opus (SEC-1/2/3/4 + FIX-4) ; 2026-07-16 ultra-audit 41 findings
+(`529fcd0`). Arbitrages produit → `PHASE5_ARBITRAGES.md`.*
 
 ---
 

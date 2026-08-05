@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
 from cinesort.infra.tmdb_client import TmdbClient
 from cinesort.ui.api._responses import err as _err_response
+
 # AUDIT 2026-06-10 (CRITICAL) : `api._normalize_user_path` n'existe pas (c'est un
 # nom module-level dans cinesort_api, pas une methode d'instance) -> AttributeError
 # non rattrapee -> HTTP 500 sur get_tmdb_posters / search_tmdb des qu'une cle TMDb
@@ -16,8 +18,13 @@ from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
 
+#: Cap defensif sur le nombre d'ids resolus en un appel (cf le commentaire
+#: detaille dans `get_tmdb_posters`). Borne un appel pathologique sans brider
+#: l'usage normal : les resolutions warm coutent ~3 ms pour 2000 ids.
+_POSTERS_MAX_IDS = 2000
 
-def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[str, Any]:
+
+def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92", force_refresh: bool = False) -> Dict[str, Any]:
     if not isinstance(tmdb_ids, list):
         return _err_response(
             t("errors.payload_tmdb_ids_invalid"), category="validation", level="info", log_module=__name__
@@ -37,7 +44,25 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         # On garde un cap defensif mais large (2000) pour ne pas exploser TMDb
         # en cas d'appel pathologique. Les posters sont servis depuis le cache
         # local (tmdb_cache.json) donc le cout reel est minime apres le 1er run.
-        ids = sorted(set(ids))[:2000]
+        #
+        # Ultra-audit 2026-08 (N20) : le cap etait `sorted(set(ids))[:2000]`,
+        # donc il gardait les 2000 PLUS PETITS tmdb_id. Les identifiants TMDb
+        # croissent avec le temps : au-dela de 2000 films, les jaquettes
+        # silencieusement perdues etaient TOUJOURS celles des films les plus
+        # RECENTS, sur toutes les pages et a chaque appel. `_build_library_rows`
+        # collecte les ids AVANT pagination (library_support.py:288-306), donc
+        # une bibliotheque de 3000 films exposait le defaut en permanence.
+        # On dedoublonne desormais en PRESERVANT L'ORDRE DE L'APPELANT : la
+        # troncature suit l'ordre d'affichage (les premieres pages, celles que
+        # l'utilisateur voit, sont servies) au lieu d'un critere arbitraire.
+        seen: Set[int] = set()
+        ordered: List[int] = []
+        for value in ids:
+            if value not in seen:
+                seen.add(value)
+                ordered.append(value)
+        truncated = max(0, len(ordered) - _POSTERS_MAX_IDS)
+        ids = ordered[:_POSTERS_MAX_IDS]
         if not ids:
             return {"ok": True, "posters": {}}
 
@@ -60,6 +85,19 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
         except (TypeError, ValueError):
             cache_ttl_days = 30
+        # Ultra-audit 2026-08 (N20) — le client est volontairement RECONSTRUIT a
+        # chaque appel ; ne pas le memoiser sur le modele de
+        # poster_proxy._build_or_get_tmdb_client sans traiter d'abord le point
+        # ci-dessous.
+        #
+        # `TmdbClient._save_cache_atomic` (tmdb_client.py:328) serialise
+        # `self._cache` EN ENTIER et fait `os.replace` : il ecrase le fichier, il
+        # ne fusionne pas. Un client de longue duree ici ecraserait donc les
+        # entrees ecrites entre-temps par le client memoise de poster_proxy, qui
+        # vise le MEME tmdb_cache.json. Le client neuf relit le fichier a la
+        # construction, donc il preserve ces entrees.
+        # Gain mesure par la passe adversaire : ~45 ms par appel sur un cache de
+        # 10 000 entrees. Ce n'est pas le prix d'un risque de purge de cache.
         tmdb = TmdbClient(
             api_key=api_key,
             cache_path=state_dir / "tmdb_cache.json",
@@ -68,10 +106,21 @@ def get_tmdb_posters(api: Any, tmdb_ids: List[int], size: str = "w92") -> Dict[s
         )
         posters: Dict[str, str] = {}
         for movie_id in ids:
-            url = tmdb.get_movie_poster_thumb_url(movie_id, size=size or "w92")
+            # E4 (verif totale 2026-07) : le bouton refresh jaquette envoie
+            # force_refresh=true depuis 2026-05-24 mais le parametre n'existait
+            # pas cote backend (TypeError => 400). E4-bis (revue) : bypass de
+            # LECTURE du cache (pas de purge) — le fallback stale survit si
+            # TMDb est injoignable.
+            url = tmdb.get_movie_poster_thumb_url(movie_id, size=size or "w92", force_refresh=force_refresh)
             if url:
                 posters[str(movie_id)] = url
         tmdb.flush()
+        # Ultra-audit 2026-08 (N20) : la troncature n'est plus silencieuse. Champ
+        # purement additif (les consommateurs existants l'ignorent), absent quand
+        # rien n'est tronque pour ne pas alourdir la reponse du cas courant.
+        if truncated:
+            logger.info("get_tmdb_posters: %d ids au-dela du cap de %d ignores", truncated, _POSTERS_MAX_IDS)
+            return {"ok": True, "posters": posters, "truncated": truncated}
         return {"ok": True, "posters": posters}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
@@ -96,7 +145,9 @@ def _build_tmdb_client(api: Any):
     if not api_key:
         return None, _err_response(
             "Cle TMDb non configuree (Parametres > Integrations).",
-            category="config", level="info", log_module=__name__,
+            category="config",
+            level="info",
+            log_module=__name__,
         )
     state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
     try:
@@ -211,16 +262,28 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
             posters[rid] = url
 
     if changed:
-        tmp_path = plan_jsonl.with_suffix(plan_jsonl.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as fp:
-            for r in all_rows:
-                fp.write(json.dumps(r, ensure_ascii=False) + "\n")
-        tmp_path.replace(plan_jsonl)
+        # Cette fonction tourne dans le thread daemon `tmdb-enrich-<run_id>`
+        # lance en fin de scan (run_flow_support.py:634) : son `.tmp` en dur
+        # etait le MEME chemin que celui de `_rematch_tmdb_and_update_plan`,
+        # declenchable au meme instant depuis l'UI (#732). Cf write_plan_jsonl.
+        # Un SEUL import differe pour les deux symboles : cf. la meme note dans
+        # `library_actions_support._rematch_tmdb_and_update_plan` (cliquet
+        # `test_lazy_imports_bounded`).
+        from cinesort.ui.api.run_data_support import (  # noqa: PLC0415
+            resync_run_state_rows,
+            write_plan_jsonl,
+        )
 
-    try:
+        write_plan_jsonl(plan_jsonl, all_rows)
+
+        # AUDIT 2026-07-13 (HIGH-17) : toute reecriture de plan.jsonl doit
+        # resynchroniser le snapshot memoire (prefere au fichier par get_plan /
+        # apply / dashboard) et purger le cache dashboard, dont la signature est
+        # calculee sur plan.jsonl (sinon cache empoisonne avec des rows perimees).
+        resync_run_state_rows(api, run_id)
+
+    with contextlib.suppress(OSError, AttributeError):
         tmdb.flush()
-    except (OSError, AttributeError):
-        pass
 
     return {"ok": True, "resolved": int(resolved), "total": len(ids), "posters": posters, "ids": resolved_ids}
 

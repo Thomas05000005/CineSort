@@ -4,8 +4,9 @@ _get_history_stats_impl ne renvoyait ni films, ni duplicates_decided/skipped ->
 onglets "Films"/"Doublons" vides ("detail non disponible") et recherche par titre
 inerte. On enrichit le dict run depuis quality_reports + plan + decisions.
 """
+
 from __future__ import annotations
-import re as _re
+
 import unittest
 from pathlib import Path
 
