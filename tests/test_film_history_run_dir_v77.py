@@ -32,6 +32,10 @@ class _FakeQualityRepo:
     def get_quality_report(self, *, run_id, row_id):
         return None
 
+    # Issue #577 : la timeline interroge desormais les rapports en LOT.
+    def get_quality_reports_for_pairs(self, *, pairs):
+        return {}
+
 
 class _FakeApplyRepo:
     def list_apply_batches_for_run(self, *, run_id, limit=10):
@@ -39,6 +43,13 @@ class _FakeApplyRepo:
 
     def list_apply_operations_by_row(self, *, batch_id, row_id):
         return []
+
+    # Issue #577 : idem pour les batches et les operations.
+    def list_apply_batches_for_runs(self, *, run_ids, limit_per_run=10):
+        return {}
+
+    def list_apply_operations_for_rows(self, *, batch_ids, row_ids):
+        return {}
 
 
 class _FakeStore:
