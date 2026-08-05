@@ -147,22 +147,36 @@ export function initKeyboard() {
       return;
     }
 
-    /* 4b. Ctrl+Z : RETIRE (revue post-merge 2026-08-03).
+    /* 4b. Ctrl+Z : RETIRE (revue post-merge 2026-08-03 + ultra-audit N01/N08 —
+     * les deux campagnes ont retire le meme raccourci, ce commentaire est leur
+     * conclusion commune).
      *
-     * Le raccourci dispatchait `cinesort:undo-shortcut`, que PLUS AUCUN module
-     * n'ecoutait : le seul auditeur vivait dans `library/lib-apply.js`, supprime
-     * a la migration ESM. Le dispatch est reste, l'auditeur est parti — la
-     * frappe ne produisait donc rien, tout en consommant l'evenement clavier.
-     * Le libelle annonce ici et dans /aide etait faux en plus : la Bibliotheque
-     * n'a aucun flux d'undo.
+     * Le raccourci (#92 quick win #3) dispatchait `cinesort:undo-shortcut`, que
+     * PLUS AUCUN module n'ecoutait : le seul auditeur vivait dans
+     * `library/lib-apply.js`, supprime a la migration ESM. Le dispatch est
+     * reste, l'auditeur est parti — la frappe ne produisait donc rien tout en
+     * consommant l'evenement clavier, pendant que la modale F1 et /aide
+     * promettaient « Annuler la derniere application (depuis Bibliotheque) »,
+     * libelle faux en prime : la Bibliotheque n'a aucun flux d'undo.
      *
-     * On RETIRE la promesse au lieu de la brancher : `run/undo_last_apply`
-     * remet des fichiers en place sur le disque, donc c'est une action
-     * destructive, qui doit rester derriere une confirmation explicite (liste
-     * des elements + consequence + delai). Une frappe nue ne peut pas porter
-     * ca. L'undo reste accessible par ses deux boutons, qui portent bien cette
-     * confirmation : « Previsualiser l'annulation » puis « Annuler l'apply »
-     * dans /traitement, et « Annuler l'apply » par run dans /historique.
+     * Pourquoi on ne le RECABLE pas — motif de CIBLE, pas de confirmation.
+     * Une premiere redaction justifiait le retrait par la regle des actions
+     * destructives ; c'etait un homme de paille et cette justification est
+     * retiree ici. Personne ne proposait de cabler une frappe nue sur
+     * `run/undo_last_apply` : le brancher sur `_onUndoExecute` (traitement.js)
+     * ou `_doUndoApply` (historique.js) aurait conserve `dangerConfirmModal` et
+     * n'aurait donc rien viole. Une regle projet mal invoquee dans le depot est
+     * pire que pas de justification : elle finit citee ailleurs.
+     *
+     * Le vrai motif : l'undo n'a pas de cible non ambigue depuis un raccourci
+     * GLOBAL. Il porte sur un batch precis — `_runInfo.pendingUndo` cote
+     * Traitement, le run selectionne cote Historique — etat qui n'existe que
+     * dans la vue montee. Depuis /parametres ou /bibliotheque, Ctrl+Z n'aurait
+     * aucun batch a designer, et depuis Historique il devrait deviner lequel
+     * des runs listes viser. L'undo reste donc accessible par ses deux boutons
+     * dedies (Traitement etape 5 « Previsualiser l'annulation » puis « Annuler
+     * l'apply », Historique -> « Annuler l'apply » par run), la ou la cible est
+     * explicite — tous deux derriere `dangerConfirmModal`.
      *
      * Effet de bord voulu : Ctrl+Z n'est plus intercepte du tout et redescend
      * au navigateur (aucun preventDefault), ce qui rend l'undo natif des champs
