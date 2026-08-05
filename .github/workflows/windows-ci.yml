@@ -1,8 +1,29 @@
 name: windows-ci
 
 on:
+  # `push:` et `pull_request:` etaient tous deux SANS filtre de branche, ce qui
+  # declenchait DEUX runs pour chaque poussee sur une PR : un pour l'evenement
+  # `push` (sur la branche), un pour l'evenement `pull_request`. Les deux
+  # survivaient, parce que le groupe `concurrency` ci-dessous les range dans des
+  # groupes DIFFERENTS (`pull_request.number` pour l'un, `github.ref` pour
+  # l'autre).
+  #
+  # Mesure du 2026-08-04 : 25 branches sur 27 avaient les deux runs. Ce workflow
+  # a DEUX jobs sur `windows-latest` (dont un build PyInstaller complet), donc
+  # chaque poussee coutait 4 jobs Windows au lieu de 2 — sur le pool le plus
+  # rare, celui-la meme que le check REQUIS `Lint, Tests, Build` doit partager.
+  # Constate deux fois dans la journee : `windows-ci`, qui n'est pas requis,
+  # occupait 11 a 12 creneaux sur 14 pendant que la cascade de fusion etait a
+  # l'arret.
+  #
+  # Le filtre ci-dessous est la convention DEJA suivie par tous les autres
+  # workflows du depot (ci, bandit, codeql, gitleaks, mypy, pip-audit) :
+  # windows-ci en etait le seul ecart. La couverture est inchangee — une PR est
+  # toujours verifiee via l'evenement `pull_request`, et `main` via `push`.
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # OpenSSF Scorecard : top-level permissions explicites = read-only.
@@ -10,12 +31,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Un nouveau push sur une PR rend le run precedent sans objet : on l'annule
+  # au lieu de le laisser occuper un slot. Mesure du 2026-08-03 : 247 runs
+  # perimes sur 999 en file, pour 16 slots d'execution.
+  # `github.sha` et NON `github.ref` pour les evenements hors PR : chaque commit
+  # de `main` obtient ainsi son PROPRE groupe, donc deux runs de `main` ne
+  # peuvent jamais s'annuler l'un l'autre — quelle que soit la facon dont
+  # `cancel-in-progress` est evalue.
+  #
+  # Mesure du 2026-08-04 : le run du commit ca85b282 (evenement `push`) a ete
+  # ANNULE alors que `cancel-in-progress` valait l'expression
+  # `github.event_name == 'pull_request'`, donc `false` pour un push. Le
+  # commentaire ci-dessous promet pourtant « sur main on laisse le run aller au
+  # bout : c'est la reference ». Il ne le faisait pas.
+  #
+  # Consequence concrete : relancer un ancien run de `main` le remet dans le
+  # groupe `CI-refs/heads/main` et tue le run du commit le PLUS RECENT — l'etat
+  # de reference de `main` devient alors inexploitable, ce qui est exactement le
+  # signal sur lequel s'appuie le suivi de la cascade.
+  #
+  # Le comportement voulu pour les PR est INCHANGE : `pull_request.number` reste
+  # la clef, donc un nouveau push sur une PR annule toujours son run precedent.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Sur main, au contraire, on laisse le run aller au bout : c'est la reference.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
       - name: Setup Python 3.13
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -56,7 +103,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
       - name: Setup Python 3.13
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
