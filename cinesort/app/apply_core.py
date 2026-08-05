@@ -276,28 +276,26 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     NB : la signature publique reste retro-compatible (``max_seconds`` est
     kwarg-only avec un defaut), les callers existants ne changent pas.
     """
-    import time as _time_mod  # local pour eviter shadow du module ``time`` haut
-
     digest = hashlib.sha1(usedforsecurity=False)
-    start = _time_mod.monotonic()
+    start = time.monotonic()
     chunk_8m = 8 * 1024 * 1024
     try:
         size = path.stat().st_size
         with path.open("rb") as file_obj:
             if size < (2 * chunk_8m):
                 while True:
-                    if _time_mod.monotonic() - start > max_seconds:
+                    if time.monotonic() - start > max_seconds:
                         raise TimeoutError(f"sha1_quick timeout ({max_seconds}s) on {path}")
                     block = file_obj.read(1024 * 1024)
                     if not block:
                         break
                     digest.update(block)
             else:
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout head ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
                 file_obj.seek(max(0, size - chunk_8m))
-                if _time_mod.monotonic() - start > max_seconds:
+                if time.monotonic() - start > max_seconds:
                     raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
     except (OSError, TimeoutError) as exc:

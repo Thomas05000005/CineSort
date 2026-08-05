@@ -306,6 +306,88 @@ class TransitionDeferredToAcceptedTests(unittest.TestCase):
         self.assertIsNone(res["previous_decision"])
         self.assertEqual(res["new_decision"], DECISION_ACCEPTED)
 
+    # -- Issue #768 : garde d'etat -----------------------------------------
+
+    def test_upgrade_depuis_rejected_est_refuse_sans_ecriture(self):
+        """Un `rejected` explicite ne devient JAMAIS `accepted` par cette voie.
+
+        Issue #768. Un film accepte redevient eligible a l'apply, donc au
+        DEPLACEMENT de son dossier sur disque : sur ce chemin, l'erreur va dans
+        le sens restrictif. On verifie les DEUX faces :
+          - la reponse annonce le refus (ok=False, new_decision=None) ;
+          - la BASE n'a pas bouge (c'est ce qui compte vraiment : un refus
+            annonce mais ecrit quand meme serait le pire des deux mondes).
+        """
+        self.decisions_repo.set_decision("tmdb:603", "run-1", DECISION_REJECTED, reason="pas ma copie")
+        before = self.decisions_repo.get_decision("tmdb:603", "run-1")
+
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=[])
+
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["previous_decision"], DECISION_REJECTED)
+        self.assertIsNone(res["new_decision"])
+        self.assertIn("refusee", str(res["warning"]))
+
+        after = self.decisions_repo.get_decision("tmdb:603", "run-1")
+        self.assertEqual(after["decision"], DECISION_REJECTED)
+        # Aucune ecriture : meme horodatage, meme raison qu'avant l'appel.
+        self.assertEqual(after["decided_at"], before["decided_at"])
+        self.assertEqual(after["reason"], "pas ma copie")
+
+    def test_upgrade_depuis_rejected_refuse_reste_hors_apply(self):
+        """Le refus se lit aussi dans la projection legacy `{ok: bool}`.
+
+        C'est cette projection qui decide de l'eligibilite a l'apply : un test
+        qui s'arreterait a la shape du dict ne prouverait pas que le film reste
+        hors du perimetre de deplacement.
+        """
+        self.decisions_repo.set_decision("tmdb:603", "run-1", DECISION_REJECTED)
+        self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=[])
+        got = self.decisions_repo.get_decision("tmdb:603", "run-1")
+        self.assertFalse(to_legacy_ok_bool(got["decision"]))
+
+    def test_upgrade_depuis_valeur_inattendue_est_refuse(self):
+        """Liste blanche FERMEE : une valeur hors tri-etat est refusee aussi.
+
+        La colonne porte un CHECK, mais un ecrivain SQL direct (migration,
+        outil de reparation) peut contourner `set_decision`. La garde ne doit
+        pas dependre de la seule enumeration des etats connus dangereux.
+        """
+        self.decisions_repo.set_decision("tmdb:603", "run-1", DECISION_DEFERRED)
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
+            # PRAGMA writable_schema : seule facon d'ecrire une valeur que le
+            # CHECK de la migration 031 interdit. On neutralise le CHECK le
+            # temps de l'UPDATE, puis on le restaure.
+            conn.execute("PRAGMA writable_schema = ON")
+            conn.execute(
+                "UPDATE sqlite_master SET sql = REPLACE(sql, "
+                "\"CHECK(decision IN ('accepted','rejected','deferred'))\", '') "
+                "WHERE type='table' AND name='film_decisions_v2'"
+            )
+            conn.execute("PRAGMA writable_schema = OFF")
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
+            conn.execute("UPDATE film_decisions_v2 SET decision='quarantined' WHERE film_id='tmdb:603'")
+
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=[])
+
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["previous_decision"], "quarantined")
+        after = self.decisions_repo.get_decision("tmdb:603", "run-1")
+        self.assertEqual(after["decision"], "quarantined")
+
+    def test_upgrade_depuis_accepted_reste_idempotent(self):
+        """`accepted -> accepted` (double-clic UI) n'est PAS un refus.
+
+        La garde doit refuser l'inversion d'une decision, pas la repetition
+        d'une decision identique — un `ok=False` ici afficherait une erreur a
+        l'utilisateur pour un no-op.
+        """
+        self.decisions_repo.set_decision("tmdb:603", "run-1", DECISION_ACCEPTED)
+        res = self.decisions_repo.upgrade_deferred_to_accepted("tmdb:603", "run-1", locked_fields=[])
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["previous_decision"], DECISION_ACCEPTED)
+        self.assertEqual(res["new_decision"], DECISION_ACCEPTED)
+
 
 # ---------------------------------------------------------------------------
 # AC-5 : coexistence apply_atomic (VP-A) sans collision kwargs
