@@ -367,7 +367,26 @@ def existing_db_fixture(
 
     tmp_root = Path(tmp_path) if tmp_path is not None else Path(tempfile.mkdtemp(prefix="cinesort_existing_db_"))
     tmp_root.mkdir(parents=True, exist_ok=True)
+    # Le dossier est cree AVANT les migrations, mais l'appelant n'enregistre son
+    # nettoyage qu'apres le RETOUR de cette fonction : une migration qui leve
+    # laissait donc le dossier derriere elle, sans personne pour le supprimer.
+    # On ne nettoie que ce qu'on a cree soi-meme — un `tmp_path` fourni par
+    # l'appelant lui appartient, et peut contenir autre chose.
+    nous_l_avons_cree = tmp_path is None
+    try:
+        return _construire_db_existante(tmp_root, target_schema_version, src_migrations)
+    except BaseException:
+        if nous_l_avons_cree:
+            shutil.rmtree(tmp_root, ignore_errors=True)
+        raise
 
+
+def _construire_db_existante(
+    tmp_root: Path,
+    target_schema_version: int,
+    src_migrations: Path,
+) -> Tuple[Path, sqlite3.Connection]:
+    """Corps d'`existing_db_fixture`, isole pour que son chemin d'erreur soit un seul `except`."""
     db_path = tmp_root / "store.sqlite3"
 
     # Si target <= 0 : DB vierge, on retourne juste une connection vide.

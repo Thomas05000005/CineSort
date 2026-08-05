@@ -30,8 +30,10 @@ import itertools
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 import unittest
@@ -525,6 +527,56 @@ class BuildReportTests(unittest.TestCase):
         self.assertIn("    1  omdb_test_*", report)
         self.assertIn("tests/x.py::A::t1", report)
         self.assertIn("<inconnu>", report)
+
+
+class ExistingDbFixtureNettoieSonEchecTests(unittest.TestCase):
+    """Le dossier cree par `existing_db_fixture` ne survit pas a une migration qui leve.
+
+    Revue CodeRabbit sur la PR#962. Le `mkdtemp` precede l'application des
+    migrations, mais l'appelant n'enregistre son `addCleanup` qu'APRES le retour
+    de la fonction : entre les deux, une exception laissait le dossier orphelin,
+    sans personne pour le supprimer. Le garde-fou de session ne le voyait pas
+    passer tant que le total restait sous la borne.
+    """
+
+    def _temps_avant(self) -> set:
+        racine = Path(tempfile.gettempdir())
+        return {p.name for p in racine.iterdir() if p.name.startswith("cinesort_existing_db_")}
+
+    def test_une_migration_qui_leve_ne_laisse_pas_de_dossier(self) -> None:
+        import tempfile as _t
+
+        from tests import _helpers
+
+        avant = self._temps_avant()
+
+        def _explose(*_a, **_k):
+            raise sqlite3.DatabaseError("migration cassee")
+
+        with unittest.mock.patch.object(_helpers, "_construire_db_existante", _explose):
+            with self.assertRaises(sqlite3.DatabaseError):
+                _helpers.existing_db_fixture(30)
+
+        apres = {p.name for p in Path(_t.gettempdir()).iterdir() if p.name.startswith("cinesort_existing_db_")}
+        self.assertEqual(apres - avant, set(), "un dossier a survecu a l'echec de la fixture")
+
+    def test_un_tmp_path_fourni_par_l_appelant_n_est_JAMAIS_supprime(self) -> None:
+        """Il ne nous appartient pas : il peut contenir autre chose."""
+        from tests import _helpers
+
+        a_moi = Path(tempfile.mkdtemp(prefix="apelant960_"))
+        self.addCleanup(shutil.rmtree, a_moi, ignore_errors=True)
+        (a_moi / "precieux.txt").write_text("ne pas supprimer", encoding="utf-8")
+
+        def _explose(*_a, **_k):
+            raise sqlite3.DatabaseError("migration cassee")
+
+        with unittest.mock.patch.object(_helpers, "_construire_db_existante", _explose):
+            with self.assertRaises(sqlite3.DatabaseError):
+                _helpers.existing_db_fixture(30, tmp_path=a_moi)
+
+        self.assertTrue(a_moi.is_dir(), "le dossier de l'appelant a ete supprime")
+        self.assertTrue((a_moi / "precieux.txt").exists(), "le contenu de l'appelant a ete detruit")
 
 
 if __name__ == "__main__":
