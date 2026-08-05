@@ -2884,7 +2884,33 @@ def apply_tv_episode(
     # de la série (le dossier) ; new_year l'année. Fallback sur row.* si non fourni.
     _eff_series = (new_title or "").strip() or str(row.tv_series_name or row.proposed_title or "")
     year = int(new_year) if (new_year is not None and int(new_year or 0) > 0) else int(row.proposed_year or 0)
-    season = int(row.tv_season or 0)
+    # #613 (CHEMIN DESTRUCTIF) : `int(row.tv_season or 0)` confondait deux etats
+    # distincts — saison INDETERMINEE (`None` : pattern « Episode 12 » sans saison,
+    # cf. tv_helpers.parse_tv_info) et saison 0, qui est une saison LEGITIME (les
+    # specials Kodi/Jellyfin vivent dans `Saison 00`). L'episode a saison inconnue
+    # partait donc en silence dans `Saison 00`, melange aux specials, sur une
+    # destination FABRIQUEE. Sens restrictif : on refuse bruyamment, le fichier
+    # reste en place, l'utilisateur est informe (log + error_messages + skip dedie).
+    #
+    # `episode`, lui, N'EST PAS garde : depuis la fermeture de la violation
+    # « renommage » (le fichier garde son nom source), le numero d'episode
+    # n'intervient plus dans AUCUN segment du chemin cible — seul le dossier de
+    # serie et le dossier de saison sont construits. Refuser sur `episode is None`
+    # bloquerait un rangement par ailleurs entierement correct.
+    if row.tv_season is None:
+        _season_err = (
+            f"SAISON TV INDETERMINEE : '{video.name}' — la saison n'a pas ete resolue. "
+            f"La ranger dans 'Saison 00' la confondrait avec les specials : "
+            f"renseigner la saison, puis relancer l'application."
+        )
+        log("WARN", _season_err)
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            res.error_messages.append(_season_err)
+        except AttributeError:  # noqa: BLE001 - retro-compat tests anciens
+            pass
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_TV_SAISON_INDETERMINEE)
+        return
+    season = int(row.tv_season)
     episode = int(row.tv_episode or 0)
     ep_title = str(row.tv_episode_title or "").strip()
 
@@ -2900,7 +2926,11 @@ def apply_tv_episode(
         separator=getattr(cfg, "separator", " "),
     )
     series_folder_name = format_tv_series_folder(cfg.naming_tv_template, _naming_ctx)
-    season_folder_name = f"Saison {season:02d}" if season else "Saison 00"
+    # #613 : la ternaire historique (`... if season else "Saison 00"`) etait une
+    # tautologie — `f"Saison {0:02d}"` vaut deja "Saison 00" — et laissait croire
+    # que "Saison 00" etait un FALLBACK. Ce n'en est pas un : c'est le dossier des
+    # specials. Le cas « saison inconnue » est desormais refuse plus haut.
+    season_folder_name = f"Saison {season:02d}"
 
     # REGLE INVIOLABLE n1 : un episode est RANGE, jamais RENOMME.
     #
