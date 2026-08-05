@@ -107,7 +107,7 @@ def _check_fqdn_resolution(host: str) -> Tuple[bool, str]:
     """
     try:
         addresses = _resolve_host_addresses(host)
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         # gaierror herite d'OSError. On NE refuse PAS : un nom temporairement
         # non resolvable (serveur eteint, PC hors ligne au moment ou l'utilisateur
         # saisit l'URL de son Jellyfin) doit rester configurable. Le refus n'est

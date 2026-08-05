@@ -159,7 +159,7 @@ def find_video_case_insensitive(folder: Path, video_name: str) -> Optional[Path]
         for child in folder.iterdir():
             if child.is_file() and child.name.lower() == str(video_name or "").lower():
                 return child
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return None
     return None
 
@@ -217,7 +217,7 @@ def existing_movie_folder_index(
     def _dirs(path: Path) -> List[Path]:
         try:
             return [child for child in path.iterdir() if child.is_dir()]
-        except (OSError, PermissionError, FileNotFoundError):
+        except OSError:
             return []
 
     def _index(path: Path) -> None:
@@ -229,7 +229,7 @@ def existing_movie_folder_index(
 
     try:
         level1 = [path for path in cfg.root.iterdir() if path.is_dir()]
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return out
 
     # F18 : le dossier collections est un CONTENEUR TRANSPARENT. La cible reelle
@@ -306,7 +306,7 @@ def can_merge_single_without_blocking(
 
     try:
         files = [path for path in src_dir.rglob("*") if path.is_file() and is_managed_merge_file(cfg, path)]
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return False, "source folder not readable"
 
     return _check_file_collisions(
@@ -341,7 +341,7 @@ def can_merge_collection_item_without_blocking(
     src_files = [video]
     try:
         src_files.extend(classify_sidecars(cfg, folder, video))
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return False, "source sidecars unreadable"
 
     return _check_file_collisions(

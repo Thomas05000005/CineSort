@@ -130,7 +130,7 @@ class RunState:
                         open(self.paths.run_dir / "debug_runstate.log", "a", encoding="utf-8") as f,
                     ):
                         f.write(f"[{ts}] WARN ui_log write failed: {exc}\n")
-                except (OSError, PermissionError):
+                except OSError:
                     return
 
     def progress(self, idx: int, total: int, current: str) -> None:

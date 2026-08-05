@@ -45,7 +45,7 @@ def run_ffprobe_json(
         # Maintenant: degradation VISIBLE (message clair), pas silencieuse.
         messages.append(f"ffprobe timeout apres {getattr(exc, 'timeout', timeout_s):.0f}s (retries epuises): {exc}")
         return None, messages
-    except (OSError, TimeoutError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         messages.append(f"ffprobe echec execution: {exc}")
         return None, messages
 

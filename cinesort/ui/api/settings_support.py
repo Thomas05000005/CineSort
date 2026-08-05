@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import cinesort.domain.core as core
 import cinesort.infra.state as state
+from cinesort.app.updater import is_valid_github_repo
 from cinesort.domain.conversions import to_bool, to_float, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.naming import PRESETS, validate_template
@@ -644,7 +645,7 @@ def read_saved_root_candidates(*state_dirs: Path) -> str:
     for state_dir in state_dirs:
         try:
             data = read_settings(state_dir)
-        except (OSError, PermissionError, ValueError):
+        except (OSError, ValueError):
             data = {}
         root_raw = str(data.get("root") or "").strip()
         if root_raw:
@@ -657,7 +658,7 @@ def read_saved_roots_candidates(*state_dirs: Path) -> list:
     for state_dir in state_dirs:
         try:
             data = read_settings(state_dir)
-        except (KeyError, OSError, PermissionError, TypeError, ValueError):
+        except (KeyError, OSError, TypeError, ValueError):
             data = {}
         _migrate_root_to_roots(data)
         roots = data.get("roots", [])
@@ -1909,9 +1910,27 @@ def _save_section_advanced(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["update_check_enabled"] = to_bool(payload.get("update_check_enabled"), True)
     if "update_github_repo" in payload:
         repo = str(payload.get("update_github_repo") or "").strip()
-        # SSRF defense : meme regex que cinesort/app/updater.py _GITHUB_REPO_PATTERN
-        if not repo or re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+        # SSRF defense (#240) : un `owner/repo` hors format part sinon tel quel
+        # dans l'URL de l'API GitHub.
+        #
+        # Issue #556 : le motif etait recopie ici, avec pour seul garde-fou un
+        # commentaire disant qu'il devait rester identique a celui de
+        # `app/updater`. C'est desormais le validateur de l'updater lui-meme
+        # qui tranche — un seul endroit ou changer la regle. `ui -> app` est
+        # autorise par les contrats d'architecture (seul `app -> ui` est
+        # interdit).
+        #
+        # La chaine VIDE reste acceptee : c'est la valeur par defaut du reglage
+        # et le seul moyen, pour l'utilisateur, de revenir au depot integre.
+        if not repo or is_valid_github_repo(repo):
             out["update_github_repo"] = repo
+        else:
+            # Trace du rejet. On ne remonte deliberement PAS d'erreur bloquante
+            # jusqu'a l'UI : la vue Parametres enregistre en continu (debounce
+            # 500 ms, parametres.js `_scheduleSave`), donc chaque frappe
+            # intermediaire — "owner" avant la barre oblique — declencherait un
+            # refus de TOUT l'enregistrement. Cf. la reserve de la PR.
+            logger.debug("settings: update_github_repo ignore, format owner/repo attendu (%r)", repo)
     # R8-068 (F5) : "worker_count" RETIRÉ — toggle inerte, aucune opération ne le lit
     # (parallélisme réel piloté par perceptual_workers_count + le mode de scan).
     # AUDIT 2026-06-11 (R3) : perceptual_workers(_count) est gere par
@@ -2247,7 +2266,7 @@ def test_jellyfin_connection(
             try:
                 libraries = client.get_libraries(user_id)
                 movies_count = client.get_movies_count(user_id)
-            except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+            except (JellyfinError, KeyError, OSError, TypeError, ValueError) as exc:
                 logger.debug("Jellyfin: erreur récupération bibliothèques: %s", exc)
 
         return {
@@ -2266,7 +2285,7 @@ def test_jellyfin_connection(
     # echoue cote serveur, ou erreur reseau bas niveau remontee comme
     # JellyfinError), on retourne un err() proprement plutot que de laisser
     # l'exception remonter au caller (qui afficherait une stacktrace dans l'UI).
-    except (JellyfinError, ConnectionError, KeyError, OSError, TimeoutError, TypeError, ValueError) as exc:
+    except (JellyfinError, KeyError, OSError, TypeError, ValueError) as exc:
         return err(f"Jellyfin connection failed: {exc}", category="runtime", level="error")
 
 

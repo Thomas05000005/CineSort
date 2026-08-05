@@ -301,7 +301,7 @@ def _validate_and_init_plan_context(
 
     try:
         state.clean_old_runs(state_dir, keep_last=20)
-    except (OSError, PermissionError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         api._debug_log(
             state_dir=state_dir, run_id=None, enabled=debug_enabled, message=f"start_plan clean_old_runs warning: {exc}"
         )
@@ -710,7 +710,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
         # + fsync avant os.replace) laisse au contraire la cible INCHANGEE : au
         # pire le plan est absent, jamais ampute.
         write_plan_jsonl(rs.paths.plan_jsonl, serialize_rows_for_payload(rows))
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         rs.log("WARN", f"Plan save failed: {exc}")
         dlog(f"job_fn writing plan.jsonl failed: {exc}")
 
@@ -718,7 +718,7 @@ def _save_plan_artifacts(rs: Any, rows: list, stats: Any, root: Any, state_dir: 
     try:
         summary_text = _build_analysis_summary(rows, stats, root, state_dir, rs.paths)
         state.atomic_write_text(rs.paths.summary_txt, summary_text, mkdir=False)
-    except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         dlog(f"job_fn writing summary.txt failed: {exc}")
 
 
@@ -765,7 +765,7 @@ def _hydrate_settings_from_store(
     try:
         state_dir, _present = api._resolve_payload_state_dir(settings)
         persisted = read_settings(state_dir)
-    except (OSError, PermissionError, KeyError, TypeError, ValueError):
+    except (OSError, KeyError, TypeError, ValueError):
         return settings
     if not isinstance(persisted, dict) or not persisted:
         return settings
@@ -1241,7 +1241,7 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
                 state.atomic_write_json(rs.paths.validation_json, safe)
                 rs.log("INFO", f"Validation enregistrée : {rs.paths.validation_json}")
                 return {"ok": True, "path": str(rs.paths.validation_json)}
-            except (OSError, PermissionError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError) as exc:
                 return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
         found = api._find_run_row(run_id)
@@ -1261,7 +1261,7 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
             state.atomic_write_json(run_paths.validation_json, safe)
             api._file_logger(run_paths)("INFO", f"Validation enregistrée : {run_paths.validation_json}")
             return {"ok": True, "path": str(run_paths.validation_json)}
-        except (KeyError, OSError, PermissionError, TypeError, ValueError) as exc:
+        except (KeyError, OSError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 

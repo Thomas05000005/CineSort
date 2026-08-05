@@ -207,7 +207,39 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # arrivees en parallele et le 2026-08-05 deux PR ont deja calcule leur
     # valeur de tete a partir d'une base commune : elles concordaient PAR
     # CHANCE. Ici, la mesure d'abord, l'ecriture ensuite.
-    "ui": 63,
+    #
+    # 63 -> 56 (#779 vague 2, -7) : le reliquat intra-`ui/api` que la vague 1
+    # (PR#930) avait laisse. Re-mesure du graphe avant de coder : l'issue annonce
+    # 89 imports differes intra-`ui/api`, il en restait 31 statements. Sur ces 31,
+    # 4 seulement sont poses sur une VRAIE arete de retour de tete
+    # (`library_support` <-> `library_actions_support` x3, `reset_support` ->
+    # `cinesort_api`). Parmi les 27 restants, 7 n'avaient NI cycle NI contrat de
+    # degradation, et sont convertis ici :
+    #   - `perceptual_support._build_tmdb_client` : `normalize_user_path` etait
+    #     DEJA importe en tete du meme module — alias purement redondant ;
+    #   - `library_actions_support._build_cfg_for_row` : `settings_support` etait
+    #     deja une dependance de tete (`normalize_user_path`), differer un second
+    #     symbole du meme module ne differait rien ;
+    #   - `run_read_support` x2 (`library_support._get_store`) : le cluster n.2
+    #     nomme par #779, sa « PR pilote » ;
+    #   - `library_actions_support` + `tmdb_support` (`run_data_support`) : leur
+    #     commentaire admettait avoir FUSIONNE deux imports en un statement pour
+    #     ne pas faire monter ce cliquet — l'artefact disparait avec la cause ;
+    #   - `facades/settings_facade.get_confidence_thresholds` : aucun garde.
+    #
+    # NON convertis, avec la raison mesuree :
+    #   - `run_facade` x3 (`schemas`) et `apply_support` x2 : leur `try` attrape
+    #     `ImportError` — l'import differe y est un contrat de degradation
+    #     (pydantic absent, build EXE ampute), pas un contournement de cycle ;
+    #   - `runtime_support` x3 : `except Exception` englobant, qui attrape
+    #     `ImportError` lui aussi (dont `_safe_read_settings_for_diag`, un
+    #     diagnostic qui doit survivre a un `settings_support` casse) ;
+    #   - `film_support` <-> `history_support` et `library_support` <->
+    #     `library_actions_support` : aretes de retour REELLES, une direction au
+    #     moins doit rester differee.
+    #
+    # 56 est MESURE sur l'arbre final (walk AST, meme code que ce test), pas 63-7.
+    "ui": 56,
 }
 
 # Borne globale = somme des bornes par couche (114 apres le lot #554/#595/#779).

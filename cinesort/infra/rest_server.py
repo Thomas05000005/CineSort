@@ -900,7 +900,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                 # prealable, qui laisse une fenetre entre la mesure et la
                 # lecture et ne borne pas l'allocation par lui-meme.
                 content = handle.read(_STATIC_MAX_BYTES + 1)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning("%s static read error: %s", scope, exc)
             self._respond_json(500, {"ok": False, "message": "Erreur de lecture."})
             return None
@@ -1587,7 +1587,7 @@ class RestApiServer:
             try:
                 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 ctx.load_cert_chain(certfile=self._cert_path, keyfile=self._key_path)
-            except (ssl.SSLError, OSError, PermissionError) as exc:
+            except (ssl.SSLError, OSError) as exc:
                 msg = f"HTTPS demande mais certificat invalide: {exc}. Serveur REST non demarre."
                 logger.error("REST: %s", msg, exc_info=True)
                 self._start_error = msg

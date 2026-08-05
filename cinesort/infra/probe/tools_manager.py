@@ -138,7 +138,7 @@ def _resolve_explicit_path(value: Any) -> str:
 def _safe_file_mtime(path: Path) -> float:
     try:
         return float(path.stat().st_mtime)
-    except (OSError, PermissionError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError):
         return 0.0
 
 
@@ -181,9 +181,9 @@ def _candidate_paths_for_tool(
                         try:
                             if p.is_file():
                                 matched.append(p)
-                        except (KeyError, OSError, PermissionError, TypeError, ValueError):
+                        except (KeyError, OSError, TypeError, ValueError):
                             continue
-                except (KeyError, OSError, PermissionError, TypeError, ValueError):
+                except (KeyError, OSError, TypeError, ValueError):
                     continue
             if matched:
                 newest = max(matched, key=_safe_file_mtime)
@@ -427,7 +427,7 @@ def _build_lpips_status() -> Dict[str, Any]:
             found_path = str(cand)
             try:
                 size_bytes = int(cand.stat().st_size)
-            except (OSError, PermissionError):
+            except OSError:
                 size_bytes = 0
             break
 

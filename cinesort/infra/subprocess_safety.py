@@ -98,7 +98,7 @@ def _kill_and_wait(proc: subprocess.Popen[Any], timeout_s: float) -> None:
         return  # deja termine
     try:
         proc.kill()
-    except (OSError, ProcessLookupError) as exc:
+    except OSError as exc:
         # Process deja mort entre poll() et kill() : OK.
         logger.debug("subprocess_safety: kill() ignored (%s)", exc)
         return
