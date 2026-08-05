@@ -190,5 +190,69 @@ class DisambiguateByContextTests(unittest.TestCase):
         self.assertEqual(c_avatar.score, 0.60)
 
 
+class AmbiguitySourceContractTests(unittest.TestCase):
+    """#493 : la MATRICE COMPLÈTE des sources, telle que la docstring l'annonce.
+
+    La docstring de `detect_title_ambiguity` affirmait « les candidats "nfo" et
+    "name" sont ignorés » alors que `_AMBIGUITY_SOURCES` accepte `nfo_tmdb` et
+    `nfo_imdb`. Le risque nommé par l'issue est qu'un relecteur « applique la
+    doc » avec un `if source.startswith("nfo"): continue` — ce qui reste vert
+    aujourd'hui pour `nfo_imdb` et pour le `nfo` nu, non couverts.
+
+    Chaque cas ci-dessous est donc une clause de la docstring corrigée, et
+    aucun n'est redondant : retirer une seule source de `_AMBIGUITY_SOURCES`
+    (ou en ajouter une) fait tomber exactement une assertion.
+    """
+
+    def _pair(self, source_a: str, source_b: str) -> bool:
+        cands = [
+            _FakeCandidate(title="Dune", year=1984, source=source_a, score=0.70, tmdb_id=841),
+            _FakeCandidate(title="Dune", year=2021, source=source_b, score=0.93, tmdb_id=438631),
+        ]
+        ambiguous, title = detect_title_ambiguity(cands)
+        if ambiguous:
+            # Le titre remonté sert aux logs/UI : on borne sur le texte COMPLET
+            # attendu, un `assertIn` passerait sur n'importe quel sur-ensemble.
+            self.assertEqual(title, "dune")
+        else:
+            self.assertIsNone(title)
+        return ambiguous
+
+    def test_nfo_imdb_participates_like_tmdb(self):
+        """Identité résolue via l'IMDb id d'un NFO : c'est un film réel."""
+        self.assertTrue(self._pair("tmdb", "nfo_imdb"))
+        self.assertTrue(self._pair("nfo_imdb", "nfo_tmdb"))
+
+    def test_bare_nfo_never_participates(self):
+        """`nfo` nu = titre du NFO sans id résolu -> ne prouve aucun 2e film."""
+        self.assertFalse(self._pair("tmdb", "nfo"))
+        self.assertFalse(self._pair("nfo", "nfo"))
+
+    def test_name_never_participates(self):
+        """`name` = titre dérivé du nom de fichier (cf. le signal circulaire #762)."""
+        self.assertFalse(self._pair("tmdb", "name"))
+        self.assertFalse(self._pair("name", "name"))
+
+    def test_the_boost_uses_the_very_same_predicate(self):
+        """#762 : détection et application partagent `_AMBIGUITY_SOURCES`.
+
+        Un `nfo_imdb` membre du groupe ambigu doit être boosté par le contexte ;
+        un `name` au même titre, jamais — sinon le boost « année exacte » (issu
+        du même nom de fichier que le candidat) se sur-promeut lui-même.
+        """
+        cands = [
+            _FakeCandidate(title="Dune", year=1984, source="nfo_imdb", score=0.70, tmdb_id=841),
+            _FakeCandidate(title="Dune", year=2021, source="tmdb", score=0.90, tmdb_id=438631),
+            _FakeCandidate(title="Dune", year=1984, source="name", score=0.60),
+        ]
+        out, ambiguous, title = disambiguate_by_context(cands, {"name_year": 1984})
+        self.assertTrue(ambiguous)
+        self.assertEqual(title, "dune")
+        boosted = next(c for c in out if c.source == "nfo_imdb")
+        self.assertGreater(boosted.score, 0.70)
+        untouched = next(c for c in out if c.source == "name")
+        self.assertEqual(untouched.score, 0.60)
+
+
 if __name__ == "__main__":
     unittest.main()

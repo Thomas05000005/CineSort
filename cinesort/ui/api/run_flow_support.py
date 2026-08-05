@@ -1530,6 +1530,25 @@ def _quality_info_for_row(store: Any, run_id: str, r: Any, probe: Any = None) ->
         w, h = video.get("width"), video.get("height")
         if w and h:
             info["resolution"] = f"{int(w)}x{int(h)}"
+        else:
+            # #699 (residu) : `classify_resolution` (domain/resolution_class)
+            # tranche sur la LARGEUR et ne se sert de la hauteur que « comme
+            # filet quand la largeur manque (probe partiel, rapport persiste
+            # tronque) ». Ce cas produit donc une classe MESUREE
+            # (`resolution_source == "probe"`, seule condition sous laquelle
+            # `_build_pseudo_probe` propage l'etiquette) sans geometrie
+            # complete : le comparateur classait alors le fichier en 2160p et
+            # la carte A/B restait muette sur la resolution qui venait de
+            # decider du verdict.
+            #
+            # On retombe sur l'etiquette CANONIQUE, jamais sur une valeur
+            # fabriquee : `f"{h}p"` afficherait « 1600p » pour un UHD scope
+            # 3840x1600 (cf. la docstring de `_build_pseudo_probe`), et une
+            # etiquette deduite du NOM de release n'arrive pas jusqu'ici.
+            # Meme precedence que `film-detail.js` (`det.resolution` puis WxH).
+            label = str(video.get("resolution") or "").strip()
+            if label:
+                info["resolution"] = label
         tracks = probe.get("audio_tracks") or []
         if tracks and isinstance(tracks[0], dict):
             ac = str(tracks[0].get("codec") or "")

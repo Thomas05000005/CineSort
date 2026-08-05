@@ -20,6 +20,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from cinesort.domain.tiers_helpers import LOW_TIERS_LOWER, PREMIUM_TIERS_LOWER
 from cinesort.infra.db.repositories._base import _BaseRepository
 
 # Nombre de couples (run_id, row_id) par requete de `get_quality_reports_for_pairs`.
@@ -481,12 +482,37 @@ class QualityRepository(_BaseRepository):
         return max(0, int(total_rows) - scored)
 
     def get_quality_counts_for_runs(self, run_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Retourne {run_id: {tier: count, ...}} pour la liste de runs donnee (agregation bulk)."""
+        """Agregats qualite par run (bulk).
+
+        Retourne ``{run_id: {"scored_movies", "score_avg", "premium_count",
+        "low_count"}}``. Les runs sans aucun rapport qualite sont ABSENTS du
+        dict (``GROUP BY`` ne produit pas de ligne vide) — l'appelant doit donc
+        utiliser ``.get(run_id, {})``.
+
+        #472 : ``premium_count`` / ``low_count`` s'agregent sur la colonne
+        ``tier`` PERSISTEE, pas sur des seuils de score en dur. Les anciens
+        ``score >= 85`` / ``score < 55`` etaient les seuils Platinum/Silver de
+        l'echelle PRE-v1.5.5 (85/68/54/30) : depuis la recalibration en
+        70/66/55/40, un film affiche Platinum a 75 n'etait pas compte premium.
+        Le tier, lui, a ete calcule avec le profil actif au moment du scoring :
+        le KPI est donc coherent avec le tier affiche film par film, y compris
+        pour les runs scores sous un autre profil (``remux_strict`` 90/76/60/40).
+        Les bandes viennent de ``domain.tiers_helpers`` (source unique).
+
+        La docstring precedente annoncait ``{run_id: {tier: count, ...}}``,
+        c'est-a-dire une distribution PAR TIER : cette forme n'a jamais ete
+        produite ici (c'est ``get_global_tier_distribution`` qui la rend).
+        """
         self._ensure_quality_tables()
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]
         if not ids:
             return {}
         placeholders = ",".join("?" for _ in ids)
+        # Ordre des parametres = ordre d'APPARITION des `?` dans le SQL.
+        premium_bands = sorted(PREMIUM_TIERS_LOWER)
+        low_bands = sorted(LOW_TIERS_LOWER)
+        premium_ph = ",".join("?" for _ in premium_bands)
+        low_ph = ",".join("?" for _ in low_bands)
         with self._managed_conn() as conn:
             cur = conn.execute(
                 f"""
@@ -494,13 +520,13 @@ class QualityRepository(_BaseRepository):
                   run_id,
                   COUNT(*) AS scored_movies,
                   AVG(score) AS score_avg,
-                  SUM(CASE WHEN score >= 85 THEN 1 ELSE 0 END) AS premium_count,
-                  SUM(CASE WHEN score < 55 THEN 1 ELSE 0 END) AS low_count
+                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({premium_ph}) THEN 1 ELSE 0 END) AS premium_count,
+                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({low_ph}) THEN 1 ELSE 0 END) AS low_count
                 FROM quality_reports
                 WHERE run_id IN ({placeholders})
                 GROUP BY run_id
                 """,
-                tuple(ids),
+                (*premium_bands, *low_bands, *ids),
             )
             out: Dict[str, Dict[str, Any]] = {}
             for row in cur.fetchall():

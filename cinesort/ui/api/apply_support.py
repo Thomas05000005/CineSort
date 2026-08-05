@@ -2067,8 +2067,22 @@ def _execute_apply(
             _ov = store.film_modal.get_tmdb_override(run_id=run_id, row_id=_rid_row)
             if not _ov:
                 continue
-            if int(_ov.get("tmdb_id") or 0) > 0:
-                _r.tmdb_id = int(_ov["tmdb_id"])
+            # #805 : la ligne `_r.tmdb_id = int(_ov["tmdb_id"])` qui figurait ici
+            # etait une ECRITURE MORTE, retiree. `PlanRow` (domain/core.py) est
+            # un dataclass SANS champ `tmdb_id` et SANS `__slots__` : l'affectation
+            # creait un attribut d'instance que rien ne relisait — `asdict()`, seule
+            # voie de serialisation d'une PlanRow (plan_support_core.plan_row_to_jsonable,
+            # run_data_support.serialize_rows_for_payload), ne retient QUE les champs
+            # declares, et `apply_core` n'y fait aucune reference (`grep tmdb_id` = 0).
+            # L'identite d'une PlanRow vit sur ses `candidates` (Candidate.tmdb_id).
+            #
+            # Ne PAS la remettre « pour aligner sur `film_support.apply_tmdb_override` » :
+            # ce helper-la opere sur des rows DICT (payload Bibliotheque / fiche film),
+            # ou `tmdb_id`/`chosen_tmdb_id` sont des cles d'enrichissement legitimes et
+            # relues (cf. `_ENRICHMENT_KEYS` de tests/test_dead_field_invariants.py).
+            # Sur l'OBJET PlanRow ce sont des attributs fantomes. Ce qu'apply doit
+            # a l'utilisateur, c'est le nom du dossier : il derive de
+            # proposed_title/proposed_year, tous deux overlayes ci-dessous.
             if _ov.get("proposed_title"):
                 _r.proposed_title = str(_ov["proposed_title"])
             if int(_ov.get("proposed_year") or 0) > 0:
