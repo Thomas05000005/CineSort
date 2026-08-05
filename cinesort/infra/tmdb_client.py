@@ -17,6 +17,7 @@ import requests
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import get_bounded, make_session_with_retry
 from cinesort.infra.fs_safety import FileTooLargeError, read_text_bounded
+from cinesort.infra.state import AtomicWriteError, atomic_write_json, atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -331,33 +332,23 @@ class TmdbClient:
                 return
             self._last_save_ts = now
 
-            tmp = self.cache_path.with_suffix(".tmp")
             # PERF-6 (v7.8.0) : drop indent=2 + separators compacts.
             # Avant : cache 20MB x 750 writes par scan x indent = 15GB IO + 112s CPU.
             # Apres : ~50% taille, ~30% temps serialize. Format toujours valide JSON.
-            # Fix audit Vague H (parite OmdbClient._save_cache_atomic) : write +
-            # flush + fsync avant rename pour eviter qu'un crash systeme entre
-            # write et os.replace ne promeuve un .tmp partiel en cache officiel
-            # (cache 50-100MB -> JSON corrompu -> re-fetch API sur tous les films).
+            # Fix #732 : le `.tmp` etait NOMME EN DUR (`cache_path.with_suffix('.tmp')`),
+            # exactement comme celui de `purge_expired_tmdb_cache` -> les deux
+            # ecrivains (cet appel + le thread daemon de purge au boot) visaient
+            # le MEME fichier intermediaire et pouvaient promouvoir le JSON
+            # partiel de l'autre (CWE-362). `atomic_write_text` fait le nom
+            # unique ET le fsync + controle de taille.
             try:
                 payload = json.dumps(self._cache, ensure_ascii=False, separators=(",", ":"))
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(payload)
-                    f.flush()
-                    os.fsync(f.fileno())  # force write to disk avant rename
-                if tmp.exists() and tmp.stat().st_size > 0:
-                    os.replace(tmp, self.cache_path)
-                    self._dirty = False
-                else:
-                    logger.warning("tmdb cache tmp write failed, keeping previous cache")
-                    if tmp.exists():
-                        with contextlib.suppress(OSError):
-                            tmp.unlink()
+                atomic_write_text(self.cache_path, payload)
+                self._dirty = False
+            except AtomicWriteError as exc:
+                logger.warning("tmdb cache tmp write failed, keeping previous cache (%s)", exc)
             except (OSError, PermissionError, ValueError) as exc:
                 logger.debug("tmdb cache save warning: %s", exc)
-                if tmp.exists():
-                    with contextlib.suppress(OSError):
-                        tmp.unlink()
 
     def flush(self) -> None:
         try:
@@ -1132,11 +1123,19 @@ def purge_expired_tmdb_cache(
         # Rien a faire : pas d'ecriture inutile
         return result
 
-    # Reecriture atomique (tmp -> rename)
+    # Reecriture atomique ET durable (#622 fsync manquant, #732 tmp partage).
+    # Cette fonction tourne dans un thread daemon au BOOT, en concurrence avec
+    # `TmdbClient._save_cache_atomic` : les deux utilisaient le meme
+    # `cache_path.with_suffix('.tmp')` et n'avaient donc aucune isolation.
+    #
+    # `indent=None` : MEME forme compacte que `TmdbClient._save_cache_atomic`
+    # (separators serres, cf PERF-6 quinze lignes plus haut). Le defaut
+    # `indent=2` d'`atomic_write_json` doublait le fichier a chaque purge —
+    # un cache de 18 Mo repassait a ~36 Mo, relu tel quel par `_load_cache` au
+    # demarrage suivant et desormais fsynce en entier. Le `indent=2` est
+    # anterieur a cette PR, mais elle reecrit cette ligne et fsync son resultat.
     try:
-        tmp = cache_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(new_cache, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, cache_path)
+        atomic_write_json(cache_path, new_cache, indent=None)
     except (OSError, PermissionError) as exc:
         result["error"] = f"write_error: {exc}"
         return result
