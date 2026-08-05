@@ -72,6 +72,26 @@ class EstimateApplySizeTests(unittest.TestCase):
         size = estimate_apply_size([row], approved_keys={"r1"})
         self.assertEqual(size, 0)
 
+    def test_size_empty_row_id_not_counted(self) -> None:
+        # Une row au row_id vide qui n'est pas dans approved_keys doit etre
+        # exclue de l'estimation, sinon on sur-estime et on declenche un faux
+        # "espace insuffisant". L'ancien garde `if rid and rid not in
+        # approved_keys` ne skippait que les row_id truthy et la laissait
+        # passer.
+        #
+        # Le sous-dossier n'est pas decoratif : depuis #796 l'estimation est
+        # RECURSIVE (`_dir_tree_size`). Il verifie que le filtre s'applique
+        # bien AVANT ce parcours, donc que la row ecartee ne contribue ni sa
+        # couche immediate ni son arborescence (sans le garde : 14000).
+        folder = self.tmp / "Ghost"
+        folder.mkdir()
+        (folder / "movie.mkv").write_bytes(b"x" * 5000)
+        (folder / "Extras").mkdir()
+        (folder / "Extras" / "bonus.mkv").write_bytes(b"x" * 9000)
+        row = _make_row(str(folder), "movie.mkv", row_id="")
+        size = estimate_apply_size([row], approved_keys={"r1"})
+        self.assertEqual(size, 0)
+
 
 class CheckDiskSpaceTests(unittest.TestCase):
     def setUp(self) -> None:

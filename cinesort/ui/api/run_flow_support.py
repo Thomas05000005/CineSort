@@ -316,8 +316,24 @@ def _validate_and_init_plan_context(
         message=f"start_plan infra ready db_path={store.db_path}",
     )
 
-    run_id = api._generate_unique_run_id(store)
-    run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=True)
+    # RESERVATION ATOMIQUE : le run_id et son dossier `tri_films_<run_id>` sont
+    # pris d'un seul tenant, AVANT toute creation de RunState et avant
+    # start_job. Auparavant l'unicite n'etait verifiee que cote base alors que
+    # le dossier etait deja cree (mkdir exist_ok=True) : deux runs de meme id
+    # partageaient le meme dossier et le second ecrasait le plan.jsonl du
+    # premier sans rien signaler.
+    try:
+        run_id, run_paths = api._reserve_unique_run(store, state_dir)
+    except (OSError, RuntimeError) as exc:
+        return (
+            _err_response(
+                str(exc),
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            ),
+            None,
+        )
     api._debug_log(
         state_dir=state_dir,
         run_id=run_id,

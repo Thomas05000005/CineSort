@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import html
 import logging
-import os
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
+
+from cinesort.infra.state import atomic_write_text, sweep_atomic_tmp_orphans
 
 _logger = logging.getLogger(__name__)
 
@@ -277,23 +278,39 @@ def export_nfo_for_run(
             details.append({"path": str(nfo_path), "status": "would_write"})
             continue
 
-        tmp = nfo_path.with_name(f"{nfo_path.name}.tmp.{os.getpid()}")
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(xml_content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, nfo_path)
+            # Fix #822 : `write_text` tronque le .nfo EN PLACE. Coupure secteur
+            # ou NAS qui decroche pendant l'ecriture -> l'utilisateur se
+            # retrouve avec un .nfo vide/tronque a la place de celui que
+            # Jellyfin/Kodi lisait tres bien avant l'export. `mkdir=False` :
+            # on n'a AUCUNE raison de recreer le dossier d'un film disparu.
+            #
+            # Conflit avec #834 (main) : les deux branches ferment la MEME
+            # issue #822, main avec un `tmp + fsync + os.replace` ECRIT SUR
+            # PLACE, celle-ci en routant vers le helper unique. Le helper
+            # SUBSUME la version inline — meme fsync, plus le controle de
+            # taille ecrite, le `.tmp` unique (pid/thread/ns/uuid au lieu du
+            # seul pid, qui collisionnait entre threads du meme processus), la
+            # retentative d'`os.replace` mesuree par #718 et le nettoyage du
+            # `.tmp` en `finally`. La mecanique inline de #834 est donc retiree
+            # plutot que doublee : deux implementations de la meme garantie
+            # divergent au premier reglage.
+            atomic_write_text(nfo_path, xml_content, mkdir=False)
             written += 1
             details.append({"path": str(nfo_path), "status": "written"})
+            # Le `.tmp` unique n'est JAMAIS reecrase : un export interrompu
+            # laisse ici un residu DEFINITIF, dans le dossier du film, a cote
+            # du .mkv — visible par l'utilisateur et scanne par Jellyfin/Kodi.
+            # On balaie les orphelins de CE .nfo (et d'aucun autre fichier du
+            # dossier) a chaque export reussi : la borne « au plus un residu »
+            # qu'offrait l'ancien `.tmp` fixe est ainsi retablie.
+            sweep_atomic_tmp_orphans(nfo_path.parent, target_name=nfo_path.name)
         except (OSError, PermissionError) as exc:
+            # Le nettoyage du `.tmp` que #834 faisait ici est desormais dans le
+            # `finally` d'`atomic_write_bytes` : il s'execute sur TOUS les
+            # chemins de sortie, y compris l'echec du controle de taille.
             errors += 1
             details.append({"path": str(nfo_path), "status": f"error: {exc}"})
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
 
     return {
         "ok": True,
