@@ -257,7 +257,6 @@
     undo_last_apply_preview: () => ({ ok: true, ops_count: 8, conflicts: [] }),
     undo_last_apply: () => ({ ok: true, undone: 8, errors: 0 }),
     undo_by_row_preview: () => ({ ok: true, batches: [], films: [] }),
-    undo_selected_rows: () => ({ ok: true, undone: 0 }),
     list_apply_history: () => ({ ok: true, batches: [] }),
 
     // -- Quality / Perceptual ----

@@ -107,7 +107,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "run.list_pending_runs",
         "run.purge_quarantine_bucket",
         "run.undo_by_row_preview",
-        "run.undo_selected_rows",
         "runtime.check_for_updates",
         "runtime.get_event_ts",
         "runtime.get_probe",

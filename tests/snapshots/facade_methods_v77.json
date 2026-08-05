@@ -4,6 +4,8 @@
   "generated_at_iso": "2026-06-01",
   "facades": {
     "library": [
+      "clear_field_lock",
+      "clear_tmdb_override",
       "delete_smart_playlist",
       "export_films",
       "export_full_library",
@@ -17,13 +19,16 @@
       "get_library_timeline",
       "get_scoring_rollup",
       "get_smart_playlists",
+      "list_field_locks",
       "list_films_with_history",
       "mark_alert_ignored",
       "mark_for_deletion",
       "mark_for_deletion_bulk",
       "save_smart_playlist",
       "search_tmdb",
-      "set_film_tmdb_candidate"
+      "set_field_lock",
+      "set_film_tmdb_candidate",
+      "unmark_for_deletion"
     ],
     "quality": [
       "analyze_perceptual_batch",
@@ -32,10 +37,13 @@
       "compare_perceptual",
       "delete_score_feedback",
       "export_quality_profile",
+      "export_recyclarr_yaml",
       "export_shareable_profile",
+      "get_breakdown_5_axes",
       "get_calibration_report",
       "get_custom_rules_catalog",
       "get_custom_rules_templates",
+      "get_embedded_presets",
       "get_films_by_tier",
       "get_history",
       "get_perceptual_compare_audio",
@@ -48,15 +56,19 @@
       "get_quality_profile",
       "get_quality_report",
       "get_recompute_job_status",
+      "get_upgrade_until_score",
       "import_quality_profile",
+      "import_recyclarr_yaml",
       "import_shareable_profile",
       "queue_perceptual_analyses",
+      "queue_perceptual_batch",
       "recompute_all_scores",
       "reset_quality_profile",
       "save_custom_quality_preset",
       "save_profile",
       "save_quality_profile",
       "set_active_profile",
+      "set_upgrade_until_score",
       "simulate_quality_preset",
       "submit_score_feedback",
       "validate_custom_rules"
@@ -66,6 +78,7 @@
       "build_apply_preview",
       "cancel_run",
       "check_duplicates",
+      "check_duplicates_fusion",
       "cleanup_old_runs",
       "delete_run",
       "export_apply_audit",
@@ -82,9 +95,13 @@
       "import_watchlist",
       "list_apply_history",
       "list_pending_runs",
+      "list_quarantine_bucket",
       "load_validation",
       "mark_duplicate_winner",
+      "mark_duplicate_winners_bulk",
       "pause_run",
+      "purge_quarantine_bucket",
+      "purge_quarantine_bucket_all",
       "rescan_row",
       "rescan_rows_bulk",
       "resume_run",
@@ -93,8 +110,7 @@
       "start_plan",
       "undo_by_row_preview",
       "undo_last_apply",
-      "undo_last_apply_preview",
-      "undo_selected_rows"
+      "undo_last_apply_preview"
     ],
     "runtime": [
       "auto_install_probe_tools",
@@ -145,6 +161,7 @@
       "reset_database",
       "reset_settings",
       "restart_api_server",
+      "reveal_rest_token",
       "save_profile",
       "save_settings",
       "set_active_profile",
@@ -153,6 +170,7 @@
       "set_scan_max_workers"
     ],
     "integrations": [
+      "enrich_tmdb_ids_by_title",
       "get_jellyfin_libraries",
       "get_jellyfin_sync_report",
       "get_plex_libraries",
@@ -175,7 +193,7 @@
     "open_path",
     "test_reset"
   ],
-  "total_impl_methods": 138,
-  "total_facade_methods": 154,
-  "total_methods": 157
+  "total_impl_methods": 148,
+  "total_facade_methods": 172,
+  "total_methods": 175
 }
