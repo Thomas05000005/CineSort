@@ -29,7 +29,7 @@ from cinesort.app.apply_core import sha1_quick_cached, unique_bucket_path
 from cinesort.app.apply_rollback import rollback_forward as _atomic_rollback_forward
 from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
-from cinesort.app.move_journal import RecordOpWithJournal, journaled_move
+from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
@@ -542,6 +542,19 @@ def _execute_undo_ops(
         op_id = int(op.get("id") or 0)
         current_path = Path(str(op.get("dst_path") or ""))
         target_path = Path(str(op.get("src_path") or ""))
+        # Un op_type `*_DIR` remet un DOSSIER entier en place. `shutil.move` degrade
+        # en copytree+rmtree des que `os.rename` echoue, y compris sur un banal
+        # verrou Windows d'UN fichier interne : la source ressort eventree et le
+        # contenu dedouble (mesure detaillee dans
+        # `move_journal._rename_or_cross_device_copy`). Sur l'undo — le filet de
+        # secours de l'utilisateur — l'erreur doit aller dans le sens RESTRICTIF :
+        # ne rien deplacer plutot que dedoubler, l'op est alors comptee FAILED et
+        # reste annulable. Les op_type `*_FILE` gardent `shutil.move`, dont la copie
+        # fait justement aboutir le deplacement d'un fichier verrouille en lecture
+        # partagee. Defaut `MOVE_FILE` pour une op sans type, comme
+        # `_resolve_hashed_target` : le comportement de ces lignes ne change pas.
+        _op_type_undo = str(op.get("op_type") or "MOVE_FILE").upper()
+        _undo_move = shutil.move if _op_type_undo.endswith("_FILE") else _rename_or_cross_device_copy
         try:
             if not current_path.exists():
                 skipped += 1
@@ -651,7 +664,7 @@ def _execute_undo_ops(
                 # CR-1 : journal write-ahead pour atomicite undo (cf move_journal.py)
                 try:
                     with journaled_move(store, src=current_path, dst=conflict_dst, op_type="UNDO_QUARANTINE"):
-                        shutil.move(str(current_path), str(conflict_dst))
+                        _undo_move(str(current_path), str(conflict_dst))
                 except FileNotFoundError:
                     _log.warning("undo: fichier disparu entre check et move (conflict): %s", current_path)
                     skipped += 1
@@ -694,7 +707,7 @@ def _execute_undo_ops(
             # CR-1 : journal write-ahead pour atomicite undo
             try:
                 with journaled_move(store, src=current_path, dst=target_path, op_type="UNDO_RESTORE"):
-                    shutil.move(str(current_path), str(target_path))
+                    _undo_move(str(current_path), str(target_path))
             except FileNotFoundError:
                 _log.warning("undo: fichier disparu entre check et move: %s", current_path)
                 skipped += 1
