@@ -829,7 +829,16 @@ function _renderVerificationStep() {
   // mais doit rester visible/compté via sa puce dédiée — sinon "Subs FR manquants" tombe à ~0.
   const _matchCat = (r, cat) => {
     const flags = _readFlags(r);
-    if (cat === "subs") return flags.some((f) => String(f).startsWith("subtitle_missing_fr"));
+    // F12 (2026-08-03) : la lentille « Subs FR » couvre aussi les films dont le
+    // seul sous-titre FR est FORCÉ (subtitle_forced_only_fr). Sans eux, l'écran
+    // n'exposerait nulle part le film qui n'a que ses incrustations traduites :
+    // il est auto-approuvable, donc absent de la liste de revue « Tous problèmes ».
+    if (cat === "subs") {
+      return flags.some((f) => {
+        const s = String(f);
+        return s.startsWith("subtitle_missing_fr") || s.startsWith("subtitle_forced_only_fr");
+      });
+    }
     if (cat === "dups") return flags.some((f) => String(f).startsWith("duplicate"));
     if (cat === "nfo") return flags.some((f) => String(f).startsWith("nfo"));
     return false;
