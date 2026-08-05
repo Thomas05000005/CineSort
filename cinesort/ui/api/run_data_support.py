@@ -246,9 +246,24 @@ def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
         raise FileNotFoundError(f"Plan introuvable: {plan_path}")
     rows: List[core.PlanRow] = []
     invalid_lines: List[int] = []
-    with plan_path.open("r", encoding="utf-8") as file_obj:
-        for line_no, raw_line in enumerate(file_obj, start=1):
-            line = raw_line.strip()
+    # Lecture BINAIRE puis decodage ligne par ligne. En mode texte, le decodage
+    # se fait quand l'iterateur AVANCE — donc dans le `for`, HORS du `try`. Un
+    # seul octet non-UTF-8 levait alors `UnicodeDecodeError` (sous-classe de
+    # ValueError, mais leve au mauvais endroit) et emportait toute la lecture :
+    # au lieu d'un `PlanCorruptedError` nommant les lignes fautives, l'appelant
+    # recevait une erreur generique, sans savoir COMBIEN de lignes etaient
+    # touchees ni lesquelles.
+    #
+    # Le comportement fail-closed est INCHANGE : un octet illisible reste une
+    # ligne invalide, donc le plan entier est toujours refuse. Ce qui change,
+    # c'est qu'on sait desormais le dire.
+    with plan_path.open("rb") as file_obj:
+        for line_no, raw_bytes in enumerate(file_obj, start=1):
+            try:
+                line = raw_bytes.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                invalid_lines.append(line_no)
+                continue
             if not line:
                 continue
             try:
@@ -419,9 +434,20 @@ def count_plan_rows(run_paths: Any, *, fallback: int = 0) -> int:
     count = 0
     unreadable = 0
     try:
-        with plan_path.open("r", encoding="utf-8") as file_obj:
-            for line in file_obj:
-                line_s = line.strip()
+        # Meme raison qu'en tete de module : en mode texte, `UnicodeDecodeError`
+        # est leve par l'iterateur, hors de tout `try` local. Il n'etait donc PAS
+        # attrape par l'`except (OSError, PermissionError)` ci-dessous, et
+        # remontait hors de ce compteur — qui doit pourtant TOUJOURS rendre un
+        # entier, degrade au besoin. Un seul octet fautif faisait ainsi echouer
+        # le « nombre de films » affiche sur le tableau de bord, l'historique et
+        # la bibliotheque, au lieu de le signaler comme ampute.
+        with plan_path.open("rb") as file_obj:
+            for raw_bytes in file_obj:
+                try:
+                    line_s = raw_bytes.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    unreadable += 1
+                    continue
                 if not line_s:
                     continue
                 try:

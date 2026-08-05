@@ -184,6 +184,49 @@ class PlanJsonlCorruptedLineTests(unittest.TestCase):
         self.assertEqual(ctx.exception.invalid_lines, [2, 4, 5])
         self.assertEqual(ctx.exception.readable_rows, 2)
 
+    def test_octet_non_utf8_compte_comme_ligne_illisible(self) -> None:
+        """Un octet indecodable ne doit pas emporter TOUTE la lecture.
+
+        En mode texte, le decodage se fait quand l'iterateur AVANCE : le
+        `UnicodeDecodeError` etait donc leve dans le `for`, HORS du `try` qui
+        entoure `json.loads`. L'appelant recevait une erreur generique au lieu
+        d'un `PlanCorruptedError` nommant les lignes fautives.
+
+        Le refus du plan est INCHANGE — c'est le diagnostic qui manquait.
+        """
+        self.paths.plan_jsonl.write_bytes(
+            _plan_line("f1", "Alpha").encode("utf-8")
+            + b"\n"
+            + b'{"row_id": "f2", "t": "\xff\xfe"}'
+            + b"\n"
+            + _plan_line("f3", "Gamma").encode("utf-8")
+            + b"\n"
+        )
+        with self.assertRaises(PlanCorruptedError) as ctx:
+            load_rows_from_plan_jsonl(self.paths)
+        self.assertEqual(ctx.exception.invalid_lines, [2])
+        self.assertEqual(ctx.exception.readable_rows, 2, "les lignes SAINES doivent rester comptees")
+
+    def test_octet_non_utf8_et_json_casse_comptes_ENSEMBLE(self) -> None:
+        """Les deux familles d'illisible alimentent le MEME compteur.
+
+        Sinon le message sous-declare l'ampleur de la corruption.
+        """
+        self.paths.plan_jsonl.write_bytes(
+            _plan_line("f1", "Alpha").encode("utf-8")
+            + b"\n"
+            + b"\xff\xff octets bruts"
+            + b"\n"
+            + b"{ pas du json"
+            + b"\n"
+            + _plan_line("f4", "Delta").encode("utf-8")
+            + b"\n"
+        )
+        with self.assertRaises(PlanCorruptedError) as ctx:
+            load_rows_from_plan_jsonl(self.paths)
+        self.assertEqual(ctx.exception.invalid_lines, [2, 3])
+        self.assertEqual(ctx.exception.readable_rows, 2)
+
     def test_ligne_json_valide_mais_non_dict_compte_comme_perdue(self) -> None:
         """`null` parse sans erreur : c'etait la perte VRAIMENT silencieuse.
 
@@ -226,6 +269,34 @@ class CountPlanRowsVisibleLossTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
+
+    def test_octet_non_utf8_ne_fait_PAS_planter_le_compteur(self) -> None:
+        """Ce compteur doit TOUJOURS rendre un entier, degrade au besoin.
+
+        C'est la source unique du « nombre de films » du tableau de bord, de
+        l'historique et de la bibliotheque. En mode texte, `UnicodeDecodeError`
+        etait leve par l'iterateur, donc HORS de l'`except (OSError,
+        PermissionError)` : un seul octet fautif faisait remonter l'exception
+        hors du compteur et cassait ces trois ecrans, au lieu de signaler un
+        plan ampute.
+        """
+        self.paths.plan_jsonl.write_bytes(
+            _plan_line("f1", "Alpha").encode("utf-8")
+            + b"\n"
+            + b"\xff\xff octets bruts"
+            + b"\n"
+            + _plan_line("f3", "Gamma").encode("utf-8")
+            + b"\n"
+        )
+        with self.assertLogs("cinesort.ui.api.run_data_support", level="WARNING") as journal:
+            n = count_plan_rows(self.paths, fallback=999)
+
+        self.assertEqual(n, 2, "les lignes SAINES doivent etre comptees")
+        self.assertNotEqual(n, 999, "le repli serait un nombre INVENTE, pas une mesure")
+        self.assertTrue(
+            any("illisible" in ligne for ligne in journal.output),
+            f"l'amputation doit etre DITE, pas subie en silence : {journal.output}",
+        )
 
     def test_plan_sain_ne_logge_aucun_avertissement(self) -> None:
         self.paths.plan_jsonl.write_text(
