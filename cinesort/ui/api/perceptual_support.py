@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import logging
 import os
 import subprocess
@@ -1047,9 +1049,6 @@ def get_perceptual_compare_frames(
         top = ranked[:max_frames]
 
         # Encode en PNG base64 (greyscale, mode "L").
-        import base64
-        import io
-
         from PIL import Image
 
         frames_out: List[Dict[str, Any]] = []
@@ -1561,8 +1560,6 @@ def _extract_audio_waveform_b64(
     ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
     le flash de console.
     """
-    import base64
-
     cmd = [
         ffmpeg_path,
         "-nostdin",
@@ -1615,8 +1612,6 @@ def _extract_audio_clip_b64(
     ffmpeg.exe sur Windows). Applique aussi `CREATE_NO_WINDOW` pour eviter
     le flash de console.
     """
-    import base64
-
     cmd = [
         ffmpeg_path,
         "-nostdin",

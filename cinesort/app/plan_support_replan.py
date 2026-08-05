@@ -9,6 +9,7 @@ serialisation viennent de `plan_support_core.py`.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 from pathlib import Path
@@ -278,8 +279,6 @@ def _resolve_tmdb_collection(
     nom du dossier source OU avec le titre du candidat. Sinon le collection
     boost est toxique (ex: 'Ca' -> Pirates des Caraibes).
     """
-    import contextlib
-
     if not (tmdb is not None and chosen.tmdb_id):
         return None, None
     coll_id: Optional[int] = None

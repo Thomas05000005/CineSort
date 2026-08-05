@@ -17,8 +17,14 @@ from cinesort.domain.conversions import to_bool, to_int
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.librarian import generate_suggestions
 from cinesort.domain.probe_models import probe_quality_is_failed, probe_quality_is_partial_or_failed
+from cinesort.domain.subtitle_helpers import _normalize_iso639
 from cinesort.infra.db import SQLiteStore
-from cinesort.ui.api import notifications_support
+
+# Imports MODULE-STYLE (pas `from X import f`) pour les modules `ui/api` :
+# les tests patchent `cinesort.ui.api.<module>.<fonction>` et un import de
+# symbole figerait le binding au chargement, rendant le patch inoperant en
+# silence. Cf. la convention « module-style imports pour tests mockes ».
+from cinesort.ui.api import history_support, library_audit_support, notifications_support, run_read_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.run_data_support import compute_total_fallback, count_plan_rows
@@ -296,33 +302,21 @@ def _build_dashboard_section(
     # Avant : "à vérifier" = (flags OU low) comptait TOUT le run (905), et auto/conflits
     # se chevauchaient. Le seuil est celui de l'auto-approbation (settings) -> cohérent
     # avec la carte "Auto-approuvables (confiance ≥ N)".
-    from cinesort.domain.conversions import to_int as _to_int
-    from cinesort.ui.api.run_read_support import (
-        _CONFLICT_FLAGS,
-    )
-    from cinesort.ui.api.run_read_support import (
-        effective_flags as _effective_flags,
-    )
-    from cinesort.ui.api.run_read_support import (
-        ignored_alerts_by_row as _ignored_alerts_by_row,
-    )
-    from cinesort.ui.api.run_read_support import (
-        is_auto_approvable_flags as _is_auto_approvable_flags,
-    )
-
     try:
-        _auto_thr = _to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
+        _auto_thr = to_int(api._get_settings_impl().get("auto_approve_threshold"), 85)
     except Exception:  # noqa: BLE001 — settings illisibles -> défaut 85
         _auto_thr = 85
     # Flags EFFECTIFS (bruts − alertes ignorées) = MÊME entrée que le payload get_plan
     # (history_support._subtract_ignored_flags), sinon "Cas à vérifier" (KPI) diverge de la
     # liste "Tous problèmes" dès qu'une alerte bloquante est ignorée par l'utilisateur.
-    _ignored = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
+    _ignored = run_read_support.ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
     review_queue_count = 0
     conflicts_count = 0
     for _r in rows:
-        _flags = _effective_flags(getattr(_r, "warning_flags", []), _ignored.get(str(getattr(_r, "row_id", ""))))
-        if not _is_auto_approvable_flags(
+        _flags = run_read_support.effective_flags(
+            getattr(_r, "warning_flags", []), _ignored.get(str(getattr(_r, "row_id", "")))
+        )
+        if not run_read_support.is_auto_approvable_flags(
             _flags,
             getattr(_r, "confidence", 0),
             getattr(_r, "proposed_title", ""),
@@ -330,7 +324,7 @@ def _build_dashboard_section(
             _auto_thr,
         ):
             review_queue_count += 1
-        if _flags & _CONFLICT_FLAGS:
+        if _flags & run_read_support._CONFLICT_FLAGS:
             conflicts_count += 1
     premium_count = sum(1 for score in scores if score >= 85)
     score_premium_pct = round((premium_count * 100.0) / scored_movies, 1) if scored_movies else 0.0
@@ -1057,9 +1051,6 @@ def _build_row_payload(
     # history_support._enrich_plan_payload). Sinon le rapport JSON/CSV/HTML livre
     # un faux subtitle_missing_<lang> sur les films dont la piste est muxee (non
     # vue au scan), en contradiction directe avec l'ecran Verification du meme run.
-    from cinesort.domain.subtitle_helpers import _normalize_iso639
-    from cinesort.ui.api.run_read_support import full_langs_from_embedded, reconcile_subtitle_flags
-
     present_langs: set = set()
     for _lang in getattr(row, "subtitle_languages", None) or []:
         _n = _normalize_iso639(str(_lang)) or str(_lang).strip().lower()
@@ -1082,7 +1073,9 @@ def _build_row_payload(
     # F12 (2026-08-03) : un `subtitle_forced_only_<lang>` n'est perime que si une
     # piste MUXEE COMPLETE existe -> `full_langs_from_embedded` (qui lit `forced`),
     # surtout pas `present_langs` (qui contient deja la langue du fichier force).
-    _flags = reconcile_subtitle_flags(_raw_flags, present_langs, full_langs_from_embedded(_embedded))
+    _flags = run_read_support.reconcile_subtitle_flags(
+        _raw_flags, present_langs, run_read_support.full_langs_from_embedded(_embedded)
+    )
     _missing = [
         str(_l)
         for _l in (getattr(row, "subtitle_missing_langs", None) or [])
@@ -1173,9 +1166,7 @@ def build_run_report_payload(api: Any, run_id: str) -> Tuple[Dict[str, Any], Opt
     # _build_row_payload livre les flags EFFECTIFS (bruts - ignores) = miroir exact de l'ecran
     # Verification (get_plan). Le store n'est pas dans le scope de _build_row_payload -> on le
     # resout ici (seul appelant) et on transmet le set par row. Best-effort : {} si indisponible.
-    from cinesort.ui.api.run_read_support import ignored_alerts_by_row as _ignored_alerts_by_row
-
-    ignored_by_row = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
+    ignored_by_row = run_read_support.ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
 
     rows_payload: List[Dict[str, Any]] = []
     validated_ok = 0
@@ -1955,9 +1946,7 @@ def get_global_stats(api: Any, limit_runs: int = 20) -> Dict[str, Any]:
         # Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
         by_decade: Dict[str, int] = {}
         try:
-            from cinesort.ui.api.library_audit_support import compute_by_decade
-
-            by_decade = compute_by_decade(api, run_id=latest_scan_rid or None)
+            by_decade = library_audit_support.compute_by_decade(api, run_id=latest_scan_rid or None)
         except (OSError, AttributeError, ImportError, KeyError, TypeError, ValueError) as exc:
             logger.debug("get_global_stats by_decade fallback (err=%s)", exc)
             by_decade = {}
@@ -2109,34 +2098,19 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
         # et le KPI "Cas a verifier" (_build_dashboard_section). Sans ca le badge
         # comptait tout flag BRUT (le FR muxe non vu au scan pose un faux
         # subtitle_missing_fr) -> ~898 alors que l'ecran annonce ~186.
-        from cinesort.ui.api.history_support import (
-            _full_langs_from_payload,
-            _present_langs_from_payload,
-        )
-        from cinesort.ui.api.run_read_support import (
-            build_qr_by_id,
-            reconcile_subtitle_flags,
-        )
-        from cinesort.ui.api.run_read_support import (
-            effective_flags as _effective_flags,
-        )
-        from cinesort.ui.api.run_read_support import (
-            ignored_alerts_by_row as _ignored_alerts_by_row,
-        )
-
         qr_by_id: Dict[str, Dict[str, Any]] = {}
         if hasattr(store, "quality"):
             try:
-                qr_by_id = build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
+                qr_by_id = run_read_support.build_qr_by_id(store.quality.list_quality_reports(run_id=run_id))
             except (OSError, AttributeError, TypeError, ValueError):
                 qr_by_id = {}
-        _ignored_q = _ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
+        _ignored_q = run_read_support.ignored_alerts_by_row(store, [str(getattr(r, "row_id", "")) for r in rows])
 
         quality = 0
         for r in rows:
             rid = str(getattr(r, "row_id", ""))
-            eff = _effective_flags(getattr(r, "warning_flags", None), _ignored_q.get(rid))
-            present = _present_langs_from_payload(
+            eff = run_read_support.effective_flags(getattr(r, "warning_flags", None), _ignored_q.get(rid))
+            present = history_support._present_langs_from_payload(
                 {"row_id": rid, "subtitle_languages": getattr(r, "subtitle_languages", None) or []},
                 qr_by_id,
             )
@@ -2145,7 +2119,9 @@ def get_sidebar_counters(api: Any) -> Dict[str, int]:
             # row dont l'unique alerte est un forced_only DEMENTI par une piste
             # muxee complete gonflerait ce badge sans apparaitre a l'ecran — la
             # divergence exacte que HIGH-4 a corrigee.
-            if reconcile_subtitle_flags(eff, present, _full_langs_from_payload({"row_id": rid}, qr_by_id)):
+            if run_read_support.reconcile_subtitle_flags(
+                eff, present, history_support._full_langs_from_payload({"row_id": rid}, qr_by_id)
+            ):
                 quality += 1
 
         # AUDIT 2026-06-13 (R5-E) : badge "Doublons" = films dans un groupe de

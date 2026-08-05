@@ -21,7 +21,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from cinesort.infra.log_context import (
     clear_request_id,
@@ -1108,8 +1108,6 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
         # serait de toute facon active.
         if clean == "/api/poster":
-            from urllib.parse import parse_qs  # noqa: PLC0415
-
             from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
             from cinesort.infra.state import default_state_dir  # noqa: PLC0415
 
