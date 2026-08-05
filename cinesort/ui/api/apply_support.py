@@ -1060,9 +1060,20 @@ def undo_selected_rows(
         return _err_response(t("errors.no_reversible_batch"), category="state", level="info", log_module=__name__)
 
     bid = str(batch["batch_id"])
+    # Issue #593 : une SEULE coercition, partagee par la branche dry_run et par
+    # l'undo reel. Avant, le dry_run testait `r["row_id"] in row_ids` :
+    #   - `row_ids` etant une LISTE, chaque test etait O(M) -> O(N*M) au total ;
+    #   - et surtout SANS `str()`, alors que l'undo reel comparait
+    #     `set(str(r) for r in row_ids)`. Le corps REST est decode par
+    #     `json.loads` (rest_server.py:1267) : des row_ids envoyes en NOMBRES
+    #     JSON ne matchaient AUCUNE ligne du preview (ou `row_id` est toujours
+    #     une chaine, cf build_undo_by_row_preview:972) alors que l'undo reel,
+    #     lui, les retrouvait. L'apercu d'une action destructive annoncait donc
+    #     « 0 ligne » avant d'en annuler N.
+    target_row_ids = {str(r) for r in row_ids}
     if bool(dry_run):
         preview = build_undo_by_row_preview(api, run_id, batch_id=bid)
-        selected = [r for r in preview.get("rows", []) if r["row_id"] in row_ids]
+        selected = [r for r in preview.get("rows", []) if str(r["row_id"]) in target_row_ids]
         return {
             "ok": True,
             "batch_id": bid,
@@ -1088,7 +1099,7 @@ def undo_selected_rows(
         )
 
     # Collect all reversible PENDING ops for the selected row_ids.
-    target_row_ids = set(str(r) for r in row_ids)
+    # `target_row_ids` est construit plus haut (cf #593), partage avec le dry_run.
     all_ops = store.apply.list_apply_operations(batch_id=bid)
     selected_ops = [
         op

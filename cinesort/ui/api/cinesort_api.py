@@ -2096,6 +2096,16 @@ class CineSortApi:
         """
         return run_flow_support.mark_duplicate_winner(self, run_id, group_key, winner_row_id, notes)
 
+    def _mark_duplicate_winners_bulk_impl(
+        self, run_id: str, decisions: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Issue #406 : persiste N decisions de doublons en UNE recharge des groupes.
+
+        Memes gardes que l'appel unitaire, groupe par groupe. Retourne
+        `{ok, results, decided, failed}` : `failed` > 0 signale des refus.
+        """
+        return run_flow_support.mark_duplicate_winners_bulk(self, run_id, decisions or [])
+
     def _get_dashboard_impl(self, run_id: str = "latest") -> Dict[str, Any]:
         """Dashboard d'un run (KPIs, distribution scores, anomalies, timeline)."""
         return dashboard_support.get_dashboard(self, run_id)
