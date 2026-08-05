@@ -27,6 +27,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+import weakref
 from pathlib import Path
 from typing import Any, Tuple
 
@@ -37,6 +38,22 @@ DEFAULT_THREAD_JOIN_TIMEOUT_S = 5.0
 # Plafond pour UN thread : un thread inconnu qui ne se terminerait jamais coute
 # ce montant une fois, au lieu d'avaler tout le budget de la fonction.
 MAX_SINGLE_THREAD_JOIN_S = 2.0
+
+#: Threads qui ont deja epuise leur budget de join sans se terminer. Ils ne
+#: sont plus attendus : la deuxieme attente a exactement le meme resultat que la
+#: premiere, pour le meme prix.
+#:
+#: MESURE : `tests/test_fs_safety.py` abandonne 3 threads anonymes (`Thread-N`)
+#: dans `fs_safety.run_with_timeout` — ils ne portent pas de nom de service,
+#: donc `is_service_thread` ne peut rien pour eux, et ils restent vivants
+#: pendant 221 tests. Sans cette memoire, chaque `cleanup_test_tree` de cette
+#: fenetre payait le budget ENTIER (3 x 2 s, plafonne a 5 s) pour rien.
+#:
+#: `WeakSet` et non un ensemble d'`ident` : un `ident` est recycle par l'OS
+#: apres la mort du thread, ce qui ferait sauter a tort l'attente d'un NOUVEAU
+#: thread. L'identite de l'objet, elle, ne se recycle pas, et la reference
+#: faible n'empeche pas le ramasse-miettes de faire son travail.
+_INSENSIBLES: "weakref.WeakSet[threading.Thread]" = weakref.WeakSet()
 
 
 def _budget(local_s: float) -> float:
@@ -67,20 +84,45 @@ def _budget(local_s: float) -> float:
     return local_s * 3.0 if os.environ.get("CI") else local_s
 
 
+#: Prefixe de nom porte par TOUS les services de l'app, et par eux seuls.
+#: Verifie sur les 11 sites de creation de threads de `cinesort/` :
+#:   services  -> `cinesort-watcher`, `cinesort-quarantine-ttl`,
+#:                `cinesort-retention-cleanup`, `cinesort-rest-api` ;
+#:   travailleurs -> `recompute_*`, `tmdb-enrich-*`, `perc-*`, `perc-batch-*`,
+#:                `email-*`, `plugin-hook-*`, et les `Thread-N` anonymes de
+#:                `job_runner` / `fs_safety`.
+_SERVICE_NAME_PREFIX = "cinesort-"
+
+
 def is_service_thread(thread: threading.Thread) -> bool:
     """True si le thread est un SERVICE qui ne se terminera pas tout seul.
 
-    Regle par capacite plutot que par nom : un thread qui expose un evenement
-    d'arret (`_stop_event`) attend qu'on le lui demande — il ne finit jamais de
-    lui-meme, et l'attendre consomme le budget entier pour rien.
+    Deux regles, parce qu'une seule ne couvrait qu'un service sur quatre.
 
-    MESURE, sur une execution complete de la suite : le thread `cinesort-watcher`
-    (`cinesort/app/watcher.py`, poll toutes les 300 s) a produit **107 joins de
-    5 s, soit 535 s** — a lui seul l'integralite du surcout observe. Les threads
-    de travail, eux, se terminent : 37 joins de `recompute_*` pour 7,5 s au
-    total. On saute donc les services, et on attend les travailleurs.
+    1. **Par capacite** : un thread qui expose lui-meme un evenement d'arret
+       (`_stop_event`) attend qu'on le lui demande. Cette regle n'est
+       satisfaisable que par une SOUS-CLASSE de `Thread` — donc, dans ce depot,
+       par le seul `FolderWatcher`.
+    2. **Par nom** : les trois autres services sont construits par
+       `threading.Thread(target=_worker, name="cinesort-...")` et posent leur
+       evenement d'arret sur l'objet `api`, pas sur le thread — la regle 1 ne
+       peut structurellement pas les voir. Ils partagent en revanche un prefixe
+       de nom que ne porte aucun travailleur (cf. `_SERVICE_NAME_PREFIX`).
+
+    MESURE qui a impose la regle 2 : avec la seule regle 1,
+    `join_background_threads(5.0)` coutait **4,02 s et laissait les deux crons
+    vivants**. En suite complete, `cinesort-quarantine-ttl` demarre dans
+    `tests/test_quarantaine_ttl_v77.py` et reste vivant jusqu'au DERNIER test de
+    la session — soit 2 087 tests, dont 58 appellent `cleanup_test_tree`.
+
+    MESURE initiale, conservee : le thread `cinesort-watcher` (poll toutes les
+    300 s) a produit **107 joins de 5 s, soit 535 s** sur une execution. Les
+    threads de travail, eux, se terminent : 37 joins de `recompute_*` pour 7,5 s
+    au total. On saute donc les services, et on attend les travailleurs.
     """
-    return isinstance(getattr(thread, "_stop_event", None), threading.Event)
+    if isinstance(getattr(thread, "_stop_event", None), threading.Event):
+        return True
+    return str(getattr(thread, "name", "") or "").startswith(_SERVICE_NAME_PREFIX)
 
 
 def join_background_threads(
@@ -106,6 +148,10 @@ def join_background_threads(
     service (cf. `is_service_thread`). Deux plafonds : `timeout_s` pour le total
     et `per_thread_s` pour un seul thread — ainsi un thread inconnu qui ne
     finirait jamais coute une fois `per_thread_s`, pas tout le budget.
+
+    Un thread qui a deja survecu a un join complet n'est plus jamais attendu
+    (cf. `_INSENSIBLES`) : le payer une fois est une precaution, le payer a
+    chaque appel est une taxe.
     """
     deadline = time.monotonic() + float(timeout_s)
     current = threading.current_thread()
@@ -114,13 +160,18 @@ def join_background_threads(
     for thread in threading.enumerate():
         if thread is current or thread is main or not thread.is_alive():
             continue
-        if is_service_thread(thread):
+        if is_service_thread(thread) or thread in _INSENSIBLES:
             continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        thread.join(min(remaining, float(per_thread_s)))
+        budget = min(remaining, float(per_thread_s))
+        thread.join(budget)
         joined.append(thread.name)
+        # Il a consomme tout son budget sans finir : il ne finira pas non plus
+        # au prochain appel. On cesse de le payer.
+        if thread.is_alive():
+            _INSENSIBLES.add(thread)
     return joined
 
 

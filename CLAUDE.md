@@ -133,6 +133,12 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
+3. **Une troisieme cause reste INEXPLIQUEE — ne pas reconduire le fourre-tout
+   sous un autre nom.** Le `WinError 5` survit dans un `%TEMP%` neuf et quasi
+   vide : sur la chaine apply/undo, 2 puis 2 echecs sur la branche corrigee,
+   0 puis 3 sur `main`, meme signature. Les deux causes ci-dessus sont mesurees
+   et corrigees ; celle-la ne l'est pas. Attribuer un nouvel echec a l'une des
+   deux premieres demande donc une MESURE, pas une ressemblance.
 
 ## Conventions
 

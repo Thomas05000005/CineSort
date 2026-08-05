@@ -33,10 +33,29 @@ Reglages :
   CINESORT_TEMP_LEAK_MAX=<n>        borne du total.
   CINESORT_TEMP_LEAK_MAX_FAMILY=<n> borne par famille de prefixe.
 
-Limite connue : la redirection a lieu au demarrage de la session, donc APRES
-l'import des modules de test. Un `mkdtemp` execute au niveau module (a
-l'import) atterrit dans le vrai `%TEMP%` et echappe au comptage. Aucun cas de
-ce genre n'existe aujourd'hui dans `tests/`.
+Limites connues, toutes MESUREES — a lire avant de croire un vert :
+
+1. **La redirection a lieu au demarrage de la session**, donc APRES l'import des
+   modules de test. Un `mkdtemp` execute au niveau module (a l'import) atterrit
+   dans le vrai `%TEMP%` et echappe au comptage. Aucun cas de ce genre
+   n'existe aujourd'hui dans `tests/` (verifie par un `--collect-only` complet,
+   qui ne laisse aucune entree).
+2. **Une borne de SESSION n'attrape que les gros fuyards.** Elle mord sur 15 ou
+   22 dossiers ; elle ne voit pas revenir une fuite de 1 a 3 dossiers, qui est
+   pourtant le profil de la majorite des fichiers corriges pour #960. Controle :
+   restaurer la version fuyante de `tests/test_lotd_chain_doublons.py` laisse la
+   session VERTE (2 entrees de 2 familles distinctes). Ce garde-fou borne la
+   derive, il ne verrouille pas chaque fichier.
+3. **Le nettoyage en `tearDown` n'est pas equivalent a `addCleanup`.** ~40 sites
+   utilisent encore `tearDown`, qui ne s'execute pas si `setUp` echoue a
+   mi-parcours — et `skipTest()` dans un `setUp` suffit (69 occurrences dans 26
+   fichiers). MESURE : une exception inseree dans un `setUp` apres le `mkdtemp`
+   laisse 45 dossiers. Le bac a sable masque la consequence, il ne ferme pas la
+   boucle.
+4. **Le residu se remesure, il ne se recopie pas** : 5 entrees sur une session,
+   6 sur une autre (`cinesort_report_` et `cinesort_lotd_rest_` apparaissent
+   sous charge). `tests/test_lotd_chain_rest.py` en laisse 1 de facon
+   reproductible, meme en isolation.
 """
 
 from __future__ import annotations
@@ -68,15 +87,21 @@ DEFAULT_MAX = 12
 DEFAULT_MAX_FAMILY = 3
 TEMP_VARS = ("TMP", "TEMP", "TMPDIR")
 BOX_PREFIX = "cslb"
+# Un bac homonyme qui resiste a la suppression fait glisser le nom d'un cran.
+# Au-dela, on renonce plutot que de boucler.
+_MAX_NOMS_DE_BAC = 4
 # Un bac a sable plus vieux que ca appartient forcement a une session morte.
 STALE_BOX_AGE_S = 3 * 3600.0
 # Suppression finale : les threads de fond de l'app peuvent encore tenir un
 # handle quelques dizaines de ms. On re-essaie, sinon le bac a sable reste.
 _FINAL_RMTREE_ATTEMPTS = 8
 _FINAL_RMTREE_DELAY_S = 0.1
-# Longueur du suffixe aleatoire de `tempfile.mkdtemp`, retiree pour regrouper
+# Longueur du bloc aleatoire de `tempfile.mkdtemp`, retiree pour regrouper
 # `probe_test_ab12cd34` et `probe_test_zz99yy88` sous la meme famille.
 _RANDOM_SUFFIX_LEN = 8
+# Au-dela, l'appariement de familles (quadratique) ne vaut plus son prix : la
+# borne du TOTAL a deja tranche bien avant.
+_MAX_NOMS_APPARIEMENT = 400
 
 # Bac a sable actif pour la session, ou None si le garde-fou est desactive.
 _box: Path | None = None
@@ -106,11 +131,70 @@ def leak_max_family() -> int:
     return _env_int(MAX_FAMILY_ENV, DEFAULT_MAX_FAMILY)
 
 
+def _cle_naive(name: str) -> str:
+    """Famille supposant que le bloc aleatoire termine le nom (`prefix + rrrrrrrr`)."""
+    return name[: max(1, len(name) - _RANDOM_SUFFIX_LEN)]
+
+
+def _cles_candidates(name: str) -> list[str]:
+    """Toutes les familles possibles, la plus vraisemblable D'ABORD.
+
+    Une cle = le nom prive d'un bloc de 8 caracteres pris a une position. On
+    balaie les positions de la FIN vers le DEBUT, donc la premiere cle produite
+    est celle du cas courant (`prefix + rrrrrrrr`) : elle sert de depart
+    d'egalite quand aucune position ne rassemble plus de monde qu'une autre.
+    """
+    cles: list[str] = []
+    vus: set[str] = set()
+    for i in range(len(name) - _RANDOM_SUFFIX_LEN, -1, -1):
+        cle = name[:i] + name[i + _RANDOM_SUFFIX_LEN :]
+        if cle not in vus:
+            vus.add(cle)
+            cles.append(cle)
+    return cles or [_cle_naive(name)]
+
+
 def count_families(leftovers: list[str]) -> collections.Counter[str]:
-    """Regroupe les entrees par prefixe, suffixe aleatoire de mkdtemp retire."""
-    families: collections.Counter[str] = collections.Counter()
+    """Regroupe les entrees par famille, bloc aleatoire de `mkdtemp` retire.
+
+    Le bloc aleatoire fait 8 caracteres et se place APRES le prefixe, pas
+    forcement a la fin : `mkdtemp(prefix=P, suffix=S)` produit `P + rrrrrrrr + S`
+    et `mkstemp(suffix=".json")` fait de meme. Retirer betement les 8 derniers
+    caracteres donnait alors une famille DIFFERENTE par dossier, et la borne par
+    famille — celle qui mord — ne voyait plus rien passer. MESURE : 10 dossiers
+    du meme `mkdtemp(prefix="agentleak_")` declenchaient la borne ; les memes
+    avec `suffix="_end"` passaient en silence, et 12 aussi.
+
+    On ne devine donc pas ou est le bloc : on essaie toutes les positions, et on
+    retient pour chaque nom la cle qui rassemble le plus de monde. Deux noms ne
+    peuvent partager une cle qu'en ayant meme longueur et meme reste — c'est-a-
+    dire meme prefixe ET meme suffixe, donc bien la meme famille. Les familles
+    distinctes ne fusionnent pas : `cinesort_atomic_e2e_XXXXXXXX` (28) et
+    `cinesort_concurrency_XXXXXXXX` (29) n'ont deja pas la meme longueur.
+
+    Au-dela de `_MAX_NOMS_APPARIEMENT` entrees, on retombe sur la regle naive :
+    a ce stade la borne du TOTAL a de toute facon deja tranche, et l'appariement
+    est quadratique.
+    """
+    if len(leftovers) > _MAX_NOMS_APPARIEMENT:
+        return collections.Counter(_cle_naive(name) for name in leftovers)
+
+    # Combien de noms chaque cle candidate rassemble-t-elle ?
+    popularite: collections.Counter[str] = collections.Counter()
+    candidates: list[list[str]] = []
     for name in leftovers:
-        families[name[: max(1, len(name) - _RANDOM_SUFFIX_LEN)]] += 1
+        cles = _cles_candidates(name)
+        candidates.append(cles)
+        popularite.update(cles)
+
+    families: collections.Counter[str] = collections.Counter()
+    for cles in candidates:
+        # `max` rend le PREMIER maximum, et `_cles_candidates` commence par la
+        # cle naive : a egalite de popularite — le cas d'un dossier isole, ou
+        # toutes les cles valent 1 — c'est donc le prefixe qui gagne, et non un
+        # fragment arbitraire. Sans ce depart d'egalite, `omdb_test_cccccccc`
+        # etait rapporte sous la famille `t_cccccccc*`.
+        families[max(cles, key=popularite.__getitem__)] += 1
     return families
 
 
@@ -149,6 +233,9 @@ def build_report(
         f"par cette session (bornes : total {limit}, par famille {limit_family}).",
         f"Borne franchie : {reason}." if reason else "",
         "",
+        "NB : ce verdict porte sur la SESSION ENTIERE. pytest l'agrafe au dernier",
+        "test execute, qui n'y est pour rien — les coupables sont ci-dessous.",
+        "",
         "Familles (prefixe -> nombre) :",
     ]
     lines += [f"  {count:5d}  {prefix}*" for prefix, count in families.most_common(15)]
@@ -167,6 +254,18 @@ def build_report(
         f"Pour desactiver temporairement ce garde-fou : {GUARD_ENV}=0.",
     ]
     return "\n".join(lines)
+
+
+def est_un_bac(name: str) -> bool:
+    """True si `name` est un bac a sable a NOUS (`cslb<pid>`, ou `cslb<pid>x<n>`).
+
+    Le test porte sur le premier caractere apres le prefixe : il doit etre un
+    chiffre, donc le debut d'un PID. Un dossier tiers qui commencerait par
+    `cslb` sans PID derriere (`cslbackup`, `cslbabc`...) n'est JAMAIS balaye —
+    le balayage supprime, il doit se tromper dans le sens conservateur.
+    """
+    reste = name[len(BOX_PREFIX) :]
+    return name.startswith(BOX_PREFIX) and bool(reste) and reste[0].isdigit()
 
 
 def sweep_stale_boxes(real_temp: Path, *, now: float | None = None, max_age_s: float = STALE_BOX_AGE_S) -> int:
@@ -188,7 +287,7 @@ def sweep_stale_boxes(real_temp: Path, *, now: float | None = None, max_age_s: f
     except OSError:
         return 0
     for entry in entries:
-        if not entry.name.startswith(BOX_PREFIX) or not entry.name[len(BOX_PREFIX) :].isdigit():
+        if not est_un_bac(entry.name):
             continue
         try:
             if reference - entry.stat().st_mtime < max_age_s:
@@ -200,6 +299,37 @@ def sweep_stale_boxes(real_temp: Path, *, now: float | None = None, max_age_s: f
         if before and not entry.exists():
             removed += 1
     return removed
+
+
+def _bac_vide(souhaite: Path) -> Path:
+    """Retourne un bac a sable GARANTI vide, quitte a changer son nom.
+
+    Le nom du bac contient le PID, et Windows recycle les PID (mesure : 2 sur
+    300 processus). Une session TUEE — Ctrl-C dur, agent interrompu, OOM —
+    laisse son bac derriere elle ; `sweep_stale_boxes` ne le ramasse qu'au-dela
+    de 3 h. Entre les deux, une session qui herite du meme PID adoptait ce bac
+    et se voyait accusee des restes de la precedente : « 20 entree(s) laissee(s)
+    par cette session », « Tests responsables : 20 <inconnu> » — un rouge sur
+    une session qui n'a rien fuit, et personne a nommer.
+
+    C'est exactement le scenario « je reproduis un echec de CI en local » :
+    on interrompt, on relance.
+
+    Un bac homonyme ne peut appartenir qu'a un processus MORT (deux processus
+    vivants n'ont pas le meme PID), donc le vider est sans risque. S'il resiste
+    — un handle encore tenu ailleurs — on prend un nom voisin plutot que de
+    compter les restes d'autrui.
+    """
+    for tentative in range(_MAX_NOMS_DE_BAC):
+        box = souhaite if tentative == 0 else souhaite.with_name(f"{souhaite.name}x{tentative}")
+        shutil.rmtree(box, ignore_errors=True)
+        box.mkdir(parents=True, exist_ok=True)
+        try:
+            if not any(box.iterdir()):
+                return box
+        except OSError:
+            return box
+    return souhaite
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -222,8 +352,7 @@ def _temp_leak_guard(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]
 
     # Nom court volontairement : chaque caractere ajoute ici se paie sur la
     # longueur de TOUS les chemins temporaires de la suite.
-    box = real_temp / f"{BOX_PREFIX}{os.getpid()}"
-    box.mkdir(parents=True, exist_ok=True)
+    box = _bac_vide(real_temp / f"{BOX_PREFIX}{os.getpid()}")
 
     saved_tempdir = tempfile.tempdir
     saved_env = {name: os.environ.get(name) for name in TEMP_VARS}

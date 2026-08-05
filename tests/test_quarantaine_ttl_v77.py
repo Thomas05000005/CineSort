@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -273,6 +274,19 @@ class PurgeReviewBucketAllTests(unittest.TestCase):
         self.assertNotIn(orphan.name, manifest)
 
 
+def _arreter_le_cron(api: SimpleNamespace, thread: "threading.Thread | None") -> None:
+    """Pose l'evenement d'arret du cron et attend sa mort effective.
+
+    Le cron pose son `threading.Event` sur `api._quarantine_ttl_stop`, pas sur
+    le thread : c'est la seule prise pour l'arreter.
+    """
+    stop = getattr(api, "_quarantine_ttl_stop", None)
+    if isinstance(stop, threading.Event):
+        stop.set()
+    if thread is not None:
+        thread.join(timeout=5.0)
+
+
 class StartQuarantineTtlCronTests(unittest.TestCase):
     def test_cron_disabled_when_ttl_zero(self) -> None:
         api = SimpleNamespace()
@@ -289,6 +303,13 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
         # ttl_days="abc" -> fallback DEFAULT_TTL_DAYS=30 (pas 0 donc demarre).
         # On test ici avec un type strictement invalide qui catch dans int().
         thread = start_quarantine_ttl_cron(api, ttl_days="abc")  # type: ignore[arg-type]
+        # Le cron demarre VRAIMENT : sans arret explicite il survit a ce test et
+        # a tous les suivants. MESURE (#960) : il restait vivant pendant 2 087
+        # tests repartis sur 182 fichiers, jusqu'au dernier test de la session,
+        # et chaque nettoyage de dossier temporaire de cette fenetre payait son
+        # attente. `addCleanup` et pas un `finally` : il s'execute meme si une
+        # assertion ci-dessous echoue.
+        self.addCleanup(_arreter_le_cron, api, thread)
         # Le fallback DEFAULT_TTL_DAYS=30 demarre un thread daemon
         self.assertIsNotNone(thread)
         self.assertTrue(thread.daemon)
