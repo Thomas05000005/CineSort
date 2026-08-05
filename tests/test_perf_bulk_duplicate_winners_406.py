@@ -241,3 +241,76 @@ class BulkParityWithSingleTests(_BulkTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BulkVerrouSqliteTests(_BulkTestBase):
+    """Une base VERROUILLEE ne doit pas casser le contrat du lot.
+
+    `sqlite3.Error` n'herite PAS d'OSError. Tant que `_persist_duplicate_winner`
+    n'attrapait que `(OSError, TypeError, ValueError)`, un
+    `sqlite3.OperationalError: database is locked` traversait la boucle et
+    remontait au boundary REST.
+
+    Le degat est PROPRE AU CHEMIN BULK : sur le chemin unitaire, une seule
+    decision etait perdue et l'appelant recevait une erreur. Ici le lot
+    s'arretait A MI-PARCOURS — les decisions deja ecrites restaient en base, et
+    l'UI ne recevait NI `results` NI `decided`/`failed`. Rien ne disait
+    lesquelles avaient abouti.
+    """
+
+    def _echoue_sur(self, indices, total):
+        """Substitut d'upsert qui leve `database is locked` sur certains index."""
+        vrai = self.store.apply.upsert_duplicate_decision
+        etat = {"n": 0}
+
+        def _upsert(**kw):
+            i = etat["n"]
+            etat["n"] += 1
+            if i in indices:
+                raise sqlite3.OperationalError("database is locked")
+            return vrai(**kw)
+
+        return _upsert
+
+    def test_le_lot_rend_une_entree_par_decision_malgre_un_verrou(self) -> None:
+        """LE CONTRAT : autant de resultats que de decisions, verrou ou pas."""
+        total = 5
+        reload_probe = _CountingReload(_groups(total))
+        with mock.patch.object(run_flow_support, "check_duplicates", reload_probe):
+            with mock.patch.object(self.store.apply, "upsert_duplicate_decision", self._echoue_sur({2}, total)):
+                res = run_flow_support.mark_duplicate_winners_bulk(self.api, "run1", _decisions(total))
+
+        self.assertTrue(res["ok"], msg=str(res))
+        self.assertEqual(
+            len(res["results"]),
+            total,
+            f"contrat rompu : {len(res['results'])} entrees pour {total} decisions",
+        )
+        self.assertEqual(res["decided"], total - 1)
+        self.assertEqual(res["failed"], 1)
+
+    def test_la_decision_verrouillee_est_NOMMEE_pas_juste_comptee(self) -> None:
+        """Un lot a moitie applique doit dire LAQUELLE a echoue.
+
+        Sans cela l'utilisateur voit « 4 sur 5 » sans savoir quoi rejouer.
+        """
+        reload_probe = _CountingReload(_groups(4))
+        with mock.patch.object(run_flow_support, "check_duplicates", reload_probe):
+            with mock.patch.object(self.store.apply, "upsert_duplicate_decision", self._echoue_sur({1}, 4)):
+                res = run_flow_support.mark_duplicate_winners_bulk(self.api, "run1", _decisions(4))
+
+        en_echec = [e for e in res["results"] if e.get("error")]
+        self.assertEqual(len(en_echec), 1, msg=str(res))
+        self.assertEqual(en_echec[0].get("group_key"), "g1")
+        self.assertIn("locked", en_echec[0]["error"].lower())
+
+    def test_les_decisions_saines_du_lot_sont_bien_ecrites(self) -> None:
+        """Le verrou d'UNE decision ne doit pas emporter les autres."""
+        reload_probe = _CountingReload(_groups(3))
+        with mock.patch.object(run_flow_support, "check_duplicates", reload_probe):
+            with mock.patch.object(self.store.apply, "upsert_duplicate_decision", self._echoue_sur({0}, 3)):
+                run_flow_support.mark_duplicate_winners_bulk(self.api, "run1", _decisions(3))
+
+        self.assertIsNone(self._decision("g0"), "g0 etait verrouillee, elle ne doit pas exister")
+        for key in ("g1", "g2"):
+            self.assertIsNotNone(self._decision(key), f"{key} etait saine, elle doit etre persistee")

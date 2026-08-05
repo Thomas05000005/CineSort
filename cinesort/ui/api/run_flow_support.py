@@ -1817,7 +1817,19 @@ def _persist_duplicate_winner(
             loser_row_ids=losers,
             notes=notes,
         )
-    except (OSError, TypeError, ValueError) as exc:
+    # `sqlite3.Error` n'herite PAS d'OSError : sans lui, une base VERROUILLEE
+    # (`sqlite3.OperationalError: database is locked`) traversait cette fonction.
+    # Sur le chemin UNITAIRE, une decision etait perdue. Sur le chemin BULK
+    # (`mark_duplicate_winners_bulk`), l'exception remontait au boundary REST :
+    # le lot s'arretait A MI-PARCOURS, les decisions deja ecrites restaient en
+    # base, et l'UI ne recevait NI `results` NI `decided`/`failed` — le contrat
+    # « une entree de results par decision » etait rompu, sans que rien ne dise
+    # lesquelles avaient abouti.
+    #
+    # Les 4 autres sites de ce fichier l'attrapent deja (:1433, :1717, :1793),
+    # dont `get_duplicate_decision` juste au-dessus. Celui-ci etait le seul a ne
+    # pas le faire.
+    except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
         return _err_response(
             f"Persistance decision impossible : {exc}",
             category="runtime",
