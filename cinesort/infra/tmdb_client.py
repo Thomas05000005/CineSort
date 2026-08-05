@@ -16,6 +16,7 @@ import requests
 
 from cinesort.infra._circuit_breaker import CircuitBreaker, CircuitOpenError
 from cinesort.infra._http_utils import get_bounded, make_session_with_retry
+from cinesort.infra.fs_safety import FileTooLargeError, read_text_bounded
 from cinesort.infra.state import AtomicWriteError, atomic_write_json, atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,14 @@ _DEBUG_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
 # entree non-acedee (popitem(last=False)). Evite la derive memoire sur grosses
 # bibliotheques (50k+ films + recherches multi-fuzzy → 200+ MB sans cap).
 _TMDB_CACHE_MAX_ENTRIES = 100_000
+
+# Borne dure de taille du fichier cache sur disque (DoS). Au-dela on repart
+# propre plutot que de charger 100k+ entrees en RAM via read_text(). Cf #539
+# audit 2026-06-06: le cap LRU agit apres deserialization, pas avant lecture
+# disque, donc un cache corrompu ou un backup invalide peut causer OOM.
+# Applique via fs_safety.read_text_bounded (borne DISQUE, a ne pas confondre
+# avec les bornes de reponse RESEAU qui, elles, se bornent en flux HTTP).
+_TMDB_CACHE_MAX_BYTES = 100 * 1024 * 1024  # 100 MB (~ MAX_ENTRIES x 1 KB + marge)
 
 # V5-03 polish v7.7.0 (R5-STRESS-4) : TTL du cache TMDb configurable.
 # Defaut 30 jours = bon compromis : suffisant pour eviter de marteler l'API
@@ -219,7 +228,7 @@ class TmdbClient:
     def _load_cache(self) -> None:
         try:
             if self.cache_path.exists():
-                raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                raw = json.loads(read_text_bounded(self.cache_path, max_bytes=_TMDB_CACHE_MAX_BYTES))
                 # OrderedDict preserve l'ordre d'insertion JSON. Si le cache
                 # depasse MAX_ENTRIES (cache historique pre-#75), on garde
                 # les MAX_ENTRIES dernieres entrees ecrites (heuristique :
@@ -304,7 +313,7 @@ class TmdbClient:
         if entry is None:
             try:
                 if self.cache_path.exists():
-                    raw = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                    raw = json.loads(read_text_bounded(self.cache_path, max_bytes=_TMDB_CACHE_MAX_BYTES))
                     entry = raw.get(key)
             except (OSError, PermissionError, json.JSONDecodeError, ValueError):
                 return None, None
@@ -1199,7 +1208,14 @@ def purge_expired_tmdb_cache(
 
     effective_ttl_days = _clamp_ttl_days(ttl_days)
     try:
-        raw = cache_path.read_text(encoding="utf-8")
+        # Meme borne disque que _load_cache : la purge tourne au boot dans un
+        # thread daemon, un cache gonfle y ferait OOM aussi. FileTooLargeError
+        # derive d'OSError donc remonte en `error` (le caller log un warning) :
+        # jamais un succes silencieux.
+        raw = read_text_bounded(cache_path, max_bytes=_TMDB_CACHE_MAX_BYTES)
+    except FileTooLargeError as exc:
+        result["error"] = f"too_large: {exc}"
+        return result
     except (OSError, PermissionError) as exc:
         result["error"] = f"read_error: {exc}"
         return result

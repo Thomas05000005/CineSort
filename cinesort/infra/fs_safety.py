@@ -29,6 +29,63 @@ _logger = logging.getLogger(__name__)
 DEFAULT_FS_TIMEOUT_S = 10.0
 
 
+class FileTooLargeError(OSError):
+    """Le fichier depasse la borne demandee : la lecture a ete REFUSEE.
+
+    Sous-classe d'`OSError` a dessein : tous les `except OSError` deja en
+    place autour des lectures de cache disque la rattrapent sans modification,
+    et repartent donc sur un cache vide (comportement voulu) au lieu de
+    propager une exception inedite.
+    """
+
+
+def read_text_bounded(
+    path: Union[Path, str],
+    *,
+    max_bytes: int,
+    encoding: str = "utf-8",
+) -> str:
+    """Lit un fichier texte en refusant de le charger au-dela de `max_bytes`.
+
+    Pourquoi : `Path.read_text()` alloue la TOTALITE du fichier en RAM avant
+    meme le parse. Un cache JSON corrompu, gonfle, ou remplace par un lien
+    vers un gros fichier suffit alors a faire OOM au demarrage (CWE-400).
+    Les caps « nombre d'entrees » (`_TMDB_CACHE_MAX_ENTRIES`, ...) agissent
+    APRES deserialisation : ils ne protegent pas de ca.
+
+    A utiliser pour toute relecture d'un fichier local dont la taille n'est
+    pas garantie par nous. Ne remplace PAS les bornes de reponse reseau
+    (celles-la se bornent en flux, sur le corps HTTP).
+
+    Raises
+    ------
+    FileTooLargeError
+        Si le fichier depasse `max_bytes`. La taille est verifiee AVANT la
+        lecture, puis re-verifiee sur le flux : le fichier peut grossir entre
+        le `stat()` et la lecture (TOCTOU), donc on lit au plus
+        `max_bytes + 1` unites et on refuse si la borne est franchie.
+    OSError
+        Erreurs de lecture habituelles (absent, permissions, ...).
+    """
+    p = Path(path)
+    limit = max(0, int(max_bytes))
+    size = p.stat().st_size
+    if size > limit:
+        _logger.warning(
+            "Lecture refusee : %s pese %.1f MB (borne %.1f MB)",
+            p,
+            size / 1024 / 1024,
+            limit / 1024 / 1024,
+        )
+        raise FileTooLargeError(f"{p}: {size} octets > borne {limit}")
+    with open(p, encoding=encoding) as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        _logger.warning("Lecture refusee : %s a depasse la borne %.1f MB pendant la lecture", p, limit / 1024 / 1024)
+        raise FileTooLargeError(f"{p}: depasse la borne {limit} pendant la lecture")
+    return data
+
+
 def run_with_timeout(
     fn: Callable[[], Any],
     *,
