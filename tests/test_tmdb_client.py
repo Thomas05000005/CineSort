@@ -149,7 +149,10 @@ class TmdbClientHostileTests(unittest.TestCase):
         # valeur avant lui tue le match et le fragment de cle part en clair vers
         # l'UI. Ici la cle commence au caractere 180 : 20 de ses caracteres sont
         # dans la fenetre de 200, le guillemet fermant non.
-        leaked_key = "abcdef0123456789abcdef0123456789"
+        # gitleaks:allow — fausse cle, present precisement pour PROUVER que
+        # le scrubbing la retire. La detecter est le comportement attendu de
+        # gitleaks ; l'annotation dit qu'ici c'est voulu.
+        leaked_key = "abcdef0123456789abcdef0123456789"  # gitleaks:allow
         body = "x" * 163 + '{"tmdb_api_key":"' + leaked_key + '"}'
         self.assertEqual(len(body[:200]), 200, "le corps doit depasser la fenetre de troncature")
         self.assertNotIn('"}', body[:200], "le guillemet fermant doit tomber APRES la coupure")
@@ -171,7 +174,10 @@ class TmdbClientHostileTests(unittest.TestCase):
         # `r.text` serait vide et le secret ne serait pas le probleme — le
         # diagnostic entier le serait. Si le scrub repassait apres la troncature,
         # le fragment de cle ressortirait.
-        leaked_key = "abcdef0123456789abcdef0123456789"
+        # gitleaks:allow — fausse cle, present precisement pour PROUVER que
+        # le scrubbing la retire. La detecter est le comportement attendu de
+        # gitleaks ; l'annotation dit qu'ici c'est voulu.
+        leaked_key = "abcdef0123456789abcdef0123456789"  # gitleaks:allow
         body = ("x" * 163 + '{"tmdb_api_key":"' + leaked_key + '"}' + "y" * 200_000).encode("utf-8")
         self.assertGreater(len(body), 64 * 1024, "le corps doit couvrir plusieurs chunks de lecture")
 
