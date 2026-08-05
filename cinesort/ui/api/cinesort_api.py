@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import datetime
+import io
 import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 import traceback
+import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -39,7 +44,6 @@ from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_loc
 from cinesort.domain.naming import (
     PRESETS,
     PREVIEW_MOCK_CONTEXT,
-    build_naming_context,
     format_movie_folder,
     validate_template,
 )
@@ -957,8 +961,6 @@ class CineSortApi:
 
     def _get_dashboard_qr_impl(self) -> Dict[str, Any]:
         """Retourne un QR code SVG inline pour l'URL du dashboard distant."""
-        import io
-
         _log = logging.getLogger(__name__)
 
         info = self._get_server_info_impl()
@@ -1724,32 +1726,32 @@ class CineSortApi:
                 errors=errors,
             )
 
-        # Essayer de charger un vrai film depuis la BDD
-        context = None
-        rid = str(sample_row_id or "").strip()
-        if rid:
-            try:
-                state_dir = self._get_state_dir()
-                settings = _read_settings(state_dir)
-                store, _ = self._get_or_create_infra(state_dir, settings)
-                # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
-                probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
-                quality_data = store.quality.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
-                context = build_naming_context(
-                    title="Film",
-                    year=2020,
-                    probe_data=probe_data,
-                    quality_data=quality_data,
-                )
-            except (OSError, PermissionError, TypeError, ValueError):
-                context = None
-
-        # Fallback : mock hardcode (Inception)
-        if context is None:
-            context = dict(PREVIEW_MOCK_CONTEXT)
-
+        # #460 : la branche « charger un vrai film depuis la BDD » qui vivait ici
+        # etait morte depuis sa premiere ligne. `self._get_or_create_infra(state_dir,
+        # settings)` passait DEUX arguments a une methode qui n'en accepte qu'UN
+        # (cinesort_api.py:588) -> TypeError systematique, avale par un
+        # `except (OSError, PermissionError, TypeError, ValueError)` -> context=None
+        # -> repli sur le mock. Les deux appels suivants etaient casses eux aussi
+        # (`get_probe_cache` est keyword-only, et le `hasattr` testait `store` au
+        # lieu de `store.quality`).
+        #
+        # Supprimee plutot que reparee : meme reparee elle n'aurait PAS affiche le
+        # film demande (title="Film", year=2020 etaient codes en dur) et
+        # `get_quality_report` exige un `run_id` dont cet endpoint ne dispose pas.
+        # Un apercu de template sur un vrai film est une FEATURE a specifier, pas
+        # une reparation de ligne.
+        #
+        # `sample_row_id` reste dans la signature (compat de l'API REST), mais la
+        # reponse DIT desormais qu'il n'est pas honore au lieu de l'ignorer en
+        # silence.
+        context = dict(PREVIEW_MOCK_CONTEXT)
         result = format_movie_folder(tpl, context)
-        return {"ok": True, "result": result, "variables": context}
+        return {
+            "ok": True,
+            "result": result,
+            "variables": context,
+            "sample_row_id_applied": False,
+        }
 
     def _validate_dropped_path_impl(self, path: str = "") -> Dict[str, Any]:
         r"""Valide qu'un chemin droppe est un dossier existant.
@@ -3012,9 +3014,7 @@ class CineSortApi:
                 log_module=__name__,
             )
         try:
-            import webbrowser as _webbrowser
-
-            _webbrowser.open(u)
+            webbrowser.open(u)
             return {"ok": True, "opened": u}
         except (OSError, RuntimeError) as exc:
             return _err_response(str(exc), category="runtime", level="warning", log_module=__name__)
@@ -3061,12 +3061,6 @@ class CineSortApi:
         Returns:
             {ok: True, version: str, build_date: str, git_sha: str, python_version: str}
         """
-        # Imports locaux : evite de polluer le top-level pour un endpoint
-        # ponctuel (subprocess lourd, sys/datetime non utilises au module-level).
-        import datetime as _dt  # noqa: PLC0415
-        import subprocess  # noqa: PLC0415
-        import sys  # noqa: PLC0415
-
         version = str(getattr(self, "_app_version", "") or "unknown")
 
         # build_date : mtime du fichier VERSION (date ISO UTC). Best-effort.
@@ -3075,7 +3069,7 @@ class CineSortApi:
             version_file = Path(__file__).resolve().parents[3] / "VERSION"
             if version_file.is_file():
                 mtime = version_file.stat().st_mtime
-                build_date = _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
+                build_date = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).date().isoformat()
         except (OSError, ValueError):
             pass
 

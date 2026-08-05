@@ -15,6 +15,7 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -27,7 +28,7 @@ from cinesort.app._local_candidate import (
     parallel_extract_local_candidates,
     resolve_scan_max_workers,
 )
-from cinesort.app.apply_core import quick_hash_cache_key, sha1_quick
+from cinesort.app.apply_core import quick_hash_cache_key_from_stat, sha1_quick
 from cinesort.domain.scan_helpers import discover_candidate_folders, file_name_looks_bonus
 from cinesort.infra.fs_safety import safe_path_exists
 from cinesort.infra.tmdb_client import TmdbClient
@@ -422,26 +423,37 @@ def resolve_incremental_quick_hash(
     *,
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
+    known_stat: Optional[Tuple[int, int]] = None,
 ) -> str:
     # Cf #83 phase A4 : utilise apply_core.quick_hash_cache_key directement
     # au lieu de l'alias backward-compat core._quick_hash_cache_key (supprime).
-
-    try:
-        stat_result = path.stat()
-    except (OSError, PermissionError, FileNotFoundError):
-        return ""
-    cache_key = quick_hash_cache_key(path)
-    if cache_key and run_hash_cache is not None and cache_key in run_hash_cache:
+    #
+    # Issue #637 : deux `stat()` etaient faits ici pour rien — un pour lire
+    # size/mtime, un second cache dans `quick_hash_cache_key(path)`. Sur SMB/NAS
+    # chacun est un aller-retour reseau. `known_stat=(size, mtime_ns)` permet a
+    # l'appelant qui vient DEJA de stater le fichier (folder_signature, via
+    # `os.scandir`) de n'en payer aucun.
+    if known_stat is not None:
+        cache_key: Tuple[str, int, int] = (str(path), int(known_stat[0]), int(known_stat[1]))
+    else:
+        try:
+            stat_result = path.stat()
+        except (OSError, PermissionError, FileNotFoundError):
+            return ""
+        cache_key = quick_hash_cache_key_from_stat(path, stat_result)
+    size = cache_key[1]
+    mtime_ns = cache_key[2]
+    if run_hash_cache is not None and cache_key in run_hash_cache:
         return str(run_hash_cache.get(cache_key) or "")
     if scan_index is not None and hasattr(scan_index, "get_incremental_file_hash"):
         try:
             cached = scan_index.get_incremental_file_hash(
                 path=str(path),
-                size=int(stat_result.st_size),
-                mtime_ns=int(stat_result.st_mtime_ns),
+                size=size,
+                mtime_ns=mtime_ns,
             )
             if cached:
-                if cache_key and run_hash_cache is not None:
+                if run_hash_cache is not None:
                     run_hash_cache[cache_key] = str(cached)
                 return str(cached)
         except (OSError, TypeError, ValueError):
@@ -457,11 +469,11 @@ def resolve_incremental_quick_hash(
         with contextlib.suppress(OSError, TypeError, ValueError):
             scan_index.upsert_incremental_file_hash(
                 path=str(path),
-                size=int(stat_result.st_size),
-                mtime_ns=int(stat_result.st_mtime_ns),
+                size=size,
+                mtime_ns=mtime_ns,
                 quick_hash=quick_hash,
             )
-    if quick_hash and cache_key and run_hash_cache is not None:
+    if quick_hash and run_hash_cache is not None:
         run_hash_cache[cache_key] = quick_hash
     return quick_hash
 
@@ -508,20 +520,43 @@ def folder_signature(
     *,
     scan_index: Optional[Any],
     run_hash_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
-) -> str:
-    # BUG 3 : optimisation NAS via os.scandir (metadata cachees en 1 op systeme)
-    import os as _os
+) -> Optional[str]:
+    """Signature du contenu d'un dossier, ou None s'il est INACCESSIBLE.
 
+    #696 : le sentinel d'erreur valait `sha1(b"")` — exactement la signature
+    d'un dossier VIDE. Un dossier peuple momentanement illisible (blip NAS/SMB,
+    permission, disparition transitoire) prenait donc la signature « vide », et
+    si le cache incremental portait deja cette signature pour ce chemin, le
+    scan concluait a un HIT : les films du dossier n'etaient PAS replanifies,
+    sans le moindre log distinguant « vide » de « inaccessible ».
+
+    None n'est pas une signature : c'est l'absence de signature. Les deux
+    appelants le traitent comme tel — miss force cote lecture, aucune ecriture
+    de cache cote persistance. Un dossier inaccessible ne peut donc ni etre
+    servi depuis le cache, ni y entrer.
+    """
+    # BUG 3 : optimisation NAS via os.scandir (metadata cachees en 1 op systeme)
     items: List[Tuple[str, str]] = []  # (sort_key, payload_line)
     video_exts = cfg.video_exts or set()
     try:
-        scandir_ctx = _os.scandir(str(folder))
-    except (OSError, PermissionError, FileNotFoundError):
-        return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
+        scandir_ctx = os.scandir(str(folder))
+    except (OSError, PermissionError, FileNotFoundError) as exc:
+        _log.warning("folder_signature: dossier inaccessible, aucun cache possible: %s (%s)", folder, exc)
+        return None
     try:
         for entry in scandir_ctx:
             name = entry.name
             name_lower = name.lower()
+            # Issue #637 : `known_stat` n'est transmis que si ce stat-ci a REUSSI
+            # et que l'entree n'est PAS un lien symbolique. Deux pieges evites :
+            #  - sur echec, size/mtime valent 0 : les propager fabriquerait une
+            #    clef de cache de quick-hash bidon, partagee par tous les
+            #    fichiers illisibles du disque ;
+            #  - `entry.stat(follow_symlinks=False)` est un LSTAT (metadonnees du
+            #    LIEN), alors que le quick-hash lit la CIBLE. Reutiliser le lstat
+            #    d'un lien figerait le hash de la cible sur le mtime du lien :
+            #    une cible modifiee ne serait plus jamais rehachee.
+            known_stat: Optional[Tuple[int, int]] = None
             try:
                 is_dir = entry.is_dir(follow_symlinks=False)
                 st = entry.stat(follow_symlinks=False)
@@ -531,6 +566,13 @@ def folder_signature(
                 is_dir = False
                 size = 0
                 mtime_ns = 0
+            else:
+                # `is_symlink()` peut lever (permissions) : dans le doute on ne
+                # transmet rien et `resolve_incremental_quick_hash` refait son
+                # propre `stat()` — l'erreur va dans le sens restrictif.
+                with contextlib.suppress(OSError):
+                    if not entry.is_symlink():
+                        known_stat = (size, mtime_ns)
             kind = "d" if is_dir else "f"
             parts = [kind, name_lower, str(size), str(mtime_ns)]
             if not is_dir:
@@ -541,6 +583,7 @@ def folder_signature(
                         Path(entry.path),
                         scan_index=scan_index,
                         run_hash_cache=run_hash_cache,
+                        known_stat=known_stat,
                     )
                     if quick_hash:
                         parts.append(quick_hash)
@@ -658,8 +701,6 @@ class _PlanLibraryContext:
             self.pause_logged = True
         # Boucle de pause cooperative — sleep court pour rester reactif au
         # resume ET a la cancellation.
-        import time as _time
-
         while True:
             if core_mod._is_cancel_requested(self.should_cancel):
                 return True
@@ -672,7 +713,7 @@ class _PlanLibraryContext:
                 self.pause_logged = False
                 self.log("INFO", "pause released")
                 return False
-            _time.sleep(poll_interval_s)
+            time.sleep(poll_interval_s)
 
     def persist_folder_cache(
         self,
@@ -767,16 +808,57 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
     # BUG 1 : Phase 1 — decouverte rapide (< 2s sur NAS SMB). UN SEUL scandir par
     # niveau (VN-F.3 : l'ancien chemin os.walk via stream_scan_targets a ete
     # supprime, plan_library passe exclusivement par discover_candidate_folders).
+    #
+    # `stats=ctx.stats` est OBLIGATOIRE : sans lui, scan_helpers._walk compte ses
+    # rejets dans le vide (`_bump_stats_reject` sort immediatement sur stats=None)
+    # et le report QW07 de _dedup_and_finalize_phase lit un dict vide. Mesure
+    # avant ce correctif : 3 dossiers `_A trier` / `_Nouveaux telechargements` /
+    # `_Films 2026` avales, `folders_rejected_underscore = 0` au dashboard, et
+    # aucune ligne de journal. Le commentaire QW07 pretendait deja corriger ce 0 :
+    # il ne pouvait pas, la source ne remplissait rien.
+    _rejected_paths: Dict[str, List[str]] = {}
     _discover_t0 = time.monotonic()
     try:
-        ctx.candidate_folders = discover_candidate_folders(ctx.cfg)
+        ctx.candidate_folders = discover_candidate_folders(
+            ctx.cfg,
+            stats=ctx.stats,
+            rejected_paths=_rejected_paths,
+        )
     except (OSError, PermissionError, FileNotFoundError) as exc:
         raise RuntimeError(f"Impossible de lister ROOT: {exc}") from exc
     discover_total = len(ctx.candidate_folders)
     _discover_dt = time.monotonic() - _discover_t0
     _log.info("scan: phase 1 decouverte = %d dossiers en %.2fs", discover_total, _discover_dt)
     ctx.log("INFO", f"Decouverte : {discover_total} dossiers trouves ({_discover_dt:.1f}s)")
+    _log_underscore_rejections(ctx, _rejected_paths)
     return True
+
+
+def _log_underscore_rejections(ctx: _PlanLibraryContext, rejected_paths: Dict[str, List[str]]) -> None:
+    """Journalise, en les NOMMANT, les dossiers racine ecartes pour cause de prefixe '_'.
+
+    `_A trier`, `_Nouveaux telechargements`, `_Films 2026`... sont des noms de
+    dossiers de transit tres courants. Leurs films etaient ecartes du plan sans
+    qu'AUCUNE trace ne le dise (aucun log contenant « ignor »/« rejet »/« exclu »),
+    ce qui les rendait indefiniment non tries sans explication.
+
+    Les dossiers de travail de CineSort (`_Collection`, `_Vide`, `_review`) ne
+    passent pas par ce compteur (cf. scan_helpers.discover_candidate_folders) :
+    cette ligne ne parle donc que de dossiers de l'utilisateur.
+    """
+    total = int((ctx.stats.analyse_ignores_par_raison or {}).get("ignore_prefix_underscore", 0))
+    if total <= 0:
+        return
+    sample = rejected_paths.get("ignore_prefix_underscore") or []
+    noms = ", ".join(Path(p).name for p in sample)
+    reste = total - len(sample)
+    if reste > 0:
+        noms = f"{noms} … et {reste} autre(s)"
+    ctx.log(
+        "WARN",
+        f"Ignoré : {total} dossier(s) préfixé(s) « _ » à la racine, non analysé(s) — {noms}. "
+        "Renommez-les (sans le « _ ») pour que leurs films soient triés.",
+    )
 
 
 def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Optional[str], bool]:
@@ -797,6 +879,12 @@ def _try_apply_folder_cache(ctx: _PlanLibraryContext, folder: Path) -> Tuple[Opt
         scan_index=ctx.scan_index,
         run_hash_cache=ctx.run_hash_cache,
     )
+    if folder_sig is None:
+        # #696 : dossier inaccessible. On ne peut RIEN affirmer sur son contenu,
+        # donc surtout pas le servir depuis le cache. Miss force ; l'appelant
+        # replanifie, et persist_folder_cache n'ecrira rien (il no-ope sur None).
+        ctx.stats.incremental_cache_misses += 1
+        return folder_sig, False
     cache_entry = None
     if hasattr(ctx.scan_index, "get_incremental_folder_cache"):
         try:

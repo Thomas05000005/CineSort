@@ -17,6 +17,7 @@ Voir docs/internal/VO_B_ANALYSIS.md pour la cartographie complete.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -204,8 +205,6 @@ def parallel_extract_local_candidates(
 
     # Branche parallele : ThreadPoolExecutor. Le GIL est libere pendant
     # os.scandir / stat sur NAS SMB (I/O bound), gain ~7x sur Phase 1.
-    from concurrent.futures import ThreadPoolExecutor
-
     results: List[Optional[LocalCandidate]] = [None] * n
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scan-local")
     futures = []

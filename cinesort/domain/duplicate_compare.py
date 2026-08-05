@@ -500,7 +500,13 @@ def _bitrate_label(br: Optional[int]) -> str:
     # < 10000 bps comme « <N> kbps » au lieu de quelques kbps.
     kbps = br // 1000
     if kbps >= 1000:
-        return f"{kbps // 1000} Mbps"
+        # #826 : la SECONDE division entiere effacait la partie kbps. Cette
+        # etiquette est affichee cote a cote dans la table de criteres du
+        # comparateur de doublons (duplicate-comparator-modal.js) : 8 500 kbps
+        # et 8 000 kbps s'y affichaient tous deux « 8 Mbps », donc le critere
+        # « Bitrate » designait un gagnant que ses deux valeurs disaient egales.
+        # Une decimale suffit a rendre l'ecart lisible.
+        return f"{kbps / 1000:.1f} Mbps"
     return f"{kbps} kbps"
 
 

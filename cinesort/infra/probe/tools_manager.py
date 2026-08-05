@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -155,11 +156,9 @@ def _candidate_paths_for_tool(
         candidates.append(("explicit", explicit_path))
 
     # Chercher dans state_dir/tools/ et aussi a cote de l'executable (tools/)
-    import sys as _sys
-
     tools_roots = [state_dir / "tools"]
-    if getattr(_sys, "frozen", False):
-        tools_roots.append(Path(_sys.executable).parent / "tools")
+    if getattr(sys, "frozen", False):
+        tools_roots.append(Path(sys.executable).parent / "tools")
     else:
         tools_roots.append(Path(__file__).resolve().parent.parent.parent.parent / "tools")
     for tools_root in tools_roots:
@@ -339,14 +338,12 @@ def _bundle_roots() -> List[Path]:
     Mode dev : racine du repo (4 niveaux au-dessus de ce fichier).
     Utilise pour fpcalc (assets/tools/) et LPIPS (assets/models/).
     """
-    import sys as _sys
-
     roots: List[Path] = []
-    meipass = getattr(_sys, "_MEIPASS", None)
+    meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         roots.append(Path(meipass))
-    if getattr(_sys, "frozen", False):
-        roots.append(Path(_sys.executable).parent)
+    if getattr(sys, "frozen", False):
+        roots.append(Path(sys.executable).parent)
     else:
         # cinesort/infra/probe/tools_manager.py -> remonter de 4 = repo root
         roots.append(Path(__file__).resolve().parent.parent.parent.parent)
