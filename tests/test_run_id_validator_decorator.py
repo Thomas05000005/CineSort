@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 import cinesort.ui.api._validators as _validators
 import cinesort.ui.api.cinesort_api as cinesort_api
 import cinesort.ui.api.export_support as ui_export_support
+import cinesort.ui.api.probe_support as probe_support
+import cinesort.ui.api.quality_report_support as quality_report_support
 from cinesort.domain.i18n_messages import t
 from cinesort.ui.api._validators import is_valid_run_id, requires_valid_run_id
 
@@ -227,6 +229,11 @@ class EndpointsNeRedisentPasLInvariantRunIdTests(unittest.TestCase):
     pas les corps prives : c'est la seule facon de constater que le decorateur
     tranche avant le corps. `api._is_valid_run_id` est lie au VRAI validateur —
     un `MagicMock` nu rendrait un truthy et fabriquerait le passage qu'on teste.
+
+    Les deux modules sont importes en TETE de fichier, pas dans les helpers :
+    un import differe ici n'aurait aucune justification (`tests/` ne participe a
+    aucun cycle) et le cliquet `test_refactor_84_progress_v77` ne scanne que
+    `cinesort/`, donc rien ne l'aurait signale.
     """
 
     def _api(self) -> MagicMock:
@@ -235,13 +242,9 @@ class EndpointsNeRedisentPasLInvariantRunIdTests(unittest.TestCase):
         return api
 
     def _appelle_probe(self, api: MagicMock, run_id: Any, row_id: Any) -> dict:
-        from cinesort.ui.api import probe_support
-
         return probe_support.get_probe(api, run_id, row_id, detect_probe_tools_fn=lambda *a, **kw: {})
 
     def _appelle_quality(self, api: MagicMock, run_id: Any, row_id: Any) -> dict:
-        from cinesort.ui.api import quality_report_support
-
         return quality_report_support.get_quality_report(api, run_id, row_id)
 
     def test_run_id_vide_est_tranche_par_le_decorateur_pas_par_le_corps(self) -> None:
