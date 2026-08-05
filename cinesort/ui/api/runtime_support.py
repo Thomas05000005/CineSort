@@ -390,11 +390,18 @@ def get_or_create_infra(
             # post-crash, ce qui est precisement le cas le plus frequent. On force
             # max_age_hours=0.0 pour capturer tous les PENDING avec started_ts<now.
             try:
-                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0)
+                # PR#852 : `state_dir` permet a la reconciliation de lire le
+                # marqueur `apply_end` du journal d'audit JSONL, seule preuve
+                # HORS SQLite qu'un apply reste PENDING parce que la DB etait
+                # indisponible et non parce qu'il a ete tue en cours de route.
+                # Sans elle, l'undo d'un tel apply reste mort a vie.
+                batches_report = reconcile_batches_at_boot(store, max_age_hours=0.0, state_dir=state_dir)
                 if batches_report.get("pending_found", 0) > 0:
                     _logger.info(
-                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned (%d completed, %d rolled_back)",
+                        "reconcile_batches_at_boot: %d PENDING-zombi cleaned "
+                        "(%d finalized DONE, %d completed, %d rolled_back)",
                         batches_report["pending_found"],
+                        batches_report.get("finalized_done", 0),
                         batches_report.get("completed", 0),
                         batches_report.get("rolled_back", 0),
                     )

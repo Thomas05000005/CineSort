@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import time
@@ -44,11 +45,35 @@ def _fake_payload(
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict):
-        self._data = json.dumps(payload).encode("utf-8")
+    """Reponse HTTP de test, calquee sur `http.client.HTTPResponse`.
 
-    def read(self) -> bytes:
-        return self._data
+    Issue #516 : la version precedente exposait `read()` SANS argument, ce qui
+    figeait le seul motif de lecture non borne. Elle est desormais adossee a un
+    vrai `io.BytesIO` : `read(amt)` rend au plus `amt` octets et avance le
+    curseur, exactement comme le flux reel. Le fake ne peut donc plus valider
+    une lecture illimitee, et il permet de MESURER ce qui a ete alloue
+    (`max_amt_requested`, `total_bytes_yielded`).
+    """
+
+    def __init__(self, payload: dict | None = None, *, raw: bytes | None = None):
+        if raw is None:
+            raw = json.dumps(payload or {}).encode("utf-8")
+        self._stream = io.BytesIO(raw)
+        self.max_amt_requested: int | None = None
+        self.total_bytes_yielded = 0
+
+    def read(self, amt: int | None = None) -> bytes:
+        if amt is None:
+            self.max_amt_requested = None
+            chunk = self._stream.read()
+        else:
+            if self.max_amt_requested is not None:
+                self.max_amt_requested = max(self.max_amt_requested, amt)
+            else:
+                self.max_amt_requested = amt
+            chunk = self._stream.read(amt)
+        self.total_bytes_yielded += len(chunk)
+        return chunk
 
     def __enter__(self) -> "_FakeResponse":
         return self
@@ -141,6 +166,17 @@ class CompareVersionsTests(unittest.TestCase):
         self.assertEqual(_parse_version("v1.2.3-rc1"), (1, 2, 3))
         self.assertEqual(_parse_version(""), (0,))
         self.assertEqual(_parse_version("not-a-version"), (0,))
+
+    def test_different_segment_counts_are_equal(self) -> None:
+        # '7.6' et '7.6.0' sont semantiquement identiques : aucune des deux
+        # directions ne doit signaler une mise a jour disponible.
+        self.assertFalse(_compare_versions("7.6", "7.6.0"))
+        self.assertFalse(_compare_versions("7.6.0", "7.6"))
+        self.assertFalse(_compare_versions("7", "7.0.0"))
+
+    def test_different_segment_counts_real_diff(self) -> None:
+        self.assertTrue(_compare_versions("7.6", "7.6.1"))
+        self.assertFalse(_compare_versions("7.6.1", "7.6"))
 
 
 class CheckForUpdatesTests(unittest.TestCase):
