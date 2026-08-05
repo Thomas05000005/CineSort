@@ -34,6 +34,9 @@ from typing import Any, Tuple
 # les threads `recompute_*` / `tmdb-enrich-*` se terminent en quelques dizaines
 # de millisecondes ; 5 s est une borne de securite, jamais atteinte en pratique.
 DEFAULT_THREAD_JOIN_TIMEOUT_S = 5.0
+# Plafond pour UN thread : un thread inconnu qui ne se terminerait jamais coute
+# ce montant une fois, au lieu d'avaler tout le budget de la fonction.
+MAX_SINGLE_THREAD_JOIN_S = 2.0
 
 
 def _budget(local_s: float) -> float:
@@ -64,7 +67,27 @@ def _budget(local_s: float) -> float:
     return local_s * 3.0 if os.environ.get("CI") else local_s
 
 
-def join_background_threads(timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S) -> list[str]:
+def is_service_thread(thread: threading.Thread) -> bool:
+    """True si le thread est un SERVICE qui ne se terminera pas tout seul.
+
+    Regle par capacite plutot que par nom : un thread qui expose un evenement
+    d'arret (`_stop_event`) attend qu'on le lui demande — il ne finit jamais de
+    lui-meme, et l'attendre consomme le budget entier pour rien.
+
+    MESURE, sur une execution complete de la suite : le thread `cinesort-watcher`
+    (`cinesort/app/watcher.py`, poll toutes les 300 s) a produit **107 joins de
+    5 s, soit 535 s** — a lui seul l'integralite du surcout observe. Les threads
+    de travail, eux, se terminent : 37 joins de `recompute_*` pour 7,5 s au
+    total. On saute donc les services, et on attend les travailleurs.
+    """
+    return isinstance(getattr(thread, "_stop_event", None), threading.Event)
+
+
+def join_background_threads(
+    timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S,
+    *,
+    per_thread_s: float = MAX_SINGLE_THREAD_JOIN_S,
+) -> list[str]:
     """Attend la fin des threads de fond demarres par l'app. Retourne leurs noms.
 
     Pourquoi (issue #960, MESURE) : les facades `api.run.*` demarrent des
@@ -79,9 +102,10 @@ def join_background_threads(timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S) ->
     [WinError 5/32]` attribues au « verrou de fichiers Windows » : le thread
     d'un test tombe sur le dossier d'un test VOISIN en train d'etre renomme.
 
-    Ne joint jamais le thread principal ni le thread courant. Le budget total
-    est partage entre tous les threads : la fonction ne peut pas bloquer plus
-    de `timeout_s`.
+    Ne joint jamais le thread principal, le thread courant, ni un thread de
+    service (cf. `is_service_thread`). Deux plafonds : `timeout_s` pour le total
+    et `per_thread_s` pour un seul thread — ainsi un thread inconnu qui ne
+    finirait jamais coute une fois `per_thread_s`, pas tout le budget.
     """
     deadline = time.monotonic() + float(timeout_s)
     current = threading.current_thread()
@@ -90,10 +114,12 @@ def join_background_threads(timeout_s: float = DEFAULT_THREAD_JOIN_TIMEOUT_S) ->
     for thread in threading.enumerate():
         if thread is current or thread is main or not thread.is_alive():
             continue
+        if is_service_thread(thread):
+            continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        thread.join(remaining)
+        thread.join(min(remaining, float(per_thread_s)))
         joined.append(thread.name)
     return joined
 
@@ -106,14 +132,19 @@ def cleanup_test_tree(
 ) -> bool:
     """Supprime un arbre temporaire de test, sans laisser de reste dans %TEMP%.
 
-    Trois etapes, dans cet ordre, chacune motivee par une mesure :
+    Trois etapes, chacune motivee par une mesure :
       1. joindre les threads de fond, sinon ils recreent l'arborescence ;
-      2. `gc.collect()`, car une exception gardee vivante par un mock retient
-         son traceback, donc des frames, donc des connexions sqlite3 et des
-         fichiers d'audit ouverts — des cycles que seul le ramasse-miettes
-         casse (WinError 32 sinon) ;
-      3. `rmtree`, re-essaye : un handle peut etre relache quelques dizaines
-         de millisecondes plus tard.
+      2. `rmtree` ;
+      3. s'il reste quelque chose : `gc.collect()` puis nouvelle tentative. Une
+         exception gardee vivante par un mock retient son traceback, donc des
+         frames, donc des connexions sqlite3 et des fichiers d'audit ouverts —
+         des cycles que seul le ramasse-miettes casse (WinError 32 sinon). Et
+         un handle peut etre relache quelques dizaines de ms plus tard.
+
+    Le `gc.collect()` est volontairement APRES la premiere tentative et non
+    avant : MESURE, il coute ~0,4 s sur le tas d'une session complete, et le
+    payer a chaque `tearDown` ajoutait ~9 minutes a la suite. Le chemin
+    nominal — la suppression reussit du premier coup — ne le paie plus.
 
     Retourne True si le dossier a disparu. A utiliser dans les fichiers qui
     pilotent l'API. Pour un test qui ne cree qu'un dossier inerte,
@@ -123,11 +154,12 @@ def cleanup_test_tree(
     target = str(path)
     join_background_threads(timeout_s)
     for attempt in range(max(1, attempts)):
-        gc.collect()
         shutil.rmtree(target, ignore_errors=True)
         if not os.path.exists(target):
             return True
+        gc.collect()
         time.sleep(0.05 * (attempt + 1))
+    shutil.rmtree(target, ignore_errors=True)
     return not os.path.exists(target)
 
 
