@@ -5,13 +5,36 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import cinesort.domain.core as core
 from cinesort.domain.conversions import to_int
+from cinesort.infra.state import atomic_write_text
 from cinesort.ui.api.settings_support import clamp_year
 
 logger = logging.getLogger(__name__)
+
+
+def write_plan_jsonl(plan_jsonl: Path, rows: List[Dict[str, Any]]) -> None:
+    """Reecrit `plan.jsonl` EN ENTIER, de facon atomique ET durable.
+
+    Ecrivain UNIQUE des reecritures de plan : `library_actions_support.
+    _rematch_tmdb_and_update_plan` et `tmdb_support.enrich_tmdb_ids_by_title`
+    derivaient tous les deux `plan_jsonl.with_suffix(suffix + ".tmp")` du meme
+    `run_id`, soit le MEME chemin au caractere pres. Ils sont concurrents pour
+    de vrai : `enrich_tmdb_ids_by_title` tourne dans le thread daemon
+    `tmdb-enrich-<run_id>` lance en fin de scan (run_flow_support.py:634)
+    pendant que le rematch est declenchable depuis l'UI sous
+    `ThreadingHTTPServer`. C'est le defaut #732, mais sur les donnees de
+    l'utilisateur : `plan.jsonl` est le fichier que l'APPLY relit pour
+    renommer les dossiers sur disque. Aucun des deux n'avait de fsync non plus.
+
+    `mkdir=False` : si le dossier du run a disparu, echouer (comme le faisait
+    l'`open()` d'avant) plutot que ressusciter un run fantome.
+    """
+    payload = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    atomic_write_text(plan_jsonl, payload, mkdir=False)
 
 
 def serialize_rows_for_payload(rows: List[core.PlanRow]) -> List[Dict[str, Any]]:
