@@ -39,7 +39,6 @@ from cinesort.domain.i18n_messages import SUPPORTED_LOCALES, get_locale, set_loc
 from cinesort.domain.naming import (
     PRESETS,
     PREVIEW_MOCK_CONTEXT,
-    build_naming_context,
     format_movie_folder,
     validate_template,
 )
@@ -1724,32 +1723,32 @@ class CineSortApi:
                 errors=errors,
             )
 
-        # Essayer de charger un vrai film depuis la BDD
-        context = None
-        rid = str(sample_row_id or "").strip()
-        if rid:
-            try:
-                state_dir = self._get_state_dir()
-                settings = _read_settings(state_dir)
-                store, _ = self._get_or_create_infra(state_dir, settings)
-                # Chercher la probe en cache (NB: signature obsolete, fallback dans except)
-                probe_data = store.probe.get_probe_cache(rid) if hasattr(store, "probe") else None
-                quality_data = store.quality.get_quality_report(rid) if hasattr(store, "get_quality_report") else None
-                context = build_naming_context(
-                    title="Film",
-                    year=2020,
-                    probe_data=probe_data,
-                    quality_data=quality_data,
-                )
-            except (OSError, PermissionError, TypeError, ValueError):
-                context = None
-
-        # Fallback : mock hardcode (Inception)
-        if context is None:
-            context = dict(PREVIEW_MOCK_CONTEXT)
-
+        # #460 : la branche « charger un vrai film depuis la BDD » qui vivait ici
+        # etait morte depuis sa premiere ligne. `self._get_or_create_infra(state_dir,
+        # settings)` passait DEUX arguments a une methode qui n'en accepte qu'UN
+        # (cinesort_api.py:588) -> TypeError systematique, avale par un
+        # `except (OSError, PermissionError, TypeError, ValueError)` -> context=None
+        # -> repli sur le mock. Les deux appels suivants etaient casses eux aussi
+        # (`get_probe_cache` est keyword-only, et le `hasattr` testait `store` au
+        # lieu de `store.quality`).
+        #
+        # Supprimee plutot que reparee : meme reparee elle n'aurait PAS affiche le
+        # film demande (title="Film", year=2020 etaient codes en dur) et
+        # `get_quality_report` exige un `run_id` dont cet endpoint ne dispose pas.
+        # Un apercu de template sur un vrai film est une FEATURE a specifier, pas
+        # une reparation de ligne.
+        #
+        # `sample_row_id` reste dans la signature (compat de l'API REST), mais la
+        # reponse DIT desormais qu'il n'est pas honore au lieu de l'ignorer en
+        # silence.
+        context = dict(PREVIEW_MOCK_CONTEXT)
         result = format_movie_folder(tpl, context)
-        return {"ok": True, "result": result, "variables": context}
+        return {
+            "ok": True,
+            "result": result,
+            "variables": context,
+            "sample_row_id_applied": False,
+        }
 
     def _validate_dropped_path_impl(self, path: str = "") -> Dict[str, Any]:
         r"""Valide qu'un chemin droppe est un dossier existant.
