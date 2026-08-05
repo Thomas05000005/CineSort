@@ -63,7 +63,7 @@ dev = [
     # lendemain sans qu'aucun commit n'ait bouge — c'est ce qui a mis la CI au
     # rouge sur `main` lui-meme et bloque ~180 PR. Toute montee de version doit
     # etre DELIBEREE, avec le reformatage dans le meme commit.
-    "ruff==0.15.22",
+    "ruff==0.16.1",
     "coverage>=7.14.0,<8",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.0.3,<10",
@@ -125,6 +125,23 @@ extend-exclude = [
   ".ui_backups",
   "archive_ui_next_20260308",
   "web_next_zero",
+  # ruff 0.16.1 formate les blocs de code DANS le Markdown. Sur `docs/internal/`,
+  # qui archive des plans et des bilans DATES, c'est une reecriture d'archives :
+  # 22 fichiers touches pour une montee de version, sans un seul .py modifie.
+  #
+  # Pire, la mise en forme DEGRADE ces documents. Mesure sur PLAN_v7_5_0.md :
+  #
+  #   avant : if crest_factor_db >= 15.0: "cinema"     <- raccourci lisible
+  #   apres : if crest_factor_db >= 15.0:
+  #               "cinema"                              <- ressemble a du code casse
+  #
+  # Le pseudo-code d'un document de conception n'a pas a etre du Python valide —
+  # `crest_factor_db` n'existe nulle part dans `cinesort/` (0 occurrence). Une
+  # revue automatique a d'ailleurs signale 6 « defauts » dans ces blocs, tous
+  # dans des esquisses gelees que ce reformatage venait de rendre trompeuses.
+  #
+  # Le CHANGELOG et `docs/` publics restent formates : ils decrivent du code REEL.
+  "docs/internal",
   # Scripts d'audit visuel manuel (Playwright capture, pas de la prod)
   "tests/manual",
 ]
