@@ -15,7 +15,7 @@ repos:
     # une borne flottante. Un developpeur formatait donc localement avec une
     # version que la CI rejetait ensuite. Ces trois points doivent monter
     # ENSEMBLE, avec le reformatage dans le meme commit.
-    rev: v0.15.22
+    rev: v0.16.1
     hooks:
       - id: ruff
         name: ruff check
