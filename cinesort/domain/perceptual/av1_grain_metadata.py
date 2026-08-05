@@ -136,7 +136,8 @@ def extract_av1_film_grain_params(
 
     try:
         parsed = json.loads(cp.stdout or "{}")
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("av1_grain: ffprobe JSON invalide sur %s: %s", media_path, exc)
         return None
 
     streams = parsed.get("streams") if isinstance(parsed, dict) else None

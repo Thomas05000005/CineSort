@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Tuple
 from cinesort.infra import state
 from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.run_data_support import write_plan_jsonl
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -386,10 +387,13 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
         )
         store.run.mark_run_running(run_id, started_ts=started)
 
-        with run_paths.plan_jsonl.open("w", encoding="utf-8") as fp:
-            for film in DEMO_FILMS:
-                row = _build_plan_row(film, run_id)
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Issue #479 site 3 : meme ecrivain de `plan.jsonl` que le scan reel,
+        # donc meme exigence — le mode demo produit un run que la Bibliotheque,
+        # les Doublons et l'Apply consomment exactement comme les autres.
+        write_plan_jsonl(
+            run_paths.plan_jsonl,
+            [_build_plan_row(film, run_id) for film in DEMO_FILMS],
+        )
 
         for film in DEMO_FILMS:
             store.quality.upsert_quality_report(
