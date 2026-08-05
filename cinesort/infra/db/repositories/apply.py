@@ -86,6 +86,30 @@ _ALLOWED_BATCH_TRANSITIONS: Dict[str, frozenset] = {
             "ROLLED_BACK_BY_ATOMIC",
         }
     ),
+    # Nuance N06 (ultra-audit 2026-08-03) : les deux statuts poses par le
+    # boot-cleanup (cf cinesort/app/apply_batches_reconciliation.py:59-60)
+    # n'avaient aucune entree ici. Consequence mesuree : apres un crash
+    # mid-apply suivi d'un reboot, un undo selectif restaurait bien les fichiers
+    # sur disque, puis `close_apply_batch` levait ApplyBatchStateError
+    # ("transition invalide vers 'UNDONE_DONE'") — que
+    # `apply_support._finalize_batch_undo_status` ne rattrape pas (il ne catche
+    # que sqlite3.Error / OSError) -> HTTP 500 sur une operation REUSSIE, et le
+    # statut du batch restait fige sur le libelle du boot-cleanup.
+    # On n'ouvre que la famille UNDONE_* : aucun retour vers DONE/PENDING, donc
+    # l'invariant H14 (pas de reintroduction dans
+    # get_last_reversible_apply_batch) est preserve.
+    "COMPLETED_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
+    "ROLLED_BACK_BY_BOOT_CLEANUP": frozenset(
+        {
+            "UNDONE_DONE",
+            "UNDONE_PARTIAL",
+        }
+    ),
 }
 
 

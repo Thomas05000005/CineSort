@@ -4,6 +4,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -301,6 +302,7 @@ def title_prefix_before_parenthesized_year(text: str) -> str:
     return prefix
 
 
+@lru_cache(maxsize=512)
 def _norm_for_tokens(s: str) -> str:
     # B02-TAGS-BRACKETS : strip {tmdb-XXX}/[imdbid-ttXXX] avant lowercasing
     # pour eviter que tmdb_id soit tokenise en chiffres / "tmdb" / "imdb".

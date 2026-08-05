@@ -155,8 +155,22 @@ def extract_import_metadata(content: str) -> Dict[str, Any]:
     Retourne `{name, author, description, exported_at, exporter, schema_version}`.
     Champs manquants remplacés par chaîne vide. Ne valide PAS la structure
     du profil — c'est pour du preview.
+
+    Issue #664 : la borne `MAX_JSON_BYTES` s'applique ICI aussi. Cette
+    fonction consomme la même entrée non fiable que `parse_and_validate_import`
+    et, dans le seul appelant réel (`_import_shareable_profile_impl`), elle est
+    invoquée **même quand la validation vient de refuser le contenu** — un
+    fichier hors borne était donc rejeté par la sœur puis parsé intégralement
+    ici. Au-delà de la borne on rend le dict vide, ce qui est déjà le contrat
+    documenté pour un contenu inexploitable.
     """
     out = {"name": "", "author": "", "description": "", "exported_at": "", "exporter": "", "schema_version": ""}
+    if not isinstance(content, str):
+        return out
+    # `len(content)` (caractères) ≤ taille UTF-8 (octets) : ce test préalable
+    # tranche les cas énormes SANS allouer la copie encodée.
+    if len(content) > MAX_JSON_BYTES or len(content.encode("utf-8")) > MAX_JSON_BYTES:
+        return out
     try:
         data = json.loads(content)
     except (json.JSONDecodeError, ValueError, TypeError):

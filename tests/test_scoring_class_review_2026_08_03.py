@@ -336,12 +336,25 @@ class ScoringRulesVersionInvalidatesPersistedScoresTests(unittest.TestCase):
 
     @staticmethod
     def _persisted(metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Rapport persiste dont SEULE l'estampille de regles doit varier.
+
+        Fusion PR#872 : le gate de cache exige desormais aussi l'empreinte du
+        CONTENU du profil (N30). Elle est injectee par defaut dans toutes les
+        fixtures — et non retiree des assertions — pour que ces tests continuent
+        de mesurer ce qu'ils annoncent. Sans elle, tous les cas « pas de
+        reutilisation » passeraient a cause de l'empreinte manquante, sans
+        jamais exercer l'estampille de regles : des tests VACANTS.
+        """
+        base_metrics: Dict[str, Any] = {
+            "profile_fingerprint": quality_report_support.profile_fingerprint(default_quality_profile())
+        }
+        base_metrics.update(metrics)
         return {
             "score": 55,
             "tier": "Silver",
             "profile_id": "CinemaLux_v1",
             "profile_version": 1,
-            "metrics": metrics,
+            "metrics": base_metrics,
         }
 
     def test_a_report_scored_with_the_old_rules_is_not_reused(self) -> None:
