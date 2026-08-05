@@ -212,10 +212,7 @@ class BulkParityWithSingleTests(_BulkTestBase):
 
         with mock.patch.object(run_flow_support, "check_duplicates", _CountingReload(payload)):
             bulk = run_flow_support.mark_duplicate_winners_bulk(self.api, "run1", decisions)
-        from_bulk = {
-            d["group_key"]: self._decision(d["group_key"])
-            for d in decisions  # noqa: PERF102 - lisibilite
-        }
+        from_bulk = {d["group_key"]: self._decision(d["group_key"]) for d in decisions}
 
         # Meme scenario, store neuf, chemin unitaire.
         self.tearDown()
