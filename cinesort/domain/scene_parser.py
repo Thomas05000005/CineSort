@@ -250,6 +250,10 @@ _PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(?:19\d{2}|20\d{2})\s*[\)\]\}]")
 # Caracteres de garbage en fin de chaine apres nettoyage
 _TRAILING_GARBAGE_RE = re.compile(r"[\s\-_\.]+$")
 
+# Separateurs orphelins en fin de chaine (- ou _ ou . isoles apres strip).
+# Utilise dans parse_scene_title pour nettoyer apres release group strip.
+_ORPHAN_SEP_RE = re.compile(r"\s+[-_.]+\s*$")
+
 # LOTD-DUP-TITLE-YEAR + BUG-TITLE-CHANNEL-RESIDUE (Lot D 2026-07) : sur un nom
 # SANS vraie extension (dossier, release nue), Path.stem traitait le dernier
 # segment pointe comme une extension et mangeait ".2005" (l'annee -> identite
@@ -471,14 +475,13 @@ def parse_scene_title(filename: str) -> str:
     #   confond avec un tag standard, laissant un dash orphelin "-" qui empeche
     #   l'after-year noise de matcher.
     # Cap a 4 iterations par securite.
-    _orphan_sep_re = re.compile(r"\s+[-_.]+\s*$")
     for _ in range(4):
         prev = name
         # Release group `-GROUP$` — seulement si vraie release (marqueur technique).
         if had_tech_marker:
             name = _RELEASE_GROUP_RE.sub(" ", name)
         # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
-        name = _orphan_sep_re.sub("", name)
+        name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         # Position-aware after-year noise tokens
         name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
@@ -486,7 +489,7 @@ def parse_scene_title(filename: str) -> str:
         # Trailing language tokens sans annee prealable
         # (cas "L'arme Fatale 2 - FR EN ...")
         name = _TRAILING_LANG_TOKENS_RE.sub("", name)
-        name = _orphan_sep_re.sub("", name)
+        name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         if name == prev:
             break
