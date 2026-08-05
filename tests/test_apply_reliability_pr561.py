@@ -73,10 +73,18 @@ class CleanupDryRunCounterTests(_ApplyReliabilityBase):
         ).normalized()
 
     def test_move_dirs_to_bucket_ne_compte_rien_en_dry_run(self) -> None:
-        """Contrat de la docstring : "0 si dry_run ou aucun eligible"."""
+        """Contrat de la docstring : "0 si dry_run ou aucun eligible".
+
+        PR#852 a rendu `res`/`counter_attr` obligatoires (le compteur est
+        desormais incremente dossier par dossier DANS la fonction, plus par un
+        `+=` du caller). Le contrat dry_run vaut donc pour les DEUX compteurs :
+        la valeur de retour ET l'attribut de `res`, qui est celui reellement
+        remonte a l'UI.
+        """
         src = self.root / "EmptyA"
         src.mkdir(parents=True, exist_ok=True)
         bucket = self.root / "_Vide"
+        res = core.ApplyResult()
 
         moved = cleanup._move_dirs_to_bucket(
             candidates=[src],
@@ -85,9 +93,16 @@ class CleanupDryRunCounterTests(_ApplyReliabilityBase):
             dry_run=True,
             log=self._log,
             log_prefix="TEST",
+            res=res,
+            counter_attr="empty_folders_moved_count",
         )
 
         self.assertEqual(moved, 0, "dry_run ne deplace rien : le compteur doit rester a 0")
+        self.assertEqual(
+            res.empty_folders_moved_count,
+            0,
+            "dry_run : le compteur expose a l'UI ne doit pas bouger non plus",
+        )
         self.assertTrue(src.exists(), "dry_run ne doit RIEN deplacer sur le disque")
         self.assertFalse(bucket.exists())
 
@@ -96,6 +111,7 @@ class CleanupDryRunCounterTests(_ApplyReliabilityBase):
         src = self.root / "EmptyB"
         src.mkdir(parents=True, exist_ok=True)
         bucket = self.root / "_Vide"
+        res = core.ApplyResult()
 
         moved = cleanup._move_dirs_to_bucket(
             candidates=[src],
@@ -104,9 +120,12 @@ class CleanupDryRunCounterTests(_ApplyReliabilityBase):
             dry_run=False,
             log=self._log,
             log_prefix="TEST",
+            res=res,
+            counter_attr="empty_folders_moved_count",
         )
 
         self.assertEqual(moved, 1)
+        self.assertEqual(res.empty_folders_moved_count, 1)
         self.assertFalse(src.exists())
         self.assertTrue((bucket / "EmptyB").exists())
 

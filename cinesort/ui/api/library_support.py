@@ -193,9 +193,16 @@ _CODEC_NORMALIZE = {
 }
 
 
+# Issue #681 : sentinelle « aucun codec detecte ». Elle est NON VIDE, donc
+# truthy : tout consommateur qui se contente d'un test de verite la compte comme
+# un codec reel. La nommer ici (au lieu du litteral duplique cote lecteurs) rend
+# le contrat explicite et empeche les deux bords de diverger.
+CODEC_UNKNOWN = "unknown"
+
+
 def _normalize_codec(codec: Optional[str]) -> str:
     if not codec:
-        return "unknown"
+        return CODEC_UNKNOWN
     normalized = str(codec).strip().lower()
     return _CODEC_NORMALIZE.get(normalized, normalized)
 
@@ -2053,7 +2060,7 @@ def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
         return f"{(year // 10) * 10}s"
     if dim == "codec":
         codec = str(row.get("codec") or "").strip()
-        return codec.upper() if codec and codec != "unknown" else None
+        return codec.upper() if codec and codec != CODEC_UNKNOWN else None
     if dim == "era_grain":
         era = row.get("grain_era_v2")
         return str(era) if era else None
