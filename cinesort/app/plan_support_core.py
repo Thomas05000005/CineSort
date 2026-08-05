@@ -438,7 +438,7 @@ def resolve_incremental_quick_hash(
     else:
         try:
             stat_result = path.stat()
-        except (OSError, PermissionError, FileNotFoundError):
+        except OSError:
             return ""
         cache_key = quick_hash_cache_key_from_stat(path, stat_result)
     size = cache_key[1]
@@ -463,7 +463,7 @@ def resolve_incremental_quick_hash(
         # transiter par le wrapper domain.core._sha1_quick (supprime).
 
         quick_hash = sha1_quick(path)
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         quick_hash = ""
     if quick_hash and scan_index is not None and hasattr(scan_index, "upsert_incremental_file_hash"):
         with contextlib.suppress(OSError, TypeError, ValueError):
@@ -495,7 +495,7 @@ def _nfo_signature(nfo_path: Optional[Path]) -> Optional[str]:
         return None
     try:
         st = nfo_path.stat()
-    except (PermissionError, OSError, FileNotFoundError):
+    except OSError:
         return None
     cache_key = (str(nfo_path), int(st.st_size), int(st.st_mtime_ns))
     cached = _NFO_SIG_CACHE.get(cache_key)
@@ -503,7 +503,7 @@ def _nfo_signature(nfo_path: Optional[Path]) -> Optional[str]:
         return cached
     try:
         sig = hashlib.sha1(nfo_path.read_bytes(), usedforsecurity=False).hexdigest()
-    except (PermissionError, OSError):
+    except OSError:
         return None
     # Cap simple pour eviter croissance illimitee (drop arbitraire des 100 plus
     # anciens — OK car l'utilisation est lineaire sur 1 scan typiquement)
@@ -540,7 +540,7 @@ def folder_signature(
     video_exts = cfg.video_exts or set()
     try:
         scandir_ctx = os.scandir(str(folder))
-    except (OSError, PermissionError, FileNotFoundError) as exc:
+    except OSError as exc:
         _log.warning("folder_signature: dossier inaccessible, aucun cache possible: %s (%s)", folder, exc)
         return None
     try:
@@ -562,7 +562,7 @@ def folder_signature(
                 st = entry.stat(follow_symlinks=False)
                 size = int(st.st_size)
                 mtime_ns = int(st.st_mtime_ns)
-            except (OSError, PermissionError, FileNotFoundError):
+            except OSError:
                 is_dir = False
                 size = 0
                 mtime_ns = 0
@@ -824,7 +824,7 @@ def _scan_root_phase(ctx: _PlanLibraryContext) -> bool:
             stats=ctx.stats,
             rejected_paths=_rejected_paths,
         )
-    except (OSError, PermissionError, FileNotFoundError) as exc:
+    except OSError as exc:
         raise RuntimeError(f"Impossible de lister ROOT: {exc}") from exc
     discover_total = len(ctx.candidate_folders)
     _discover_dt = time.monotonic() - _discover_t0
@@ -1019,7 +1019,7 @@ def _classify_and_plan_folder(
     if len(videos) > 1 and core_mod.detect_single_with_extras(ctx.cfg, videos):
         try:
             main = max(videos, key=lambda path: path.stat().st_size)
-        except (OSError, PermissionError, FileNotFoundError):
+        except OSError:
             main = videos[0]
         ctx.rows.extend(
             _plan_single(ctx.cfg, folder, main, ctx.tmdb, ctx.log, should_cancel=ctx.should_cancel, **ctx.v2_kwargs)

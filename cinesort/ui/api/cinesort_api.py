@@ -149,7 +149,7 @@ def _read_app_version() -> str:
     try:
         version_file = Path(__file__).resolve().parents[3] / "VERSION"
         return version_file.read_text(encoding="utf-8").strip() or "unknown"
-    except (OSError, PermissionError, ValueError):
+    except (OSError, ValueError):
         return "unknown"
 
 
@@ -1805,7 +1805,7 @@ class CineSortApi:
                     level="info",
                     log_module=__name__,
                 )
-        except (OSError, PermissionError):
+        except OSError:
             return _err_response(
                 "Impossible de lire l'attribut symlink du chemin.",
                 category="runtime",

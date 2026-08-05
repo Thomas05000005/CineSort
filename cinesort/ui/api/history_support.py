@@ -329,7 +329,7 @@ def load_validation(api: Any, run_id: str, *, normalize_user_path: Any) -> Dict[
                 seeded = run_read_support.seed_auto_approve_decisions(api, rows, data)
                 return {"ok": True, "decisions": api._normalize_decisions_for_rows(rows, seeded)}
             return {"ok": True, "decisions": {}}
-        except (KeyError, OSError, PermissionError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             api._debug_log(
                 state_dir=api._state_dir,
                 run_id=run_id,

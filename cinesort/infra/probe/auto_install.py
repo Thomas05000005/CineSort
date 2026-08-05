@@ -618,13 +618,13 @@ def install_all(
     # refuse et on remonte le message a l'utilisateur.
     try:
         results["ffprobe"] = install_ffprobe(progress_callback)
-    except (OSError, FileNotFoundError, zipfile.BadZipFile, IntegrityError) as exc:
+    except (OSError, zipfile.BadZipFile, IntegrityError) as exc:
         logger.error("auto_install: echec ffprobe: %s", exc)
         errors.append(f"FFprobe: {exc}")
 
     try:
         results["mediainfo"] = install_mediainfo(progress_callback)
-    except (OSError, FileNotFoundError, zipfile.BadZipFile, IntegrityError) as exc:
+    except (OSError, zipfile.BadZipFile, IntegrityError) as exc:
         logger.error("auto_install: echec MediaInfo: %s", exc)
         errors.append(f"MediaInfo: {exc}")
 

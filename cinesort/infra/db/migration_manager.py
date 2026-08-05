@@ -326,7 +326,7 @@ class MigrationManager:
                     self._record_migration(conn, version, path.name)
                     current_version = version
                     logger.info("db: migration %s appliquee -> v%d", path.name, version)
-                except (OSError, PermissionError, TypeError, ValueError, sqlite3.DatabaseError) as exc:
+                except (OSError, TypeError, ValueError, sqlite3.DatabaseError) as exc:
                     logger.error("db: echec migration %s: %s", path.name, exc)
                     raise
 
@@ -349,7 +349,7 @@ class MigrationManager:
                 version_file = Path(__file__).resolve().parents[3] / "VERSION"
                 if version_file.is_file():
                     app_version = version_file.read_text(encoding="utf-8").strip()
-            except (OSError, PermissionError):
+            except OSError:
                 app_version = ""
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, name, app_version) VALUES (?, ?, ?)",

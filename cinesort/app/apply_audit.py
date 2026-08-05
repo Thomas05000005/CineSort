@@ -92,7 +92,7 @@ class ApplyAuditLogger:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._fh = self._path.open("a", encoding="utf-8")
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _log.warning("apply_audit: impossible d'ouvrir %s : %s — audit désactivé", self._path, exc)
             self._fh = None
 
@@ -131,7 +131,7 @@ class ApplyAuditLogger:
             try:
                 self._fh.write(line + "\n")
                 self._fh.flush()
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 _log.warning("apply_audit: écriture échouée %s : %s", event, exc)
 
     # --- API publique ---
@@ -299,7 +299,7 @@ def read_apply_audit(
                 out.append(event)
                 if limit is not None and len(out) >= int(limit):
                     break
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _log.warning("apply_audit: lecture échouée %s : %s", path, exc)
     return out
 

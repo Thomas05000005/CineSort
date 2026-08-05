@@ -42,7 +42,7 @@ def discover_plugins(plugins_dir: Optional[Path] = None) -> List[Dict[str, Any]]
     plugins: List[Dict[str, Any]] = []
     try:
         entries = sorted(pdir.iterdir(), key=lambda p: p.name.lower())
-    except (OSError, PermissionError):
+    except OSError:
         return []
     for entry in entries:
         if not entry.is_file():
@@ -241,5 +241,5 @@ def _run_plugin(
             logger.debug("[plugins] %s OK", plugin_path.name)
     except subprocess.TimeoutExpired:
         logger.warning("[plugins] %s timeout (%ds)", plugin_path.name, timeout_s)
-    except (OSError, FileNotFoundError) as exc:
+    except OSError as exc:
         logger.warning("[plugins] %s exec error: %s", plugin_path.name, exc)

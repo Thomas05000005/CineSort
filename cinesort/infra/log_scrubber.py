@@ -234,7 +234,7 @@ def install_rotating_log(
     log_dir = Path(log_dir)
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-    except (OSError, PermissionError):
+    except OSError:
         return None
     log_path = log_dir / filename
 
@@ -245,7 +245,7 @@ def install_rotating_log(
             backupCount=int(backup_count),
             encoding="utf-8",
         )
-    except (OSError, PermissionError):
+    except OSError:
         return None
 
     handler.setLevel(int(level))

@@ -87,7 +87,7 @@ def _read_tmdb_api_key_from_settings(state_dir: Path) -> str:
         # Memoire user : utf-8-sig OBLIGATOIRE pour tolerer le BOM PowerShell.
         raw = settings_file.read_text(encoding="utf-8-sig")
         data = json.loads(raw)
-    except (OSError, PermissionError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         logger.debug("poster_proxy settings read warn: %s", exc)
         return ""
     if not isinstance(data, dict):
@@ -148,7 +148,7 @@ def _build_or_get_tmdb_client(state_dir: Path) -> Optional[TmdbClient]:
             cache_path=state_dir / "tmdb_cache.json",
             timeout_s=10.0,
         )
-    except (OSError, PermissionError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         logger.warning("poster_proxy TmdbClient init failed: %s", exc)
         return None
 
@@ -510,7 +510,7 @@ def fetch_and_cache(
     # 7. Ecriture atomique.
     try:
         _atomic_write(cache_file, payload)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         logger.warning(
             "poster_proxy cache write error id=%d size=%s err=%s",
             tmdb_id,
@@ -726,7 +726,7 @@ def serve_poster(
     # 4. Lire les bytes.
     try:
         payload = cache_file.read_bytes()
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         logger.warning("poster_proxy cache read error file=%s err=%s", cache_file.name, exc)
         _respond_error_json(handler, 502, "runtime", "Upstream error")
         return

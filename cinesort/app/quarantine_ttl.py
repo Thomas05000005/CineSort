@@ -145,7 +145,7 @@ def _run_review_roots() -> List[Path]:
                     rr = child / REVIEW_FOLDER_NAME
                     if rr.is_dir():
                         out.append(rr)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _log.warning("run review roots: scan %s echec : %s", runs_root, exc)
     return out
 
@@ -225,7 +225,7 @@ def _stable_arrival_ts(fp: Path, default: float, *, anchor: Optional[Path] = Non
             continue
         try:
             st = target.stat()
-        except (OSError, PermissionError):
+        except OSError:
             continue
         for attr in ("st_ctime", "st_mtime"):
             raw = getattr(st, attr, None)
@@ -288,9 +288,9 @@ def _iter_review_files(root: Path) -> List[Path]:
             try:
                 if item.is_file() and not _is_ttl_manifest_file(item.name):
                     out.append(item)
-            except (OSError, PermissionError):
+            except OSError:
                 continue
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _log.warning("iter review files: %s erreur %s", root, exc)
     return out
 
@@ -366,7 +366,7 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
         for fp in files:
             try:
                 st = fp.stat()
-            except (OSError, PermissionError):
+            except OSError:
                 continue
             size = int(st.st_size)
             mtime = float(st.st_mtime)
@@ -487,10 +487,10 @@ def _purge_dir_recursive(
                 item.unlink()
                 stats["deleted"] += 1
                 stats["bytes_freed"] += size
-            except (OSError, PermissionError) as exc:
+            except OSError as exc:
                 stats["errors"] += 1
                 _log.warning("purge: unlink %s echec : %s", item, exc)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             stats["errors"] += 1
             _log.warning("purge: stat/iter %s echec : %s", item, exc)
 
@@ -506,7 +506,7 @@ def _purge_dir_recursive(
             for d in all_dirs:
                 with contextlib.suppress(OSError):
                     d.rmdir()  # echoue silencieusement si non vide
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             _log.warning("purge: cleanup dirs %s echec : %s", target, exc)
 
     return stats
@@ -608,11 +608,11 @@ def purge_review_bucket(
                                 child.unlink()
                                 top_stats["deleted"] += 1
                                 top_stats["bytes_freed"] += size
-                            except (OSError, PermissionError):
+                            except OSError:
                                 top_stats["errors"] += 1
-                except (OSError, PermissionError):
+                except OSError:
                     top_stats["errors"] += 1
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _log.warning("purge: iter top-level _review %s echec : %s", root, exc)
 
     payload["by_subdir"]["_top_quarantine"] = top_stats
@@ -707,11 +707,11 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
                             child.unlink()
                             top_stats["deleted"] += 1
                             top_stats["bytes_freed"] += size
-                        except (OSError, PermissionError):
+                        except OSError:
                             top_stats["errors"] += 1
-                except (OSError, PermissionError):
+                except OSError:
                     top_stats["errors"] += 1
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         _log.warning("purge_all: iter top-level _review echec : %s", exc)
 
     payload["by_subdir"]["_top_quarantine"] = top_stats

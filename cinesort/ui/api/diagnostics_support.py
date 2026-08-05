@@ -46,7 +46,7 @@ def debug_log(
     line = f"[{ts}] {safe_message}\n"
     try:
         append_text(state_dir / "debug_api.log", line)
-    except (OSError, PermissionError):
+    except OSError:
         return
     if run_id:
         try:
@@ -92,7 +92,7 @@ def write_crash_file(
     try:
         run_paths.run_dir.mkdir(parents=True, exist_ok=True)
         run_paths.run_dir.joinpath("crash.txt").write_text(content, encoding="utf-8")
-    except (OSError, PermissionError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         debug_log(
             api,
             state_dir=api._state_dir,
@@ -150,11 +150,11 @@ def file_logger(api: Any, run_paths: Any, *, env_truthy_fn: Callable[[str], bool
             run_paths.ui_log_txt.parent.mkdir(parents=True, exist_ok=True)
             with open(run_paths.ui_log_txt, "a", encoding="utf-8") as file_obj:
                 file_obj.write(f"[{ts}] {level}: {safe_msg}\n")
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             state_dir_guess = api._state_dir
             try:
                 state_dir_guess = run_paths.run_dir.parent.parent
-            except (OSError, PermissionError):
+            except OSError:
                 state_dir_guess = api._state_dir
             debug_log(
                 api,

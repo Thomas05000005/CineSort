@@ -92,7 +92,7 @@ def check_header(path: Path) -> Tuple[bool, str]:
 
     try:
         data = _read_header(path)
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         logger.debug("Integrity read error %s: %s", path, exc)
         return False, "read_error"
 
@@ -239,7 +239,7 @@ def check_tail(path: Path) -> Tuple[bool, str]:
                     return False, "fin de fichier nulle (MKV possiblement tronque)"
                 return True, "ok"
 
-    except (OSError, PermissionError) as exc:
+    except OSError as exc:
         return False, f"erreur lecture tail: {exc}"
 
     return True, "ok"

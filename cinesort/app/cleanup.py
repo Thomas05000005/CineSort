@@ -32,7 +32,7 @@ def _collect_root_all_empty_dirs(cfg: "Config") -> List[Path]:
     out: List[Path] = []
     try:
         entries = [p for p in cfg.root.iterdir() if p.is_dir()]
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return out
     for directory in entries:
         if is_dir_empty(directory):
@@ -125,7 +125,7 @@ def _classify_cleanable_residual_dir(cfg: "Config", path: Path) -> str:
                 return "ambiguous"
             if ext not in allowed_exts:
                 return "ambiguous"
-    except (PermissionError, OSError):
+    except OSError:
         return "ambiguous"
     return "eligible" if saw_file else "no_files"
 
@@ -138,7 +138,7 @@ def _collect_root_all_dirs(cfg: "Config") -> List[Path]:
     out: List[Path] = []
     try:
         entries = [p for p in cfg.root.iterdir() if p.is_dir()]
-    except (OSError, PermissionError, FileNotFoundError):
+    except OSError:
         return out
     for directory in entries:
         out.append(directory)

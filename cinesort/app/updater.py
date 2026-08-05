@@ -217,7 +217,7 @@ def _fetch_latest_release(github_repo: str, timeout_s: int) -> Optional[dict]:
         else:
             logger.warning("Updater: GitHub API HTTP %d sur %s", exc.code, github_repo)
         return None
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (URLError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         # UnicodeDecodeError (issue #516, meme scenario) : un serveur hostile
         # qui repond des octets non-UTF-8 faisait remonter l'exception jusqu'a
         # l'appelant. `UnicodeDecodeError` derive de ValueError, pas de

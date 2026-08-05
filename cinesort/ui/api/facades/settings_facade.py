@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from cinesort.ui.api import settings_support
 from cinesort.ui.api.facades._base import _BaseFacade
 
 
@@ -248,6 +249,4 @@ class SettingsFacade(_BaseFacade):
         Le dashboard consomme cet endpoint au demarrage et cache la valeur
         module-level (web/dashboard/core/api.js -> fetchConfidenceThresholds).
         """
-        from cinesort.ui.api.settings_support import get_confidence_thresholds_payload  # noqa: PLC0415
-
-        return get_confidence_thresholds_payload()
+        return settings_support.get_confidence_thresholds_payload()
