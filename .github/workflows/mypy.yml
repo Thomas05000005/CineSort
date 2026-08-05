@@ -19,6 +19,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Un nouveau push sur une PR rend le run precedent sans objet : on l'annule
+  # au lieu de le laisser occuper un slot. Mesure du 2026-08-03 : 247 runs
+  # perimes sur 999 en file, pour 16 slots d'execution.
+  # `github.sha` et NON `github.ref` pour les evenements hors PR : chaque commit
+  # de `main` obtient ainsi son PROPRE groupe, donc deux runs de `main` ne
+  # peuvent jamais s'annuler l'un l'autre — quelle que soit la facon dont
+  # `cancel-in-progress` est evalue.
+  #
+  # Mesure du 2026-08-04 : le run du commit ca85b282 (evenement `push`) a ete
+  # ANNULE alors que `cancel-in-progress` valait l'expression
+  # `github.event_name == 'pull_request'`, donc `false` pour un push. Le
+  # commentaire ci-dessous promet pourtant « sur main on laisse le run aller au
+  # bout : c'est la reference ». Il ne le faisait pas.
+  #
+  # Consequence concrete : relancer un ancien run de `main` le remet dans le
+  # groupe `CI-refs/heads/main` et tue le run du commit le PLUS RECENT — l'etat
+  # de reference de `main` devient alors inexploitable, ce qui est exactement le
+  # signal sur lequel s'appuie le suivi de la cascade.
+  #
+  # Le comportement voulu pour les PR est INCHANGE : `pull_request.number` reste
+  # la clef, donc un nouveau push sur une PR annule toujours son run precedent.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # Sur main, au contraire, on laisse le run aller au bout : c'est la reference.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   mypy:
     name: mypy check
@@ -27,7 +53,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
 
       - name: Setup Python 3.13
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6

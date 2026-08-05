@@ -229,17 +229,35 @@ class SQLiteStoreBackupIntegrationTests(unittest.TestCase):
         if backup_dir.exists():
             self.assertEqual(list(backup_dir.iterdir()), [])
 
-    def test_initialize_creates_backup_when_db_exists(self) -> None:
-        """Au 2e initialize, la DB existe -> backup pre_migration cree."""
+    def test_initialize_creates_backup_when_a_migration_is_pending(self) -> None:
+        """DB existante AVEC migration en attente -> backup pre_migration cree.
+
+        Nuance N28 (ultra-audit 2026-08-03) : le backup n'est plus pousse a
+        chaque boot — la rotation par mtime evincait alors tous les backups
+        riches en DEFAULT_MAX_BACKUPS lancements — mais uniquement quand le
+        schema va reellement bouger. On met donc en scene l'etat d'une base
+        apres mise a jour de l'application : `user_version` en retard.
+        """
         # 1er init pour creer la DB
         store1 = SQLiteStore(self.db_path, busy_timeout_ms=5000)
         store1.initialize()
-        # 2e init : la DB existe deja, donc backup
+        with closing(sqlite3.connect(str(self.db_path))) as conn:
+            current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            conn.execute(f"PRAGMA user_version = {max(0, current - 1)}")
+            conn.commit()
+        # 2e init : une migration est en attente, donc backup
         store2 = SQLiteStore(self.db_path, busy_timeout_ms=5000)
         store2.initialize()
         backups = store2.list_db_backups()
         self.assertGreaterEqual(len(backups), 1)
         self.assertIn("pre_migration", backups[0].name)
+
+    def test_initialize_skips_backup_when_nothing_to_migrate(self) -> None:
+        """Nuance N28 : boot nominal (schema deja a jour) = aucun backup pousse."""
+        SQLiteStore(self.db_path, busy_timeout_ms=5000).initialize()
+        store2 = SQLiteStore(self.db_path, busy_timeout_ms=5000)
+        store2.initialize()
+        self.assertEqual([p.name for p in store2.list_db_backups()], [])
 
     def test_backup_now_creates_named_backup(self) -> None:
         store = SQLiteStore(self.db_path, busy_timeout_ms=5000)
@@ -254,15 +272,23 @@ class SQLiteStoreBackupIntegrationTests(unittest.TestCase):
         result = store.backup_now(trigger="manual")
         self.assertIsNone(result)
 
-    def test_initialize_rotates_old_backups(self) -> None:
-        """Apres > DEFAULT_MAX_BACKUPS initialize, le nombre de backups est cap."""
+    def test_backup_now_rotates_old_backups(self) -> None:
+        """Apres > DEFAULT_MAX_BACKUPS backups, le nombre est cap.
+
+        Nuance N28 : la boucle passait auparavant par `initialize()`, qui
+        poussait un backup a chaque boot ; ce n'est plus le cas quand rien n'est
+        a migrer, et l'assertion `<= DEFAULT_MAX_BACKUPS` serait devenue vacante
+        (0 <= 5 toujours vrai). On exerce donc la rotation par le chemin qui la
+        declenche encore reellement en production : `backup_now` (hook
+        post-apply + UI Parametres), et on assert l'egalite stricte.
+        """
         store = SQLiteStore(self.db_path, busy_timeout_ms=5000)
-        store.initialize()  # 1er = pas de backup
+        store.initialize()
         for _ in range(DEFAULT_MAX_BACKUPS + 3):
-            SQLiteStore(self.db_path, busy_timeout_ms=5000).initialize()
+            self.assertIsNotNone(store.backup_now(trigger="post_apply"))
             time.sleep(0.001)
         backups = store.list_db_backups()
-        self.assertLessEqual(len(backups), DEFAULT_MAX_BACKUPS)
+        self.assertEqual(len(backups), DEFAULT_MAX_BACKUPS)
 
 
 class ApplyChangesIntegrationBackupTests(unittest.TestCase):

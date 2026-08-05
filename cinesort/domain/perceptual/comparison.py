@@ -65,6 +65,11 @@ def extract_aligned_frames(
     common_h_b = max(1, int(round(int(height_b) * common_w / max(1, int(width_b)))))
     # Prendre la plus petite hauteur pour uniformiser
     common_h = min(common_h_a, common_h_b)
+    if common_w <= 0 or common_h <= 0:
+        # Probe incomplet (largeur inconnue) : sans resolution cible, ffmpeg
+        # sortirait chaque frame en natif et la comparaison serait faussee
+        # (cf issue #559). Mieux vaut ne rien extraire.
+        return []
 
     # Bit depth commun : utiliser 8-bit pour la comparaison (normalise)
     bd = 8

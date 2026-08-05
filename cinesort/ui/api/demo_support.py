@@ -18,11 +18,12 @@ import logging
 import shutil
 import sqlite3
 import time
-import uuid
 from typing import Any, Dict, List, Tuple
 
 from cinesort.infra import state
+from cinesort.infra.run_id import generate_run_id
 from cinesort.ui.api._responses import err as _err_response
+from cinesort.ui.api.run_data_support import write_plan_jsonl
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
@@ -301,19 +302,44 @@ def _build_plan_row(film: Dict[str, Any], run_id: str) -> Dict[str, Any]:
 
 
 def _build_quality_metrics(film: Dict[str, Any]) -> Dict[str, Any]:
+    # Fix audit 2026-07-24 (couche all) : _build_library_rows (seul rendu de la
+    # vue Bibliotheque) lit EXCLUSIVEMENT metrics["detected"] avec les cles
+    # width/height/video_codec/duration_s/languages (cf library_support.py:331
+    # et le commentaire lib-1 v1.5.6 lignes 317-330). L'ancien schema
+    # metrics["video"]/["audio"] + duration_s/bitrate top-level n'etait relu
+    # nulle part -> tous les films demo affichaient codec="unknown", resolution
+    # degradee, duree 0 et audio_languages vides, cassant la raison d'etre meme
+    # du mode demo. On aligne sur le schema reel produit par
+    # cinesort/domain/quality_score.py:1622.
     width, height = _RESOLUTION_WH.get(str(film.get("resolution") or ""), (0, 0))
+    duration_s = 6300.0
+    bitrate_kbps = int(film["bitrate"])
+    # Estimation taille = debit (kbps) / 8 * duree (s) * 1000 octets, comme
+    # _estimate_file_size cote quality_score (bitrate en kbps -> octets).
+    file_size_bytes = int(bitrate_kbps / 8 * duration_s * 1000)
     return {
-        "video": {
-            "codec": str(film["video_codec"]),
+        "engine_version": "demo",
+        "profile_id": DEMO_PROFILE_ID,
+        "profile_version": DEMO_PROFILE_VERSION,
+        "probe_quality": "OK",
+        "detected": {
+            "resolution": str(film.get("resolution") or ""),
+            "resolution_source": "demo",
             "width": int(width),
             "height": int(height),
+            "bitrate_kbps": bitrate_kbps,
+            "video_codec": str(film["video_codec"]),
+            "bit_depth": 10,
+            "hdr_dolby_vision": False,
+            "hdr10_plus": False,
+            "hdr10": False,
+            "audio_tracks_count": 1,
+            "audio_best_codec": str(film["audio_codec"]),
+            "audio_best_channels": int(film["channels"]),
+            "languages": ["eng", "fra"],
+            "duration_s": duration_s,
+            "file_size_bytes": file_size_bytes,
         },
-        "audio": {
-            "codec": str(film["audio_codec"]),
-            "channels": int(film["channels"]),
-        },
-        "duration_s": 6300,
-        "bitrate_kbps": int(film["bitrate"]),
     }
 
 
@@ -331,11 +357,27 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
         )
 
     started = time.time()
-    run_id = f"demo_{int(started)}_{uuid.uuid4().hex[:6]}"
+    # CINQUIEME producteur de run_id, longtemps oublie : il rendait
+    # `demo_<epoch>_<hex6>`, hors du format canonique. Ce n'etait pas cosmetique.
+    # `state.clean_old_runs` trie les dossiers par NOM en ordre decroissant puis
+    # rmtree tout ce qui depasse `keep_last` : « demo_… » (0x64) trie AVANT tout
+    # « 2026… » (0x32), donc les dossiers demo etaient eternellement classes « les
+    # plus recents » et purgeaient de VRAIS runs a leur place. Mesure sur 10 runs
+    # canoniques + 2 runs demo avec keep_last=10 : 2 dossiers demo survivants,
+    # 2 runs reels detruits. C'est exactement l'argument #1 du docstring de
+    # `infra/run_id.py`, applique au producteur qui lui echappait.
+    #
+    # Rien ne dependait du prefixe : `_is_demo_run` / `_list_demo_run_ids` et
+    # `stop_demo_mode` resolvent les runs demo par `config_json['is_demo']`
+    # UNIQUEMENT (le seul autre litteral `demo_` du depot est DEMO_PROFILE_ID).
+    run_id = generate_run_id()
     config = {"is_demo": True, "demo_label": "CineSort démo", "root": DEMO_ROOT}
 
     try:
-        run_paths = state.new_run(state_dir, run_id)
+        # exclusive=True : le mode demo contourne le JobRunner (insert direct,
+        # sans le verrou de run actif). La reservation atomique du dossier est
+        # donc sa seule garde contre l'ecrasement d'un run existant.
+        run_paths = state.new_run(state_dir, run_id, exclusive=True)
         store.run.insert_run_pending(
             run_id=run_id,
             root=DEMO_ROOT,
@@ -345,10 +387,13 @@ def start_demo_mode(api: Any) -> Dict[str, Any]:
         )
         store.run.mark_run_running(run_id, started_ts=started)
 
-        with run_paths.plan_jsonl.open("w", encoding="utf-8") as fp:
-            for film in DEMO_FILMS:
-                row = _build_plan_row(film, run_id)
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Issue #479 site 3 : meme ecrivain de `plan.jsonl` que le scan reel,
+        # donc meme exigence — le mode demo produit un run que la Bibliotheque,
+        # les Doublons et l'Apply consomment exactement comme les autres.
+        write_plan_jsonl(
+            run_paths.plan_jsonl,
+            [_build_plan_row(film, run_id) for film in DEMO_FILMS],
+        )
 
         for film in DEMO_FILMS:
             store.quality.upsert_quality_report(

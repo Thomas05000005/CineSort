@@ -9721,6 +9721,16 @@ body.v5-notif-lock {
   font-size: var(--fs-sm);
   padding: var(--sp-2);
 }
+/* Issue #413 : repli sur cache TMDb expire. Avertissement, pas erreur — les
+   resultats affiches restent exploitables, ils sont juste peut-etre perimes. */
+.tmdb-manual-search-stale {
+  color: var(--warning, #b26a00);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  border-left: 3px solid var(--warning, #b26a00);
+  background: var(--surface-2, rgba(178, 106, 0, 0.06));
+}
 .tmdb-manual-search-results {
   list-style: none;
   margin: 0;

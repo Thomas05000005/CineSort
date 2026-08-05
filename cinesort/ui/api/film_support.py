@@ -19,6 +19,12 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
 from cinesort.infra import state
+
+# Import module-style (et non `from ... import TmdbClient`) : c'est la
+# convention du depot pour tout symbole que les tests substituent par
+# `patch("cinesort.infra.tmdb_client.TmdbClient", ...)` — une liaison par
+# `from` figerait la reference et rendrait le patch inoperant.
+from cinesort.infra import tmdb_client as _tmdb_client
 from cinesort.ui.api import film_history_support
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.settings_support import _SECRET_MASK, normalize_user_path
@@ -42,16 +48,23 @@ def _resolve_run_id(api: Any, run_id: Optional[str]) -> Optional[str]:
 
 
 def _find_plan_row(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
+    """Retourne LA row de plan demandee, sans materialiser tout le plan.
+
+    PERF (ultra-audit 2026-08, HIGH) : cette fonction appelait
+    `api.run.get_plan(run_id)`, qui serialise ET enrichit les N rows du run
+    (dont 2 connexions SQLite par row pour l'override TMDb), puis jetait les
+    N-1 autres. Mesure : 9,2 s et ~2000 connexions SQLite pour renvoyer UNE
+    ligne sur un plan de 1000 films. `history_support.get_plan_row` fait passer
+    la seule row voulue dans la MEME chaine d'enrichissement (alertes ignorees,
+    override TMDb, reconciliation des sous-titres, display_title,
+    auto_approvable) : memes champs en sortie, cout constant.
+    """
+    from cinesort.ui.api.history_support import get_plan_row  # noqa: PLC0415 — import tardif (cycle)
+
     try:
-        plan = api.run.get_plan(run_id)
+        return get_plan_row(api, str(run_id), str(row_id), normalize_user_path=normalize_user_path)
     except (OSError, AttributeError, KeyError, TypeError, ValueError):
         return None
-    if not plan or not plan.get("ok"):
-        return None
-    for r in plan.get("rows") or []:
-        if str(r.get("row_id") or "") == str(row_id):
-            return r
-    return None
 
 
 def _fetch_poster_url(api: Any, tmdb_id: int, size: str = "w500") -> Optional[str]:
@@ -76,11 +89,6 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
     out: Dict[str, Any] = {"runtime": None, "director": None, "overview": None}
     if not tmdb_id or int(tmdb_id) <= 0:
         return out
-    # Import lazy : TmdbClient n'est pas necessaire si pas de cle TMDb.
-    try:
-        from cinesort.infra.tmdb_client import TmdbClient
-    except ImportError:
-        return out
     try:
         # AUDIT F20 : _internal_settings() -> secrets EN CLAIR. get_settings()
         # renvoie tmdb_api_key MASQUEE ("••••••••") depuis SEC-H2, et le masque
@@ -99,7 +107,7 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
             cache_ttl_days = int(settings.get("tmdb_cache_ttl_days") or 30)
         except (TypeError, ValueError):
             cache_ttl_days = 30
-        client = TmdbClient(
+        client = _tmdb_client.TmdbClient(
             api_key=api_key,
             cache_path=state_dir / "tmdb_cache.json",
             timeout_s=float(settings.get("tmdb_timeout_s") or 10.0),
@@ -115,66 +123,22 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
         # pas append_to_response=credits). Ils partaient donc en GET NON CACHE a
         # chaque appel : 1 par ouverture de fiche film, et surtout N en parallele
         # quand la vue Doublons hydrate N groupes (un library/get_film_full par
-        # groupe, Promise.allSettled). On range desormais le resultat dans le
-        # cache local du client (meme tmdb_cache.json, meme TTL configure) sous
-        # une cle dediee : le 2e appel et les suivants ne touchent plus le reseau.
-        extras_key = f"movie_extras|{int(tmdb_id)}"
-        cached_extras: Any = None
+        # groupe, Promise.allSettled). Le cache (meme tmdb_cache.json, meme TTL
+        # configure, cle `movie_extras|{id}`) est desormais tenu par le client.
+        #
+        # Issue #599 : cet appel etait un `requests` direct, donc hors du circuit
+        # breaker ET hors de la session a retry/backoff du client — la fiche
+        # film ne respectait pas le `Retry-After` de TMDb sur 429, alors que la
+        # vue Doublons l'ouvre en rafale. Il est maintenant porte par
+        # `TmdbClient.get_movie_extras`, comme tous les autres appels TMDb.
+        extras: Any = None
         with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
-            cached_extras = client._cache_get(extras_key)
-        if isinstance(cached_extras, dict):
-            out["director"] = cached_extras.get("director") or None
-            out["overview"] = cached_extras.get("overview") or None
+            extras = client.get_movie_extras(int(tmdb_id))
+        if isinstance(extras, dict):
+            out["director"] = extras.get("director") or None
+            out["overview"] = extras.get("overview") or None
             if not out.get("runtime"):
-                out["runtime"] = cached_extras.get("runtime") or None
-        else:
-            # Miss (ou cache indisponible) : appel HTTP frais avec
-            # append_to_response=credits pour recuperer crew -> Director.
-            try:
-                import requests as _req
-
-                r = _req.get(
-                    f"https://api.themoviedb.org/3/movie/{int(tmdb_id)}",
-                    params={
-                        "api_key": api_key,
-                        "language": "fr-FR",
-                        "append_to_response": "credits",
-                    },
-                    timeout=float(settings.get("tmdb_timeout_s") or 10.0),
-                )
-                if r.status_code == 200:
-                    data = r.json() or {}
-                    # Director : prend le premier crew member job=Director
-                    credits = data.get("credits") or {}
-                    crew = credits.get("crew") or []
-                    for c in crew:
-                        if str(c.get("job") or "").lower() == "director":
-                            out["director"] = str(c.get("name") or "").strip() or None
-                            break
-                    out["overview"] = str(data.get("overview") or "").strip() or None
-                    # Runtime aussi en fallback si pas deja recupere
-                    fresh_runtime: Optional[int] = None
-                    try:
-                        rt = int(data.get("runtime") or 0)
-                        fresh_runtime = rt if rt > 0 else None
-                    except (TypeError, ValueError):
-                        fresh_runtime = None
-                    if not out.get("runtime"):
-                        out["runtime"] = fresh_runtime
-                    # On ne memorise QUE les reponses 200 : une erreur reseau ou
-                    # un 401 doit etre reessaye au prochain appel, pas fige pour
-                    # la duree du TTL.
-                    with contextlib.suppress(AttributeError, OSError, TypeError, ValueError):
-                        client._cache_set(
-                            extras_key,
-                            {
-                                "director": out.get("director"),
-                                "overview": out.get("overview"),
-                                "runtime": out.get("runtime") or fresh_runtime,
-                            },
-                        )
-            except (OSError, ImportError, KeyError, TypeError, ValueError) as exc:
-                logger.debug("tmdb extras http fetch error: %s", exc)
+                out["runtime"] = extras.get("runtime") or None
         with contextlib.suppress(OSError, AttributeError):
             client.flush()
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -213,6 +177,22 @@ def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]
     return 0
 
 
+#: Marqueur pose sur une row UNIQUEMENT quand `film_tmdb_overrides` a ete lue
+#: AVEC SUCCES pour cette row (qu'un override existe ou non).
+#:
+#: Revue adversaire PR #849 : le seul signal qui prouve « l'overlay a tourne »
+#: doit etre pose par l'overlay lui-meme, sur son chemin de succes. Inferer ce
+#: succes depuis un autre champ (`display_title`, pose de toute facon par
+#: `history_support._enrich_plan_payload` APRES un `contextlib.suppress`) fait
+#: passer un echec silencieux pour un succes -> le choix TMDb manuel de
+#: l'utilisateur disparait de la Bibliotheque (bug R7-3 re-ouvert).
+#:
+#: Contrat : marqueur ABSENT => la lecture n'a pas abouti (store None, run_id/
+#: row_id vide, erreur SQLite/OS...) => tout consommateur en aval DOIT refaire
+#: l'overlay lui-meme. Fail-closed : en cas de doute on relit.
+TMDB_OVERLAY_DONE_KEY = "_tmdb_overlay_done"
+
+
 def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]) -> bool:
     """AUDIT 2026-06-14 (R7-3) : applique l'override TMDb manuel sur une row dict.
 
@@ -223,6 +203,12 @@ def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]
     overlay tmdb_id/chosen_tmdb_id/proposed_title/proposed_year/confidence depuis
     l'override. Sans override -> no-op (comportement inchange). Reversible : la
     table reste la source, on n'ecrit pas le plan (clear_tmdb_override suffit).
+
+    Effet de bord voulu : pose `TMDB_OVERLAY_DONE_KEY` sur la row des que la
+    lecture de la table a abouti (voir la constante). La valeur de retour, elle,
+    ne dit que « un override a ete APPLIQUE » : elle vaut False aussi bien quand
+    la lecture a echoue que quand il n'y a simplement rien a appliquer, donc
+    elle ne peut PAS servir de signal « l'overlay a tourne ».
     """
     if not isinstance(row, dict) or store is None:
         return False
@@ -232,22 +218,164 @@ def overlay_tmdb_override(store: Any, run_id: Optional[str], row: Dict[str, Any]
         return False
     try:
         ov = store.film_modal.get_tmdb_override(run_id=rid, row_id=row_id)
-    except (AttributeError, OSError, TypeError, ValueError):
+    # Regle 4 du CLAUDE.md : sqlite3.Error n'herite PAS d'OSError. Sans lui, une
+    # base verrouillee remontait ici en exception nue -> chemin divergent selon
+    # l'appelant (avalee par le `contextlib.suppress(Exception)` de
+    # _enrich_plan_payload, mais fatale a toute la vue Bibliotheque).
+    except (AttributeError, OSError, TypeError, ValueError, sqlite3.Error) as exc:
+        # PAS de marqueur : la row n'a pas d'etat d'override fiable, l'appelant
+        # suivant doit refaire le travail.
+        logger.debug("overlay_tmdb_override read failed run_id=%s row_id=%s: %s", rid, row_id, exc)
         return False
-    if not ov:
+    # Lecture aboutie : cette row porte desormais l'etat authoritatif de
+    # film_tmdb_overrides. Le marqueur est pose ICI, et sur le chemin GROUPE
+    # dans `apply_tmdb_overrides_bulk` — les deux seules fonctions qui savent
+    # qu'une lecture a abouti. Jamais chez un appelant (cf. la constante).
+    row[TMDB_OVERLAY_DONE_KEY] = True
+    return apply_tmdb_override(row, ov)
+
+
+def apply_tmdb_override(row: Dict[str, Any], override: Optional[Dict[str, Any]]) -> bool:
+    """Applique un override DEJA LU sur une row dict. Fonction pure (zero I/O).
+
+    Extraite de `overlay_tmdb_override` (dont elle garde la semantique champ
+    pour champ) pour que les appelants qui traitent un LOT de rows puissent
+    lire les overrides en une seule requete (`list_tmdb_overrides_bulk`) au
+    lieu d'ouvrir 2 connexions SQLite par row.
+
+    Ne pose deliberement PAS `TMDB_OVERLAY_DONE_KEY` : recevant un override
+    deja lu, elle ne peut pas distinguer « pas d'override pour cette row » de
+    « la lecture a echoue » — `override=None` vaut pour les deux. Le marqueur
+    appartient aux fonctions qui font la lecture (`overlay_tmdb_override` et
+    `apply_tmdb_overrides_bulk`).
+    """
+    if not isinstance(row, dict) or not override:
         return False
-    tid = int(ov.get("tmdb_id") or 0)
+    tid = int(override.get("tmdb_id") or 0)
     if tid > 0:
         row["tmdb_id"] = tid
         row["chosen_tmdb_id"] = tid
-    if ov.get("proposed_title"):
-        row["proposed_title"] = str(ov["proposed_title"])
-    if int(ov.get("proposed_year") or 0) > 0:
-        row["proposed_year"] = int(ov["proposed_year"])
-    conf = int(ov.get("new_confidence") or 0)
+    if override.get("proposed_title"):
+        row["proposed_title"] = str(override["proposed_title"])
+    if int(override.get("proposed_year") or 0) > 0:
+        row["proposed_year"] = int(override["proposed_year"])
+    conf = int(override.get("new_confidence") or 0)
     if conf > 0:
         row["confidence"] = conf
     return True
+
+
+def list_tmdb_overrides_bulk(store: Any, run_id: Optional[str]) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Tous les overrides TMDb d'un run, en UNE requete. Cf `apply_tmdb_override`.
+
+    PERF (ultra-audit 2026-08, CRITICAL) : `film_modal.get_tmdb_override`
+    enchaine `_ensure_tables()` (1 connexion) puis `_managed_conn()` (2e
+    connexion), soit EXACTEMENT 2 ouvertures de connexion SQLite par appel.
+    Applique par row sur un plan entier, cela donnait 2N connexions : 40 s et
+    2002 connexions mesurees pour 1000 films, meme quand la table est vide.
+    Le cout n'est pas le SELECT (~0,003 ms) mais l'ouverture de connexion
+    (~14 ms : `apply_pragmas` ecrit dans `pragma_history` a chaque ouverture).
+
+    Retour :
+      - `{}`   : run sans aucun override (cas normal, rien a appliquer) ;
+      - dict   : {row_id: override} au meme format que `get_tmdb_override` ;
+      - `None` : lecture bulk indisponible (store/table/repo hors service) OU
+        seulement PARTIELLE (au moins une ligne de la table indecodable).
+        Les deux cas sont volontairement distincts pour que l'appelant puisse
+        retomber sur le chemin par row plutot que de servir un plan
+        silencieusement prive de ses overrides.
+
+    Fail-closed (contrat `TMDB_OVERLAY_DONE_KEY`, PR #849) : un resultat
+    PARTIEL rendrait ce contrat menteur. L'appelant marque les rows « override
+    a jour » sur la foi d'un dict non-`None` ; une ligne silencieusement omise
+    ferait donc disparaitre le choix TMDb manuel de l'utilisateur SANS que la
+    Bibliotheque relise (bug R7-3 re-ouvert). Une seule ligne illisible suffit
+    donc a rendre `None` — exactement ce que fait deja le chemin par row, ou
+    `get_tmdb_override` leve sur les memes conversions et laisse
+    `overlay_tmdb_override` repartir sans marqueur.
+    """
+    rid = str(run_id or "")
+    repo = getattr(store, "film_modal", None) if store is not None else None
+    if repo is None or not rid:
+        return None
+    # Acces aux helpers du repository : `film_tmdb_overrides` n'expose pas de
+    # lecture par run, et ces helpers sont precisement le contrat documente de
+    # `_BaseRepository` (delegation vers le SQLiteStore parent).
+    try:
+        repo._ensure_tables()  # noqa: SLF001
+        with repo._managed_conn() as conn:  # noqa: SLF001
+            cur = conn.execute(
+                """
+                SELECT row_id, tmdb_id, new_confidence, proposed_title, proposed_year, chosen_at
+                FROM film_tmdb_overrides
+                WHERE run_id=?
+                """,
+                (rid,),
+            )
+            fetched = cur.fetchall()
+    # sqlite3.Error n'herite PAS d'OSError (regle projet) : sans lui, un
+    # 'database is locked' pendant un apply concurrent remonterait au lieu de
+    # rendre la main au chemin par row.
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+        logger.debug("list_tmdb_overrides_bulk unavailable: %s", exc)
+        return None
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in fetched:
+        try:
+            out[str(r["row_id"])] = {
+                "tmdb_id": int(r["tmdb_id"]),
+                "new_confidence": int(r["new_confidence"]),
+                "proposed_title": str(r["proposed_title"] or ""),
+                "proposed_year": int(r["proposed_year"] or 0),
+                "chosen_at": float(r["chosen_at"]),
+            }
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            # Resultat PARTIEL : on rend `None` au lieu de sauter la ligne. Cf.
+            # la docstring — un dict ampute ferait poser le marqueur d'overlay
+            # sur des rows dont l'override n'a PAS ete applique.
+            logger.debug("list_tmdb_overrides_bulk partial read, falling back to per-row: %s", exc)
+            return None
+    return out
+
+
+def apply_tmdb_overrides_bulk(
+    rows: Any,
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> int:
+    """Applique un LOT d'overrides deja lus et pose le marqueur d'overlay.
+
+    Pendant groupe de `overlay_tmdb_override` : meme contrat, meme endroit ou
+    le marqueur est ecrit (dans film_support, sur une lecture ABOUTIE), mais
+    une seule requete pour tout le run au lieu de 2 connexions SQLite par row.
+
+    `overrides is None` (lecture bulk indisponible ou partielle) => aucune row
+    n'est touchee et AUCUNE n'est marquee : l'appelant doit repasser par le
+    chemin par row. Une row sans `row_id`, ou dont l'application echoue, ne
+    recoit pas non plus le marqueur — fail-closed jusqu'au grain de la row.
+
+    Retourne le nombre de rows sur lesquelles un override a ete APPLIQUE (les
+    autres rows lues restent marquees : marqueur != override applique).
+    """
+    if overrides is None:
+        return 0
+    applied = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        row_id = str(row.get("row_id") or "")
+        if not row_id:
+            # Meme regle que `overlay_tmdb_override` : sans row_id il n'y a pas
+            # d'etat d'override connu pour cette row.
+            continue
+        try:
+            if apply_tmdb_override(row, overrides.get(row_id)):
+                applied += 1
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            # Pas de marqueur pour CETTE row : son etat d'override est douteux.
+            logger.debug("apply_tmdb_overrides_bulk failed row_id=%s: %s", row_id, exc)
+            continue
+        row[TMDB_OVERLAY_DONE_KEY] = True
+    return applied
 
 
 def get_film_full(api: Any, run_id: Optional[str], row_id: str) -> Dict[str, Any]:
