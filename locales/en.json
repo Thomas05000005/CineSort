@@ -454,6 +454,7 @@
     "title_undo_done": "Undo finished",
     "title_scan_error": "Scan error",
     "title_critical_error": "Critical error",
+    "title_undo_unavailable": "Apply CANNOT be undone",
     "scan_done_body": "{{count}} movie(s) detected in {{elapsed}}s.",
     "apply_done_body": "{{renames}} renamed, {{moves}} moved, {{errors}} error(s).",
     "undo_done_body": "{{done}} restored, {{failed}} failed."
@@ -486,6 +487,7 @@
     "payload_tmdb_ids_invalid": "Invalid payload: 'tmdb_ids' must be a list.",
     "row_ids_required": "row_ids list is required.",
     "no_reversible_apply": "No reversible apply to undo.",
+    "undo_unavailable_after_apply": "Files were moved successfully, but the undo journal could not be finalized (database unavailable): this apply CANNOT be undone. Check the apply log before doing anything else.",
     "preview_undo_ready": "Undo preview ready.",
     "no_reversible_op_available": "No reversible operation available.",
     "no_reversible_op_pending": "No reversible operation pending for the selected movies.",

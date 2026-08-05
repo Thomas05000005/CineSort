@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
 # --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
@@ -307,7 +308,7 @@ def build_naming_context(
     # Probe audio (meilleure piste)
     audio_tracks = probe.get("audio_tracks") or []
     if audio_tracks:
-        best = audio_tracks[0]
+        best = _best_audio_track(audio_tracks)
         ctx["audio_codec"] = _codec_label(best.get("codec"))
         channels = best.get("channels")
         ctx["channels"] = _channels_label(channels) if channels else ""
@@ -555,6 +556,32 @@ def _channels_label(channels: Any) -> str:
     return _format_audio_channels(channels, invalid="")
 
 
+def _audio_track_sort_key(track: Dict[str, Any]) -> Tuple[int, int, int]:
+    codec = str(track.get("codec") or "").strip().lower()
+    rank = _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    return (rank, _as_int(track.get("channels")), _as_int(track.get("bitrate")))
+
+
+def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Meilleure piste audio pour les placeholders {audio_codec}/{channels}.
+
+    Aligne sur `quality_score._best_audio_track` (R8-039) : rang codec d'abord
+    (lossless > lossy), puis canaux, puis bitrate. Avant, `audio_tracks[0]`
+    prenait l'ordre du conteneur -> une piste lossy compatible pouvait etiqueter
+    le fichier avec un codec inferieur a la vraie meilleure piste.
+    """
+    if not audio_tracks:
+        return {}
+    return max(audio_tracks, key=_audio_track_sort_key)
+
+
 # --- Conformance check ----------------------------------------------------
 
 
@@ -563,17 +590,43 @@ def folder_matches_template(
     template: str,
     title: str,
     year: int,
+    *,
+    edition: str = "",
+    separator: Optional[str] = None,
 ) -> bool:
     """Verifie si un nom de dossier correspond au resultat attendu du template.
 
-    Compare le nom normalise du dossier avec le resultat formate du template.
-    Le template est applique avec un contexte minimal (title + year) puis
-    compare au dossier via normalisation tokens.
+    Le contrat est : « ce dossier porte-t-il DEJA le nom que le renommage
+    ecrirait ? ». La reponse doit donc etre calculee avec **exactement** la
+    meme chaine de rendu que les ecrivains reels (`apply_core.apply_single` et
+    son miroir `duplicate_support.planned_target_folder`), sinon la conformance
+    diverge de l'apply et on propose des renommages sans effet.
+
+    Ces ecrivains appellent `build_naming_context(title=, year=, edition=,
+    separator=)` — ni probe, ni qualite, ni tmdb_id. Les placeholders
+    `{resolution}`, `{video_codec}`, `{tmdb_tag}`, `{quality}`, `{score}`... ne
+    sont donc JAMAIS alimentes sur le chemin de renommage (seul l'apercu des
+    reglages, `cinesort_api`, leur passe un probe). Un dossier qui porte un de
+    ces segments n'est pas conforme : l'apply lui retirerait. Les elargir ici
+    (regex `.*` sur placeholder variable) rendrait la conformance PLUS permissive
+    que l'ecrivain et casserait l'invariant « planned == apply par construction »
+    (cf. `duplicate_support.planned_target_folder`). Cf. #469.
+
+    `edition` et `separator`, eux, SONT alimentes par les ecrivains : sans eux un
+    dossier « Titre (Annee) {edition-Director's Cut} » produit par l'apply etait
+    juge non conforme a son propre template.
+
+    Args:
+        folder_name: nom de dossier existant sur disque.
+        template: `cfg.naming_movie_template`.
+        title / year: identite retenue pour ce film.
+        edition: edition detectee (`row.edition`), telle que passee a l'apply.
+        separator: `cfg.separator`, tel que passe a l'apply (None -> defaut " ").
     """
     if not folder_name or not title:
         return False
 
-    ctx = build_naming_context(title=title, year=year)
+    ctx = build_naming_context(title=title, year=year, edition=edition or "", separator=separator)
     expected = format_movie_folder(template, ctx)
 
     # Comparaison normalisee (ignorer casse, espaces multiples)
