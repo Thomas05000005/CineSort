@@ -7,8 +7,10 @@ Couvre :
   store + batch_id pour permettre atomic_move.
 - Helper atomic_move : utilise journal si record_op porte journal_store,
   sinon fallback shutil.move direct.
-- reconcile_pending_moves : 4 verdicts (completed, rolled_back, duplicated,
-  lost) + cleanup de l'entree dans tous les cas.
+- reconcile_pending_moves : verdicts (completed, rolled_back, duplicated, lost,
+  mismatched, unverified) + cleanup de l'entree dans tous les cas.
+- Issue #512 : `completed` exige la verification d'identite du fichier a dst
+  (src_sha1 + src_size releves avant le move), pas un simple `exists()`.
 - Mixin _apply_mixin : insert/delete/list/count pending moves.
 """
 
@@ -18,19 +20,26 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 
+from cinesort.app.apply_core import sha1_quick
 from cinesort.app.move_journal import (
     RecordOpWithJournal,
     atomic_move,
     journaled_move,
 )
 from cinesort.app.move_reconciliation import (
+    _classify_dst_present,
     _classify_pending,
+    _dir_contains_fingerprint,
+    _file_matches_fingerprint,
     reconcile_at_boot,
     reconcile_pending_moves,
 )
-from cinesort.infra.db.sqlite_store import SQLiteStore
+from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
+from cinesort.ui.api import cinesort_api as backend
+from cinesort.ui.api import runtime_support
 
 
 def _make_store() -> tuple[SQLiteStore, Path]:
@@ -405,6 +414,293 @@ class ReconcileAtBootTests(unittest.TestCase):
         )
         report = reconcile_at_boot(self.store, notify=notify)
         self.assertEqual(len(report["lost"]), 1)
+
+
+class ClassifyPendingIdentityTests(unittest.TestCase):
+    """Issue #512 — `completed` doit etre PROUVE, pas deduit de `exists()`.
+
+    `apply_pending_moves` stocke l'empreinte relevee avant le move (`src_sha1`,
+    `src_size`). Sans la consulter, un simple homonyme a dst (ancien apply
+    skippe, re-scan, fichier remis a la main) faisait rendre `completed` sur un
+    fichier DIFFERENT : l'entree pending etait supprimee, la trace du
+    deplacement perdue, et l'undo n'avait plus rien a defaire.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_reconcile_identity_"))
+        self.src = self._tmp / "src.mkv"
+        self.dst = self._tmp / "dst.mkv"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    @staticmethod
+    def _entry(src: Path, dst: Path, *, sha1: str | None, size: int | None, op_type: str = "MOVE_FILE") -> dict:
+        return {
+            "id": 1,
+            "src_path": str(src),
+            "dst_path": str(dst),
+            "op_type": op_type,
+            "src_sha1": sha1,
+            "src_size": size,
+        }
+
+    def _write(self, path: Path, payload: bytes) -> tuple[str, int]:
+        """Ecrit `payload` et retourne l'empreinte telle que l'apply la releve."""
+        path.write_bytes(payload)
+        return sha1_quick(path), path.stat().st_size
+
+    # --- MOVE_FILE ---------------------------------------------------------
+
+    def test_dst_est_bien_le_fichier_deplace_donne_completed(self) -> None:
+        sha1, size = self._write(self.dst, b"le vrai film" * 64)
+        entry = self._entry(self.src, self.dst, sha1=sha1, size=size)
+        self.assertEqual(_classify_pending(entry), "completed")
+
+    def test_homonyme_de_meme_taille_mais_autre_contenu_nest_pas_completed(self) -> None:
+        """Le coeur du defaut : meme nom, meme taille, contenu DIFFERENT."""
+        payload = b"le vrai film" * 64
+        reference = self._tmp / "reference.mkv"
+        expected_sha1, expected_size = self._write(reference, payload)
+        # Un AUTRE fichier, exactement de la meme taille, occupe la destination.
+        self.dst.write_bytes(b"un autre film" * 59 + b"@" * (len(payload) - len(b"un autre film" * 59)))
+        self.assertEqual(self.dst.stat().st_size, expected_size, "le leurre doit avoir la meme taille")
+        entry = self._entry(self.src, self.dst, sha1=expected_sha1, size=expected_size)
+        self.assertEqual(_classify_pending(entry), "mismatched")
+
+    def test_homonyme_de_taille_differente_nest_pas_completed(self) -> None:
+        _, expected_size = self._write(self._tmp / "reference.mkv", b"x" * 4096)
+        self.dst.write_bytes(b"y" * 128)
+        entry = self._entry(self.src, self.dst, sha1="a" * 40, size=expected_size)
+        self.assertEqual(_classify_pending(entry), "mismatched")
+
+    def test_meme_sha1_quick_mais_taille_differente_nest_pas_completed(self) -> None:
+        """La comparaison de taille est une GARDE, pas un simple pre-filtre.
+
+        `sha1_quick` (apply_core.py:273) ne hashe QUE les 8 premiers Mo et les 8
+        derniers Mo des que le fichier atteint 16 Mio. Deux fichiers de tailles
+        differentes qui partagent ces deux extremites ont donc le MEME
+        sha1_quick : sans la comparaison de taille, l'impostuer passerait
+        `completed`. Ce test construit exactement cette collision.
+        """
+        block = bytes(range(256)) * 4096  # 1 Mio deterministe
+        tail = block[::-1]
+
+        def _forge(path: Path, filler: bytes) -> None:
+            with path.open("wb") as handle:
+                for _ in range(8):  # 8 Mio de tete, identiques
+                    handle.write(block)
+                handle.write(filler)  # seul le ventre differe
+                for _ in range(8):  # 8 Mio de queue, identiques
+                    handle.write(tail)
+
+        reference = self._tmp / "reference.mkv"
+        _forge(reference, b"\x01")
+        _forge(self.dst, b"\x01\x02")
+        expected_sha1, expected_size = sha1_quick(reference), reference.stat().st_size
+
+        self.assertEqual(
+            sha1_quick(self.dst),
+            expected_sha1,
+            "prealable du test : les deux fichiers doivent bien collisionner sur sha1_quick",
+        )
+        self.assertNotEqual(self.dst.stat().st_size, expected_size, "prealable : tailles differentes")
+
+        entry = self._entry(self.src, self.dst, sha1=expected_sha1, size=expected_size)
+        self.assertEqual(_classify_pending(entry), "mismatched")
+
+    def test_sans_empreinte_enregistree_le_verdict_reste_completed(self) -> None:
+        """Retro-compat : lignes anterieures aux colonnes d'empreinte."""
+        self.dst.write_bytes(b"peu importe")
+        self.assertEqual(_classify_pending(self._entry(self.src, self.dst, sha1=None, size=None)), "completed")
+        self.assertEqual(_classify_pending(self._entry(self.src, self.dst, sha1="", size=0)), "completed")
+
+    def test_taille_illisible_dans_la_ligne_ne_bloque_pas(self) -> None:
+        """Une `src_size` non entiere (ligne corrompue) ne fait pas planter le boot."""
+        self.dst.write_bytes(b"peu importe")
+        entry = self._entry(self.src, self.dst, sha1="a" * 40, size=None)
+        entry["src_size"] = "pas-un-entier"
+        self.assertEqual(_classify_pending(entry), "completed")
+
+    # --- MOVE_DIR : l'empreinte est celle de la video INTERNE ---------------
+
+    def test_move_dir_contenant_la_video_attendue_donne_completed(self) -> None:
+        """`apply_single` hashe la video principale, pas le dossier."""
+        moved_dir = self._tmp / "Inception (2010)"
+        moved_dir.mkdir()
+        (moved_dir / "Extras").mkdir()
+        (moved_dir / "movie.nfo").write_bytes(b"<nfo/>")
+        sha1, size = self._write(moved_dir / "movie.mkv", b"pellicule" * 512)
+        entry = self._entry(self.src, moved_dir, sha1=sha1, size=size, op_type="MOVE_DIR")
+        self.assertEqual(_classify_pending(entry), "completed")
+
+    def test_move_dir_sans_la_video_attendue_nest_pas_completed(self) -> None:
+        payload = b"pellicule" * 512
+        expected_sha1, expected_size = self._write(self._tmp / "reference.mkv", payload)
+        squatter = self._tmp / "Inception (2010)"
+        squatter.mkdir()
+        # Meme taille, autre contenu : le pre-filtre taille ne suffit pas.
+        (squatter / "movie.mkv").write_bytes(b"autre film" * 460 + b"#" * (len(payload) - 4600))
+        self.assertEqual((squatter / "movie.mkv").stat().st_size, expected_size)
+        entry = self._entry(self.src, squatter, sha1=expected_sha1, size=expected_size, op_type="MOVE_DIR")
+        self.assertEqual(_classify_pending(entry), "mismatched")
+
+    # --- indecidable -------------------------------------------------------
+
+    def test_dst_disparu_entre_exists_et_stat_donne_unverified(self) -> None:
+        """TOCTOU reel : `exists()` a dit oui, la verification ne trouve plus rien.
+
+        On ne transforme pas cette ignorance en `completed`.
+        """
+        entry = self._entry(self.src, self.dst, sha1="a" * 40, size=1024)
+        self.assertFalse(self.dst.exists())
+        self.assertEqual(_classify_dst_present(entry, self.dst), "unverified")
+
+    def test_scan_de_dossier_impossible_donne_unverified(self) -> None:
+        """`iterdir()` sur ce qui n'est pas un dossier -> indecidable, pas False."""
+        self.dst.write_bytes(b"je suis un fichier")
+        self.assertIsNone(_dir_contains_fingerprint(self.dst, "a" * 40, 18))
+
+    def test_empreinte_de_fichier_disparu_est_indecidable(self) -> None:
+        self.assertIsNone(_file_matches_fingerprint(self._tmp / "jamais.mkv", "a" * 40, 10))
+
+
+class ReconcileIdentityReportTests(unittest.TestCase):
+    """Issue #512 — le verdict d'identite doit remonter dans le rapport."""
+
+    def setUp(self) -> None:
+        self.store, self._tmp = _make_store()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_dst_occupe_par_un_autre_fichier_nest_pas_compte_completed(self) -> None:
+        payload = b"le vrai film" * 128
+        reference = self._tmp / "reference.mkv"
+        reference.write_bytes(payload)
+        expected_sha1 = sha1_quick(reference)
+        expected_size = reference.stat().st_size
+
+        dst = self._tmp / "dst.mkv"
+        dst.write_bytes(b"impostuer!!!" * 128)
+        self.assertEqual(dst.stat().st_size, expected_size, "le leurre doit avoir la meme taille")
+
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self._tmp / "src.mkv"),
+            dst_path=str(dst),
+            src_sha1=expected_sha1,
+            src_size=expected_size,
+        )
+        report = reconcile_pending_moves(self.store)
+
+        self.assertEqual(report["examined"], 1)
+        self.assertEqual(report["completed"], 0, "un fichier different n'est pas un move termine")
+        self.assertEqual(len(report["mismatched"]), 1)
+        self.assertTrue(
+            any("IDENTITE INCOHERENTE" in m for m in report["messages"]),
+            f"message d'alerte attendu: {report['messages']}",
+        )
+        self.assertEqual(self.store.apply.count_pending_moves(), 0, "l'entree reste nettoyee")
+
+    def test_dst_verifie_reste_compte_completed(self) -> None:
+        dst = self._tmp / "dst.mkv"
+        dst.write_bytes(b"le vrai film" * 128)
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self._tmp / "src.mkv"),
+            dst_path=str(dst),
+            src_sha1=sha1_quick(dst),
+            src_size=dst.stat().st_size,
+        )
+        report = reconcile_pending_moves(self.store)
+        self.assertEqual(report["completed"], 1)
+        self.assertEqual(report["mismatched"], [])
+        self.assertEqual(report["messages"], [])
+
+    def test_mismatch_declenche_la_notification_de_boot(self) -> None:
+        notify = MagicMock()
+        notify.notify = MagicMock()
+        dst = self._tmp / "dst.mkv"
+        dst.write_bytes(b"impostuer" * 100)
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self._tmp / "src.mkv"),
+            dst_path=str(dst),
+            src_sha1="d" * 40,
+            src_size=dst.stat().st_size,
+        )
+        report = reconcile_at_boot(self.store, notify=notify)
+        self.assertEqual(len(report["mismatched"]), 1)
+        notify.notify.assert_called_once()
+        args, _kwargs = notify.notify.call_args
+        self.assertEqual(args[0], "error")
+
+
+class ReconcileBootSummaryLogTests(unittest.TestCase):
+    """Issue #512 — la ligne de synthese du boot ne doit pas taire les nouveaux verdicts.
+
+    Elle ne loguait que examined / completed / rolled_back / duplicated / lost :
+    une entree `mismatched`, pourtant qualifiee de critique, s'affichait
+    « 1 examinee, 0 completed, 0 rolled_back, 0 duplicated, 0 lost ». Le detail
+    partait bien en `error`, mais la synthese, elle, mentait.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_reconcile_boot_log_"))
+        self.state_dir = self._tmp / "state"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        runtime_support._RECONCILED_STATE_DIRS.clear()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _seed_pending(self, *, sha1: str, size: int, payload: bytes) -> None:
+        """Pose une entree pending dont la source a disparu et dont dst existe."""
+        store = SQLiteStore(db_path_for_state_dir(self.state_dir), busy_timeout_ms=5000)
+        store.initialize()
+        dst = self._tmp / "dst.mkv"
+        dst.write_bytes(payload)
+        store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self._tmp / "disparu.mkv"),
+            dst_path=str(dst),
+            src_sha1=sha1,
+            src_size=size if size >= 0 else dst.stat().st_size,
+        )
+        store.close()
+
+    def _boot_summary(self) -> str:
+        """Boot reel via `_get_or_create_infra` ; retourne la ligne de synthese."""
+        runtime_support._RECONCILED_STATE_DIRS.clear()
+        api = backend.CineSortApi()
+        with self.assertLogs("cinesort.ui.api.runtime_support", level="INFO") as captured:
+            store, _runner = api._get_or_create_infra(self.state_dir)  # type: ignore[attr-defined]
+        store.close()
+        summary = [line for line in captured.output if "reconcile_at_boot:" in line]
+        self.assertEqual(len(summary), 1, f"une seule ligne de synthese attendue: {captured.output}")
+        return summary[0]
+
+    def test_la_synthese_de_boot_compte_les_mismatched(self) -> None:
+        # Meme taille, empreinte differente -> verdict `mismatched`.
+        self._seed_pending(sha1="a" * 40, size=-1, payload=b"un tout autre film")
+        line = self._boot_summary()
+        self.assertIn("1 entree(s) examinee(s)", line)
+        self.assertIn("1 mismatched", line)
+
+    def test_la_synthese_de_boot_compte_les_unverified(self) -> None:
+        """`sha1_quick` renvoie "" quand la lecture echoue (NAS deconnecte, timeout).
+
+        Le verdict devient alors `unverified` : la synthese doit le dire.
+        """
+        payload = b"le vrai film" * 32
+        reference = self._tmp / "reference.mkv"
+        reference.write_bytes(payload)
+        self._seed_pending(sha1=sha1_quick(reference), size=len(payload), payload=payload)
+        with mock.patch("cinesort.app.move_reconciliation.sha1_quick", return_value=""):
+            line = self._boot_summary()
+        self.assertIn("1 entree(s) examinee(s)", line)
+        self.assertIn("1 unverified", line)
 
 
 if __name__ == "__main__":
