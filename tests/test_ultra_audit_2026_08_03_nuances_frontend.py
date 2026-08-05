@@ -821,6 +821,58 @@ __emit({ items: M.__h.dangerOpts()[0].items, itemsSansPlan: M.__h.dangerOpts()[1
             f"repli sans plan : la quarantaine reste annoncable cote client : {res['itemsSansPlan'][0]}",
         )
 
+    def test_aucune_operation_NULLE_sur_la_derniere_confirmation(self):
+        """Remarque de revue sur la PR #873 — et le defaut etait plus large.
+
+        `op.text(0)` rend « 0 mise en quarantaine (_review/) », jamais une
+        chaine vide. La ligne annoncait donc des operations NULLES sur l'ecran
+        precisement gouverne par la regle « action destructive = confirmation
+        listant les elements et leurs consequences ». Du bruit qui dilue ce qui
+        compte.
+
+        La revue ne visait que le repli ; `_plannedApplyOps` ne filtre rien et
+        les DEUX branches d'affichage joignaient toutes les entrees.
+        """
+        res = self._run(
+            _ROWS
+            + r"""
+M.__h.seed(rows, { totals: { renames: 12, moves: 0, quarantined: 0 } });
+await M.__h.applyNow();
+const avecPlan = M.__h.dangerOpts()[0].items[0];
+M.__h.seed(rows, null);
+M.__h.setQuarantine(false);
+await M.__h.applyNow();
+const sansPlan = M.__h.dangerOpts()[1].items[0];
+__emit({ avecPlan, sansPlan });
+"""
+        )
+        self.assertIn("12", res["avecPlan"], f"le renommage reel doit rester : {res['avecPlan']}")
+        self.assertNotIn("0 déplacement", res["avecPlan"], f"operation nulle annoncee : {res['avecPlan']}")
+        self.assertNotIn("0 mise", res["avecPlan"], f"operation nulle annoncee : {res['avecPlan']}")
+        self.assertNotIn("0 mise", res["sansPlan"], f"repli : operation nulle annoncee : {res['sansPlan']}")
+        self.assertFalse(
+            res["sansPlan"].rstrip().endswith("·"),
+            f"separateur orphelin en fin de ligne : {res['sansPlan']}",
+        )
+
+    def test_quand_RIEN_n_est_prevu_la_ligne_le_DIT(self):
+        """Une ligne VIDE serait pire qu'un zero sur une confirmation destructive.
+
+        Filtrer les operations nulles sans traiter ce cas produirait une chaine
+        vide : l'utilisateur ne saurait pas s'il ne se passe rien ou si
+        l'information manque. On le dit explicitement.
+        """
+        res = self._run(
+            _ROWS
+            + r"""
+M.__h.seed(rows, { totals: { renames: 0, moves: 0, quarantined: 0 } });
+await M.__h.applyNow();
+__emit({ ligne: M.__h.dangerOpts()[0].items[0] });
+"""
+        )
+        self.assertTrue(res["ligne"].strip(), "ligne d'operations VIDE sur une confirmation destructive")
+        self.assertIn("aucune", res["ligne"].lower(), f"le cas « rien a faire » doit etre dit : {res['ligne']}")
+
     def test_invariant_aucune_operation_disque_prevue_ne_manque_a_la_modale(self):
         """INVARIANT — le test qui empeche le trou de se recreer.
 

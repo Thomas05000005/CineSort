@@ -2332,6 +2332,28 @@ function _plannedApplyOps({ totals, clientCounts }) {
   });
 }
 
+/** Ligne d'operations affichee sur la DERNIERE confirmation avant modification
+ *  du disque. N'annonce que ce qui va REELLEMENT se produire.
+ *
+ *  `op.text(0)` rend « 0 renommage de dossier », jamais une chaine vide : la
+ *  ligne annoncait donc des operations NULLES sur l'ecran precisement gouverne
+ *  par la regle « action destructive = confirmation listant les elements et
+ *  leurs consequences ». Un « 0 mise en quarantaine » y est du bruit qui dilue
+ *  ce qui compte.
+ *
+ *  Le defaut touchait les DEUX branches d'affichage, pas seulement le repli :
+ *  `_plannedApplyOps` ne filtre rien et les deux joignaient toutes les entrees.
+ *
+ *  Cas limite traite explicitement : si RIEN n'est prevu, on ne rend pas une
+ *  chaine vide — sur une confirmation destructive, une ligne vide est pire
+ *  qu'un zero, l'utilisateur ne saurait pas s'il manque une information.
+ *  @returns {string} */
+function _opsLineText(plannedOps) {
+  const reelles = (plannedOps || []).filter((o) => o.count > 0);
+  if (!reelles.length) return "aucune opération sur le disque";
+  return reelles.map((o) => o.text).join(" · ");
+}
+
 /** Ultra-audit 2026-08-03 (N35) — nombre d'operations en ECHEC dans la reponse
  *  de run/apply.
  *
@@ -2473,12 +2495,17 @@ async function _handleApplyNow() {
     totals: previewTotals,
     clientCounts: { quarantined: quarantineCount },
   });
-  const quarantineText = plannedOps.find((o) => o.key === "quarantined")?.text || "";
   const opsLine = previewTotals
-    ? plannedOps.map((o) => o.text).join(" · ")
+    ? _opsLineText(plannedOps)
     // Repli sans plan backend : on annonce des FILMS approuves en le disant,
-    // et on n'oublie pas la quarantaine (elle, est connue cote client).
-    : `${opCount} film${opCount > 1 ? "s" : ""} approuvé${opCount > 1 ? "s" : ""} (plan exact non calculé) · ${quarantineText}`;
+    // et on n'oublie la quarantaine que si elle est NULLE — elle est connue
+    // cote client, donc quand elle vaut zero c'est une certitude, pas une
+    // ignorance. Sans ce filtre la ligne se terminait aussi par un « · »
+    // orphelin des que le texte etait vide.
+    : [
+        `${opCount} film${opCount > 1 ? "s" : ""} approuvé${opCount > 1 ? "s" : ""} (plan exact non calculé)`,
+        ...(quarantineCount > 0 ? [plannedOps.find((o) => o.key === "quarantined").text] : []),
+      ].join(" · ");
 
   // Apply reel : modale danger avec countdown 3s
   dangerConfirmModal({
