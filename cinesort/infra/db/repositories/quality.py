@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from cinesort.domain.tiers_helpers import LOW_TIERS_LOWER, PREMIUM_TIERS_LOWER
 from cinesort.infra.db.repositories._base import _BaseRepository
+from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
 
 # Nombre de couples (run_id, row_id) par requete de `get_quality_reports_for_pairs`.
 # Chaque couple pese 2 parametres lies et un niveau d'imbrication `OR` : 200 tient
@@ -521,33 +522,38 @@ class QualityRepository(_BaseRepository):
         ids = [str(x) for x in (run_ids or []) if str(x).strip()]
         if not ids:
             return {}
-        placeholders = ",".join("?" for _ in ids)
         # Ordre des parametres = ordre d'APPARITION des `?` dans le SQL.
         premium_bands = sorted(PREMIUM_TIERS_LOWER)
         low_bands = sorted(LOW_TIERS_LOWER)
         premium_ph = ",".join("?" for _ in premium_bands)
         low_ph = ",".join("?" for _ in low_bands)
+        # Issue #448 : la liste de runs est decoupee en paquets (les bandes de
+        # tiers, elles, sont bornees par les constantes du domaine). Le
+        # `GROUP BY run_id` rend une ligne par run : l'union des paquets redonne
+        # exactement le meme dictionnaire.
+        out: Dict[str, Dict[str, Any]] = {}
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                f"""
-                SELECT
-                  run_id,
-                  COUNT(*) AS scored_movies,
-                  AVG(score) AS score_avg,
-                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({premium_ph}) THEN 1 ELSE 0 END) AS premium_count,
-                  SUM(CASE WHEN LOWER(TRIM(tier)) IN ({low_ph}) THEN 1 ELSE 0 END) AS low_count
-                FROM quality_reports
-                WHERE run_id IN ({placeholders})
-                GROUP BY run_id
-                """,
-                (*premium_bands, *low_bands, *ids),
-            )
-            out: Dict[str, Dict[str, Any]] = {}
-            for row in cur.fetchall():
-                out[str(row["run_id"])] = {
-                    "scored_movies": int(row["scored_movies"] or 0),
-                    "score_avg": float(row["score_avg"] or 0.0),
-                    "premium_count": int(row["premium_count"] or 0),
-                    "low_count": int(row["low_count"] or 0),
-                }
-            return out
+            for chunk in chunked(ids, SQL_CHUNK):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"""
+                    SELECT
+                      run_id,
+                      COUNT(*) AS scored_movies,
+                      AVG(score) AS score_avg,
+                      SUM(CASE WHEN LOWER(TRIM(tier)) IN ({premium_ph}) THEN 1 ELSE 0 END) AS premium_count,
+                      SUM(CASE WHEN LOWER(TRIM(tier)) IN ({low_ph}) THEN 1 ELSE 0 END) AS low_count
+                    FROM quality_reports
+                    WHERE run_id IN ({placeholders})
+                    GROUP BY run_id
+                    """,
+                    (*premium_bands, *low_bands, *chunk),
+                )
+                for row in cur.fetchall():
+                    out[str(row["run_id"])] = {
+                        "scored_movies": int(row["scored_movies"] or 0),
+                        "score_avg": float(row["score_avg"] or 0.0),
+                        "premium_count": int(row["premium_count"] or 0),
+                        "low_count": int(row["low_count"] or 0),
+                    }
+        return out
