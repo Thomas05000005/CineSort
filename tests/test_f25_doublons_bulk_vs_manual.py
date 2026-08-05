@@ -31,9 +31,20 @@ JS = ROOT / "web" / "dashboard" / "views" / "doublons.js"
 
 STUBS = r"""
 globalThis.__marks = [];
+globalThis.__bulkPosts = [];
 globalThis.__toasts = [];
 globalThis.__markDelayMs = 60;
 globalThis.__groups = null;
+// Issue #406 : quand true, la modale de confirmation n'appelle PAS onConfirm
+// tout de suite — le test le declenche via __pendingConfirm(). Fidele a la
+// production : l'utilisateur peut decider manuellement pendant que la modale
+// est affichee (les boutons ne sont verrouilles qu'APRES la confirmation).
+globalThis.__deferConfirm = false;
+// Issue #406 : injections pour les cas degrades du lot (reponse sans `results`,
+// reponse partielle). null/undefined => reponse nominale complete.
+globalThis.__bulkOverride = null;
+globalThis.__bulkPartial = null;
+globalThis.__bulkShuffle = false;
 
 const apiPost = async (endpoint, body) => {
   if (endpoint === "run/get_dashboard") return { status: 200, data: { ok: true, run_id: "run-1" } };
@@ -44,6 +55,30 @@ const apiPost = async (endpoint, body) => {
     globalThis.__marks.push({ group_key: body.group_key, winner_row_id: body.winner_row_id, notes: body.notes || null });
     await new Promise((r) => setTimeout(r, globalThis.__markDelayMs));
     return { status: 200, data: { ok: true, losers: [] } };
+  }
+  // Issue #406 : l'auto-decision poste desormais UN SEUL lot. On enregistre
+  // chaque decision du lot dans __marks (comme le fait l'endpoint unitaire)
+  // pour que les assertions « qui a ete decide » restent comparables.
+  if (endpoint === "run/mark_duplicate_winners_bulk") {
+    const decisions = (body && body.decisions) || [];
+    globalThis.__bulkPosts.push(decisions.map((d) => d.group_key));
+    for (const d of decisions) {
+      globalThis.__marks.push({ group_key: d.group_key, winner_row_id: d.winner_row_id, notes: d.notes || null });
+    }
+    await new Promise((r) => setTimeout(r, globalThis.__markDelayMs));
+    if (globalThis.__bulkOverride) return { status: 200, data: globalThis.__bulkOverride };
+    let kept = globalThis.__bulkPartial == null ? decisions : decisions.slice(0, globalThis.__bulkPartial);
+    // Contrat casse volontairement : resultats renvoyes dans le DESORDRE.
+    if (globalThis.__bulkShuffle) kept = kept.slice().reverse();
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        results: kept.map((d) => ({ group_key: d.group_key, ok: true, losers: [] })),
+        decided: kept.length,
+        failed: 0,
+      },
+    };
   }
   if (endpoint === "library/get_film_full") return { status: 200, data: { ok: true, row: {} } };
   return { status: 200, data: { ok: true } };
@@ -63,7 +98,11 @@ const setRightPanelSections = (sections) => { globalThis.__panels.push(sections)
 const navigateTo = () => {};
 // dangerConfirmModal : confirme immediatement (la modale est deja couverte
 // ailleurs ; ici on teste ce qui se passe APRES la confirmation).
-const dangerConfirmModal = (o) => { globalThis.__confirmPromise = o.onConfirm(); };
+const dangerConfirmModal = (o) => {
+  globalThis.__pendingConfirm = o.onConfirm;
+  if (globalThis.__deferConfirm) return;
+  globalThis.__confirmPromise = o.onConfirm();
+};
 
 function __makeEl() {
   const el = {
@@ -129,6 +168,27 @@ await M.initDoublons(el);
 """
 
 
+def _boot_n(count: int) -> str:
+    """BOOT avec `count` groupes non decides (mesure du nombre d'allers-retours)."""
+    return (
+        "globalThis.__groups = Array.from({ length: %d }, (_, k) => {\n"
+        "  const i = k + 1;\n"
+        "  return {\n"
+        '    group_key: "film" + i + "|2000",\n'
+        '    title: "Film " + i,\n'
+        "    year: 2000,\n"
+        "    winner_decided: false,\n"
+        '    comparison: { winner: "a", size_savings: 0 },\n'
+        '    rows: [{ row_id: "r" + i + "a" }, { row_id: "r" + i + "b" }],\n'
+        "  };\n"
+        "});\n"
+        "const el = globalThis.__makeEl();\n"
+        "globalThis.__lastContainer = el;\n"
+        "globalThis.__containerHtml = () => el.innerHTML;\n"
+        "await M.initDoublons(el);\n" % count
+    )
+
+
 class F25BulkVsManualDecisionTests(unittest.TestCase):
     def setUp(self) -> None:
         require_node(self)
@@ -164,29 +224,49 @@ __emit({ marks: globalThis.__marks, byGroup, toasts: globalThis.__toasts.map((t)
         self.assertIn("film1|2001", res["byGroup"], "les autres groupes sont bien auto-decides")
         self.assertIn("film2|2002", res["byGroup"])
 
-    def test_bulk_saute_un_groupe_marque_decide_pendant_la_boucle(self):
-        """Une decision manuelle TERMINEE pendant la boucle (winner_decided pose
-        sur l'objet groupe) doit etre respectee par les tours suivants."""
+    def test_bulk_saute_un_groupe_marque_decide_pendant_la_confirmation(self):
+        """Une decision manuelle TERMINEE entre le snapshot `candidates` et la
+        confirmation (winner_decided pose sur l'objet groupe) doit etre
+        respectee par le lot.
+
+        Issue #406 : le lot part en UN seul POST, donc la fenetre qui compte
+        n'est plus « pendant la boucle » mais « pendant que la modale de
+        confirmation est affichee » — la SEULE fenetre ou une decision manuelle
+        peut encore aboutir (des la confirmation, `autoDecideInFlight` verrouille
+        les boutons Garder A/B et le comparateur, cf. les trois tests suivants).
+        Le lot est donc re-filtre juste avant l'envoi, pas au moment du clic.
+        """
         res = self._run(
             _BOOT
             + r"""
 globalThis.__markDelayMs = 60;
+globalThis.__deferConfirm = true;       // la modale attend l'utilisateur
 const st = M.__h.state();
-M.__h.autoDecideAll();
-await globalThis.__sleep(20);          // la boucle traite film1
-// Simule la fin d'une decision manuelle sur film3 (ce que fait _handleDecision).
+M.__h.autoDecideAll();                  // snapshot `candidates` + modale affichee
+// Pendant que la modale est ouverte, une decision manuelle sur film3 aboutit
+// (c'est ce que fait _handleDecision).
 const g3 = st.groups.find((g) => g.group_key === "film3|2003");
 g3.winner_decided = true;
 g3.winner_row_id = "r3b";
+globalThis.__confirmPromise = globalThis.__pendingConfirm();   // l'utilisateur confirme
 await globalThis.__confirmPromise;
-__emit({ groups: globalThis.__marks.map((m) => m.group_key), toasts: globalThis.__toasts.map((t) => t.text) });
+__emit({
+  groups: globalThis.__marks.map((m) => m.group_key),
+  bulkPosts: globalThis.__bulkPosts,
+  toasts: globalThis.__toasts.map((t) => t.text),
+});
 """
         )
-        self.assertNotIn("film3|2003", res["groups"], "film3 deja decide -> la boucle doit le sauter")
+        self.assertNotIn("film3|2003", res["groups"], "film3 deja decide -> le lot doit le sauter")
         self.assertIn("film1|2001", res["groups"])
         self.assertTrue(
             any("ignor" in t for t in res["toasts"]),
             f"le toast final doit annoncer le(s) groupe(s) ignore(s) : {res['toasts']}",
+        )
+        self.assertEqual(
+            res["bulkPosts"],
+            [["film1|2001", "film2|2002"]],
+            "issue #406 : UN SEUL POST bulk, et film3 n'y figure pas",
         )
 
     def test_decision_manuelle_refusee_pendant_le_bulk(self):
@@ -429,6 +509,109 @@ __emit({ opened: globalThis.__comparatorOpened || 0 });
 """
         )
         self.assertEqual(res["opened"], 1)
+
+    # -------------------------------------------------- issue #406 (perf)
+    def test_406_un_seul_aller_retour_quel_que_soit_le_nombre_de_groupes(self):
+        """MESURE deterministe : nombre de POST emis par « Auto-decider tous ».
+
+        AVANT : 1 POST `run/mark_duplicate_winner` par groupe (et cote serveur,
+        1 recalcul COMPLET de la detection de doublons par POST).
+        APRES : 1 POST `run/mark_duplicate_winners_bulk`, quel que soit N.
+
+        Deux tailles pour que la mesure ne depende pas d'un cas particulier.
+        """
+        for count in (3, 40):
+            with self.subTest(groupes=count):
+                res = self._run(
+                    _boot_n(count)
+                    + r"""
+globalThis.__markDelayMs = 0;
+M.__h.autoDecideAll();
+await globalThis.__confirmPromise;
+__emit({
+  bulkPostCount: globalThis.__bulkPosts.length,
+  bulkSizes: globalThis.__bulkPosts.map((p) => p.length),
+  unitPosts: globalThis.__marks.length,
+  decided: M.__h.state().groups.filter((g) => g.winner_decided).length,
+});
+"""
+                )
+                self.assertEqual(
+                    res["bulkPostCount"],
+                    1,
+                    f"{count} groupes doivent tenir en UN aller-retour (observe : {res['bulkPostCount']})",
+                )
+                self.assertEqual(res["bulkSizes"], [count], "le lot doit porter les N decisions")
+                self.assertEqual(res["decided"], count, "les N groupes doivent etre marques decides")
+
+    def test_406_reponse_sans_detail_ne_devient_pas_un_succes(self):
+        """Un lot dont la reponse n'enumere pas les resultats ne doit PAS etre
+        compte comme reussi (regle : un echec ne devient jamais un succes
+        silencieux). Idem pour une reponse partielle."""
+        res = self._run(
+            _BOOT
+            + r"""
+globalThis.__markDelayMs = 0;
+// Le backend repond ok:true mais sans `results` (contrat non tenu).
+globalThis.__bulkOverride = { ok: true };
+M.__h.autoDecideAll();
+await globalThis.__confirmPromise;
+const toastsA = globalThis.__toasts.map((t) => t.text);
+const decidedA = M.__h.state().groups.filter((g) => g.winner_decided).length;
+__emit({ toastsA, decidedA });
+"""
+        )
+        self.assertEqual(res["decidedA"], 0, "aucun groupe ne doit etre marque decide sans confirmation")
+        self.assertTrue(
+            any("chec" in t for t in res["toastsA"]),
+            f"l'utilisateur doit voir des echecs, pas un succes : {res['toastsA']}",
+        )
+
+    def test_406_reponse_partielle_compte_le_reliquat_en_echec(self):
+        res = self._run(
+            _BOOT
+            + r"""
+globalThis.__markDelayMs = 0;
+// Le backend ne confirme qu'UNE des 3 decisions.
+globalThis.__bulkPartial = 1;
+M.__h.autoDecideAll();
+await globalThis.__confirmPromise;
+__emit({
+  toasts: globalThis.__toasts.map((t) => t.text),
+  decided: M.__h.state().groups.filter((g) => g.winner_decided).length,
+});
+"""
+        )
+        self.assertEqual(res["decided"], 1, "seule la decision confirmee doit etre marquee")
+        self.assertTrue(
+            any("2 échec" in t for t in res["toasts"]),
+            f"le reliquat non confirme doit etre annonce en echec : {res['toasts']}",
+        )
+
+    def test_406_resultats_desordonnes_ne_marquent_pas_le_mauvais_groupe(self):
+        """Les resultats sont rattaches PAR INDEX au lot envoye. Si le serveur
+        repondait dans un autre ordre, on ne saurait plus a quel groupe rattacher
+        quelle reponse : il faut compter en echec, pas marquer un film au hasard
+        (le perdant d'un groupe part en _review/_duplicates_user_decided/)."""
+        res = self._run(
+            _BOOT
+            + r"""
+globalThis.__markDelayMs = 0;
+globalThis.__bulkShuffle = true;
+M.__h.autoDecideAll();
+await globalThis.__confirmPromise;
+__emit({
+  toasts: globalThis.__toasts.map((t) => t.text),
+  decided: M.__h.state().groups.filter((g) => g.winner_decided).length,
+});
+"""
+        )
+        # film2 est au milieu : son indice survit a l'inversion, les 2 autres non.
+        self.assertEqual(res["decided"], 1, f"seul le resultat encore aligne compte : {res['toasts']}")
+        self.assertTrue(
+            any("2 échec" in t for t in res["toasts"]),
+            f"les resultats desalignes doivent etre annonces en echec : {res['toasts']}",
+        )
 
     def test_nonreg_syntaxe_du_module(self):
         node_check(self, JS)
