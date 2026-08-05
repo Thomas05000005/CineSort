@@ -293,8 +293,13 @@ class TvEpisodeEmptyVideoGuardTests(_ApplyReliabilityBase):
             duplicates_identical_root=self.run_review_root / "_duplicates_identical",
         )
 
-        moved = list(self.root.rglob("S01E01 - Pilote.mkv"))
+        # Regle inviolable n1 : l'episode est RANGE dans Serie/Saison NN/ mais
+        # garde son nom de fichier source (`S01E01 - Pilote.mkv` etait un
+        # RENOMMAGE, qui desynchronise le fichier de son torrent).
+        moved = list(self.root.rglob("Ma.Serie.S01E01.mkv"))
+        moved = [p for p in moved if p.parent != folder]
         self.assertEqual(len(moved), 1, f"l'episode valide doit etre range ; arbo={list(self.root.rglob('*'))}")
+        self.assertEqual(moved[0].parent.name, "Saison 01")
         self.assertEqual(res.skip_reasons.get(core.SKIP_REASON_AUTRE, 0), 0)
 
 
