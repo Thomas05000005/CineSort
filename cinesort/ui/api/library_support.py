@@ -462,7 +462,17 @@ def _build_library_rows(
     # R7-3 : overlay du choix manuel de candidat TMDb (film_tmdb_overrides) sur
     # chaque row -> la biblio reflete le match choisi (tmdb_id/titre/annee) et ne
     # revient plus au match auto au reload. No-op si aucun override.
-    from cinesort.ui.api.film_support import TMDB_OVERLAY_DONE_KEY, overlay_tmdb_override
+    #
+    # #779 : cet import differe est CONSERVE, et la mesure explique pourquoi.
+    # Aucun cycle ne le justifie aujourd'hui (`film_support` n'atteint pas
+    # `library_support` par ses imports de tete), mais le remonter cree l'arete
+    # `library_support -> film_support`, qui rend NECESSAIRES deux imports
+    # differes jusque-la libres : `film_support:62` (-> history_support) et
+    # `film_support:457` (-> library_actions_support), tous deux refermes via
+    # `... -> library_support -> film_support`. Mesure : 4 vraies aretes de
+    # retour avant, 6 apres. Convertir ici echange un import differe contre
+    # deux cycles supplementaires — c'est l'inverse du but de #779.
+    from cinesort.ui.api import film_support  # noqa: PLC0415
 
     # PERF (audit 2026-08-02, HIGH library_support:231) : `api.run.get_plan`
     # ci-dessus a DEJA applique cet overlay sur chaque row
@@ -484,9 +494,9 @@ def _build_library_rows(
     # Fail-closed : marqueur absent (ou falsy) => on relit. Le cout du cas
     # nominal reste nul, seul le cas degrade repaye les 2N connexions.
     for _r in plan_rows:
-        if isinstance(_r, dict) and _r.get(TMDB_OVERLAY_DONE_KEY):
+        if isinstance(_r, dict) and _r.get(film_support.TMDB_OVERLAY_DONE_KEY):
             continue
-        overlay_tmdb_override(store, run_id, _r)
+        film_support.overlay_tmdb_override(store, run_id, _r)
 
     # Fix audit 2026-05-25 (v1.5.4) Vague I (Bug 2) : pre-resolve poster URLs en
     # batch via integrations.get_tmdb_posters(). Avant : `r.get("poster_url")`

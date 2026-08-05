@@ -66,6 +66,21 @@ def connect_sqlite(
         storage_type_detected = None
     history_source = "manual_settings" if profile is not None else "auto"
 
+    # Issue #428 : `isolation_level` n'est PAS passe, et c'est delibere. Le
+    # defaut `""` est un alias de "DEFERRED" — mesure sur ce Python (3.13.13,
+    # SQLite 3.50.4) via `set_trace_callback` : le defaut emet `BEGIN `, et
+    # `isolation_level="DEFERRED"` emet `BEGIN DEFERRED`, qui est la MEME chose
+    # pour SQLite (une transaction est deferred par defaut). `in_transaction` et
+    # le rejet d'un `BEGIN` explicite sont identiques dans les deux cas ; seule
+    # la valeur de l'attribut `conn.isolation_level` change, et rien ne la lit
+    # dans le depot. L'expliciter serait donc du bruit non testable autrement
+    # que par une tautologie.
+    #
+    # Ce qu'il ne faut PAS faire en revanche : passer `isolation_level=None`
+    # (autocommit). `pragma_profile._record_pragma_history` DEPEND du mode
+    # transactionnel implicite — il commit explicitement son INSERT parce que
+    # celui-ci ouvre une transaction qui ferait echouer le `BEGIN` de
+    # `MigrationManager.apply()` (cf. le commentaire detaille la-bas).
     conn = sqlite3.connect(
         str(db_path),
         timeout=max(1.0, busy_timeout_ms / 1000.0),
