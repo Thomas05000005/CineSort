@@ -535,6 +535,12 @@ def analyze_video_frames(
     # (judder, DNR variable) n'entrait dans aucun score persiste, alors que
     # `compute_temporal_consistency` la prend en compte pour son propre verdict.
     result.temporal_stddev = temporal["combined_stddev"]
+    # #923 : sans resultat de filtre, compute_temporal_consistency rend un
+    # stddev de 0.0 (verdict "unknown"), que composite_score._score_temporal
+    # note 90/100. Le drapeau distingue « aucune variation mesuree » de
+    # « aucune mesure ». Les deux correctifs sont INDEPENDANTS : #830 corrige la
+    # GRANDEUR mesuree, #923 dit si elle a ete mesuree.
+    result.temporal_measured = bool(filter_results)
     _compute_visual_score(result, multiplier, temporal["score"])
     logger.debug(
         "video: blockiness=%.2f blur=%.3f banding=%.1f score=%d",
@@ -597,14 +603,21 @@ def _aggregate_filter_metrics(result: VideoPerceptual, filter_results: List[Dict
     # moyenne. Le nombre de keyframes probees est faible et souvent pair, donc
     # le biais vers le haut etait systematique. `np.median` est deja la
     # convention du module (cf. block_variance_stats).
+    #
+    # #923 : ces deux blocs n'ecrivent RIEN quand `filter_results` est vide (ce
+    # que rend run_filter_graph des que ffmpeg sort en rc != 0) ; les champs
+    # gardent alors le 0.0 du dataclass, qui est la MEILLEURE note possible.
+    # Le drapeau atteste la mesure et rend les deux etats separables en aval.
     if f_blocks:
         result.blockiness_mean = _mean(f_blocks)
         result.blockiness_median = float(np.median(f_blocks))
         result.blockiness_stddev = _stddev(f_blocks)
+        result.blockiness_measured = True
     if f_blurs:
         result.blur_mean = _mean(f_blurs)
         result.blur_median = float(np.median(f_blurs))
         result.blur_stddev = _stddev(f_blurs)
+        result.blur_measured = True
 
     f_yavgs = [fr.get("y_avg", 0) for fr in filter_results]
     f_sats = [fr.get("sat_avg", 0) for fr in filter_results]
@@ -623,10 +636,14 @@ def _aggregate_filter_metrics(result: VideoPerceptual, filter_results: List[Dict
 def _apply_pixel_aggregates(result: VideoPerceptual, agg: Dict[str, Any]) -> None:
     """Applique les metriques pixel agregees au VideoPerceptual."""
     result.frames_analyzed = len(agg["y_avgs"])
+    # #923 : meme motif que _aggregate_filter_metrics — sans frame pixel
+    # exploitable, banding_mean reste a 0.0, note de reference (95/100).
     if agg["banding"]:
         result.banding_mean = _weighted_mean(agg["banding"], agg["weights"])
+        result.banding_measured = True
     if agg["bits"]:
         result.effective_bits_mean = _mean(agg["bits"])
+        result.effective_bits_measured = True
     if agg["variances"]:
         result.variance_mean = _mean(agg["variances"])
     if agg["flat_ratios"]:
@@ -644,20 +661,29 @@ def _compute_visual_score(result: VideoPerceptual, multiplier: float, temporal_s
     - les logs debug exposent ce score
     - la persistence DB stocke ce champ via _perceptual_mixin
     """
-    s_block = _score_blockiness(result.blockiness_mean, multiplier)
-    s_blur = _score_blur(result.blur_mean, multiplier)
-    s_banding = _score_banding(result.banding_mean, multiplier)
-    s_bits = _score_effective_bits(result.effective_bits_mean)
     s_grain = 50  # Grain sera remplace par composite_score en Phase V
-    visual = (
-        s_block * VISUAL_WEIGHT_BLOCKINESS
-        + s_blur * VISUAL_WEIGHT_BLUR
-        + s_banding * VISUAL_WEIGHT_BANDING
-        + s_bits * VISUAL_WEIGHT_BIT_DEPTH
-        + s_grain * VISUAL_WEIGHT_GRAIN_VERDICT
-        + temporal_score * VISUAL_WEIGHT_TEMPORAL
-    ) / 100
+    # #923 : un critere NON MESURE ne doit alimenter aucune note. On l'exclut de
+    # la somme ponderee (au lieu de lui laisser sa note de defaut, qui vaut 95
+    # pour blockiness/blur/banding) et on renormalise sur le poids restant. La
+    # part du poids reellement mesuree devient la confiance du score.
+    weighted: List[tuple] = [(s_grain, VISUAL_WEIGHT_GRAIN_VERDICT)]
+    if result.is_measured("blockiness"):
+        weighted.append((_score_blockiness(result.blockiness_mean, multiplier), VISUAL_WEIGHT_BLOCKINESS))
+    if result.is_measured("blur"):
+        weighted.append((_score_blur(result.blur_mean, multiplier), VISUAL_WEIGHT_BLUR))
+    if result.is_measured("banding"):
+        weighted.append((_score_banding(result.banding_mean, multiplier), VISUAL_WEIGHT_BANDING))
+    if result.is_measured("effective_bits"):
+        weighted.append((_score_effective_bits(result.effective_bits_mean), VISUAL_WEIGHT_BIT_DEPTH))
+    if result.is_measured("temporal"):
+        weighted.append((temporal_score, VISUAL_WEIGHT_TEMPORAL))
+
+    total_weight = sum(w for _, w in weighted)
+    visual = sum(s * w for s, w in weighted) / max(total_weight, 1)
     result.visual_score = max(0, min(100, int(round(visual))))
+    # Le grain n'est ici qu'un bouchon a 50 : il ne compte pas comme mesure.
+    measured_weight = total_weight - VISUAL_WEIGHT_GRAIN_VERDICT
+    result.visual_confidence = measured_weight / (100 - VISUAL_WEIGHT_GRAIN_VERDICT)
 
     if result.visual_score >= TIER_REFERENCE:
         result.visual_tier = "reference"

@@ -239,13 +239,26 @@ def compare_criterion(
     value_b: float,
     criterion_name: str,
     higher_is_better: bool = True,
+    *,
+    measured_a: bool = True,
+    measured_b: bool = True,
 ) -> Dict[str, Any]:
-    """Compare deux valeurs numeriques avec seuil tie."""
+    """Compare deux valeurs numeriques avec seuil tie.
+
+    #923 : un cote NON MESURE ne peut pas gagner. Pour blockiness / blur /
+    banding, `higher_is_better=False` et la valeur de repli est 0.0 : le
+    fichier dont l'analyse ffmpeg a echoue remportait donc automatiquement
+    « Artefacts » et « Nettete » contre n'importe quelle copie reellement
+    mesuree, et ces faux points forts se retrouvaient dans la recommandation
+    d'archivage. Sans mesure des deux cotes, le critere ne departage plus.
+    """
     delta = value_a - value_b
     ref = max(abs(value_a), abs(value_b), 0.001)
     delta_pct = abs(delta) / ref * 100
 
-    if delta_pct < _TIE_PCT:
+    if not (measured_a and measured_b):
+        winner = "tie"
+    elif delta_pct < _TIE_PCT:
         winner = "tie"
     elif higher_is_better:
         winner = "a" if delta > 0 else "b"
@@ -259,6 +272,8 @@ def compare_criterion(
         "winner": winner,
         "delta": round(abs(delta), 3),
         "delta_pct": round(delta_pct, 1),
+        "measured_a": bool(measured_a),
+        "measured_b": bool(measured_b),
     }
 
 
@@ -297,6 +312,29 @@ def _build_lpips_criterion(lpips_result: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _metric_measured(video: Dict[str, Any], metric: str, value_key: str) -> bool:
+    """#923 — le critere `metric` du rapport `video` repose-t-il sur une mesure ?
+
+    Meme regle que `VideoPerceptual.is_measured` : une valeur non nulle prouve
+    la mesure, seul 0.0 est ambigu. La cle `measured` est absente des rapports
+    persistes AVANT ce correctif — on retombe alors sur la valeur, ce qui rend
+    le verdict correct sur l'historique aussi, sans re-scan.
+    """
+    block = video.get(metric) or {}
+    flag = block.get("measured")
+    if flag is not None:
+        return bool(flag)
+    return float(block.get(value_key) or 0.0) != 0.0
+
+
+def _visual_coverage(video: Dict[str, Any]) -> Optional[float]:
+    """Part du score visuel adossee a une mesure. None si l'info manque."""
+    raw = video.get("visual_confidence")
+    if raw is None:
+        return None
+    return max(0.0, min(1.0, float(raw)))
+
+
 def build_comparison_report(
     perceptual_a: Dict[str, Any],
     perceptual_b: Dict[str, Any],
@@ -318,24 +356,32 @@ def build_comparison_report(
             vb.get("blockiness", {}).get("mean", 0),
             "Artefacts (blockiness)",
             higher_is_better=False,
+            measured_a=_metric_measured(va, "blockiness", "mean"),
+            measured_b=_metric_measured(vb, "blockiness", "mean"),
         ),
         compare_criterion(
             va.get("blur", {}).get("mean", 0),
             vb.get("blur", {}).get("mean", 0),
             "Nettete (blur)",
             higher_is_better=False,
+            measured_a=_metric_measured(va, "blur", "mean"),
+            measured_b=_metric_measured(vb, "blur", "mean"),
         ),
         compare_criterion(
             va.get("banding", {}).get("mean_score", 0),
             vb.get("banding", {}).get("mean_score", 0),
             "Banding",
             higher_is_better=False,
+            measured_a=_metric_measured(va, "banding", "mean_score"),
+            measured_b=_metric_measured(vb, "banding", "mean_score"),
         ),
         compare_criterion(
             va.get("effective_bit_depth", {}).get("mean_bits", 0),
             vb.get("effective_bit_depth", {}).get("mean_bits", 0),
             "Profondeur effective",
             higher_is_better=True,
+            measured_a=_metric_measured(va, "effective_bit_depth", "mean_bits"),
+            measured_b=_metric_measured(vb, "effective_bit_depth", "mean_bits"),
         ),
         compare_criterion(
             va.get("local_variance", {}).get("mean_variance", 0),
@@ -387,8 +433,28 @@ def build_comparison_report(
     score_b = int(perceptual_b.get("global_score") or 0)
     delta = score_a - score_b
 
+    # #923 : un score global n'est comparable qu'a couverture de mesure egale.
+    # Moins un fichier est mesure, plus son score converge vers les criteres
+    # « faciles » (resolution, metadonnees) et remonte : le fichier dont
+    # l'analyse a echoue — typiquement un fichier corrompu — pouvait donc
+    # sortir GAGNANT, et la recommandation invitait a archiver la copie saine.
+    # Tant que la partie manquante n'a pas ete mesuree, on ne conclut pas.
+    cov_a, cov_b = _visual_coverage(va), _visual_coverage(vb)
+    less_measured = ""
+    if cov_a is not None and cov_b is not None and cov_a != cov_b:
+        less_measured = "a" if cov_a < cov_b else "b"
+
+    # Le gagnant putatif est-il justement celui qu'on a le moins mesure ?
+    inconclusive = bool(less_measured) and less_measured == ("a" if delta > 0 else "b")
+
     # Gagnant global
-    if abs(delta) < 5:
+    if inconclusive:
+        winner = "tie"
+        winner_label = (
+            f"Comparaison non concluante : l'analyse du fichier {less_measured.upper()} est incomplete "
+            "(criteres non mesures)."
+        )
+    elif abs(delta) < 5:
         winner = "tie"
         winner_label = "Qualite equivalente, differences marginales"
     elif delta > 0:
@@ -399,7 +465,14 @@ def build_comparison_report(
         winner_label = "Fichier B est globalement superieur"
 
     # Recommendation
-    recommendation = _build_recommendation(criteria, winner, path_a, path_b, delta)
+    if inconclusive:
+        recommendation = (
+            f"Le fichier {less_measured.upper()} obtient le meilleur score, mais une partie de ses criteres "
+            "n'a PAS pu etre mesuree (analyse ffmpeg incomplete) : son avance n'est pas demontree. "
+            "Relancer l'analyse avant d'archiver quoi que ce soit."
+        )
+    else:
+        recommendation = _build_recommendation(criteria, winner, path_a, path_b, delta)
 
     # Criteria summary
     criteria_summary = [
@@ -414,6 +487,8 @@ def build_comparison_report(
         "score_delta": abs(delta),
         "winner": winner,
         "winner_label": winner_label,
+        # #923 : « tie » par egalite mesuree n'est pas « tie » faute de mesure.
+        "inconclusive": inconclusive,
         "recommendation": recommendation,
         "criteria": criteria,
         "criteria_summary": criteria_summary,
