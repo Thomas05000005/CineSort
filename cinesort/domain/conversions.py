@@ -185,12 +185,34 @@ def to_optional_bool(value: Any) -> Optional[bool]:
 
     Gardes de type en tete (comme to_bool / to_optional_int / to_optional_bitrate) :
     ``False`` et ``0`` sont des valeurs mesurees, pas des absences (#785).
+
+    Ou la distinction ``None`` / ``False`` est OBSERVABLE (audit 2026-06-25) :
+    ce helper est le delegue de
+    ``cinesort.infra.probe._normalize_helpers._bool_from_text``, qui normalise le
+    flag ``forced`` des pistes de sous-titres. ``_normalize_ffprobe.py`` arbitre
+    ensuite ``bool(forced_tag) if forced_tag is not None else forced_disp`` : un
+    tag ``forced`` numerique ``0`` doit rendre ``False`` — refus EXPLICITE, qui
+    prime sur le bit de disposition — et non ``None``, qui reviendrait a se
+    rabattre sur la disposition comme si le tag etait absent.
+    (``_normalize_mediainfo.py``, lui, ecrase ``None`` en ``False`` : la
+    distinction y est inerte.)
     """
     if value is None:
         return None
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
+        # NaN n'est pas une mesure, c'est l'ABSENCE de mesure — or `bool(nan)`
+        # vaut True en Python. Sans cette garde, un `forced` a NaN se lisait
+        # « piste forcee », et le refus explicite decrit ci-dessus se
+        # transformait en affirmation.
+        #
+        # Le chemin est reel : `json.loads('{"x": NaN}')` fonctionne par defaut
+        # en Python, donc un sidecar ou une reponse d'outil externe peut en
+        # produire. On rend None — l'appelant retombe alors sur le bit de
+        # disposition, exactement comme quand le tag est absent.
+        if value != value:  # noqa: PLR0124 - test NaN sans importer math
+            return None
         return bool(value)
     s = str(value).strip().lower()
     if not s:
