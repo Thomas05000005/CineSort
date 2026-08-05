@@ -5,7 +5,7 @@ Couvre :
 - parse_raw_frame : 8-bit, 10-bit, donnees tronquees
 - is_valid_frame : variance haute/basse, donnees tronquees
 - compute_inter_frame_diff : frames identiques, differentes
-- extract_single_frame : commande ffmpeg, downscale, pix_fmt
+- extract_single_frame : commande ffmpeg, geometrie de sortie forcee, pix_fmt
 - extract_representative_frames : orchestration, diversite, remplacement
 """
 
@@ -203,10 +203,26 @@ class ExtractSingleFrameTests(unittest.TestCase):
         mock_run.return_value = (0, b"\x80" * 100, "")
         extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 1280, 720, 8)
         cmd = mock_run.call_args[0][0]
-        # Chercher le filtre scale
         self.assertIn("-vf", cmd)
         vf_idx = cmd.index("-vf")
         self.assertEqual(cmd[vf_idx + 1], "scale=1280:720")
+
+    @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
+    def test_scale_filter_matches_requested_geometry_uhd(self, mock_run) -> None:
+        """Issue #559 AU-DESSUS du seuil de downscale : plus aucun `scale=1920:-1`.
+
+        C'est le cas de non-regression du bug d'origine : le filtre n'etait pose
+        QUE si width > FRAME_DOWNSCALE_THRESHOLD, et il valait `scale=1920:-1` —
+        la geometrie demandee ne servait qu'au test de seuil. Un appelant qui
+        demande explicitement 3840x2160 doit obtenir 3840x2160, pas 1920 de large
+        ni une hauteur calculee par ffmpeg (qui peut differer d'un pixel de celle
+        calculee en Python sur une geometrie non 16:9).
+        """
+        mock_run.return_value = (0, b"\x80" * 100, "")
+        extract_single_frame("/usr/bin/ffmpeg", "film.mkv", 10.0, 3840, 2160, 8)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("-vf", cmd)
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=3840:2160")
 
     @mock.patch("cinesort.domain.perceptual.frame_extraction.run_ffmpeg_binary")
     def test_scale_forced_1080p(self, mock_run) -> None:
@@ -225,6 +241,10 @@ class ExtractSingleFrameTests(unittest.TestCase):
         sortirait la frame en resolution NATIVE : exactement le decalage de
         pixels que l'issue #559 corrige. parse_raw_frame jetait deja la frame
         (w <= 0 -> array vide), mais un sous-processus etait paye par timestamp.
+
+        Ce test REMPLACE `test_no_scale_filter_when_geometry_unusable` (branche
+        #884), dont l'assertion « aucun filtre invalide n'est passe a ffmpeg »
+        est ici subsumee, en plus strict : ffmpeg n'est pas appele du tout.
         """
         mock_run.return_value = (0, b"\x80" * 100, "")
         for width, height in ((0, 0), (0, 1080), (1920, 0), (-1920, -1080)):
