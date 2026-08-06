@@ -88,6 +88,38 @@ class DevToolingContractsTests(unittest.TestCase):
             "le hook pre-commit et requirements-dev.txt doivent viser la meme version de ruff",
         )
 
+    def test_le_CLAUDE_md_annonce_la_MEME_version_de_ruff(self) -> None:
+        """CLAUDE.md est le 5e endroit ou ruff est epingle — et le plus lu.
+
+        Il se charge automatiquement dans le contexte de chaque session, et il
+        porte la commande que tout le monde copie. Une version perimee y coute
+        donc plus cher que partout ailleurs : elle est heritee a chaque
+        demarrage, avec l'autorite du fichier de reference.
+
+        MESURE du 2026-08-06 : le depot etait passe a `0.16.1` (4 endroits
+        synchronises, contrat vert) pendant que CLAUDE.md annoncait toujours
+        `uvx ruff@0.15.22`. Les deux ne voient meme pas le meme perimetre —
+        `0.15.22 format --check` compte 1018 fichiers, `0.16.1` en compte 1068.
+        Une session qui suivait le fichier verifiait donc autre chose que la CI,
+        et un `format` (sans `--check`) aurait reformate le depot avec la
+        mauvaise version — exactement le piege que ce meme fichier documente.
+
+        Le contrat existant couvrait 4 endroits ; ce 5e y entre.
+        """
+        racine = Path(__file__).resolve().parent.parent
+        claude_md = (racine / "CLAUDE.md").read_text(encoding="utf-8")
+        attendue = re.search(r"ruff==(\d+\.\d+\.\d+)", self.requirements_dev)
+        self.assertIsNotNone(attendue, "ruff doit etre epingle dans requirements-dev.txt")
+        versions = sorted(set(re.findall(r"ruff[@=]{1,2}(\d+\.\d+\.\d+)", claude_md)))
+        self.assertTrue(versions, "CLAUDE.md doit citer la version de ruff (commandes + section Pieges)")
+        self.assertEqual(
+            versions,
+            [attendue.group(1)],
+            f"CLAUDE.md annonce {versions} alors que le depot epingle "
+            f"{attendue.group(1)}. Il se charge dans chaque session : une version "
+            "perimee y est heritee a chaque demarrage.",
+        )
+
     def test_pyproject_declares_ruff_and_coverage_settings(self) -> None:
         self.assertIn("[tool.ruff]", self.pyproject)
         self.assertIn("[tool.ruff.lint]", self.pyproject)
