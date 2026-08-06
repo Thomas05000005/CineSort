@@ -13,6 +13,8 @@ class DevToolingContractsTests(unittest.TestCase):
         cls.requirements_dev = (root / "requirements-dev.txt").read_text(encoding="utf-8")
         cls.pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
         cls.pre_commit = (root / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        cls.uv_lock = (root / "uv.lock").read_text(encoding="utf-8")
+        cls.claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
         cls.compile_helper = (root / "scripts" / "check_python_compile.py").read_text(encoding="utf-8")
         cls.check_project = (root / "check_project.bat").read_text(encoding="utf-8")
         cls.dev_readme = (root / "docs" / "README_DEV.md").read_text(encoding="utf-8")
@@ -72,52 +74,55 @@ class DevToolingContractsTests(unittest.TestCase):
         )
 
     def test_ruff_version_is_identical_everywhere(self) -> None:
-        """Le hook pre-commit et requirements-dev doivent viser LA MEME version.
+        """Les CINQ endroits ou ruff est epingle doivent viser LA MEME version.
 
-        Sans cette garde, un developpeur formate avec la version du hook et la
-        CI rejette avec la sienne — c'est exactement la situation trouvee le
-        2026-08-02 (hook 0.15.6, lock 0.15.16, CI 0.15.22).
+        Sans cette garde, un developpeur formate avec une version et la CI
+        rejette avec une autre — situation trouvee le 2026-08-02 (hook 0.15.6,
+        lock 0.15.16, CI 0.15.22).
+
+        Ce test n'en couvrait que DEUX — `requirements-dev.txt` et le hook
+        pre-commit — alors que `CLAUDE.md` le nommait comme le gardien de
+        quatre. Un document qui designe un test faisant MOINS que ce qu'il
+        annonce est pire que pas de document : il donne une garantie qui
+        n'existe pas.
+
+        `CLAUDE.md` compte lui-meme parmi les cinq, et c'est le plus cher a
+        laisser deriver : il se charge AUTOMATIQUEMENT dans le contexte de
+        chaque session et porte la commande que tout le monde copie. MESURE du
+        2026-08-06 : le depot etait a `0.16.1`, les quatre autres endroits
+        synchronises et ce test vert, pendant que `CLAUDE.md` annoncait
+        `uvx ruff@0.15.22`. Les deux versions ne voient meme pas le meme
+        perimetre — 1018 fichiers contre 1068 — donc une session qui suivait le
+        fichier verifiait autre chose que la CI, et un `format` sans `--check`
+        aurait reformate le depot avec la mauvaise version.
         """
         attendue = re.search(r"ruff==(\d+\.\d+\.\d+)", self.requirements_dev)
         self.assertIsNotNone(attendue, "ruff doit etre epingle dans requirements-dev.txt")
+        reference = attendue.group(1)
+
         hook = re.search(r"ruff-pre-commit\s*\n(?:\s*#.*\n)*\s*rev:\s*v(\d+\.\d+\.\d+)", self.pre_commit)
         self.assertIsNotNone(hook, "le hook ruff-pre-commit doit declarer une rev versionnee")
+        pyproject = re.search(r'"ruff==(\d+\.\d+\.\d+)"', self.pyproject)
+        self.assertIsNotNone(pyproject, "ruff doit etre epingle dans pyproject.toml [dev]")
+        lock = re.search(r'name = "ruff"\s*\nversion = "(\d+\.\d+\.\d+)"', self.uv_lock)
+        self.assertIsNotNone(lock, "uv.lock doit contenir le paquet ruff avec sa version")
+        citees = sorted(set(re.findall(r"ruff[@=]{1,2}(\d+\.\d+\.\d+)", self.claude_md)))
+        self.assertTrue(citees, "CLAUDE.md doit citer la version de ruff (commandes + section Pieges)")
+
+        trouvees = {
+            ".pre-commit-config.yaml": [hook.group(1)],
+            "pyproject.toml": [pyproject.group(1)],
+            "uv.lock": [lock.group(1)],
+            "CLAUDE.md": citees,
+        }
+        divergents = {ou: v for ou, v in trouvees.items() if v != [reference]}
         self.assertEqual(
-            hook.group(1),
-            attendue.group(1),
-            "le hook pre-commit et requirements-dev.txt doivent viser la meme version de ruff",
-        )
-
-    def test_le_CLAUDE_md_annonce_la_MEME_version_de_ruff(self) -> None:
-        """CLAUDE.md est le 5e endroit ou ruff est epingle — et le plus lu.
-
-        Il se charge automatiquement dans le contexte de chaque session, et il
-        porte la commande que tout le monde copie. Une version perimee y coute
-        donc plus cher que partout ailleurs : elle est heritee a chaque
-        demarrage, avec l'autorite du fichier de reference.
-
-        MESURE du 2026-08-06 : le depot etait passe a `0.16.1` (4 endroits
-        synchronises, contrat vert) pendant que CLAUDE.md annoncait toujours
-        `uvx ruff@0.15.22`. Les deux ne voient meme pas le meme perimetre —
-        `0.15.22 format --check` compte 1018 fichiers, `0.16.1` en compte 1068.
-        Une session qui suivait le fichier verifiait donc autre chose que la CI,
-        et un `format` (sans `--check`) aurait reformate le depot avec la
-        mauvaise version — exactement le piege que ce meme fichier documente.
-
-        Le contrat existant couvrait 4 endroits ; ce 5e y entre.
-        """
-        racine = Path(__file__).resolve().parent.parent
-        claude_md = (racine / "CLAUDE.md").read_text(encoding="utf-8")
-        attendue = re.search(r"ruff==(\d+\.\d+\.\d+)", self.requirements_dev)
-        self.assertIsNotNone(attendue, "ruff doit etre epingle dans requirements-dev.txt")
-        versions = sorted(set(re.findall(r"ruff[@=]{1,2}(\d+\.\d+\.\d+)", claude_md)))
-        self.assertTrue(versions, "CLAUDE.md doit citer la version de ruff (commandes + section Pieges)")
-        self.assertEqual(
-            versions,
-            [attendue.group(1)],
-            f"CLAUDE.md annonce {versions} alors que le depot epingle "
-            f"{attendue.group(1)}. Il se charge dans chaque session : une version "
-            "perimee y est heritee a chaque demarrage.",
+            divergents,
+            {},
+            f"ruff doit etre epingle a {reference} (requirements-dev.txt) PARTOUT. "
+            f"Divergences : {divergents}. CLAUDE.md compte parmi les cinq : il se "
+            "charge dans chaque session, donc une version perimee y est heritee a "
+            "chaque demarrage, avec l'autorite du fichier de reference.",
         )
 
     def test_pyproject_declares_ruff_and_coverage_settings(self) -> None:
