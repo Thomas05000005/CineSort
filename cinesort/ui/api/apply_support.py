@@ -1994,10 +1994,15 @@ def _execute_apply(
         if apply_batch_id is None:
             return
         try:
-            op_index_holder[0] += 1
+            # #901 (reouverte) — `op_index` compte les ecritures ABOUTIES, pas les
+            # tentatives : l'increment vivait AVANT l'appel et n'etait jamais defait,
+            # donc 3 ecritures en echec rendaient quand meme `op_index = 3`, donc
+            # `undo_available = True` (condition `int(op_index or 0) > 0` plus bas)
+            # avec ZERO ligne en base. Un `+= 1` mal place desarmait toute l'alerte
+            # « undo indisponible ».
             store.apply.append_apply_operation(
                 batch_id=apply_batch_id,
-                op_index=op_index_holder[0],
+                op_index=op_index_holder[0] + 1,
                 op_type=str(payload.get("op_type") or "MOVE"),
                 src_path=str(payload.get("src_path") or ""),
                 dst_path=str(payload.get("dst_path") or ""),
@@ -2013,6 +2018,16 @@ def _execute_apply(
             # sur disque -> etat mixte et rows restantes jamais traitees. Le type est
             # logue pour distinguer un lock transitoire d'une corruption reelle.
             log_fn("WARN", f"Journal operation apply ignoree ({type(exc).__name__}): {exc}")
+            # ... puis on RELANCE. Avaler ici rendait `_CompteurEchecsJournal`
+            # (apply_core) borgne — il ne compte que ce qui REMONTE, et rien ne
+            # remontait de la seule closure de production. Mesure sur un apply reel
+            # a journal verrouille : 3 dossiers deplaces, 3 echecs, compteur a 0.
+            # Relancer n'avorte PAS l'apply : le seul appelant est
+            # `apply_core.record_apply_op`, dont l'`except` couvre exactement ces
+            # quatre types et degrade en warning. Le `raise` rend l'echec
+            # COMPTABLE, il ne change pas le sort du batch.
+            raise
+        op_index_holder[0] += 1
 
     if not bool(dry_run):
         try:
@@ -3107,13 +3122,30 @@ def _apply_changes_body(
             "journal_finalized": bool(journal_finalized),
             "undo_available": undo_available,
         }
-        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque :
-        # `applied_count` vient du resultat (donc reste vrai quand
-        # `insert_apply_batch` a echoue et que `op_index` est reste a 0), et
-        # `op_index` couvre les operations journalisees hors rows (nettoyage
-        # residuel). Un apply qui n'a rien deplace n'a rien perdu : crier au loup
-        # sur ce cas-la userait l'alerte exactement quand elle doit porter.
-        disk_touched = int(applied_count or 0) > 0 or int(op_index or 0) > 0
+        # L'alerte ne se declenche que si l'apply a REELLEMENT touche au disque.
+        # Trois termes, et il en faut TROIS :
+        #
+        # - `applied_count` ne compte que la boucle PAR ROW (apply_core:2328), et
+        #   seulement si le tuple `post_actions` bouge. Les buckets de nettoyage,
+        #   les doublons ecartes et les films marques pour suppression n'y sont
+        #   pas : ils deplacent des dossiers sans jamais l'incrementer.
+        # - `op_index` rattrapait ces deplacements-la... tant qu'il comptait des
+        #   TENTATIVES. Depuis qu'il ne compte que les ecritures ABOUTIES (#901),
+        #   il vaut 0 precisement quand le journal est verrouille — c'est-a-dire
+        #   dans le mode de panne pour lequel cette alerte a ete ecrite.
+        # - d'ou `journal_failures` : une operation comptee ici a ete journalisee
+        #   APRES un deplacement deja fait sur disque (record_apply_op est appelee
+        #   apres atomic_move). Un echec y vaut donc preuve que le disque a bouge.
+        #
+        # Sans ce troisieme terme, un apply qui ne deplace que des buckets avec un
+        # journal verrouille repondait `{"ok": True, "undo_available": False}` sans
+        # aucune alerte ni notification — le silence exact que #901 corrige.
+        # Trouve en revue adversaire de ce meme correctif, pas par un test.
+        disk_touched = (
+            int(applied_count or 0) > 0
+            or int(op_index or 0) > 0
+            or int(getattr(result, "journal_failures", 0) or 0) > 0
+        )
         if not dry_run and disk_touched and not undo_available:
             warning = t("errors.undo_unavailable_after_apply")
             payload["journal_warning"] = warning

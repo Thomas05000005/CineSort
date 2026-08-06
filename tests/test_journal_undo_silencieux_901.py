@@ -214,5 +214,201 @@ class ApplyReelRemonteLeCompteurTests(unittest.TestCase):
         self.assertEqual(res.errors, 0, "un echec de journal ne doit pas compter comme erreur d'apply")
 
 
+class _FilmModalVide:
+    def get_tmdb_override(self, **_k: object) -> None:
+        return None
+
+    def list_marked_for_deletion(self, **_k: object) -> list:
+        return []
+
+
+class _StoreJournalVerrouille:
+    """La COUCHE DE PRODUCTION en panne : le batch se cree, les ops non.
+
+    C'est la difference qui a fait rouvrir #901. Les tests precedents passaient
+    a `apply_rows` un `record_op` qui LEVE — forme qui n'existe nulle part en
+    production : la vraie closure (`apply_support._execute_apply`) attrape
+    `(sqlite3.Error, OSError, TypeError, ValueError)`. Un stub qui leve saute
+    donc par-dessus le seul endroit ou le defaut vit.
+
+    Ici la panne est injectee la ou elle se produit reellement : le store.
+    """
+
+    def __init__(self) -> None:
+        self.apply = self
+        self.film_modal = _FilmModalVide()
+        self.ecritures_tentees = 0
+        self.statuts_de_cloture: list = []
+
+    # --- repo apply, surface reellement utilisee par _execute_apply ---
+    def list_duplicate_decisions(self, **_k: object) -> list:
+        return []
+
+    def insert_apply_batch(self, **_k: object) -> str:
+        return "batch-901"
+
+    def append_apply_operation(self, **_k: object) -> int:
+        self.ecritures_tentees += 1
+        raise sqlite3.OperationalError("database is locked")
+
+    def close_apply_batch(self, *, status: str, **_k: object) -> None:
+        self.statuts_de_cloture.append(status)
+
+    def insert_pending_move(self, **_k: object) -> int:
+        return 1
+
+    def delete_pending_move(self, *_a: object, **_k: object) -> None:
+        return None
+
+
+class _StoreJournalSain(_StoreJournalVerrouille):
+    """Contre-epreuve : meme surface, mais les ecritures aboutissent."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ops_ecrites: list = []
+
+    def append_apply_operation(self, **kwargs: object) -> int:
+        self.ecritures_tentees += 1
+        self.ops_ecrites.append(dict(kwargs))
+        return len(self.ops_ecrites)
+
+
+class ApplySupportRemonteSesEchecsDeJournalTests(unittest.TestCase):
+    """#901 (rouverte) — mesure a la couche de PRODUCTION, pas sur un stub.
+
+    Mesure du defaut, sur `main` @ 661e9357, avec ce meme harnais :
+
+        3 dossiers deplaces sur disque
+        3 ecritures de journal en echec
+        journal_failures = 0        <- le compteur ne voyait rien
+        op_index         = 3        <- il comptait des TENTATIVES
+        => undo_available = True, et ZERO ligne en base.
+
+    Les deux chiffres du milieu sont ce que ces tests verrouillent.
+    """
+
+    def _apply_reel(self, store, nb_films=3):
+        import shutil
+        import tempfile
+        from types import SimpleNamespace
+
+        from cinesort.domain import core as core_mod
+        from cinesort.ui.api import apply_support
+
+        tmp = Path(tempfile.mkdtemp(prefix="cs_901_prod_"))
+        try:
+            root = tmp / "root"
+            root.mkdir()
+            run_dir = tmp / "run"
+            run_dir.mkdir()
+            rows, decisions = [], {}
+            for i in range(1, nb_films + 1):
+                folder = root / f"Film.{i}"
+                folder.mkdir()
+                (folder / f"film{i}.mkv").write_bytes(b"x" * 64)
+                rows.append(
+                    core_mod.PlanRow(
+                        row_id=f"s{i}",
+                        kind="single",
+                        folder=str(folder),
+                        video=f"film{i}.mkv",
+                        proposed_title=f"Titre{i}",
+                        proposed_year=1979 + i,
+                        proposed_source="name",
+                        confidence=90,
+                        confidence_label="high",
+                        candidates=[],
+                    )
+                )
+                decisions[f"s{i}"] = {"ok": True, "title": f"Titre{i}", "year": 1979 + i}
+
+            run_paths = SimpleNamespace(
+                run_id="r901",
+                run_dir=run_dir,
+                plan_jsonl=run_dir / "plan.jsonl",
+                ui_log=run_dir / "ui_log.txt",
+                ui_log_txt=run_dir / "ui_log.txt",
+                summary_txt=run_dir / "summary.txt",
+                validation_json=run_dir / "validation.json",
+            )
+            batch_state: list = [None, 0]
+            res, batch_id, op_index = apply_support._execute_apply(
+                core_mod.Config(root=root).normalized(),
+                rows,
+                decisions,
+                set(decisions),
+                dry_run=False,
+                quarantine_unapproved=False,
+                log_fn=lambda *_a: None,
+                run_paths=run_paths,
+                store=store,
+                api=SimpleNamespace(_app_version="test"),
+                run_id="r901",
+                batch_state=batch_state,
+            )
+            return res, batch_id, op_index
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_les_echecs_de_la_CLOSURE_DE_PRODUCTION_sont_comptes(self) -> None:
+        store = _StoreJournalVerrouille()
+        res, _batch_id, _op_index = self._apply_reel(store)
+
+        self.assertGreater(store.ecritures_tentees, 0, "le harnais n'a rien journalise : il ne prouve rien")
+        self.assertEqual(
+            res.journal_failures,
+            store.ecritures_tentees,
+            "la closure de production avale l'echec : le compteur reste borgne — c'est #901",
+        )
+
+    def test_op_index_compte_les_ecritures_ABOUTIES_pas_les_tentatives(self) -> None:
+        """C'est ce chiffre qui pilote `undo_available` (cf. apply_support).
+
+        Tant qu'il compte les tentatives, un apply dont AUCUNE operation n'est
+        journalisee annonce `undo_available: True` et l'alerte
+        « undo indisponible » ne se declenche jamais.
+        """
+        store = _StoreJournalVerrouille()
+        _res, _batch_id, op_index = self._apply_reel(store)
+
+        self.assertEqual(op_index, 0, "op_index compte des tentatives, donc undo_available ment")
+
+    def test_les_films_sont_QUAND_MEME_ranges(self) -> None:
+        """Garde anti-sur-correction : relancer ne doit pas avorter l'apply.
+
+        Le deplacement physique a deja eu lieu quand la journalisation echoue ;
+        avorter laisserait un etat mixte sur le disque.
+        """
+        store = _StoreJournalVerrouille()
+        res, _batch_id, _op_index = self._apply_reel(store)
+
+        self.assertGreaterEqual(res.renames + res.moves, 3, "le batch a ete avorte par le raise")
+        self.assertEqual(res.errors, 0, f"un echec de journal ne doit pas compter comme erreur : {res.error_messages}")
+
+    def test_la_consequence_est_NOMMEE_a_l_utilisateur(self) -> None:
+        store = _StoreJournalVerrouille()
+        res, _batch_id, _op_index = self._apply_reel(store)
+
+        joints = " ".join(res.error_messages or []).lower()
+        self.assertIn("annulation", joints, f"consequence non nommee : {res.error_messages}")
+
+    def test_le_chemin_NOMINAL_est_inchange(self) -> None:
+        """Contre-epreuve indispensable : sans elle, un correctif qui compte
+        TOUT (y compris les succes) passerait les quatre tests ci-dessus."""
+        store = _StoreJournalSain()
+        res, batch_id, op_index = self._apply_reel(store)
+
+        self.assertEqual(res.journal_failures, 0, "un succes ne doit rien compter")
+        self.assertEqual(batch_id, "batch-901")
+        self.assertGreater(op_index, 0, "aucune operation journalisee sur un store sain")
+        self.assertEqual(op_index, len(store.ops_ecrites))
+        self.assertEqual(
+            [int(o["op_index"]) for o in store.ops_ecrites],
+            list(range(1, len(store.ops_ecrites) + 1)),
+            "op_index doit rester une suite 1..n sans trou ni doublon",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
