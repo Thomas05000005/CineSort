@@ -19,9 +19,7 @@ par des doublures) et fait tourner le code de production sous Node.
 
 from __future__ import annotations
 
-import json
 import unittest
-from pathlib import Path
 
 from tests._jsexec import DASHBOARD, require_node, run_module_test
 
