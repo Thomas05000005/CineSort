@@ -1,4 +1,4 @@
-"""V4-07 - Audit a11y axe-core sur le dashboard via Playwright.
+﻿"""V4-07 - Audit a11y axe-core sur le dashboard via Playwright.
 
 Run:
   CINESORT_API_TOKEN=<token> python -m unittest tests.test_axe_dashboard -v
@@ -12,7 +12,15 @@ from pathlib import Path
 
 OUTPUT_DIR = Path("audit/results")
 DASHBOARD_URL = "http://127.0.0.1:8642/dashboard/"
-ROUTES = ["/status", "/library", "/quality", "/validation", "/settings", "/help"]
+# MESURE 2026-08-06 contre les `registerRoute` de web/dashboard/app.js : cinq de
+# ces six routes existent, `/validation` n'a JAMAIS ete enregistree. Cette
+# derniere auditait donc une page vide, sans que rien ne le signale. L'ecran de
+# validation vit dans `/traitement`.
+#
+# Le garde `tests/test_axe_routes_existent.py` verrouille cette liste contre le
+# routeur reel : une route qui disparait fait desormais rougir, au lieu de vider
+# silencieusement l'audit.
+ROUTES = ["/status", "/library", "/quality", "/traitement", "/settings", "/help"]
 
 
 class AxeDashboardTests(unittest.TestCase):

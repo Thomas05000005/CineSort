@@ -880,6 +880,18 @@ async function _runApply() {
       : "";
     dangerConfirmModal({
       title: "Lancer l'apply ?",
+      // Regle projet n3. Ce site ne passait NI liste NI delai, sur l'action qui
+      // renomme et deplace les films sur le disque : quel que soit le volume, le
+      // bouton etait actif immediatement. `itemCount` fait deriver le compte a
+      // rebours par la modale (cf. gradedCountdownSeconds).
+      //
+      // La LISTE n'est volontairement pas passee : `_state` ne porte que les
+      // compteurs (`rowCounts`), pas les rows, et le tableau rendu est pagine.
+      // En extraire les titres donnerait une liste PARTIELLE presentee comme
+      // complete — un mensonge plus couteux que l'absence. La rendre complete
+      // demande de faire remonter les titres approuves jusqu'ici, ce qui est un
+      // sujet en soi.
+      itemCount: approved,
       consequence:
         `${approved} film(s) approuvé(s) vont être RENOMMÉS et DÉPLACÉS sur le disque.`
         + quarantineNote
