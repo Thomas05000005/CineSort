@@ -84,6 +84,23 @@ def connect_sqlite(
     conn = sqlite3.connect(
         str(db_path),
         timeout=max(1.0, busy_timeout_ms / 1000.0),
+        # C'est CECI, et non `isolation_level`, qui protege du risque nomme par
+        # #428 (« une montee de Python change le comportement transactionnel »).
+        # Depuis Python 3.12, `isolation_level` n'est honore QUE tant que
+        # `autocommit` vaut LEGACY_TRANSACTION_CONTROL ; le jour ou ce defaut
+        # changerait, l'expliciter n'aurait servi a rien. MESURE comparative :
+        #
+        #   rien passe / LEGACY epingle : BEGIN implicite avant le DML,
+        #                                 in_transaction=True, BEGIN explicite REFUSE
+        #   autocommit=True             : AUCUN BEGIN implicite,
+        #                                 in_transaction=False, BEGIN explicite ACCEPTE
+        #
+        # Le depot est ecrit contre la premiere colonne : `MigrationManager.apply`
+        # pose son propre `BEGIN` puis `commit`/`rollback`, et
+        # `_record_pragma_history` commit explicitement pour que ce `BEGIN`
+        # passe. Epingler est un no-op aujourd'hui (mesure : traces SQL emises
+        # identiques) et une assurance pour demain.
+        autocommit=sqlite3.LEGACY_TRANSACTION_CONTROL,
     )
     try:
         conn.row_factory = sqlite3.Row
