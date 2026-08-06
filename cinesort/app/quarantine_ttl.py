@@ -789,7 +789,12 @@ def _run_purge_once(api: Any, ttl_days: int) -> None:
         # On passe par l'api facade pour respecter l'inversion d'imports :
         # le cron tourne en thread daemon, il n'importe pas la cfg directement
         # — c'est `api` qui sait construire le cfg courant via les settings.
-        result = api.run.purge_quarantine_bucket(ttl_days)
+        # `dry_run=False` EXPLICITE. Le defaut de la facade est passe a True :
+        # cette methode est exposee en REST, et un appel au corps vide y
+        # supprimait des fichiers. Le cron, lui, est le seul appelant dont le
+        # travail EST de supprimer — il doit donc le dire. Sans ce parametre, il
+        # deviendrait un no-op silencieux et la quarantaine croitrait sans borne.
+        result = api.run.purge_quarantine_bucket(ttl_days, dry_run=False)
     # R8-024 (F2-d) : +sqlite3.Error -> un verrou DB transitoire ne tue plus le thread
     # cron de purge TTL (qui restait mort definitivement = croissance non bornee).
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:

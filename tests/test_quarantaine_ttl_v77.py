@@ -340,16 +340,27 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
 
 class TriggerNowTests(unittest.TestCase):
     def test_trigger_now_calls_api_run(self) -> None:
+        """Le cron doit demander la SUPPRESSION explicitement.
+
+        Le defaut de `purge_quarantine_bucket` est passe a `dry_run=True` : la
+        methode est exposee en REST, et un POST au corps vide y supprimait des
+        fichiers. Le cron est le seul appelant dont le travail EST de supprimer —
+        sans ce parametre, il deviendrait un no-op SILENCIEUX et la quarantaine
+        croitrait sans borne.
+
+        Ce test n'observait que les arguments positionnels : il serait reste vert
+        avec un cron devenu inoffensif.
+        """
         calls = []
 
         class _FakeRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
-                calls.append(ttl_days)
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
+                calls.append((ttl_days, dry_run))
                 return {"ok": True, "deleted": 7}
 
         api = SimpleNamespace(run=_FakeRun())
         trigger_now(api, ttl_days=15)
-        self.assertEqual(calls, [15])
+        self.assertEqual(calls, [(15, False)])
 
     def test_trigger_now_swallows_attribute_error(self) -> None:
         # api sans facade.run -> ne doit pas exploser.
