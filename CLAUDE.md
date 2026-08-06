@@ -46,8 +46,8 @@ global est en 3.12 et produit des echecs massifs trompeurs.
   --ignore=tests/manual --ignore=tests/live --ignore=tests/stress -q
 
 # Lint et formatage — la version EXACTE compte (cf. section Pieges)
-uvx ruff@0.15.22 check .
-uvx ruff@0.15.22 format --check .
+uvx ruff@0.16.1 check .
+uvx ruff@0.16.1 format --check .
 
 # Contrats d'architecture (l'executable, PAS `python -m importlinter`)
 ./.venv/Scripts/lint-imports.exe
@@ -99,9 +99,10 @@ les supprime. Mesure : 37 re-exports effaces, 2 fichiers de tests ne collectaien
 plus, et pytest s'arretait AVANT d'executer quoi que ce soit — un « 0 echec »
 trompeur sur une batterie amputee. Les deux modules sont en `per-file-ignores`.
 
-**ruff est epingle EXACTEMENT** (`ruff==0.15.22`) en **4 endroits** qui doivent
+**ruff est epingle EXACTEMENT** (`ruff==0.16.1`) en **5 endroits** qui doivent
 rester synchrones : `pyproject.toml`, `requirements-dev.txt`,
-`.pre-commit-config.yaml` (rev du hook) et `uv.lock`. Trois versions differentes
+`.pre-commit-config.yaml` (rev du hook), `uv.lock` — et **CE FICHIER**, qui
+porte la commande que tout le monde copie. Trois versions differentes
 avaient coexiste : un developpeur formatait avec une version que la CI rejetait.
 Le test `test_ruff_version_is_identical_everywhere` echoue si elles divergent.
 Toute montee de version doit etre **deliberee**, avec le reformatage dans le
@@ -198,7 +199,8 @@ ne detectent rien quand il casse.
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : ~6660 tests.
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **8515 tests** (mesure du 2026-08-06 ; ce nombre
+se remesure, il ne se recopie pas).
 
 Le bot d'audit quotidien tourne en Opus 5 et est **borne par un budget
 d'ouverture** (`.github/audit-prompt.md`) : au plus 3 PR et 5 issues par
