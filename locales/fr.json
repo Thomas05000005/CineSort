@@ -520,9 +520,11 @@
     "title_scan_error": "Erreur d'analyse",
     "title_critical_error": "Erreur critique",
     "title_undo_unavailable": "Application NON annulable",
+    "title_undo_none": "Annulation sans effet",
     "scan_done_body": "{{count}} film(s) détecté(s) en {{elapsed}}s.",
     "apply_done_body": "{{renames}} renommé(s), {{moves}} déplacé(s), {{errors}} erreur(s).",
-    "undo_done_body": "{{done}} restauré(s), {{failed}} échec(s)."
+    "undo_done_body": "{{done}} restauré(s), {{failed}} échec(s).",
+    "undo_none_body": "Aucun film restauré : {{skipped}} opération(s) ignorée(s). L'application reste annulable."
   },
   "errors": {
     "run_not_found": "Le run demandé est introuvable.",
@@ -553,6 +555,7 @@
     "undo_selective_done_with_anomalies": "Undo sélectif terminé avec anomalies.",
     "undo_done": "Undo terminé.",
     "undo_done_with_anomalies": "Undo terminé avec anomalies.",
+    "undo_none": "Aucun film n'a été restauré : {{skipped}} opération(s) ignorée(s). Rien n'a été modifié sur le disque, et cette application reste annulable — vous pouvez réessayer.",
     "undo_atomic_refused": "Annulation refusée : certains fichiers ont changé depuis l'apply. Relancer avec atomic=false pour forcer.",
     "undo_atomic_refused_detailed": "Annulation refusée : certains fichiers ont été modifiés depuis l'apply. Les détails sont dans 'preverify'. Relancer avec atomic=false pour forcer malgré tout.",
     "no_reversible_apply_available": "Aucun apply réversible.",
