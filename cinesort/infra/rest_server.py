@@ -60,6 +60,23 @@ _EXCLUDED_METHODS: Set[str] = {
     "log_api_exception",
     "log",
     "progress",
+    # #483 : `test_reset` remet l'application dans un etat propre (efface les
+    # runs en memoire). Elle n'a AUJOURD'HUI aucune route — Pass 1 est desactive
+    # par defaut, et elle n'est sur aucune facade — mais rien ne le garantissait.
+    #
+    # MESURE : poser les trois methodes publiques residuelles de `CineSortApi`
+    # sur une facade, ce que #483 recommande, cree exactement UNE route :
+    # `runtime/test_reset`. Les deux autres (`open_path`, `log_api_exception`)
+    # sont deja dans cette liste, que la Pass 2 consulte aussi ; `test_reset`
+    # ne l'etait pas, parce qu'elle n'en avait jamais eu besoin.
+    #
+    # L'y mettre ferme la porte AVANT que quelqu'un ne la pousse. Les E2E ne
+    # sont pas concernes : ils l'appellent directement sur l'objet Python
+    # (`tests/e2e/conftest.py`) ou via le pont pywebview
+    # (`window.pywebview.api.test_reset`), qui ne passe pas par ce dispatcher —
+    # exactement comme `open_path`, exclu ici et pourtant utilise par l'UI
+    # desktop.
+    "test_reset",
 }
 
 # Issue #84 PR 8 : noms des 6 facades introduites par le refactor god class.
