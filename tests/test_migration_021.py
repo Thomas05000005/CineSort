@@ -336,6 +336,188 @@ class ExistingDbMigrationTests(unittest.TestCase):
             )
             self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM anomalies WHERE run_id='GHOST'").fetchone()[0]), 0)
 
+    def _seed_v20_avec_orpheline(self) -> None:
+        """Base en v20 : une `errors` legitime, une orpheline.
+
+        Pourquoi ce cas manquait au test ci-dessus : `connect_sqlite` pose
+        `PRAGMA foreign_keys = ON`, et `errors` est la SEULE des quatre tables
+        qui avait deja une FK en v20. Une orpheline y est donc impossible a
+        creer par le chemin qu'utilisait le test — l'angle mort etait dans le
+        harnais. En vrai elle arrive sans rien faire d'exotique : `foreign_keys`
+        vaut OFF par DEFAUT dans SQLite, donc tout ecrivain qui ne pose pas le
+        pragma (version anterieure, outil externe, script de maintenance) laisse
+        ses `errors` derriere un run supprime.
+        """
+        MigrationManager(self.db_path, self._mig_v20).apply()
+        ts = time.time()
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            conn.execute(
+                "INSERT INTO runs(run_id, status, created_ts, root, state_dir, config_json) "
+                "VALUES ('R-OK', 'DONE', ?, '/r', '/s', '{}')",
+                (ts,),
+            )
+            conn.execute(
+                "INSERT INTO errors(run_id, ts, step, code, message) VALUES ('R-OK', ?, 'scan', 'E1', 'legitime')",
+                (ts,),
+            )
+            # Le commit n'est pas cosmetique : `PRAGMA foreign_keys` est un no-op
+            # SILENCIEUX dans une transaction ouverte.
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                "INSERT INTO errors(run_id, ts, step, code, message) VALUES ('GHOST', ?, 'scan', 'E2', 'orpheline')",
+                (ts,),
+            )
+            conn.commit()
+
+    def test_v20_to_v21_ne_bloque_pas_sur_une_errors_orpheline(self) -> None:
+        """MESURE avant correctif, base reelle en v20, UNE seule orpheline :
+
+            essai 1 : IntegrityError: FOREIGN KEY constraint failed -> v20
+            essai 2 : IntegrityError: FOREIGN KEY constraint failed -> v20
+
+        Deterministe et rejoue a chaque ouverture : la base ne s'ouvre plus
+        jamais, et rien dans l'application ne repare la ligne fautive.
+        """
+        self._seed_v20_avec_orpheline()
+
+        version = MigrationManager(self.db_path, _REAL_MIG_DIR).apply()
+
+        self.assertGreaterEqual(version, 21, "la migration a echoue : la base reste bloquee a v20")
+
+    def test_l_orpheline_SURVIT_a_la_migration(self) -> None:
+        """Contre-epreuve du correctif ecarte.
+
+        Le premier correctif tente ici etait le filtre `WHERE EXISTS` des trois
+        sections soeurs. Il debloque bien le demarrage — et DETRUIT le journal
+        d'erreurs, ce que la passe adversaire N26 avait deja refuse. Le meme SQL
+        etant rejoue par `_bootstrap_schema_latest` a chaque auto-reparation, le
+        filtre aurait supprime ces lignes sur le chemin le PLUS frequent des
+        deux (mesure : 2 tests de N26 passes au rouge).
+
+        Le correctif retenu (marqueur `disable_fk`) n'enleve rien : il aligne
+        seulement le chemin migration sur le chemin bootstrap, qui tournait deja
+        FK a OFF.
+        """
+        self._seed_v20_avec_orpheline()
+
+        MigrationManager(self.db_path, _REAL_MIG_DIR).apply()
+
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            codes = sorted(str(r[0]) for r in conn.execute("SELECT code FROM errors"))
+        self.assertEqual(codes, ["E1", "E2"], "le journal d'erreurs a ete ampute par la migration")
+
+    def test_l_orpheline_reste_DIAGNOSTIQUABLE(self) -> None:
+        """Survivre ne suffit pas : l'incoherence doit rester visible.
+
+        `PRAGMA integrity_check` repond « ok » sur une base pleine d'orphelines —
+        c'est tout l'objet du diagnostic N26. Si la migration laissait passer la
+        ligne SANS qu'elle soit detectable, on aurait echange un blocage bruyant
+        contre une incoherence muette.
+        """
+        self._seed_v20_avec_orpheline()
+        MigrationManager(self.db_path, _REAL_MIG_DIR).apply()
+
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+
+        tables = {str(row[0]) for row in violations}
+        self.assertIn("errors", tables, f"l'orpheline n'est signalee par aucun diagnostic : {violations}")
+
+    def test_une_orpheline_ne_bloque_pas_le_demarrage_SUIVANT(self) -> None:
+        """Le vrai symptome n'est pas « la migration echoue », c'est qu'elle
+        echoue A CHAQUE FOIS. Un echec transitoire se rattrape au reboot ; celui-ci
+        non."""
+        self._seed_v20_avec_orpheline()
+
+        versions = [MigrationManager(self.db_path, _REAL_MIG_DIR).apply() for _ in range(2)]
+
+        self.assertTrue(
+            all(v >= 21 for v in versions),
+            f"la base reste bloquee au redemarrage : versions obtenues {versions}",
+        )
+
+    def test_l_apply_operation_orpheline_SURVIT_aussi(self) -> None:
+        """Section 4 : le journal d'undo, la table la plus consequente des quatre.
+
+        Chacune de ses lignes est le seul enregistrement d'un deplacement DEJA
+        FAIT sur disque. Elle n'avait NI garde d'execution NI test : son filtre
+        `WHERE EXISTS` etait presente comme une protection d'integrite, alors que
+        sous `disable_fk` il ne fait plus que supprimer. MESURE : filtre retire
+        et rien d'autre change, la migration aboutit ET la ligne est preservee.
+        """
+        MigrationManager(self.db_path, self._mig_v20).apply()
+        ts = time.time()
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            conn.execute(
+                "INSERT INTO apply_batches VALUES ('B-OK', 'R', ?, NULL, 0, 0, 'DONE', '{}', '7.6')",
+                (ts,),
+            )
+            conn.execute(
+                "INSERT INTO apply_operations(batch_id, op_index, op_type, src_path, dst_path, "
+                "reversible, undo_status, ts) VALUES ('B-OK', 1, 'MOVE', '/a', '/b', 1, 'PENDING', ?)",
+                (ts,),
+            )
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                "INSERT INTO apply_operations(batch_id, op_index, op_type, src_path, dst_path, "
+                "reversible, undo_status, ts) VALUES ('B-DISPARU', 1, 'MOVE', '/c', '/d', 1, 'PENDING', ?)",
+                (ts,),
+            )
+            conn.commit()
+
+        MigrationManager(self.db_path, _REAL_MIG_DIR).apply()
+
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            batches = sorted(str(r[0]) for r in conn.execute("SELECT batch_id FROM apply_operations"))
+        self.assertEqual(
+            batches,
+            ["B-DISPARU", "B-OK"],
+            "le journal d'undo a ete ampute : ces lignes tracent des deplacements deja faits sur disque",
+        )
+
+    def test_les_sorties_RECALCULABLES_restent_filtrees(self) -> None:
+        """Garde anti-sur-correction : ne pas etendre la clemence a tout.
+
+        `quality_reports` et `anomalies` sont des sorties qu'un nouveau scan
+        reproduit. Les conserver orphelines n'apporterait rien et laisserait du
+        bruit dans une base que la retention ne sait pas purger (leur run n'existe
+        plus, donc aucun chemin de nettoyage ne les atteint).
+        """
+        MigrationManager(self.db_path, self._mig_v20).apply()
+        ts = time.time()
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            conn.execute(
+                "INSERT INTO quality_reports VALUES ('GHOST', 'row1', 60, 'Silver', '[]', '{}', 'p1', 1, ?)",
+                (ts,),
+            )
+            conn.execute(
+                "INSERT INTO anomalies(run_id, severity, code, message, ts) VALUES ('GHOST', 'WARN', 'A1', 'm', ?)",
+                (ts,),
+            )
+            conn.commit()
+
+        MigrationManager(self.db_path, _REAL_MIG_DIR).apply()
+
+        with closing(connect_sqlite(str(self.db_path))) as conn:
+            self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM quality_reports").fetchone()[0]), 0)
+            self.assertEqual(int(conn.execute("SELECT COUNT(*) FROM anomalies").fetchone()[0]), 0)
+
+    def test_le_marqueur_disable_fk_est_PRESENT_et_strictement_formate(self) -> None:
+        """Le marqueur est un contrat textuel, matche par `line.strip().startswith`.
+
+        Deux lecteurs independants l'interpretent (`migration_manager.apply` et
+        `SQLiteStore._bootstrap_schema_latest`) et tous deux exigent une ligne
+        qui COMMENCE par le marqueur apres trim. Le noyer dans une phrase le
+        desactiverait sans que rien ne rougisse.
+        """
+        sql = (_REAL_MIG_DIR / "021_fk_cascade.sql").read_text(encoding="utf-8")
+
+        lignes_marqueur = [ln for ln in sql.splitlines() if ln.strip().startswith("-- @manager: disable_fk")]
+
+        self.assertEqual(len(lignes_marqueur), 1, f"marqueur absent ou duplique : {lignes_marqueur}")
+
 
 class IdempotenceTests(unittest.TestCase):
     """Rejouer la migration apres son application = no-op."""
