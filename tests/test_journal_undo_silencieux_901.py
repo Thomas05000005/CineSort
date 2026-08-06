@@ -289,12 +289,12 @@ class ApplySupportRemonteSesEchecsDeJournalTests(unittest.TestCase):
     """
 
     def _apply_reel(self, store, nb_films=3):
-        import shutil
         import tempfile
         from types import SimpleNamespace
 
         from cinesort.domain import core as core_mod
         from cinesort.ui.api import apply_support
+        from tests._helpers import cleanup_test_tree  # noqa: I001 - import local au harnais
 
         tmp = Path(tempfile.mkdtemp(prefix="cs_901_prod_"))
         try:
@@ -349,7 +349,15 @@ class ApplySupportRemonteSesEchecsDeJournalTests(unittest.TestCase):
             )
             return res, batch_id, op_index
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            # `cleanup_test_tree` et PAS `shutil.rmtree(ignore_errors=True)` :
+            # ce harnais execute le vrai `_execute_apply`, donc il demarre les
+            # threads de fond de l'application. MESURE consignee dans CLAUDE.md :
+            # ces threads continuent d'ecrire dans le `state_dir` du test et le
+            # RECREENT juste apres le `rmtree` (12 dossiers sur 13 pour
+            # test_api_bridge_lot3). Le helper les joint d'abord, puis reessaie
+            # apres `gc.collect()` — et surtout il ne masque pas l'echec, alors
+            # qu'`ignore_errors=True` laissait la fuite invisible.
+            cleanup_test_tree(tmp)
 
     def test_les_echecs_de_la_CLOSURE_DE_PRODUCTION_sont_comptes(self) -> None:
         store = _StoreJournalVerrouille()
