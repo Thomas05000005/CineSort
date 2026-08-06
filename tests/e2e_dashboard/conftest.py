@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Optional
 
 import pytest
 
@@ -128,6 +128,52 @@ _SHELL_TIMEOUT_MS = 8000
 #: plancher de bruit, pas une mesure. On ne paie ce budget que sur le chemin
 #: lent, donc il ne coute rien quand tout va bien.
 _SHELL_TIMEOUT_LENT_MS = 30000
+
+
+#: Erreurs reseau TRANSITOIRES de Chromium : la ressource manque a l'instant T,
+#: elle revient. Toute autre erreur (DNS, refus de connexion, TLS) designe un
+#: vrai probleme et ne doit PAS etre reessayee — la reessayer retarderait un
+#: diagnostic juste.
+_ERREURS_RESEAU_TRANSITOIRES = ("ERR_NO_BUFFER_SPACE", "ERR_INSUFFICIENT_RESOURCES")
+#: Paliers d'attente avant de recharger. Total ~1,4 s : negligeable devant les
+#: 8 s d'attente du shell qui suivent, et suffisant pour qu'un port ephemere se
+#: libere (TIME_WAIT court sur les runners Windows).
+_PALIERS_GOTO_S = (0.0, 0.1, 0.3, 1.0)
+
+
+def _aller_au_dashboard(page, e2e_server: Dict[str, Any]) -> None:
+    """`page.goto` avec reprise sur une penurie de ressource reseau (#924).
+
+    POURQUOI ICI. Le correctif keep-alive de #924 a fait passer le serveur de
+    26 sockets a 1 pour 6 serveurs x 4 requetes, et la frequence de
+    `net::ERR_NO_BUFFER_SPACE` s'est effondree — mais pas a zero : une
+    occurrence sur ~25 executions de `main` (run 31086285725). Le diagnostic
+    ajoute a l'epoque vit dans l'attente du shell, plus bas ; or cette
+    occurrence-la frappe AU `goto`, donc la page n'est jamais chargee et le
+    diagnostic ne se declenche pas. L'instrument etait sur la mauvaise ligne.
+
+    Ce que fait cette fonction : elle recharge sur les seules erreurs qui
+    signalent une penurie momentanee de ports ephemeres, et elle NE MASQUE
+    rien — si la penurie persiste, la derniere exception est relancee, enrichie
+    de l'etat du serveur au moment de l'echec (`connect_ex` sur son port), ce
+    qui tranche enfin entre « le serveur est mort » et « le client n'a plus de
+    socket pour l'atteindre ».
+    """
+    url = e2e_server["dashboard_url"]
+    derniere: Optional[Exception] = None
+    for attente in _PALIERS_GOTO_S:
+        if attente:
+            time.sleep(attente)
+        try:
+            page.goto(url)
+            return
+        except Exception as exc:  # noqa: BLE001 -- on filtre juste apres
+            message = str(exc)
+            if not any(motif in message for motif in _ERREURS_RESEAU_TRANSITOIRES):
+                raise
+            derniere = exc
+    assert derniere is not None
+    raise RuntimeError(_diagnostic_shell_absent(page, e2e_server, derniere)) from derniere
 
 
 def _diagnostic_shell_absent(page, e2e_server: Dict[str, Any], exc: Exception) -> str:
@@ -269,7 +315,7 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
     token = e2e_server["token"]
     # AVANT le goto : une erreur d'amorcage survient pendant le chargement.
     _brancher_capture_console(page)
-    page.goto(url)
+    _aller_au_dashboard(page, e2e_server)
     try:
         page.wait_for_selector("#app-shell:not(.hidden)", timeout=_SHELL_TIMEOUT_MS)
         return page
