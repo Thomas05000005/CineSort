@@ -21,6 +21,7 @@ import errno
 import logging
 import shutil
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
@@ -31,9 +32,78 @@ _logger = logging.getLogger(__name__)
 # rename inter-volumes, on teste donc aussi le winerror brut.
 _WINERROR_NOT_SAME_DEVICE = 17
 
+#: Paliers d'attente avant de reessayer un renommage de dossier refuse par
+#: Windows. Volontairement minuscules au depart : la fenetre mesuree est de
+#: l'ordre de la microseconde (cf. `renommer_avec_reprise`), et le premier
+#: palier suffit dans la quasi-totalite des cas. Le total plafonne a ~0,3 s,
+#: donc le cout est nul quand tout va bien et borne quand rien ne va.
+_REPRISES_RENAME_S = (0.0, 0.005, 0.02, 0.05, 0.1, 0.15)
+
 
 def _is_cross_device(exc: OSError) -> bool:
     return getattr(exc, "errno", None) == errno.EXDEV or getattr(exc, "winerror", None) == _WINERROR_NOT_SAME_DEVICE
+
+
+def renommer_avec_reprise(source: Path, cible: Path) -> None:
+    """Renomme un dossier, en reessayant brievement sur un refus d'acces Windows.
+
+    MESURE (#965), sur `main`, %TEMP% neuf et vide, machine au repos :
+
+        sans instrumentation                          : 8 echecs / 20
+        avec une simple enveloppe Python sur `rename` :  0 echec  / 20
+        (Fisher exact bilateral : p ~ 0,004)
+
+    Autrement dit, **le seul fait d'ajouter un appel de fonction Python avant
+    le renommage fait disparaitre l'echec**. La fenetre de course se compte
+    donc en microsecondes : un handle est en cours de liberation sur un enfant
+    du dossier — sur Windows, un fichier ouvert sans `FILE_SHARE_DELETE`
+    empeche le renommage de son dossier parent — et l'appel arrive juste avant
+    que la fermeture ne soit effective.
+
+    Ce qui a ete ECARTE par la mesure, pour ne pas y revenir :
+      - la saturation de `%TEMP%` (l'echec survient dans un `%TEMP%` vide, et
+        le remplir ne l'aggrave pas de facon distinguable : p = 0,38) ;
+      - un cycle de references retenant un objet fichier (forcer `gc.collect()`
+        avant chaque renommage ne previent rien : 3/25 contre 4/25) ;
+      - `sha1_quick`, qui ouvre bien le fichier video juste avant mais le ferme
+        de facon deterministe (`with path.open`).
+
+    La reprise ne MASQUE pas un vrai verrou : un dossier reellement tenu par un
+    autre processus epuise les paliers et l'exception d'origine est relancee
+    telle quelle. Elle ne transforme donc jamais un echec en succes silencieux
+    — elle cesse de perdre un deplacement pour une course de quelques
+    microsecondes, sur le chemin qui deplace les films de l'utilisateur.
+
+    Ce helper habite ce module — et non `apply_core` ou il est ne — parce que
+    `_rename_or_cross_device_copy` ci-dessous est le passage OBLIGE de tous les
+    deplacements de dossier entier (`atomic_move(..., allow_copy_fallback=False)`) :
+    doublons ecartes, marques pour suppression, dossier de collection, mise en
+    quarantaine, bucket de nettoyage, rollback et undo. Le laisser dans
+    `apply_core` obligeait `move_journal` a l'importer, donc a fabriquer un
+    cycle ; ici l'arete existe deja dans le bon sens.
+    """
+    derniere: Optional[OSError] = None
+    for attente in _REPRISES_RENAME_S:
+        if attente:
+            time.sleep(attente)
+        try:
+            source.rename(cible)
+            if derniere is not None:
+                _logger.info(
+                    "apply: renommage de %s reussi apres reprise (%s a l'essai precedent)",
+                    source.name,
+                    derniere.__class__.__name__,
+                )
+            return
+        except PermissionError as exc:
+            # Uniquement le refus d'acces : un `FileExistsError` ou un chemin
+            # invalide ne se resoudra pas en attendant, et le reessayer
+            # retarderait un diagnostic juste.
+            if getattr(exc, "winerror", None) not in (5, 32):
+                raise
+            derniere = exc
+    assert derniere is not None
+    raise derniere
 
 
 def _rename_or_cross_device_copy(src: Union[Path, str], dst: Union[Path, str]) -> None:
@@ -53,9 +123,17 @@ def _rename_or_cross_device_copy(src: Union[Path, str], dst: Union[Path, str]) -
     Sur un chemin destructif, l'erreur doit aller dans le sens RESTRICTIF : ne
     rien deplacer plutot que dedoubler. La copie reste le seul recours quand les
     deux chemins sont sur des volumes differents, et ce cas-la seul la declenche.
+
+    Le renommage passe par `renommer_avec_reprise` (#965) : la course de quelques
+    microsecondes qui faisait perdre un deplacement dans `apply_single` frappe
+    ICI AUSSI, et sur des chemins ou elle coute plus cher — le rollback et l'undo
+    sont le filet de secours de l'utilisateur. La reprise ne change RIEN au
+    partage des roles ci-dessous : `renommer_avec_reprise` ne rattrape que le
+    refus d'acces Windows (WinError 5/32), donc un vrai EXDEV la traverse intact
+    et tombe comme avant dans la degradation en copie.
     """
     try:
-        Path(src).rename(dst)
+        renommer_avec_reprise(Path(src), Path(dst))
     except OSError as exc:
         if not _is_cross_device(exc):
             raise
