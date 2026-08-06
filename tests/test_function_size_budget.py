@@ -220,6 +220,25 @@ def _iter_oversized_functions():
                     yield rel, node.name, loc
 
 
+def _depassements(mesures, plafonds):
+    """Fonctions listees dont la taille MESUREE depasse leur plafond.
+
+    Isole du parcours du depot pour pouvoir etre eprouve sur des entrees
+    controlees : sans cela, une comparaison inversee (`<` au lieu de `>`)
+    passerait inapercue tant que l'inventaire courant est conforme.
+    """
+    return [
+        (rel, name, loc, plafonds[(rel, name)])
+        for rel, name, loc in mesures
+        if (rel, name) in plafonds and loc > plafonds[(rel, name)]
+    ]
+
+
+def _plafonds_morts(plafonds, seuil):
+    """Plafonds <= seuil : la fonction sortirait de l'inventaire, ils ne mordraient jamais."""
+    return sorted((rel, name, plafond) for (rel, name), plafond in plafonds.items() if plafond <= seuil)
+
+
 def test_no_new_oversized_function():
     """Aucune fonction > MAX_LINES hors allowlist gelee (#677)."""
     offenders = [(rel, name, loc) for rel, name, loc in _iter_oversized_functions() if (rel, name) not in PLAFONDS]
@@ -259,11 +278,7 @@ def test_les_fonctions_listees_ne_grossissent_pas():
     silencieuse. C'est le meme cliquet que celui des imports, et il est a marge
     ZERO : la moindre ligne de plus rougit.
     """
-    depassements = [
-        (rel, name, loc, PLAFONDS[(rel, name)])
-        for rel, name, loc in _iter_oversized_functions()
-        if (rel, name) in PLAFONDS and loc > PLAFONDS[(rel, name)]
-    ]
+    depassements = _depassements(_iter_oversized_functions(), PLAFONDS)
     assert not depassements, (
         f"{len(depassements)} fonction(s) deja trop longue(s) ont GROSSI. "
         "Les decouper, ou (si justifie) monter leur plafond dans PLAFONDS — "
@@ -278,8 +293,43 @@ def test_les_plafonds_sont_au_dessus_du_seuil():
     Sans ce controle, une valeur erronee (0, ou une taille d'avant decoupe)
     passerait inapercue et le plafond ne mordrait jamais.
     """
-    morts = sorted((rel, name, plafond) for (rel, name), plafond in PLAFONDS.items() if plafond <= MAX_LINES)
+    morts = _plafonds_morts(PLAFONDS, MAX_LINES)
     assert not morts, (
         f"{len(morts)} plafond(s) <= MAX_LINES ({MAX_LINES}) : la fonction ne serait plus "
         "listee, donc le plafond ne s'appliquerait jamais. " + ", ".join(f"{rel}:{name}={p}" for rel, name, p in morts)
     )
+
+
+# ---------------------------------------------------------------------------
+# Controles du DETECTEUR lui-meme.
+#
+# Les deux tests ci-dessus ne parcourent que l'arbre courant : ils resteraient
+# VERTS si la detection devenait inoperante, tant que l'inventaire est conforme.
+# C'est le meme piege que le test vide au site d'appel — verifier l'etat plutot
+# que l'instrument qui le mesure. Les cas ci-dessous eprouvent les helpers sur
+# des entrees controlees, donc sans dependre de l'etat du depot.
+# ---------------------------------------------------------------------------
+
+
+def test_le_detecteur_voit_un_depassement():
+    trouve = _depassements([("a/b.py", "f", 150)], {("a/b.py", "f"): 120})
+    assert trouve == [("a/b.py", "f", 150, 120)], trouve
+
+
+def test_une_taille_EGALE_au_plafond_passe():
+    """La borne est un plafond inclusif : sinon le depot rougirait a l'identique."""
+    assert _depassements([("a/b.py", "f", 120)], {("a/b.py", "f"): 120}) == []
+
+
+def test_une_fonction_ABSENTE_des_plafonds_n_est_pas_un_depassement():
+    """Elle releve de `test_no_new_oversized_function`, pas de ce controle-ci."""
+    assert _depassements([("a/b.py", "inconnue", 999)], {("a/b.py", "f"): 120}) == []
+
+
+def test_le_detecteur_voit_un_plafond_mort():
+    assert _plafonds_morts({("a/b.py", "f"): 80}, 100) == [("a/b.py", "f", 80)]
+    assert _plafonds_morts({("a/b.py", "f"): 100}, 100) == [("a/b.py", "f", 100)]
+
+
+def test_un_plafond_au_dessus_du_seuil_n_est_pas_mort():
+    assert _plafonds_morts({("a/b.py", "f"): 101}, 100) == []
