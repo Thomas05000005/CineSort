@@ -17,7 +17,11 @@ from cinesort.app.cleanup import (
     _move_residual_top_level_dirs,
     preview_cleanup_residual_folders,
 )
-from cinesort.app.move_journal import RecordOpWithJournal, atomic_move
+from cinesort.app.move_journal import (
+    RecordOpWithJournal,
+    atomic_move,
+    renommer_avec_reprise,
+)
 from cinesort.domain.naming import (
     build_naming_context,
     check_path_length_killswitch,
@@ -202,68 +206,6 @@ def record_apply_op(
         return False
 
 
-#: Paliers d'attente avant de reessayer un renommage de dossier refuse par
-#: Windows. Volontairement minuscules au depart : la fenetre mesuree est de
-#: l'ordre de la microseconde (cf. `renommer_avec_reprise`), et le premier
-#: palier suffit dans la quasi-totalite des cas. Le total plafonne a ~0,3 s,
-#: donc le cout est nul quand tout va bien et borne quand rien ne va.
-_REPRISES_RENAME_S = (0.0, 0.005, 0.02, 0.05, 0.1, 0.15)
-
-
-def renommer_avec_reprise(source: Path, cible: Path) -> None:
-    """Renomme un dossier, en reessayant brievement sur un refus d'acces Windows.
-
-    MESURE (#965), sur `main`, %TEMP% neuf et vide, machine au repos :
-
-        sans instrumentation                          : 8 echecs / 20
-        avec une simple enveloppe Python sur `rename` :  0 echec  / 20
-        (Fisher exact bilateral : p ~ 0,004)
-
-    Autrement dit, **le seul fait d'ajouter un appel de fonction Python avant
-    le renommage fait disparaitre l'echec**. La fenetre de course se compte
-    donc en microsecondes : un handle est en cours de liberation sur un enfant
-    du dossier — sur Windows, un fichier ouvert sans `FILE_SHARE_DELETE`
-    empeche le renommage de son dossier parent — et l'appel arrive juste avant
-    que la fermeture ne soit effective.
-
-    Ce qui a ete ECARTE par la mesure, pour ne pas y revenir :
-      - la saturation de `%TEMP%` (l'echec survient dans un `%TEMP%` vide, et
-        le remplir ne l'aggrave pas de facon distinguable : p = 0,38) ;
-      - un cycle de references retenant un objet fichier (forcer `gc.collect()`
-        avant chaque renommage ne previent rien : 3/25 contre 4/25) ;
-      - `sha1_quick`, qui ouvre bien le fichier video juste avant mais le ferme
-        de facon deterministe (`with path.open`).
-
-    La reprise ne MASQUE pas un vrai verrou : un dossier reellement tenu par un
-    autre processus epuise les paliers et l'exception d'origine est relancee
-    telle quelle. Elle ne transforme donc jamais un echec en succes silencieux
-    — elle cesse de perdre un deplacement pour une course de quelques
-    microsecondes, sur le chemin qui deplace les films de l'utilisateur.
-    """
-    derniere: Optional[OSError] = None
-    for attente in _REPRISES_RENAME_S:
-        if attente:
-            time.sleep(attente)
-        try:
-            source.rename(cible)
-            if derniere is not None:
-                _logger.info(
-                    "apply: renommage de %s reussi apres reprise (%s a l'essai precedent)",
-                    source.name,
-                    derniere.__class__.__name__,
-                )
-            return
-        except PermissionError as exc:
-            # Uniquement le refus d'acces : un `FileExistsError` ou un chemin
-            # invalide ne se resoudra pas en attendant, et le reessayer
-            # retarderait un diagnostic juste.
-            if getattr(exc, "winerror", None) not in (5, 32):
-                raise
-            derniere = exc
-    assert derniere is not None
-    raise derniere
-
-
 def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
     """Fix audit 2026-05-26 (v1.5.6) Vague L (test vacuous rollback) :
     helper extrait du _execute_apply pour permettre un test de COMPORTEMENT
@@ -277,6 +219,13 @@ def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
     impossible a recuperer manuellement. Si MEME le rollback echoue, on
     LOG un warning (le dossier reste en .__tmp_ren et l'utilisateur doit
     intervenir) puis on re-raise l'exception originale.
+
+    Les TROIS renommages passent par `renommer_avec_reprise` (#965) : ce sont des
+    renommages de DOSSIER, donc exposes a la meme course de quelques microsecondes
+    qu'`apply_single`. Elle y coute plus cher qu'ailleurs — perdre le 2e rename
+    fait tenter un rollback qui n'avait aucune raison d'etre, et perdre CE rollback
+    laisse le dossier du film en `.__tmp_ren`, etat dont l'utilisateur ne sort qu'a
+    la main.
 
     Raises:
         OSError / PermissionError : l'exception du 2e rename est toujours
@@ -298,13 +247,13 @@ def _case_only_rename_with_rollback(folder: Path, dst: Path) -> None:
             f"_case_only_rename_with_rollback: aucun suffixe tmp libre pour {folder} "
             f"(essaye {base_name}, {base_name}_1..{base_name}_9)"
         )
-    folder.rename(tmp)
+    renommer_avec_reprise(folder, tmp)
     try:
-        tmp.rename(dst)
+        renommer_avec_reprise(tmp, dst)
     except OSError:
         # Rollback : restaurer le nom original si le 2e rename echoue
         try:
-            tmp.rename(folder)
+            renommer_avec_reprise(tmp, folder)
         except OSError as rollback_err:
             # M4 : ne plus masquer silencieusement — le dossier reste en .__tmp_ren
             # Fix audit 2026-05-25 (v1.5.3) Vague H : retrograde error->warning, erreur non-fatale
