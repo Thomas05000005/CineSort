@@ -18,7 +18,6 @@ from cinesort.app.cleanup import (
     preview_cleanup_residual_folders,
 )
 from cinesort.app.move_journal import (
-    _REPRISES_RENAME_S,  # noqa: F401  (re-export : point d'import historique de #965)
     RecordOpWithJournal,
     atomic_move,
     renommer_avec_reprise,

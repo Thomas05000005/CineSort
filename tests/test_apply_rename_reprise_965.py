@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cinesort.app.apply_core import _REPRISES_RENAME_S, renommer_avec_reprise
+from cinesort.app.move_journal import _REPRISES_RENAME_S, renommer_avec_reprise
 
 
 def _refus(winerror: int) -> PermissionError:
