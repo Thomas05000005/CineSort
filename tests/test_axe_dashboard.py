@@ -1,4 +1,4 @@
-﻿"""V4-07 - Audit a11y axe-core sur le dashboard via Playwright.
+"""V4-07 - Audit a11y axe-core sur le dashboard via Playwright.
 
 Run:
   CINESORT_API_TOKEN=<token> python -m unittest tests.test_axe_dashboard -v
