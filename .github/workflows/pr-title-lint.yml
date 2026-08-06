@@ -88,7 +88,15 @@ jobs:
             sec
             rel
           requireScope: false
-          subjectPattern: ^[A-Za-z0-9_].+$
+          # Le motif dit « une lettre ou un chiffre » ; `[A-Za-z0-9_]` ne
+          # couvrait que l'ASCII. Sur un depot dont la convention est d'ecrire
+          # en francais, tout titre commencant par un accent etait donc recale
+          # par un check dont le message affirmait le contraire — vu sur
+          # « rel(infra-db): epingler... » ecrit avec un e accent aigu.
+          # La plage À-ɏ couvre le latin etendu (accents francais,
+          # allemands, espagnols, nordiques...) sans ouvrir aux ponctuations,
+          # qui sont ce que ce motif existe pour refuser.
+          subjectPattern: ^[A-Za-z0-9_\u00C0-\u024F].+$
           subjectPatternError: |
             Le titre apres le prefix doit commencer par une lettre/chiffre.
 
