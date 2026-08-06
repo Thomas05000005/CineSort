@@ -348,11 +348,26 @@ VIDEO_EXTS_DEFAULT = {
     ".vob",
 }
 
-# Phase 6 (v7.8.0) : VIDEO_EXTS_ALL = union maximale des extensions video
-# reconnues dans toute la codebase. Avant ce constant, apply_core/apply_support
-# avaient 5 sets hardcodes divergents — un fichier .wmv pouvait etre considere
-# video par 1 module et pas par les autres. A utiliser partout ou on detecte
-# "un fichier video quelconque" (collisions, cleanup, integrity check).
+# Phase 6 (v7.8.0) : socle commun des extensions video, introduit parce que
+# apply_core/apply_support portaient 5 sets hardcodes divergents — un fichier
+# .wmv pouvait etre considere video par 1 module et pas par les autres.
+#
+# ATTENTION — ce commentaire a longtemps annonce une « union maximale des
+# extensions video reconnues dans toute la codebase ». C'est FAUX, et l'erreur
+# a coute : `apply_support._resolve_hashed_target` s'y est fiee seule et rendait
+# la verification d'identite de l'undo inoperante pour les extensions absentes.
+# `VIDEO_EXTS_ALL` n'est PAS un sur-ensemble de `VIDEO_EXTS_DEFAULT` : elle omet
+# `.m4v`, `.flv`, `.mpg`, `.mpeg`, `.ogv` et `.vob`, et ajoute `.iso`.
+#
+# A utiliser en UNION avec les extensions effectives (`cfg.video_exts`, ou
+# `VIDEO_EXTS_DEFAULT` quand aucun Config n'est disponible) partout ou l'on
+# detecte « un fichier video quelconque » — jamais seule.
+#
+# L'elargir pour tenir la promesse d'origine serait une REGRESSION : les trois
+# sites d'`apply_core` font `cfg.video_exts | VIDEO_EXTS_ALL`, donc tout ajout
+# ici elargit le perimetre DESTRUCTIF au-dela des extensions que l'utilisateur a
+# saisies — exactement ce que `tests/test_perimetre_destructif_20260803.py`
+# verrouille.
 VIDEO_EXTS_ALL = frozenset(
     {
         ".mkv",

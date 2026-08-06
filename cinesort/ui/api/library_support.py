@@ -208,11 +208,27 @@ def _normalize_codec(codec: Optional[str]) -> str:
 
 
 def _classify_resolution(width: int, height: int) -> str:
+    """Bande de resolution pour les rows de bibliotheque (vocabulaire du drawer).
+
+    Les SEUILS doivent etre ceux de `domain.resolution_class.classify_resolution`,
+    source de verite unique : `quality_score._resolution_label` se declare
+    explicitement « coherent avec library_support._classify_resolution ». Seuls le
+    VOCABULAIRE (`4k`/`sd`/`unknown` au lieu de `2160p`/`SD`/`""`) et la queue
+    divergent, ce que la note de dette de `resolution_class` documente deja.
+
+    Le seuil de HAUTEUR, lui, avait derive : `h >= 1060` au lieu de `h >= 1000`.
+    Les trois autres copies de l'echelle (`naming`, `duplicate_compare`,
+    `perceptual/composite_score_v2`) portent toutes 1000. Un film dont la largeur
+    n'est pas exploitable — probe partiel, rapport persiste tronque, cas ou la
+    hauteur sert justement de filet — et dont la hauteur tombe dans [1000, 1060)
+    etait donc affiche et FILTRE en 720p dans la bibliotheque, alors que le
+    scoring qualite, le nommage et la deduplication le traitaient en 1080p.
+    """
     w = int(width or 0)
     h = int(height or 0)
     if w >= 3800 or h >= 2100:
         return "4k"
-    if w >= 1900 or h >= 1060:
+    if w >= 1900 or h >= 1000:
         return "1080p"
     if w >= 1280 or h >= 680:
         return "720p"
