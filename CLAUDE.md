@@ -196,6 +196,31 @@ restaurer, verifier le contenu restaure, revoir le vert. Proscrire les tests qui
 comparent une chaine de **code source** : ils tombent quand le code s'ameliore et
 ne detectent rien quand il casse.
 
+Trois pieges de cette famille, **mesures le 2026-08-06**, chacun ayant produit un
+faux vert dans une session qui appliquait pourtant la regle ci-dessus :
+
+1. **La panne doit etre injectee a la couche de PRODUCTION.** L'issue #901 avait
+   ete fermee sur un test qui passait un `record_op` **qui leve** — forme absente
+   du code reel, ou la closure attrape et avale. Le test sautait par-dessus le
+   seul endroit ou le defaut vivait. Injecter au niveau du **store**, pas du
+   callable.
+2. **Un test qui verifie la PRESENCE d'une garde reste vert quand elle est
+   neutralisee.** `if (false && condition)` contient toujours `condition` :
+   asserter sur la chaine ne prouve rien. Exiger que la garde soit
+   **atteignable** (premier terme = la vraie variable), et qu'aucune garde
+   desactivee par une constante ne subsiste.
+3. **Un correctif peut ETEINDRE une garde existante.** Rendre `op_index` honnete
+   (il comptait des tentatives) l'a mis a 0 sur un journal verrouille — or il
+   servait de preuve « le disque a bouge » a l'alerte d'undo indisponible. Apres
+   avoir change la semantique d'une valeur, **grep tous ses lecteurs** et
+   asserter sur la **sortie utilisateur** (payload), pas seulement sur la valeur
+   corrigee.
+
+**Mesures** : `cProfile` ajoute son cout a CHAQUE appel — il fait paraitre couteux
+ce qui est FREQUENT. Sur `connect_sqlite` il attribuait 49 us par `execute` la ou
+la mesure directe en donne 1,5. Pour comparer deux variantes, A/B a **bras
+alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
+
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
@@ -206,6 +231,46 @@ Le bot d'audit quotidien tourne en Opus 5 et est **borne par un budget
 d'ouverture** (`.github/audit-prompt.md`) : au plus 3 PR et 5 issues par
 execution, zero au-dela de 150 elements ouverts. Sans cette borne il avait
 produit un backlog de 177 PR et 248 issues.
+
+### Campagne de remise en etat (2026-08-06) — 7 PR, 5 issues
+
+Plan complet et arbitrages : `docs/internal/TRI_ROUTES_ORPHELINES.md` pour la
+vague 3.1 ; le reste vit dans les PR. Ce qui compte pour une session suivante :
+
+- **#982** #901 rouverte : la closure de production AVALAIT l'echec, et
+  `op_index` comptait des tentatives — donc `undo_available` mentait.
+- **#985** migration 021 : une ligne `errors` orpheline bloquait le demarrage
+  **definitivement**. Le correctif est le marqueur `disable_fk`, PAS un filtre —
+  le meme SQL est rejoue par `_bootstrap_schema_latest` a chaque auto-reparation,
+  et filtrer y detruisait le journal d'erreurs (refute par la passe N26).
+- **#988** regle n3 : le seuil vit desormais DANS `dangerConfirmModal`. Quatre
+  conventions coexistaient sur 19 sites ; « Lancer l'apply » ne passait ni liste
+  ni delai.
+- **#989** undo : `UNDONE_NONE` ne consomme plus l'annulation ; le refus du garde
+  anti-echappement n'avorte plus le batch (type DEDIE, pas `RuntimeError` nu —
+  sinon le rollback atomique ne part plus) ; conflits exposes en donnee ;
+  pre-check d'espace sur les DEUX volumes ; cliquet de couverture par module.
+- **#990** tri des 60 methodes de facade orphelines : 42 a cabler, et **8 des 9
+  retraits proposes ont ete refutes**.
+- **#991** durcissement : `dry_run=True` par defaut sur les purges (un POST au
+  corps vide supprimait), cle TMDb jetee sur profil neuf, `db_local_guard`
+  aveugle aux lecteurs reseau mappes, cliquet sur 68 `except OSError` a risque.
+- **#993** politique Compensate : un fichier modifie ne bloque plus la
+  restauration des autres.
+
+**Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
+
+- « transaction `pragma_history` laissee ouverte » : NE SE REPRODUIT PAS
+  (3 scenarios, `in_transaction=False` et `BEGIN ok` a chaque fois) ;
+- « les films ecartes partent en %LOCALAPPDATA% » : la quarantaine des NON
+  APPROUVES reste sous `cfg.root`. Ce sont les bacs conflits / doublons /
+  marques-pour-suppression qui sont ailleurs (6 sur 7, mesure) ;
+- « ~14 PRAGMA par appel expliquent le cout de `connect_sqlite` » : les MEMES 8
+  PRAGMA coutent **x139** sur un handle neuf. Ce n'est pas leur nombre —
+  en retirer 6 sur 14 rend 1,7 %. Le gain est dans la REUTILISATION.
+
+Ecarts entre les chiffres annonces et mesures : 78 -> 68 `except OSError`,
+53 -> 60 routes orphelines. **Remesurer avant de coder.**
 
 Detail et historique : `docs/internal/CLAUDE.md` et
 `docs/internal/CLAUDE_HISTORY.md`.
