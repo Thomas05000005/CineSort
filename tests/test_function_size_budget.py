@@ -109,7 +109,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/dashboard_support.py", "get_dashboard"): 165,
     ("cinesort/app/plan_support_core.py", "_filter_dossiers_phase"): 163,
     ("cinesort/domain/subtitle_helpers.py", "build_subtitle_report"): 161,
-    ("cinesort/infra/db/connection.py", "connect_sqlite"): 157,
+    # 157 -> 163 : mesure de la vague 2. La relecture des PRAGMA (six `PRAGMA` de
+    # plus par ouverture) devient optionnelle sur le seul chemin qui IGNORE le
+    # retour, et le commentaire porte les chiffres qui l'expliquent — c'est eux
+    # qui evitent qu'on croie avoir trouve le cout de la connexion.
+    ("cinesort/infra/db/connection.py", "connect_sqlite"): 163,
     ("cinesort/ui/api/perceptual_support.py", "get_perceptual_compare_frames"): 157,
     ("cinesort/app/apply_batches_reconciliation.py", "reconcile_pending_batches"): 155,
     ("cinesort/app/apply_rollback.py", "rollback_forward"): 155,
