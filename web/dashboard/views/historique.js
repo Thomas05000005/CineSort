@@ -1295,8 +1295,23 @@ function _proposerUndoPartiel(runId, preverify) {
     // Tant qu'elle n'est pas fusionnee, `dangerConfirmModal` ignore `itemCount`
     // et retombe sur 0 seconde — une restauration de 200 films serait alors
     // confirmable au premier clic. Une PR ne doit pas dependre d'une autre pour
-    // etre correcte ; quand les deux seront la, les deux valeurs coincident.
-    countdownSeconds: restaurables > 50 ? 3 : 0,
+    // etre correcte.
+    //
+    // La formule REPLIQUE `gradedCountdownSeconds` a l'identique, et ce n'est pas
+    // cosmetique : une valeur explicite l'emporte sur la derivation. Un simple
+    // `restaurables > 50 ? 3 : 0` aurait donc rendu 0 s la ou la regle partagee
+    // rend 1 s (entre 31 et 50 elements) — et cet ecart aurait SURVECU a la
+    // fusion, en reintroduisant la convention par appelant que l'autre branche
+    // supprime justement.
+    //
+    // A RETIRER une fois les deux branches sur `main` : `itemCount` suffira, et
+    // la regle ne vivra plus qu'a un seul endroit.
+    countdownSeconds: (() => {
+      const n = Number(restaurables) || 0;
+      if (n <= 30) return 0;
+      if (n > 50) return 3;
+      return Math.max(0, Math.min(3, Math.round(((n - 30) / (100 - 30)) * 3)));
+    })(),
     consequence:
       `${modifies} fichier(s) ont été modifiés depuis l'apply et seront LAISSÉS EN PLACE. `
       + `Les ${restaurables} autres seront remis à leur emplacement d'origine. `

@@ -132,6 +132,48 @@ class ReplPartielTests(unittest.TestCase):
         self.assertEqual(res["countdown"], 3, "200 films deplaces sans delai de confirmation")
         self.assertEqual(res["itemCount"], 200, "le compte est calibre sur les fichiers NON deplaces")
 
+    def test_la_bande_42_50_suit_la_regle_PARTAGEE(self) -> None:
+        """Le piege de la fusion, trouve en raisonnant sur la combinaison.
+
+        Une valeur explicite l'emporte sur la derivation automatique de la
+        modale. Un `restaurables > 50 ? 3 : 0` aurait donc rendu 0 s la ou la
+        regle partagee (`gradedCountdownSeconds`, autre branche) rend 1 s — et
+        cet ecart aurait SURVECU a la fusion, en reintroduisant la convention
+        par appelant que l'autre branche supprime justement.
+
+        LA BANDE EXACTE, mesuree : l'interpolation `((n-30)/70)*3` ne franchit
+        0,5 qu'a n=42. En dessous, les deux formules rendent 0 — une premiere
+        version de ce test attendait 1 a n=40 et rougissait a tort. La divergence
+        va donc de 42 a 50 inclus.
+        """
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 45, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 1, "45 restaurables : l'interpolation partagee impose 1 s")
+
+    def test_sous_42_les_deux_formules_coincident(self) -> None:
+        """Contre-epreuve de la bande : en dessous du basculement, 0 s."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 41, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 0)
+
     def test_sous_le_seuil_aucun_delai_n_est_impose(self) -> None:
         """Contre-epreuve : un delai systematique userait la confirmation."""
         res = _executer(
