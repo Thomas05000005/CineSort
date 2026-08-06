@@ -1282,8 +1282,21 @@ function _proposerUndoPartiel(runId, preverify) {
 
   dangerConfirmModal({
     title: `Restaurer ${restaurables} film(s) sur ${restaurables + modifies} ?`,
+    // `items` liste les fichiers MODIFIES : c'est ce que l'utilisateur doit
+    // savoir, puisque ce sont les seuls qui ne bougeront pas.
     items: details.map((d) => String((d && d.dst_path) || "").split(/[\\/]/).pop()).filter(Boolean),
-    itemCount: modifies,
+    // Le delai se calibre sur ce qui est REELLEMENT DEPLACE, donc sur
+    // `restaurables` — pas sur `modifies`, que la premiere version passait ici.
+    // Se tromper de nombre revenait a graduer la confirmation sur les fichiers
+    // qu'on ne touche PAS.
+    itemCount: restaurables,
+    // `countdownSeconds` EXPLICITE, et pas seulement `itemCount` : la derivation
+    // automatique par la modale vit dans une AUTRE branche (regle n3 unifiee).
+    // Tant qu'elle n'est pas fusionnee, `dangerConfirmModal` ignore `itemCount`
+    // et retombe sur 0 seconde — une restauration de 200 films serait alors
+    // confirmable au premier clic. Une PR ne doit pas dependre d'une autre pour
+    // etre correcte ; quand les deux seront la, les deux valeurs coincident.
+    countdownSeconds: restaurables > 50 ? 3 : 0,
     consequence:
       `${modifies} fichier(s) ont été modifiés depuis l'apply et seront LAISSÉS EN PLACE. `
       + `Les ${restaurables} autres seront remis à leur emplacement d'origine. `

@@ -1,132 +1,228 @@
-"""Un fichier modifie ne doit plus empecher de restaurer les autres.
+"""Un fichier modifie a la main ne doit plus bloquer la restauration des autres.
 
 MESURE du defaut : l'undo est atomique par defaut. Si UN SEUL fichier a ete
-modifie depuis l'apply, il refuse TOUT — 1 fichier touche a la main sur 5, et
-c'est 0 sur 5 qui sont restaures.
+modifie depuis l'apply, il refuse TOUT — 1 fichier touche sur 5, et c'est 0 sur 5
+qui sont restaures.
 
-Le backend sait pourtant faire autrement : `atomic=false` restaure les fichiers
-intacts et ignore les autres (`_execute_undo_ops`). Ce mode n'etait atteignable
-qu'en REST BRUT — `historique.js` forcait `atomic: true`, et `traitement.js`
-l'omet (le defaut vaut True). L'utilisateur n'avait donc aucun moyen, depuis
-l'application, de recuperer ses quatre films intacts.
+Le backend sait pourtant faire autrement (`_execute_undo_ops` avec
+`atomic=False`). Ce mode n'etait atteignable qu'en REST BRUT : `historique.js`
+forcait `atomic: true` et `traitement.js` l'omet. L'utilisateur n'avait aucun
+moyen, depuis l'application, de recuperer ses quatre films intacts.
 
-Arbitrage Thomas (2026-08-06) : restaurer les N intacts, laisser les autres,
-derriere la modale destructive — liste, consequence, delai derive du nombre.
-
-Ces tests lisent le source JS. C'est assume et borne : ils n'assertent que sur la
-PRESENCE des elements de la politique, pas sur une mise en forme.
+CES TESTS EXECUTENT LA VRAIE SOURCE. Une premiere version comparait des chaines
+du fichier JavaScript — ce que la regle du depot proscrit, et pour une raison
+que ce meme fichier a demontree : la mutation `if (false && condition)` laissait
+le test VERT, puisque `condition` etait toujours presente dans la source. Le
+harnais `_jsexec` charge `historique.js`, neutralise ses seuls imports (remplaces
+par des doublures) et fait tourner le code de production sous Node.
 """
 
 from __future__ import annotations
 
-import re
+import json
 import unittest
 from pathlib import Path
 
-_HISTORIQUE = Path("web/dashboard/views/historique.js")
+from tests._jsexec import DASHBOARD, require_node, run_module_test
+
+_JS = DASHBOARD / "views" / "historique.js"
+
+# Doublures des imports de `historique.js`. Seules `apiPost`,
+# `dangerConfirmModal` et `showToast` comptent ici ; les autres existent pour
+# que le module se charge.
+_STUBS = r"""
+globalThis.__appels = [];
+globalThis.__modales = [];
+globalThis.__toasts = [];
+globalThis.__reponses = [];
+
+// `__appels` ne retient QUE les appels d'undo. Le chemin de succes enchaine sur
+// `_refreshRuns`, qui fait ses propres `apiPost` : les compter aurait rendu les
+// assertions dependantes d'un rafraichissement sans rapport avec le sujet.
+const apiPost = async (route, params) => {
+  if (route === "run/undo_last_apply") {
+    __appels.push({ route, params });
+    return __reponses.shift() || { data: { ok: true, counts: { done: 0, skipped: 0 } } };
+  }
+  return { data: { ok: true, runs: [], items: [] } };
+};
+const cachedGetSettings = async () => ({});
+const escapeHtml = (s) => String(s == null ? "" : s);
+const getNavSignal = () => ({ aborted: false });
+const navigateTo = () => {};
+const deriveRunStatus = () => "done";
+const rightPanel = { open: () => {}, close: () => {} };
+const dangerConfirmModal = (opts) => { __modales.push(opts); };
+const showModal = () => {};
+const closeModal = () => {};
+const showToast = (o) => { __toasts.push(o); };
+const buildEmptyState = () => "";
+"""
+
+# `_doUndoApply` et `_proposerUndoPartiel` sont des fonctions de module, non
+# exportees : on les expose au driver sans toucher a leur corps.
+_EXTRA = r"""
+export const __doUndoApply = _doUndoApply;
+export const __refreshRunsStub = () => {};
+"""
 
 
-def _source() -> str:
-    return _HISTORIQUE.read_text(encoding="utf-8")
+def _executer(driver: str) -> dict:
+    return run_module_test(_JS, stubs=_STUBS, extra=_EXTRA, driver=driver)
 
 
-class ReplPartielProposeTests(unittest.TestCase):
-    def test_le_refus_atomique_est_INTERCEPTE(self) -> None:
-        """Sans cette branche, la reponse `ABORTED_HASH_MISMATCH` tombait dans
-        le `else` generique et l'utilisateur ne voyait qu'un message d'echec.
+class ReplPartielTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
 
-        Ce test exigeait d'abord la seule PRESENCE de la chaine — il restait donc
-        vert avec la branche desactivee (`if (false && _payload.status === ...)`),
-        ce que la mutation a montre. Il exige maintenant que la garde soit
-        ATTEIGNABLE : le premier terme doit etre `atomic`, pas une constante.
-        """
-        source = _source()
-
-        self.assertIn("_proposerUndoPartiel", source)
-        self.assertRegex(
-            source,
-            r"if\s*\(\s*atomic\s*&&\s*_payload\.status\s*===\s*\"ABORTED_HASH_MISMATCH\"\s*\)",
-            "la garde du repli n'est pas conditionnee au mode atomique : branche morte ou toujours prise",
+    def test_un_refus_atomique_PROPOSE_le_repli(self) -> None:
+        """Le coeur du defaut : sans cette branche, l'utilisateur ne voyait
+        qu'un message d'echec et repartait avec zero film restaure."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1,
+                           mismatch_details: [{ dst_path: "D:/Films/Alien (1979)/alien.mkv" }] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ appels: __appels, modales: __modales.map(m => ({
+              titre: m.title, items: m.items, itemCount: m.itemCount,
+              countdown: m.countdownSeconds, consequence: m.consequence })) });
+            """
         )
-        self.assertNotRegex(
-            source,
-            r"if\s*\(\s*(?:false|0)\s*&&",
-            "une garde neutralisee par une constante subsiste dans ce fichier",
+        self.assertEqual(len(res["appels"]), 1, "le premier essai doit etre unique")
+        self.assertIs(res["appels"][0]["params"]["atomic"], True, "le premier essai doit etre ATOMIQUE")
+        self.assertEqual(len(res["modales"]), 1, f"aucun repli propose : {res}")
+        self.assertIn("4", res["modales"][0]["titre"])
+
+    def test_la_confirmation_relance_en_atomic_FALSE(self) -> None:
+        """C'est ce second appel qui restaure reellement les fichiers intacts."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL",
+                                      counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1");
+            await __modales[0].onConfirm();
+            __emit({ appels: __appels, toasts: __toasts });
+            """
         )
+        self.assertEqual(len(res["appels"]), 2, f"le repli n'a pas relance l'undo : {res['appels']}")
+        self.assertIs(res["appels"][1]["params"]["atomic"], False, "le repli doit demander le mode best-effort")
 
-    def test_le_repli_appelle_bien_atomic_FALSE(self) -> None:
-        source = _source()
-
-        self.assertRegex(
-            source,
-            r"_doUndoApply\(runId,\s*\{\s*atomic:\s*false\s*\}\)",
-            "le repli ne demande pas le mode best-effort : il refuserait a nouveau tout",
+    def test_le_delai_de_3s_s_applique_au_dela_de_50_RESTAURES(self) -> None:
+        """Regle projet n3. Le compte a rebours se calibre sur ce qui est
+        REELLEMENT DEPLACE (`restaurables`), pas sur les fichiers laisses en
+        place — c'est l'erreur de la premiere version."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 200, hash_mismatch_count: 2, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds, itemCount: __modales[0].itemCount });
+            """
         )
+        self.assertEqual(res["countdown"], 3, "200 films deplaces sans delai de confirmation")
+        self.assertEqual(res["itemCount"], 200, "le compte est calibre sur les fichiers NON deplaces")
 
-    def test_le_repli_passe_par_la_MODALE_DESTRUCTIVE(self) -> None:
-        """Regle projet n3 : liste des elements, consequence, delai."""
-        source = _source()
-        debut = source.index("function _proposerUndoPartiel")
-        bloc = source[debut : debut + 2200]
-
-        self.assertIn("dangerConfirmModal", bloc)
-        self.assertIn("items:", bloc)
-        self.assertIn("itemCount:", bloc)
-        self.assertIn("consequence:", bloc)
-
-    def test_la_consequence_dit_ce_qui_est_LAISSE_en_place(self) -> None:
-        """« Restaurer N films » sans dire ce qui ne le sera pas serait la meme
-        demi-verite que le message d'origine."""
-        source = _source()
-        debut = source.index("function _proposerUndoPartiel")
-        bloc = source[debut : debut + 2200]
-
-        self.assertIn("LAISSÉS EN PLACE", bloc)
-
-    def test_zero_restaurable_ne_propose_RIEN(self) -> None:
-        """Contre-epreuve : ouvrir une modale destructive dont la seule issue est
-        « 0 restaure » userait la confirmation exactement quand elle doit porter."""
-        source = _source()
-        debut = source.index("function _proposerUndoPartiel")
-        bloc = source[debut : debut + 2200]
-
-        self.assertIn("restaurables <= 0", bloc)
-        self.assertLess(
-            bloc.index("restaurables <= 0"),
-            bloc.index("dangerConfirmModal"),
-            "le garde doit precederer l'ouverture de la modale",
+    def test_sous_le_seuil_aucun_delai_n_est_impose(self) -> None:
+        """Contre-epreuve : un delai systematique userait la confirmation."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 3, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
         )
+        self.assertEqual(res["countdown"], 0)
+
+    def test_ZERO_restaurable_ne_propose_RIEN(self) -> None:
+        """Ouvrir une modale destructive dont la seule issue est « 0 restaure »
+        userait la confirmation exactement quand elle doit porter."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 0, hash_mismatch_count: 3, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ modales: __modales.length, toasts: __toasts });
+            """
+        )
+        self.assertEqual(res["modales"], 0, "une modale destructive s'ouvre pour ne rien restaurer")
+        self.assertEqual(res["toasts"][0]["type"], "error")
 
 
 class MessagesHonnetesTests(unittest.TestCase):
-    def test_le_toast_de_succes_DIT_le_nombre(self) -> None:
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_le_toast_DIT_combien_ont_ete_laisses(self) -> None:
         """« Apply annule. Fichiers restaures. » se lisait comme un succes
-        complet, y compris quand 1 film sur 5 avait ete laisse en place."""
-        source = _source()
+        COMPLET, y compris quand un film sur cinq etait reste en place."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL",
+                                      counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1", { atomic: false });
+            __emit({ toasts: __toasts });
+            """
+        )
+        texte = res["toasts"][0]["text"]
+        self.assertIn("4", texte)
+        self.assertIn("1", texte)
+        self.assertIn("laissé", texte.lower())
 
-        self.assertNotIn('text: "Apply annulé. Fichiers restaurés."', source)
-        self.assertIn("laissé(s) en place", source)
-
-    def test_UNDONE_NONE_n_est_pas_annonce_comme_un_succes(self) -> None:
+    def test_UNDONE_NONE_n_est_PAS_annonce_comme_un_succes(self) -> None:
         """Le backend distingue desormais « rien restaure » de « tout restaure » ;
-        l'UI doit suivre, sinon la distinction meurt au dernier metre."""
-        source = _source()
+        sans cette branche la distinction mourait au dernier metre."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_NONE",
+                                      message: "Aucun film n'a été restauré.",
+                                      counts: { done: 0, skipped: 2 } }});
+            await M.__doUndoApply("r1");
+            __emit({ toasts: __toasts });
+            """
+        )
+        self.assertEqual(res["toasts"][0]["type"], "warn", f"annonce comme un succes : {res['toasts']}")
 
-        self.assertIn('_payload.status === "UNDONE_NONE"', source)
-        bloc = source[source.index('_payload.status === "UNDONE_NONE"') :][:400]
-        self.assertIn('type: "warn"', bloc)
 
+class CheminNominalTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
 
-class NonRegressionTests(unittest.TestCase):
-    def test_le_chemin_NOMINAL_reste_atomique(self) -> None:
-        """Le premier essai doit rester atomique : on ne bascule en best-effort
-        qu'apres un refus EXPLICITE et une confirmation de l'utilisateur."""
-        source = _source()
-        appels = re.findall(r"apiPost\(\"run/undo_last_apply\",\s*\{([^}]*)\}", source)
-
-        self.assertTrue(appels, "l'appel d'undo a disparu ou change de forme")
-        for args in appels:
-            self.assertIn("atomic", args, f"undo sans mode atomique explicite : {args}")
+    def test_un_undo_qui_REUSSIT_ne_propose_aucun_repli(self) -> None:
+        """Non-regression : le cas courant ne doit rien declencher de neuf."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE",
+                                      counts: { done: 5, skipped: 0 } }});
+            await M.__doUndoApply("r1");
+            __emit({ appels: __appels.length, modales: __modales.length,
+                     toast: __toasts[0] });
+            """
+        )
+        self.assertEqual(res["appels"], 1)
+        self.assertEqual(res["modales"], 0)
+        self.assertEqual(res["toast"]["type"], "success")
 
 
 if __name__ == "__main__":
