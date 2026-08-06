@@ -80,8 +80,23 @@ def _resolve_hashed_target(dst: Path, op_type: str) -> Optional[Path]:
             return None
         # On ne peut pas appeler find_main_video_in_folder sans cfg, on fait
         # une heuristique equivalente : le plus gros fichier video du dossier.
-        # Phase 6 v7.8.0 : VIDEO_EXTS_ALL au lieu du 5eme set hardcode divergent
-        video_exts = core.VIDEO_EXTS_ALL
+        #
+        # L'union est INDISPENSABLE, et l'heuristique n'etait justement PAS
+        # equivalente sans elle : malgre son nom, `VIDEO_EXTS_ALL` n'est pas
+        # l'union maximale des extensions video du depot. Elle omet six des
+        # quatorze de `VIDEO_EXTS_DEFAULT` — `.m4v`, `.flv`, `.mpg`, `.mpeg`,
+        # `.ogv`, `.vob` — que le scan accepte pourtant comme films et que
+        # l'apply a donc bel et bien deplaces (les trois sites d'`apply_core`
+        # font tous `cfg.video_exts | VIDEO_EXTS_ALL`).
+        #
+        # Consequence sur ce site, qui etait le seul a lire `VIDEO_EXTS_ALL`
+        # seule : pour un `MOVE_DIR` dont la video principale est un `.vob`
+        # (rip DVD) ou un `.m4v`, aucun fichier ne matchait, la fonction rendait
+        # None, et l'op etait classee « destination absente » alors que le
+        # dossier est bien la. La verification d'identite sha1+taille de P1.2 —
+        # la garantie meme que cette pre-verification existe pour offrir —
+        # etait donc SILENCIEUSEMENT inoperante, et l'undo procedait sans elle.
+        video_exts = core.VIDEO_EXTS_DEFAULT | core.VIDEO_EXTS_ALL
         best: Optional[Path] = None
         best_size = 0
         try:
