@@ -85,5 +85,50 @@ class ModeTransactionnelImpliciteTests(unittest.TestCase):
         self.conn.rollback()
 
 
+class EpingleResisteAUnFuturPythonTests(unittest.TestCase):
+    """Le test qui manquait : les quatre ci-dessus passent SANS l'epingle.
+
+    Le defaut de `autocommit` vaut aujourd'hui `LEGACY_TRANSACTION_CONTROL`, donc
+    ne rien passer donne exactement le meme comportement que l'epingler. Les
+    tests d'invariant ci-dessus ne peuvent donc pas distinguer les deux, et le
+    correctif de #428 restait invisible pour eux — le piege du test qui verifie
+    le comportement d'aujourd'hui plutot que la protection qu'on vient d'ajouter.
+
+    On simule ici le seul evenement contre lequel l'epingle protege : une
+    version de Python dont le defaut de `autocommit` n'est plus le mode legacy.
+    Le `setdefault` ne s'applique QUE si l'appelant ne fournit rien — donc ce
+    test est vert si et seulement si `connect_sqlite` passe la valeur.
+    """
+
+    def test_le_mode_implicite_survit_a_un_changement_de_defaut(self) -> None:
+        from unittest import mock
+
+        dossier = Path(tempfile.mkdtemp(prefix="cinesort_futur428_"))
+        self.addCleanup(shutil.rmtree, str(dossier), True)
+        vrai_connect = sqlite3.connect
+
+        def _connect_avec_futur_defaut(*args, **kwargs):
+            # Ce qu'une future version de Python pourrait imposer : autocommit
+            # actif par defaut, conformement a la PEP 249.
+            kwargs.setdefault("autocommit", True)
+            return vrai_connect(*args, **kwargs)
+
+        with mock.patch.object(sqlite3, "connect", _connect_avec_futur_defaut):
+            conn = connect_sqlite(str(dossier / "futur.sqlite3"))
+        self.addCleanup(conn.close)
+        conn.execute("CREATE TABLE t (x INTEGER)")
+        conn.commit()
+
+        conn.execute("INSERT INTO t VALUES (1)")
+
+        self.assertTrue(
+            conn.in_transaction,
+            "sous un Python dont le defaut d'autocommit aurait change, `connect_sqlite` "
+            "n'impose plus le mode transactionnel implicite : les rollback de "
+            "MigrationManager ne protegent plus rien. Repasser "
+            "`autocommit=sqlite3.LEGACY_TRANSACTION_CONTROL` explicitement.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
