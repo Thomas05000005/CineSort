@@ -402,11 +402,11 @@ class JobRunner:
                 self._debug("start_job refused: active run already in progress", run_debug)
                 raise RuntimeError("Un run est deja en cours")
 
-            # Collision memoire/DB detectee sous verrou.
+            # Collision memoire/DB sous verrou, ORPHELINES COMPRISES (#984 : `get_run`
+            #  ne voyait que `runs` ; cf. `run_id_est_utilise`).
             #  - hint EXPLICITE : on refuse, sans demarrer de thread (cf docstring).
-            #  - pas de hint : personne n'a encore rien cree sous cet id, la
-            #    substitution est sans effet de bord observable.
-            if run_id in self._runs or self._store.run.get_run(run_id) is not None:
+            #  - pas de hint : rien n'existe sous cet id, la substitution est neutre.
+            if run_id in self._runs or self._store.run.run_id_est_utilise(run_id):
                 if run_id_hint:
                     self._debug(f"start_job refused: run_id hint {run_id} already used", run_debug)
                     raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}")
