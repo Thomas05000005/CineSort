@@ -82,13 +82,12 @@ const POLL_BACKOFF_MAX_ATTEMPTS = 8; // borne souple : passe au plafond apres le
  * 1s ou 2s pour n entre 51 et 99, violant la regle utilisateur obligatoire.
  * Clamp ajoute : > 50 -> 3s pour garantir conformite.
  */
-function _gradedCountdownSeconds(count) {
-  const n = Number(count) || 0;
-  if (n <= 30) return 0;
-  if (n > 50) return 3;
-  const linear = ((n - 30) / (100 - 30)) * 3;
-  return Math.max(0, Math.min(3, Math.round(linear)));
-}
+// Le calcul vivait ICI, en SECONDE copie de la meme regle. Il a ete supprime au
+// profit de `components/modal.js`, qui le derive maintenant pour les 19 sites
+// d'appel. Deux implementations d'une meme regle finissent par diverger : celle
+// de ce fichier avait deja du etre corrigee une fois pour violation de la regle
+// utilisateur entre 51 et 99 elements. Les appelants d'ici passent desormais
+// `itemCount` et laissent la modale decider.
 
 // M14 (audit ultra 2026-07-13) : collation FRANCAISE partagee, meme instance
 // d'Intl.Collator que la Bibliotheque (À classé avec A, Ç avec C, ellipse/
@@ -2138,9 +2137,10 @@ async function _handleBulkApprove(filter) {
       consequence: `${approvedCount} films seront marqués comme approuvés. Vous pourrez encore les décocher individuellement avant Apply.`,
       confirmLabel: `✓ Approuver ${approvedCount} films`,
       cancelLabel: "Annuler",
-      // mega-hotfix frontend_ui_polish (#5) : countdown gradue (0-3s entre 30-100).
-      // approvedCount > 50 ici (gate DANGER_THRESHOLD ci-dessus), donc valeur ~1.5-3s.
-      countdownSeconds: _gradedCountdownSeconds(approvedCount),
+      // Le countdown gradue est desormais DERIVE par la modale (regle unique
+      // pour les 19 sites d'appel, cf. `gradedCountdownSeconds`). On ne passe
+      // plus que le nombre : `items` peut etre tronquee a l'affichage, pas lui.
+      itemCount: approvedCount,
       onConfirm: async () => {
         await _applyBulkApprove(targetIds, approvedCount);
       },
@@ -2804,8 +2804,8 @@ function _onContainerClick(event) {
         dangerConfirmModal({
           title: `Passer à Apply avec ${pendingDups} doublon${pendingDups > 1 ? "s" : ""} non décidé${pendingDups > 1 ? "s" : ""} ?`,
           consequence: "Les choix par défaut (premier fichier de chaque groupe) seront appliqués. Les autres fichiers de doublons peuvent être supprimés/déplacés selon votre profil.",
-          // mega-hotfix frontend_ui_polish (#5) : countdown gradue (au lieu de cliff a 50).
-          countdownSeconds: _gradedCountdownSeconds(pendingDups),
+          // Countdown gradue derive par la modale (regle unique, cf. modal.js).
+          itemCount: pendingDups,
           confirmLabel: "Continuer vers Apply",
           cancelLabel: "Retourner aux Doublons",
           onConfirm: () => {

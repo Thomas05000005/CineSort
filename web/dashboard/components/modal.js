@@ -212,6 +212,32 @@ const DANGER_MODAL_ID = "dashDangerModal";
  *        lancer onConfirm au lieu d'attendre sa resolution (cf plus bas).
  * @returns {Promise<void>} resolue apres affichage (pas attente de l'utilisateur)
  */
+/**
+ * Delai de confirmation derive du NOMBRE d'elements (regle projet n3).
+ *
+ * Le seuil vit ici, et plus dans chaque appelant. Mesure du 2026-08-06 sur les
+ * 19 sites d'appel de `dangerConfirmModal` : QUATRE conventions coexistaient —
+ *
+ *   graduee (n<=30 -> 0, n>50 -> 3, interpolation entre)   2 sites
+ *   ternaire `n > 50 ? 3 : 0`                              4 sites
+ *   fixe 3, quel que soit le volume                        8 sites
+ *   rien passe -> 0                                        3 sites
+ *
+ * Le dernier groupe contient « Lancer l'apply » (processing.js), qui renomme et
+ * deplace N films sur disque : ni liste, ni delai, quel que soit N. Une regle
+ * appliquee de quatre facons differentes n'est pas une regle.
+ *
+ * Le clamp `> 50 -> 3` est celui de la regle utilisateur, pas une interpolation :
+ * une version anterieure rendait 1 s ou 2 s pour n entre 51 et 99 et la violait.
+ */
+export function gradedCountdownSeconds(count) {
+  const n = Number(count) || 0;
+  if (n <= 30) return 0;
+  if (n > 50) return 3;
+  const linear = ((n - 30) / (100 - 30)) * 3;
+  return Math.max(0, Math.min(3, Math.round(linear)));
+}
+
 export function dangerConfirmModal(opts) {
   // Fermer toute modale danger existante (re-trigger rapide)
   const existing = document.getElementById(DANGER_MODAL_ID);
@@ -221,7 +247,14 @@ export function dangerConfirmModal(opts) {
     title = "Confirmer ?",
     items = [],
     consequence = "",
-    countdownSeconds = 0,
+    // `null` (ou absent) = DERIVE du nombre d'elements. Une valeur explicite
+    // gagne toujours : les sites qui passent deja leur propre calcul ne changent
+    // pas de comportement. Ceux qui ne passaient RIEN heritaient de 0 seconde,
+    // y compris sur des actions massives — c'est ce trou que le defaut comble.
+    countdownSeconds = null,
+    // Nombre d'elements quand la LISTE n'est pas disponible (un compteur suffit
+    // a graduer le delai). A defaut, on retombe sur `items.length`.
+    itemCount = null,
     confirmLabel = "Confirmer",
     cancelLabel = "Annuler",
     onConfirm = () => {},
@@ -270,7 +303,12 @@ export function dangerConfirmModal(opts) {
     ? `<p id="${DANGER_MODAL_ID}Consequence" class="danger-modal-consequence">${escapeHtml(consequence)}</p>`
     : "";
 
-  const countdown = Math.max(0, parseInt(countdownSeconds, 10) || 0);
+  const nbElements = itemCount === null || itemCount === undefined
+    ? (Array.isArray(items) ? items.length : 0)
+    : (Number(itemCount) || 0);
+  const countdown = countdownSeconds === null || countdownSeconds === undefined
+    ? gradedCountdownSeconds(nbElements)
+    : Math.max(0, parseInt(countdownSeconds, 10) || 0);
   const confirmDisabled = countdown > 0 ? "disabled" : "";
   const countdownSuffix = countdown > 0
     ? ` <span class="danger-modal-confirm-countdown" data-danger-countdown>(${countdown}s)</span>`
