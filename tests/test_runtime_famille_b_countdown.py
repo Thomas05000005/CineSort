@@ -48,12 +48,25 @@ _JS_INSTALL_INTERVAL_PROBE = """
     // Permet de verifier qu'apres close le solde (created - cleared) revient
     // au baseline (pas de fuite handler).
     if (window.__cdProbe) return window.__cdProbe;
-    const probe = { created: 0, cleared: 0, baseline: 0 };
+    // `creesParLaModale` compte SEPAREMENT les intervals attribuables a
+    // `modal.js`, via la pile d'appel.
+    //
+    // POURQUOI. `created` compte TOUT le document. Tant que le harnais n'etait
+    // pas authentifie (il vivait sur le bypass d'auth loopback), presque rien
+    // ne tournait en fond et ce compteur global suffisait. Depuis que le
+    // harnais porte un jeton, le code de fond s'execute vraiment — la banniere
+    // de scan polle, les vues se re-rendent — et cree ses propres intervals
+    // pendant la fenetre de mesure : le delta global est monte a 2 sans qu'AUCUN
+    // countdown n'ait ete arme. L'assertion mesurait le voisinage, pas le sujet.
+    const probe = { created: 0, cleared: 0, baseline: 0, creesParLaModale: 0 };
     const realSetInterval = window.setInterval.bind(window);
     const realClearInterval = window.clearInterval.bind(window);
     window.setInterval = function(fn, ms) {
         const id = realSetInterval(fn, ms);
         probe.created += 1;
+        try {
+            if ((new Error().stack || "").includes("modal.js")) probe.creesParLaModale += 1;
+        } catch (e) { /* no-op */ }
         probe._lastId = id;
         return id;
     };
@@ -126,8 +139,8 @@ _JS_CLOSE_VIA_CANCEL = """
 
 _JS_PROBE_COUNTERS = """
 () => {
-    const p = window.__cdProbe || { created: 0, cleared: 0 };
-    return { created: p.created, cleared: p.cleared };
+    const p = window.__cdProbe || { created: 0, cleared: 0, creesParLaModale: 0 };
+    return { created: p.created, cleared: p.cleared, creesParLaModale: p.creesParLaModale || 0 };
 }
 """
 
@@ -270,11 +283,16 @@ def test_countdown_zero_no_disabled_no_span(dashboard_page) -> None:
     )
 
     after_open = dashboard_page.evaluate(_JS_PROBE_COUNTERS)
-    # Aucun setInterval ne doit avoir ete cree pour le countdown (le compteur
-    # peut bouger d'autres parts du code asynchrone, on tolere un delta <=1).
-    created_delta = after_open["created"] - baseline["created"]
-    assert created_delta <= 1, (
-        f"setInterval cree alors que countdown=0 (delta={created_delta}). Regression performance / fuite handler."
+    # On compte les intervals attribuables a `modal.js` PAR LA PILE D'APPEL, et
+    # non le total du document : depuis que le harnais est authentifie, le code
+    # de fond (banniere de scan, re-rendus de vue) cree ses propres intervals
+    # pendant cette fenetre. L'ancienne tolerance `delta <= 1` etait un seuil
+    # cale sur un voisinage silencieux, pas une mesure du sujet.
+    delta_modale = after_open["creesParLaModale"] - baseline["creesParLaModale"]
+    assert delta_modale == 0, (
+        f"la modale a cree {delta_modale} setInterval alors que countdownSeconds=0 "
+        f"(fuite de handler). Total document sur la meme fenetre, pour information : "
+        f"{after_open['created'] - baseline['created']}."
     )
 
     # Cleanup pour ne pas polluer.

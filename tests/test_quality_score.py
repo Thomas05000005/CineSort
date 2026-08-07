@@ -273,7 +273,7 @@ class QualityScoreTests(unittest.TestCase):
         saved = api.quality.save_quality_profile(custom)
         self.assertTrue(saved.get("ok"), saved)
 
-        reset = api.quality.reset_quality_profile()
+        reset = api.quality.reset_quality_profile(dry_run=False)
         self.assertTrue(reset.get("ok"), reset)
         profile = reset.get("profile_json", {})
         self.assertEqual(profile.get("id"), "CinemaLux_v1")

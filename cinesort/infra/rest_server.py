@@ -675,31 +675,38 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # --- Auth ---------------------------------------------------------------
 
     def _check_auth(self) -> bool:
-        # 2026-06-08 — BYPASS LOCALHOST DESKTOP TRUSTED
-        # Cause racine : 4 hotfixes successifs (_mask_secrets, _safeBearer,
-        # utf-8-sig, native_boot) n'ont pas fait disparaitre les 401 silencieux
-        # en local. Tant que le token transitant par PowerShell/JS storage subit
-        # une mutation invisible (BOM U+FEFF, percent-decode, normalisation
-        # unicode), l'auth Bearer echoue de facon non-reproductible.
-        # Approche radicale : en mode desktop pywebview (bind 127.0.0.1), le
-        # process REST tourne dans le meme contexte utilisateur que le client.
-        # Un attaquant local a deja le shell — l'auth Bearer ne protege rien.
-        # On bypass donc l'auth quand TOUS les criteres sont reunis :
-        #   1. client_ip ∈ _LOCAL_CLIENT_IPS (loopback v4/v6)
-        #   2. bind_host == "127.0.0.1" (PAS 0.0.0.0 / expose LAN)
-        #   3. feature flag CINESORT_DISABLE_LOCAL_AUTH != "1" (kill-switch)
-        # Le bypass est volontairement DESACTIVE quand bind 0.0.0.0 : on ne
-        # peut pas distinguer un client LAN qui spoof 127.0.0.1 dans son
-        # interface vs un vrai loopback. Securite critique.
-        client_ip = self.client_address[0] if self.client_address else ""
-        bypass_disabled = os.environ.get("CINESORT_DISABLE_LOCAL_AUTH", "0").strip() == "1"
-        if not bypass_disabled and client_ip in _LOCAL_CLIENT_IPS and self.bind_host == "127.0.0.1":
-            logger.info(
-                "Auth bypass localhost (client=%s, bind=%s) — desktop trusted mode",
-                client_ip,
-                self.bind_host,
-            )
-            return True
+        # 2026-08-07 — LE BYPASS LOOPBACK EST RETIRE.
+        #
+        # De 2026-06-08 a cette date, cette methode rendait `True` sans verifier
+        # le jeton des que le client etait en loopback et le bind en 127.0.0.1.
+        # Sa justification ecrite tenait en une phrase : « le token subit une
+        # mutation invisible (BOM U+FEFF, percent-decode, normalisation
+        # unicode), l'auth Bearer echoue de facon non-reproductible ».
+        #
+        # CETTE JUSTIFICATION DECRIVAIT UN SYMPTOME, PAS LA CAUSE. La cause
+        # reelle des 401 etait que `get_settings()` MASQUAIT le jeton en huit
+        # puces U+2022 avant qu'il n'entre dans l'URL ; url-encodees en
+        # `%E2%80%A2`, elles etaient rejetees par la regex du front. Elle a ete
+        # corrigee le 2026-06-07 (app.py lit desormais `rest_server._token`),
+        # soit LA VEILLE de l'ajout de ce bypass.
+        #
+        # MESURES DU RETRAIT (2026-08-07) :
+        #   - aller-retour `?ntoken=` sur 20 000 jetons `token_urlsafe(24)` :
+        #     0 corruption. `quote()` est un no-op sur cet alphabet, et le jeton
+        #     est chiffre au repos (DPAPI) donc hors d'atteinte d'un BOM ;
+        #   - navigateur reel, bypass coupe : 15 appels API, tous 200, jeton
+        #     persiste a l'octet pres, rechargement SANS `?ntoken=` fonctionnel,
+        #     zero erreur console.
+        #
+        # Ce que le retrait ferme : 172 methodes de facade en POST, dont 20
+        # destructives, etaient atteignables sans jeton par tout processus
+        # capable d'ouvrir une socket locale — y compris depuis une autre
+        # session utilisateur de la meme machine. La garde CSRF
+        # (`_is_forbidden_cross_site` + `Sec-Fetch-Site`) etait le SEUL rempart ;
+        # elle devient une defense en profondeur au lieu d'une defense unique.
+        #
+        # `_LOCAL_CLIENT_IPS` reste utilise ailleurs (exemption de rate-limit,
+        # marquage `set_remote_request`) : ne pas le supprimer.
         if not self.auth_token:
             return False
         auth = self.headers.get("Authorization", "")
