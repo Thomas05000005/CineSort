@@ -340,11 +340,22 @@ class QualityFacadeFullMigrationTests(unittest.TestCase):
         self.assertEqual(result, sentinel)
 
     def test_reset_quality_profile_delegates(self) -> None:
+        # `dry_run` fait partie de la delegation : la facade doit le TRANSMETTRE.
+        # Si elle le laissait tomber, l'implementation retomberait sur son propre
+        # defaut (`True`) et une reinitialisation demandee rendrait un apercu —
+        # avec `ok=True` et rien d'ecrit. Asserter `assert_called_once_with()`
+        # laissait passer exactement cette mutation.
         sentinel = {"ok": True, "reset": True}
         with patch.object(self.api, "_reset_quality_profile_impl", return_value=sentinel) as mocked:
             result = self.api.quality.reset_quality_profile()
-        mocked.assert_called_once_with()
+        mocked.assert_called_once_with(dry_run=True)
         self.assertEqual(result, sentinel)
+
+    def test_reset_quality_profile_transmet_dry_run_FALSE(self) -> None:
+        sentinel = {"ok": True, "reset": True}
+        with patch.object(self.api, "_reset_quality_profile_impl", return_value=sentinel) as mocked:
+            self.api.quality.reset_quality_profile(dry_run=False)
+        mocked.assert_called_once_with(dry_run=False)
 
     def test_export_quality_profile_delegates(self) -> None:
         sentinel = {"ok": True, "profile_json": {}}

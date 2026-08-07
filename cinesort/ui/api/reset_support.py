@@ -377,6 +377,16 @@ def reset_settings(api: Any, scope: str = "all", *, dry_run: bool = True) -> Dic
         }
 
     # Scope cible : on lit les settings courants et on remplace cle par cle
+    return _reinitialiser_un_scope(api, scope_norm, defaults, dry_run=dry_run)
+
+
+def _reinitialiser_un_scope(api: Any, scope_norm: str, defaults: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
+    """Remet a zero les cles d'UN scope (le cas `all` est traite en amont).
+
+    Extraite de `reset_settings` parce que l'ajout du mode apercu a porte cette
+    derniere a 111 LOC, au-dela du plafond de 100
+    (`test_function_size_budget`).
+    """
     try:
         current = api.settings.get_settings() or {}
     except (AttributeError, OSError, TypeError, ValueError) as exc:
@@ -505,6 +515,17 @@ def reset_database(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
             "backup_dir": str(state_path / "db" / "backups"),
         }
 
+    return _executer_le_wipe(api, db_path, state_path)
+
+
+def _executer_le_wipe(api: Any, db_path: Path, state_path: Path) -> Dict[str, Any]:
+    """Sauvegarde puis supprime la base — la partie qui TOUCHE le disque.
+
+    Extraite de `reset_database` parce que l'ajout du mode apercu a porte cette
+    derniere a 117 LOC, au-dela du plafond de 100 (`test_function_size_budget`).
+    La couture n'est pas arbitraire : elle separe « valider et decrire » de
+    « detruire », et c'est exactement la frontiere que `dry_run` arbitre.
+    """
     backup_dir = state_path / "db" / "backups"
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
