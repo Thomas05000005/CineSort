@@ -1,0 +1,379 @@
+"""Un fichier modifie a la main ne doit plus bloquer la restauration des autres.
+
+MESURE du defaut : l'undo est atomique par defaut. Si UN SEUL fichier a ete
+modifie depuis l'apply, il refuse TOUT — 1 fichier touche sur 5, et c'est 0 sur 5
+qui sont restaures.
+
+Le backend sait pourtant faire autrement (`_execute_undo_ops` avec
+`atomic=False`). Ce mode n'etait atteignable qu'en REST BRUT : `historique.js`
+forcait `atomic: true` et `traitement.js` l'omet. L'utilisateur n'avait aucun
+moyen, depuis l'application, de recuperer ses quatre films intacts.
+
+CES TESTS EXECUTENT LA VRAIE SOURCE. Une premiere version comparait des chaines
+du fichier JavaScript — ce que la regle du depot proscrit, et pour une raison
+que ce meme fichier a demontree : la mutation `if (false && condition)` laissait
+le test VERT, puisque `condition` etait toujours presente dans la source. Le
+harnais `_jsexec` charge `historique.js`, neutralise ses seuls imports (remplaces
+par des doublures) et fait tourner le code de production sous Node.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from tests._jsexec import DASHBOARD, require_node, run_module_test
+
+_JS = DASHBOARD / "views" / "historique.js"
+
+# Doublures des imports de `historique.js`. Seules `apiPost`,
+# `dangerConfirmModal` et `showToast` comptent ici ; les autres existent pour
+# que le module se charge.
+_STUBS = r"""
+globalThis.__appels = [];
+globalThis.__modales = [];
+globalThis.__toasts = [];
+globalThis.__reponses = [];
+
+// `__appels` ne retient QUE les appels d'undo. Le chemin de succes enchaine sur
+// `_refreshRuns`, qui fait ses propres `apiPost` : les compter aurait rendu les
+// assertions dependantes d'un rafraichissement sans rapport avec le sujet.
+const apiPost = async (route, params) => {
+  if (route === "run/undo_last_apply") {
+    __appels.push({ route, params });
+    return __reponses.shift() || { data: { ok: true, counts: { done: 0, skipped: 0 } } };
+  }
+  return { data: { ok: true, runs: [], items: [] } };
+};
+const cachedGetSettings = async () => ({});
+const escapeHtml = (s) => String(s == null ? "" : s);
+const getNavSignal = () => ({ aborted: false });
+const navigateTo = () => {};
+const deriveRunStatus = () => "done";
+const rightPanel = { open: () => {}, close: () => {} };
+const dangerConfirmModal = (opts) => { __modales.push(opts); };
+const showModal = () => {};
+const closeModal = () => {};
+const showToast = (o) => { __toasts.push(o); };
+const buildEmptyState = () => "";
+"""
+
+# `_doUndoApply` et `_proposerUndoPartiel` sont des fonctions de module, non
+# exportees : on les expose au driver sans toucher a leur corps.
+_EXTRA = r"""
+export const __doUndoApply = _doUndoApply;
+export const __onActionClick = _onActionClick;
+export const __refreshRunsStub = () => {};
+
+// Faux evenement de clic delegue : `_onActionClick` n'interroge que `closest`.
+globalThis.__clic = (action, runId) => ({
+  target: {
+    closest: (sel) => (sel === "[data-historique-action]"
+      ? { dataset: { historiqueAction: action, runId } }
+      : null),
+  },
+});
+"""
+
+
+def _executer(driver: str) -> dict:
+    return run_module_test(_JS, stubs=_STUBS, extra=_EXTRA, driver=driver)
+
+
+class ReplPartielTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_un_refus_atomique_PROPOSE_le_repli(self) -> None:
+        """Le coeur du defaut : sans cette branche, l'utilisateur ne voyait
+        qu'un message d'echec et repartait avec zero film restaure."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1,
+                           mismatch_details: [{ dst_path: "D:/Films/Alien (1979)/alien.mkv" }] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ appels: __appels, modales: __modales.map(m => ({
+              titre: m.title, items: m.items, itemCount: m.itemCount,
+              countdown: m.countdownSeconds, consequence: m.consequence })) });
+            """
+        )
+        self.assertEqual(len(res["appels"]), 1, "le premier essai doit etre unique")
+        self.assertIs(res["appels"][0]["params"]["atomic"], True, "le premier essai doit etre ATOMIQUE")
+        self.assertEqual(len(res["modales"]), 1, f"aucun repli propose : {res}")
+        self.assertIn("4", res["modales"][0]["titre"])
+
+    def test_la_confirmation_relance_en_atomic_FALSE(self) -> None:
+        """C'est ce second appel qui restaure reellement les fichiers intacts."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL",
+                                      counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1");
+            await __modales[0].onConfirm();
+            __emit({ appels: __appels, toasts: __toasts });
+            """
+        )
+        self.assertEqual(len(res["appels"]), 2, f"le repli n'a pas relance l'undo : {res['appels']}")
+        self.assertIs(res["appels"][1]["params"]["atomic"], False, "le repli doit demander le mode best-effort")
+
+    def test_le_delai_de_3s_s_applique_au_dela_de_50_RESTAURES(self) -> None:
+        """Regle projet n3. Le compte a rebours se calibre sur ce qui est
+        REELLEMENT DEPLACE (`restaurables`), pas sur les fichiers laisses en
+        place — c'est l'erreur de la premiere version."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 200, hash_mismatch_count: 2, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds, itemCount: __modales[0].itemCount });
+            """
+        )
+        self.assertEqual(res["countdown"], 3, "200 films deplaces sans delai de confirmation")
+        self.assertEqual(res["itemCount"], 200, "le compte est calibre sur les fichiers NON deplaces")
+
+    def test_la_bande_42_50_suit_la_regle_PARTAGEE(self) -> None:
+        """Le piege de la fusion, trouve en raisonnant sur la combinaison.
+
+        Une valeur explicite l'emporte sur la derivation automatique de la
+        modale. Un `restaurables > 50 ? 3 : 0` aurait donc rendu 0 s la ou la
+        regle partagee (`gradedCountdownSeconds`, autre branche) rend 1 s — et
+        cet ecart aurait SURVECU a la fusion, en reintroduisant la convention
+        par appelant que l'autre branche supprime justement.
+
+        LA BANDE EXACTE, mesuree : l'interpolation `((n-30)/70)*3` ne franchit
+        0,5 qu'a n=42. En dessous, les deux formules rendent 0 — une premiere
+        version de ce test attendait 1 a n=40 et rougissait a tort. La divergence
+        va donc de 42 a 50 inclus.
+        """
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 45, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 1, "45 restaurables : l'interpolation partagee impose 1 s")
+
+    def test_les_BORNES_EXACTES_de_la_bande_valent_1s(self) -> None:
+        """42 et 50 : les deux extremites, pas seulement un point au milieu.
+
+        45 seul laissait passer un decalage d'une unite dans les DEUX sens —
+        une formule qui basculerait a 43, ou qui s'arreterait a 49, serait
+        restee verte. Ce sont les bornes qui contraignent la formule.
+        """
+        for n in (42, 50):
+            with self.subTest(restaurables=n):
+                res = _executer(
+                    f"""
+                    globalThis._refreshRuns = async () => {{}};
+                    __reponses.push({{ data: {{
+                      ok: false, status: "ABORTED_HASH_MISMATCH",
+                      preverify: {{ safe_count: {n}, hash_mismatch_count: 1, mismatch_details: [] }},
+                    }}}});
+                    await M.__doUndoApply("r1");
+                    __emit({{ countdown: __modales[0].countdownSeconds }});
+                    """
+                )
+                self.assertEqual(res["countdown"], 1, f"{n} restaurables : la regle partagee impose 1 s")
+
+    def test_JUSTE_au_dessus_de_la_bande_le_delai_est_PLEIN(self) -> None:
+        """51 : contre-epreuve haute. Sans elle, une formule qui interpolerait
+        au-dela de 50 rendrait 1 s la ou la regle exige 3 s."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 51, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 3, "51 restaurables : au-dela du seuil, delai plein")
+
+    def test_sous_42_les_deux_formules_coincident(self) -> None:
+        """Contre-epreuve de la bande : en dessous du basculement, 0 s."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 41, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 0)
+
+    def test_sous_le_seuil_aucun_delai_n_est_impose(self) -> None:
+        """Contre-epreuve : un delai systematique userait la confirmation."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 3, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 0)
+
+    def test_ZERO_restaurable_ne_propose_RIEN(self) -> None:
+        """Ouvrir une modale destructive dont la seule issue est « 0 restaure »
+        userait la confirmation exactement quand elle doit porter."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 0, hash_mismatch_count: 3, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ modales: __modales.length, toasts: __toasts });
+            """
+        )
+        self.assertEqual(res["modales"], 0, "une modale destructive s'ouvre pour ne rien restaurer")
+        self.assertEqual(res["toasts"][0]["type"], "error")
+
+
+class MessagesHonnetesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_le_toast_DIT_combien_ont_ete_laisses(self) -> None:
+        """« Apply annule. Fichiers restaures. » se lisait comme un succes
+        COMPLET, y compris quand un film sur cinq etait reste en place."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL",
+                                      counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1", { atomic: false });
+            __emit({ toasts: __toasts });
+            """
+        )
+        texte = res["toasts"][0]["text"]
+        self.assertIn("4", texte)
+        self.assertIn("1", texte)
+        self.assertIn("laissé", texte.lower())
+
+    def test_UNDONE_NONE_n_est_PAS_annonce_comme_un_succes(self) -> None:
+        """Le backend distingue desormais « rien restaure » de « tout restaure » ;
+        sans cette branche la distinction mourait au dernier metre."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_NONE",
+                                      message: "Aucun film n'a été restauré.",
+                                      counts: { done: 0, skipped: 2 } }});
+            await M.__doUndoApply("r1");
+            __emit({ toasts: __toasts });
+            """
+        )
+        self.assertEqual(res["toasts"][0]["type"], "warn", f"annonce comme un succes : {res['toasts']}")
+
+
+class DeuxModalesNeSeMarchentPasDessusTests(unittest.TestCase):
+    """La modale de repli s'ouvrait PENDANT que la premiere etait encore active.
+
+    `dangerConfirmModal` n'appelle `close()` qu'apres resolution de `onConfirm`.
+    La premiere modale se fermait donc APRES l'ouverture de la seconde, et sa
+    fermeture restaure le focus sur son declencheur — un bouton situe DERRIERE
+    la modale desormais affichee, qui perdait ainsi le focus qu'elle venait de
+    prendre.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_la_modale_d_undo_se_ferme_AVANT_son_onConfirm(self) -> None:
+        res = _executer(
+            """
+            M.__onActionClick(__clic("undo-apply", "r1"));
+            __emit({ modales: __modales.map(m => (
+              { titre: m.title, avant: m.closeBeforeConfirm })) });
+            """
+        )
+        self.assertEqual(len(res["modales"]), 1, f"la confirmation d'undo n'est plus proposee : {res}")
+        self.assertIs(
+            res["modales"][0]["avant"],
+            True,
+            "la modale de repli s'ouvrira par-dessus celle-ci, qui volera ensuite le focus",
+        )
+
+    def test_un_DOUBLE_CLIC_ne_lance_pas_deux_annulations(self) -> None:
+        """Contrepartie de la fermeture anticipee : le declencheur redevient
+        cliquable pendant l'appel reseau. Sans garde, deux annulations
+        concurrentes partiraient sur le MEME run."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE", counts: { done: 5, skipped: 0 } }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE", counts: { done: 5, skipped: 0 } }});
+            await Promise.all([M.__doUndoApply("r1"), M.__doUndoApply("r1")]);
+            __emit({ appels: __appels.length });
+            """
+        )
+        self.assertEqual(res["appels"], 1, "deux annulations concurrentes sur le meme run")
+
+    def test_le_repli_reste_possible_APRES_le_premier_essai(self) -> None:
+        """Contre-epreuve : une garde trop large bloquerait la relance en
+        best-effort, et le correctif tuerait la fonction qu'il protege."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL", counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1");
+            await __modales[0].onConfirm();
+            __emit({ appels: __appels.map(a => a.params.atomic) });
+            """
+        )
+        self.assertEqual(res["appels"], [True, False], f"le repli a ete bloque par la garde : {res}")
+
+
+class CheminNominalTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_un_undo_qui_REUSSIT_ne_propose_aucun_repli(self) -> None:
+        """Non-regression : le cas courant ne doit rien declencher de neuf."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE",
+                                      counts: { done: 5, skipped: 0 } }});
+            await M.__doUndoApply("r1");
+            __emit({ appels: __appels.length, modales: __modales.length,
+                     toast: __toasts[0] });
+            """
+        )
+        self.assertEqual(res["appels"], 1)
+        self.assertEqual(res["modales"], 0)
+        self.assertEqual(res["toast"]["type"], "success")
+
+
+if __name__ == "__main__":
+    unittest.main()

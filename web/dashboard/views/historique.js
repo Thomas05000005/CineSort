@@ -1246,13 +1246,133 @@ function _renderFilmsHistoryModalBody(films) {
   });
 }
 
-async function _doUndoApply(runId) {
+/* Politique COMPENSATE (arbitrage Thomas, 2026-08-06).
+ *
+ * L'undo est atomique par defaut : si UN SEUL fichier a ete modifie depuis
+ * l'apply, il refuse TOUT et ne restaure rien. Mesure : 1 fichier touche a la
+ * main sur 5 -> 0 sur 5 restaures.
+ *
+ * Le backend sait pourtant faire autrement — `atomic=false` restaure les
+ * fichiers intacts et ignore les autres (cf. `_execute_undo_ops`). Ce mode
+ * n'etait atteignable qu'en REST BRUT : ce site forcait `atomic: true`, et
+ * `traitement.js` l'omet (le defaut vaut True). L'utilisateur n'avait donc
+ * AUCUN moyen, depuis l'application, de recuperer ses quatre films intacts.
+ *
+ * On propose desormais le repli, derriere la modale destructive : liste des
+ * fichiers concernes, consequence explicite, et delai derive du nombre
+ * (regle projet n3, cf. `gradedCountdownSeconds`).
+ */
+function _proposerUndoPartiel(runId, preverify) {
+  const details = Array.isArray(preverify && preverify.mismatch_details)
+    ? preverify.mismatch_details
+    : [];
+  const restaurables = Number((preverify && preverify.safe_count) || 0);
+  const modifies = Number((preverify && preverify.hash_mismatch_count) || details.length || 0);
+
+  // Rien a proposer : le repli ne restaurerait aucun fichier. Le dire est plus
+  // honnete que d'ouvrir une modale destructive dont la seule issue est
+  // « 0 restaure » — cela userait la confirmation quand elle doit porter.
+  if (restaurables <= 0) {
+    showToast({
+      type: "error",
+      text: `Annulation impossible : les ${modifies} fichier(s) ont été modifiés depuis l'apply, aucun n'est restaurable.`,
+    });
+    return;
+  }
+
+  dangerConfirmModal({
+    title: `Restaurer ${restaurables} film(s) sur ${restaurables + modifies} ?`,
+    // `items` liste les fichiers MODIFIES : c'est ce que l'utilisateur doit
+    // savoir, puisque ce sont les seuls qui ne bougeront pas.
+    items: details.map((d) => String((d && d.dst_path) || "").split(/[\\/]/).pop()).filter(Boolean),
+    // Le delai se calibre sur ce qui est REELLEMENT DEPLACE, donc sur
+    // `restaurables` — pas sur `modifies`, que la premiere version passait ici.
+    // Se tromper de nombre revenait a graduer la confirmation sur les fichiers
+    // qu'on ne touche PAS.
+    itemCount: restaurables,
+    // `countdownSeconds` EXPLICITE, et pas seulement `itemCount` : la derivation
+    // automatique par la modale vit dans une AUTRE branche (regle n3 unifiee).
+    // Tant qu'elle n'est pas fusionnee, `dangerConfirmModal` ignore `itemCount`
+    // et retombe sur 0 seconde — une restauration de 200 films serait alors
+    // confirmable au premier clic. Une PR ne doit pas dependre d'une autre pour
+    // etre correcte.
+    //
+    // La formule REPLIQUE `gradedCountdownSeconds` a l'identique, et ce n'est pas
+    // cosmetique : une valeur explicite l'emporte sur la derivation. Un simple
+    // `restaurables > 50 ? 3 : 0` aurait donc rendu 0 s la ou la regle partagee
+    // rend 1 s (entre 31 et 50 elements) — et cet ecart aurait SURVECU a la
+    // fusion, en reintroduisant la convention par appelant que l'autre branche
+    // supprime justement.
+    //
+    // A RETIRER une fois les deux branches sur `main` : `itemCount` suffira, et
+    // la regle ne vivra plus qu'a un seul endroit.
+    countdownSeconds: (() => {
+      const n = Number(restaurables) || 0;
+      if (n <= 30) return 0;
+      if (n > 50) return 3;
+      return Math.max(0, Math.min(3, Math.round(((n - 30) / (100 - 30)) * 3)));
+    })(),
+    consequence:
+      `${modifies} fichier(s) ont été modifiés depuis l'apply et seront LAISSÉS EN PLACE. `
+      + `Les ${restaurables} autres seront remis à leur emplacement d'origine. `
+      + "Cette opération déplace des fichiers sur le disque.",
+    confirmLabel: `Restaurer les ${restaurables} intacts`,
+    cancelLabel: "Ne rien faire",
+    onConfirm: () => _doUndoApply(runId, { atomic: false }),
+  });
+}
+
+// Garde de re-entrance de l'undo.
+//
+// La modale initiale passe `closeBeforeConfirm: true` : sans cela, la modale de
+// repli s'ouvrait ALORS QUE la premiere etait encore active — `dangerConfirmModal`
+// n'appelle `close()` qu'apres resolution de `onConfirm`. La fermeture differee
+// de la premiere restaurait alors le focus sur son declencheur, situe DERRIERE la
+// seconde modale, qui perdait le focus qu'elle venait de prendre.
+//
+// Fermer tot a une contrepartie, que la documentation de `dangerConfirmModal`
+// enonce : le declencheur redevient cliquable pendant l'appel reseau. Sans cette
+// garde, un double-clic lancerait deux annulations concurrentes sur le meme run.
+// L'appel de repli (`atomic: false`) n'est PAS bloque : il part apres le retour
+// du premier, donc apres la remise a zero du drapeau.
+let _undoEnVol = false;
+
+async function _doUndoApply(runId, options) {
+  if (_undoEnVol) return;
+  _undoEnVol = true;
+  const atomic = !(options && options.atomic === false);
   try {
-    const res = await apiPost("run/undo_last_apply", { run_id: runId, dry_run: false, atomic: true });
+    const res = await apiPost("run/undo_last_apply", { run_id: runId, dry_run: false, atomic });
     // Fix audit 2026-05-24 : res.ok = undefined (apiPost retourne {status, data}).
     const _payload = (res && res.data) || res || {};
+
+    // Refus atomique : le backend n'a RIEN touche et dit pourquoi. C'est le seul
+    // moment ou proposer le repli a du sens — apres, le disque a deja bouge.
+    if (atomic && _payload.status === "ABORTED_HASH_MISMATCH") {
+      _proposerUndoPartiel(runId, _payload.preverify);
+      return;
+    }
+
+    // Un undo qui n'a restaure AUCUN fichier n'est pas un succes : le backend le
+    // dit desormais (`UNDONE_NONE`) et laisse le batch annulable.
+    if (_payload.status === "UNDONE_NONE") {
+      showToast({ type: "warn", text: _payload.message || "Aucun film n'a été restauré." });
+      await _refreshRuns();
+      return;
+    }
+
     if (res && _payload.ok !== false) {
-      showToast({ type: "success", text: "Apply annulé. Fichiers restaurés." });
+      const _c = _payload.counts || {};
+      const _done = Number(_c.done || 0);
+      const _skipped = Number(_c.skipped || 0);
+      // « Apply annule. Fichiers restaures. » se lisait comme un succes COMPLET,
+      // y compris quand un film sur cinq avait ete laisse en place.
+      showToast({
+        type: "success",
+        text: _skipped > 0
+          ? `Apply annulé : ${_done} film(s) restauré(s), ${_skipped} laissé(s) en place.`
+          : `Apply annulé. ${_done} fichier(s) restauré(s).`,
+      });
       // Ultra-audit 2026-08-03 (N01) : app.js ecoute `cinesort:undo` pour
       // recharger les compteurs de sidebar (#92 quick win #2). L'evenement
       // n'etait plus emis par personne depuis la migration ESM.
@@ -1267,6 +1387,8 @@ async function _doUndoApply(runId) {
     }
   } catch (err) {
     showToast({ type: "error", text: `Erreur : ${err && err.message || err}` });
+  } finally {
+    _undoEnVol = false;
   }
 }
 
@@ -1354,6 +1476,13 @@ function _onActionClick(ev) {
         countdownSeconds: 3,
         confirmLabel: "✗ Annuler l'apply",
         cancelLabel: "Garder l'apply",
+        // Cette confirmation peut en ouvrir une SECONDE (le repli partiel, quand
+        // le backend refuse l'undo atomique). Par defaut `dangerConfirmModal`
+        // ne se ferme qu'apres resolution de `onConfirm` : la modale de repli
+        // s'ouvrirait donc par-dessus celle-ci, et la fermeture differee de
+        // celle-ci renverrait ensuite le focus sur le bouton situe DERRIERE.
+        // On ferme donc AVANT ; la re-entrance est gardee par `_undoEnVol`.
+        closeBeforeConfirm: true,
         onConfirm: () => _doUndoApply(runId),
       });
       break;
