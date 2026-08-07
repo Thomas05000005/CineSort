@@ -1,3 +1,53 @@
+-- @manager: disable_fk
+--
+-- POURQUOI CE MARQUEUR (ajoute apres mesure, 2026-08-06)
+--
+-- Ce fichier est execute par DEUX chemins, avec le meme SQL mais pas le meme
+-- `PRAGMA foreign_keys` :
+--
+--   1. MigrationManager.apply, une fois, sur une base restee en v20 ;
+--   2. SQLiteStore._bootstrap_schema_latest, a CHAQUE auto-reparation, qui
+--      concatene TOUTES les migrations et tourne avec les FK a OFF (fix
+--      BUG-001, sans quoi un DROP TABLE runs CASCADE-supprimerait les tables
+--      filles).
+--
+-- La section 1 recopie `errors` SANS filtrer les lignes orphelines — c'est
+-- volontaire, et refuse explicitement par la passe adversaire N26 : `errors`
+-- est le journal d'erreurs de l'utilisateur, le jeter en silence serait pire
+-- que le probleme. Le chemin (2) le permettait deja, les FK y etant a OFF.
+-- Le chemin (1), lui, les avait a ON.
+--
+-- MESURE, base reelle amenee a v20, UNE seule ligne `errors` orpheline :
+--
+--   essai 1 : IntegrityError: FOREIGN KEY constraint failed -> user_version 20
+--   essai 2 : IntegrityError: FOREIGN KEY constraint failed -> user_version 20
+--
+-- Deterministe, rejoue a chaque ouverture : la base ne s'ouvre plus JAMAIS, et
+-- rien dans l'application ne repare la ligne fautive. Une orpheline s'obtient
+-- sans rien faire d'exotique — `foreign_keys` vaut OFF par defaut dans SQLite,
+-- donc tout ecrivain qui ne pose pas le pragma laisse ses `errors` derriere un
+-- run supprime.
+--
+-- Le marqueur aligne (1) sur (2). Les orphelines survivent au lieu de bloquer.
+--
+-- CE QUE LE MARQUEUR NE FAIT PAS, contrairement a ce qu'une premiere redaction
+-- de ce bloc affirmait (corrige apres mesure en revue adversaire) :
+--
+--   - il ne rend PAS l'incoherence durablement visible. `PRAGMA foreign_key_check`
+--     n'est appele que sous la garde `schema_change_pending` (sqlite_store.py:504),
+--     donc UNE seule fois : au boot qui applique la migration. Tous les suivants
+--     sont muets, et le resultat part dans un `logger.error` qui n'alimente pas
+--     `_integrity_event` — aucune surface produit ne le dit a l'utilisateur.
+--     Le choix reste le bon (une base bloquee est pire), mais il se paie en
+--     observabilite, et ce cout doit etre ecrit ici plutot que nie.
+--   - il ne laisse PAS les sections 2/3/4 sans effet nouveau. Sur la seule classe
+--     de bases qu'il debloque, leurs filtres `WHERE EXISTS` suppriment desormais
+--     des lignes qui survivaient auparavant par le rollback de la migration
+--     entiere. MESURE, meme base v20, 1 orpheline + 1 ligne valide par table :
+--       sans marqueur -> user_version 20 ; quality_reports 2, anomalies 2, apply_operations 2
+--       avec marqueur -> user_version 31 ; quality_reports 1, anomalies 1, apply_operations 1
+--     C'est ce qui a conduit a retirer le filtre de la section 4 (voir sur place).
+--
 -- v21 (V1-02 polish v7.7.0) : ajout ON DELETE CASCADE sur les FK enfants de runs et apply_batches.
 -- Source : audit R5-DB-1, PLAN_RESTE_A_FAIRE.md section 1.2.
 --
@@ -45,6 +95,13 @@ CREATE TABLE errors_new (
   FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
 );
 
+-- Pas de filtre orphelines ici, CONTRAIREMENT aux sections 2, 3 et 4 : `errors`
+-- est le journal d'erreurs de l'utilisateur, et le jeter en silence est
+-- precisement ce que la passe adversaire N26 a refuse (cf.
+-- tests/test_infra_db_nuances_audit_20260803.py, ForeignKeyViolationDiagnostic).
+-- Les orphelines survivent donc, et `PRAGMA foreign_key_check` les signale au
+-- boot suivant. C'est ce que le marqueur `disable_fk` en tete de fichier rend
+-- possible sans casser le demarrage — voir son commentaire.
 INSERT INTO errors_new (id, run_id, ts, step, code, message, context_json)
 SELECT id, run_id, ts, step, code, message, context_json FROM errors;
 
@@ -154,17 +211,29 @@ CREATE TABLE apply_operations_new (
   FOREIGN KEY (batch_id) REFERENCES apply_batches(batch_id) ON DELETE CASCADE
 );
 
--- Idem : filtrer les operations orphelines pour proteger l'integrite FK.
+-- PAS de filtre orphelines ici — retire apres mesure, meme raison que la
+-- section 1. Cette table est le JOURNAL D'UNDO (cf. 005_apply_undo_journal.sql) :
+-- chacune de ses lignes est le seul enregistrement d'un DEPLACEMENT DEJA FAIT
+-- SUR DISQUE. Ce n'est pas un sous-produit recalculable, c'est le filet de
+-- securite de l'utilisateur — la meme categorie que `errors`, en plus grave.
+--
+-- Le filtre `WHERE EXISTS (SELECT 1 FROM apply_batches ...)` qui vivait ici
+-- avait ete ecrit « pour proteger l'integrite FK ». Sous `disable_fk` il ne
+-- protege plus rien : contre-epreuve MESUREE, filtre retire et rien d'autre
+-- change, la migration aboutit (user_version 31) et l'orpheline est PRESERVEE.
+-- Il ne restait donc qu'une suppression silencieuse.
+--
+-- Les sections 2 (quality_reports) et 3 (anomalies) gardent le leur : ce sont
+-- des sorties recalculables par un nouveau scan, pas la trace d'une action
+-- irreversible.
 INSERT INTO apply_operations_new (
   id, batch_id, op_index, op_type, src_path, dst_path, reversible,
   undo_status, error_message, ts, row_id, src_sha1, src_size
 )
 SELECT
-  ao.id, ao.batch_id, ao.op_index, ao.op_type, ao.src_path, ao.dst_path,
-  ao.reversible, ao.undo_status, ao.error_message, ao.ts,
-  ao.row_id, ao.src_sha1, ao.src_size
-FROM apply_operations ao
-WHERE EXISTS (SELECT 1 FROM apply_batches ab WHERE ab.batch_id = ao.batch_id);
+  id, batch_id, op_index, op_type, src_path, dst_path, reversible,
+  undo_status, error_message, ts, row_id, src_sha1, src_size
+FROM apply_operations;
 
 DROP TABLE apply_operations;
 

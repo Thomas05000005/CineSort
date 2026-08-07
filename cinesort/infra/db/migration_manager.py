@@ -269,8 +269,13 @@ class MigrationManager:
                     statements = _split_sql_statements(sql)
 
                     # V8-01 : certaines migrations doivent recreer une table parent
-                    # sans declencher de CASCADE sur les enfants (ex: migration 023
-                    # qui recree `runs` pour etendre la CHECK status). Le marker
+                    # sans declencher de CASCADE sur les enfants (ex: migration
+                    # 025_run_pause_status.sql:79-81, qui recree `runs` pour etendre
+                    # la CHECK status — ce commentaire nommait « 023 », qui ne fait
+                    # que trois CREATE TABLE IF NOT EXISTS et ne porte aucun marker ;
+                    # la meme confusion est recopiee dans docs/internal/
+                    # inventory_post_v166.md:214 et tests/test_migrations_from_legacy.py).
+                    # Le marker
                     # `-- @manager: disable_fk` permet de desactiver les FK pour
                     # cette migration uniquement. PRAGMA foreign_keys ne fonctionne
                     # PAS dans une transaction, donc on le pose avant BEGIN et on
