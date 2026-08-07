@@ -467,6 +467,68 @@ def _finalize_batch_undo_status(
         return False
 
 
+def _premier_index_libre(store: Any, reversible_ops: List[Dict[str, Any]]) -> int:
+    """Premier `op_index` disponible du batch en cours d'undo.
+
+    `reversible_ops` est FILTRE (`reversible == 1`) : son maximum local peut
+    donc etre inferieur au maximum reel du batch, et servirait un index deja
+    pris — `UNIQUE (batch_id, op_index)`. On interroge la base.
+    """
+    batch_id = ""
+    for op in reversible_ops:
+        batch_id = str(op.get("batch_id") or "")
+        if batch_id:
+            break
+    if not batch_id:
+        return 0
+    try:
+        return int(store.apply.next_free_op_index(batch_id=batch_id))
+    except (AttributeError, sqlite3.Error, OSError, TypeError, ValueError):
+        # Un store sans la methode (doublure de test ancienne) ou une base
+        # indisponible ne doit pas AVORTER l'undo en cours : les fichiers
+        # comptent plus que leur journal. Le journal de quarantaine sera
+        # simplement absent, et le WARN de `_journaliser_quarantaine_undo` le
+        # dira.
+        return 0
+
+
+def _journaliser_quarantaine_undo(
+    store: Any,
+    log_fn: Callable[[str, str], None],
+    *,
+    op: Dict[str, Any],
+    src: Path,
+    dst: Path,
+    index_libre: int,
+) -> None:
+    """Inscrit le deplacement vers `_undo_conflicts` comme une operation annulable.
+
+    `src` -> `dst` decrit le mouvement QUI VIENT D'AVOIR LIEU ; l'annuler
+    remettra le film de `dst` vers `src`, c'est-a-dire a l'emplacement qu'il
+    occupait avant la quarantaine.
+
+    L'echec d'ecriture ne fait PAS echouer l'undo : le fichier est deja deplace,
+    et refuser de continuer ne le ramenerait pas. Mais il est signale — un
+    journal muet est precisement ce que #901 a coute.
+    """
+    try:
+        store.apply.append_apply_operation(
+            batch_id=str(op.get("batch_id") or ""),
+            op_index=int(index_libre),
+            op_type="UNDO_QUARANTINE",
+            src_path=str(src),
+            dst_path=str(dst),
+            reversible=True,
+            row_id=str(op.get("row_id") or "") or None,
+        )
+    except (AttributeError, sqlite3.Error, OSError, TypeError, ValueError) as exc:
+        log_fn(
+            "WARN",
+            f"Quarantaine d'undo NON journalisee ({type(exc).__name__}: {exc}) — "
+            f"le fichier est dans {dst}, mais aucune reprise automatique ne le verra.",
+        )
+
+
 def _execute_undo_ops(
     api: Any,
     reversible_ops: List[Dict[str, Any]],
@@ -497,6 +559,13 @@ def _execute_undo_ops(
     empty_folder_dirs_reversed = 0
     cleanup_residual_dirs_reversed = 0
     undo_conflicts_root = run_paths.run_dir / "_review" / "_undo_conflicts"
+    # #987 : index libre pour les operations de quarantaine ajoutees dans cette
+    # passe. Calcule UNE fois — `next_free_op_index` lit le MAX en base, et
+    # l'appeler a chaque conflit relirait la table sans rien apprendre de plus,
+    # puisque les lignes ajoutees ici sont deja comptees par l'incrementation
+    # locale. Vaut 0 si le batch est introuvable : `append_apply_operation`
+    # rejetterait alors le doublon plutot que d'ecraser une ligne.
+    index_quarantaine = _premier_index_libre(store, reversible_ops)
 
     conflicts_details: List[Dict[str, Any]] = []
 
@@ -712,6 +781,36 @@ def _execute_undo_ops(
                     )
                     continue
                 conflict_moves += 1
+                # #987 — LE DEPLACEMENT VERS LE BAC EST UNE OPERATION A PART
+                # ENTIERE, ET IL EST DESORMAIS JOURNALISE COMME TELLE.
+                #
+                # L'operation d'origine reste `FAILED`, ce qui est la verite :
+                # son undo n'a pas abouti. Mais `FAILED` est TERMINAL pour les
+                # trois chemins de reprise du depot — `undo_selected_rows` ne
+                # prend que `PENDING`, `build_undo_by_row_preview` ne compte que
+                # `PENDING`, et `_revert_one_op` SAUTE les `FAILED`. Le film
+                # etait donc dans un bac que rien ne savait plus atteindre.
+                #
+                # POURQUOI PAS UN STATUT « REPRENABLE » SUR L'OPERATION D'ORIGINE
+                # (piste envisagee dans l'issue) : le fichier BLOQUANT n'a pas
+                # bouge — le conflit vient de `target_path`, auquel on ne touche
+                # pas. Rendre l'operation d'origine reprenable ferait donc
+                # rejouer un undo GARANTI de reconflicter, et de re-deplacer le
+                # film dans le bac. Un cycle, pas une reprise.
+                #
+                # La nouvelle operation, elle, nait `PENDING` et decrit un
+                # deplacement REELLEMENT reversible : `conflict_dst` ->
+                # `current_path`. Les trois lecteurs la voient sans qu'aucun
+                # n'ait a connaitre un nouveau vocabulaire.
+                _journaliser_quarantaine_undo(
+                    store,
+                    log_fn,
+                    op=op,
+                    src=current_path,
+                    dst=conflict_dst,
+                    index_libre=index_quarantaine,
+                )
+                index_quarantaine += 1
                 # Ou est parti le film, en DONNEE et pas seulement dans une
                 # chaine de message. Avant, la seule trace de sa nouvelle place
                 # etait le texte de `error_message` ci-dessous : aucune surface

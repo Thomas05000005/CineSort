@@ -386,6 +386,28 @@ class ApplyRepository(_BaseRepository):
                     out[rid] = int(summary.get("applied_count") or 0)
         return out
 
+    def next_free_op_index(self, *, batch_id: str) -> int:
+        """Premier `op_index` libre du batch.
+
+        `idx_apply_ops_batch_opindex` impose `UNIQUE (batch_id, op_index)` : une
+        operation ajoutee APRES coup — la mise en quarantaine d'undo, qui est un
+        vrai deplacement de fichier et doit donc etre annulable — ne peut pas
+        deviner son index.
+
+        On lit le MAX en base et non le maximum des operations deja chargees en
+        memoire : l'appelant travaille sur une liste FILTREE (`reversible`), donc
+        son maximum local peut etre inferieur au maximum reel et produirait une
+        violation d'unicite.
+        """
+        self._ensure_apply_journal_tables()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                "SELECT COALESCE(MAX(op_index), -1) + 1 AS suivant FROM apply_operations WHERE batch_id=?",
+                (str(batch_id),),
+            )
+            row = cur.fetchone()
+        return int(row["suivant"]) if row is not None else 0
+
     def list_apply_operations(self, *, batch_id: str) -> List[Dict[str, Any]]:
         """Retourne les operations apply du batch dans l'ordre d'execution (op_index croissant)."""
         self._ensure_apply_journal_tables()
