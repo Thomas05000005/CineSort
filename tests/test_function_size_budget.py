@@ -86,7 +86,22 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # 335 -> 350 : les conflits d'undo deviennent une DONNEE de la reponse
     # (row_id, source, destination, ce qui bloquait) au lieu d'une chaine de
     # message dont aucune surface ne pouvait rien faire.
-    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 350,
+    #
+    # 350 -> 364 (#987, 2026-08-07) : la mise en quarantaine d'undo est
+    # desormais JOURNALISEE comme une operation a part entiere, sans quoi le
+    # film restait dans un bac qu'aucun des trois chemins de reprise ne savait
+    # atteindre. L'ajout est de 14 lignes irreductibles — le « pourquoi » a ete
+    # deplace dans les docstrings de `_premier_index_libre` et
+    # `_journaliser_quarantaine_undo` precisement pour ne pas gonfler ce corps.
+    #
+    # CE PLAFOND EST UN AVEU, PAS UNE SOLUTION. Cette fonction est la plus
+    # longue du chemin destructif et elle etait DEJA a son plafond : toute
+    # correction qui la touche rencontrera ce mur. Son bloc de conflit (~60
+    # lignes) est une couture d'extraction evidente. Il n'a pas ete extrait ICI
+    # parce que deplacer soixante lignes de deplacement de fichiers au milieu
+    # d'un correctif de surete des donnees enlarge le diff sur le chemin le plus
+    # dangereux de l'application — cet eclatement merite sa propre verification.
+    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 364,
     ("cinesort/ui/api/run_flow_support.py", "_build_plan_job_fn"): 304,
     ("cinesort/ui/api/perceptual_support.py", "_execute_perceptual_analysis"): 298,
     ("cinesort/app/job_runner.py", "_run_worker"): 292,
