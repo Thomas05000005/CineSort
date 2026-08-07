@@ -141,6 +141,11 @@ def connect_sqlite(
             resolved_profile,
             history_source,
         )
+        # `readback=False` : ce site IGNORE le retour, et la relecture coute six
+        # `PRAGMA` de plus par ouverture. Mesure cProfile sur 200 ouvertures :
+        # 1,17 ms par connexion dont 0,74 ms dans `Connection.execute`, pour 15
+        # instructions — dont ces six-la, dont personne ne lisait le resultat.
+        # `record_history` force la relecture quand elle est reellement utile.
         apply_pragmas(
             conn,
             resolved_profile,
@@ -148,6 +153,7 @@ def connect_sqlite(
             storage_type_detected=storage_type_detected,
             source=history_source,
             record_history=record_history,
+            readback=False,
         )
 
         # 3. Backward compat busy_timeout : si le caller a fourni une valeur

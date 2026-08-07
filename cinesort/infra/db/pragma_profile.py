@@ -395,6 +395,7 @@ def apply_pragmas(
     storage_type_detected: Optional[str] = None,
     source: str = "auto",
     record_history: bool = True,
+    readback: bool = True,
 ) -> Dict[str, object]:
     """Applique le profil PRAGMA `profile_name` a la connexion `conn`.
 
@@ -440,12 +441,29 @@ def apply_pragmas(
                 exc,
             )
 
-    snapshot = get_pragma_snapshot(conn)
-    logger.debug(
-        "apply_pragmas[%s]: readback = %s",
-        profile_name,
-        snapshot,
-    )
+    # La relecture coute SIX `PRAGMA` de plus, a chaque ouverture de connexion.
+    #
+    # MESURE (profil cProfile, 200 ouvertures) : `connect_sqlite` = 1,17 ms, dont
+    # 0,74 ms dans `Connection.execute` — 15 instructions, dont ces 6 relectures.
+    # Elles ne servaient qu'a deux consommateurs : un `logger.debug` (eteint en
+    # production) et `_record_pragma_history`, qui n'ecrit qu'au premier boot ou
+    # sur changement de profil. Sur toutes les autres ouvertures, on payait six
+    # allers-retours pour un resultat que personne ne lisait.
+    #
+    # `readback=True` reste le DEFAUT : les appelants qui exploitent le retour
+    # (tests de profil, de retention, de migration 028) sont inchanges. Seul
+    # `connect_sqlite` — qui ignore le retour — passe `readback=False`.
+    #
+    # `record_history` force la relecture : l'historique a besoin du snapshot,
+    # et ce serait un piege que ce parametre puisse le vider en silence.
+    besoin_snapshot = bool(record_history) or bool(readback) or logger.isEnabledFor(logging.DEBUG)
+    snapshot: Dict[str, object] = get_pragma_snapshot(conn) if besoin_snapshot else {}
+    if besoin_snapshot:
+        logger.debug(
+            "apply_pragmas[%s]: readback = %s",
+            profile_name,
+            snapshot,
+        )
 
     if record_history:
         _record_pragma_history(
