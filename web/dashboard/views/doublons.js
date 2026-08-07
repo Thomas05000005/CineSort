@@ -873,7 +873,10 @@ async function _autoDecideAll() {
       "Les décisions sont persistées immédiatement en base. Pour annuler, il faudra rouvrir chaque groupe et changer le winner manuellement.",
     confirmLabel: `🤖 Auto-décider ${candidates.length}`,
     cancelLabel: "Annuler",
-    countdownSeconds: candidates.length > 50 ? 3 : 0,
+    // Regle n3 : le delai est DERIVE du nombre d'elements par la modale
+    // (`gradedCountdownSeconds`). La ternaire `> 50 ? 3 : 0` qui vivait ici
+    // rendait 0 s entre 42 et 50 groupes, la ou la regle partagee rend 1 s.
+    itemCount: candidates.length,
     onConfirm: async () => {
       if (!_state) return;
       _state.bulkInFlight = true;
@@ -1040,7 +1043,8 @@ function _goToApply() {
     dangerConfirmModal({
       title: `Continuer avec ${pending} groupe${pending > 1 ? "s" : ""} de doublons non décidé${pending > 1 ? "s" : ""} ?`,
       consequence: "Les fichiers en doublon seront conservés tels quels (aucune décision n'est appliquée). Vous pourrez perdre ces décisions au prochain rescan.",
-      countdownSeconds: pending > 50 ? 3 : 0,
+      // Regle n3 : delai derive par la modale (cf. `gradedCountdownSeconds`).
+      itemCount: pending,
       confirmLabel: "Continuer vers Apply",
       cancelLabel: "Annuler",
       onConfirm: () => {
