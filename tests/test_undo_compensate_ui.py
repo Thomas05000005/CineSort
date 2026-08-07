@@ -61,7 +61,17 @@ const buildEmptyState = () => "";
 # exportees : on les expose au driver sans toucher a leur corps.
 _EXTRA = r"""
 export const __doUndoApply = _doUndoApply;
+export const __onActionClick = _onActionClick;
 export const __refreshRunsStub = () => {};
+
+// Faux evenement de clic delegue : `_onActionClick` n'interroge que `closest`.
+globalThis.__clic = (action, runId) => ({
+  target: {
+    closest: (sel) => (sel === "[data-historique-action]"
+      ? { dataset: { historiqueAction: action, runId } }
+      : null),
+  },
+});
 """
 
 
@@ -159,6 +169,44 @@ class ReplPartielTests(unittest.TestCase):
         )
         self.assertEqual(res["countdown"], 1, "45 restaurables : l'interpolation partagee impose 1 s")
 
+    def test_les_BORNES_EXACTES_de_la_bande_valent_1s(self) -> None:
+        """42 et 50 : les deux extremites, pas seulement un point au milieu.
+
+        45 seul laissait passer un decalage d'une unite dans les DEUX sens —
+        une formule qui basculerait a 43, ou qui s'arreterait a 49, serait
+        restee verte. Ce sont les bornes qui contraignent la formule.
+        """
+        for n in (42, 50):
+            with self.subTest(restaurables=n):
+                res = _executer(
+                    f"""
+                    globalThis._refreshRuns = async () => {{}};
+                    __reponses.push({{ data: {{
+                      ok: false, status: "ABORTED_HASH_MISMATCH",
+                      preverify: {{ safe_count: {n}, hash_mismatch_count: 1, mismatch_details: [] }},
+                    }}}});
+                    await M.__doUndoApply("r1");
+                    __emit({{ countdown: __modales[0].countdownSeconds }});
+                    """
+                )
+                self.assertEqual(res["countdown"], 1, f"{n} restaurables : la regle partagee impose 1 s")
+
+    def test_JUSTE_au_dessus_de_la_bande_le_delai_est_PLEIN(self) -> None:
+        """51 : contre-epreuve haute. Sans elle, une formule qui interpolerait
+        au-dela de 50 rendrait 1 s la ou la regle exige 3 s."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 51, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            await M.__doUndoApply("r1");
+            __emit({ countdown: __modales[0].countdownSeconds });
+            """
+        )
+        self.assertEqual(res["countdown"], 3, "51 restaurables : au-dela du seuil, delai plein")
+
     def test_sous_42_les_deux_formules_coincident(self) -> None:
         """Contre-epreuve de la bande : en dessous du basculement, 0 s."""
         res = _executer(
@@ -242,6 +290,68 @@ class MessagesHonnetesTests(unittest.TestCase):
             """
         )
         self.assertEqual(res["toasts"][0]["type"], "warn", f"annonce comme un succes : {res['toasts']}")
+
+
+class DeuxModalesNeSeMarchentPasDessusTests(unittest.TestCase):
+    """La modale de repli s'ouvrait PENDANT que la premiere etait encore active.
+
+    `dangerConfirmModal` n'appelle `close()` qu'apres resolution de `onConfirm`.
+    La premiere modale se fermait donc APRES l'ouverture de la seconde, et sa
+    fermeture restaure le focus sur son declencheur — un bouton situe DERRIERE
+    la modale desormais affichee, qui perdait ainsi le focus qu'elle venait de
+    prendre.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_la_modale_d_undo_se_ferme_AVANT_son_onConfirm(self) -> None:
+        res = _executer(
+            """
+            M.__onActionClick(__clic("undo-apply", "r1"));
+            __emit({ modales: __modales.map(m => (
+              { titre: m.title, avant: m.closeBeforeConfirm })) });
+            """
+        )
+        self.assertEqual(len(res["modales"]), 1, f"la confirmation d'undo n'est plus proposee : {res}")
+        self.assertIs(
+            res["modales"][0]["avant"],
+            True,
+            "la modale de repli s'ouvrira par-dessus celle-ci, qui volera ensuite le focus",
+        )
+
+    def test_un_DOUBLE_CLIC_ne_lance_pas_deux_annulations(self) -> None:
+        """Contrepartie de la fermeture anticipee : le declencheur redevient
+        cliquable pendant l'appel reseau. Sans garde, deux annulations
+        concurrentes partiraient sur le MEME run."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE", counts: { done: 5, skipped: 0 } }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_DONE", counts: { done: 5, skipped: 0 } }});
+            await Promise.all([M.__doUndoApply("r1"), M.__doUndoApply("r1")]);
+            __emit({ appels: __appels.length });
+            """
+        )
+        self.assertEqual(res["appels"], 1, "deux annulations concurrentes sur le meme run")
+
+    def test_le_repli_reste_possible_APRES_le_premier_essai(self) -> None:
+        """Contre-epreuve : une garde trop large bloquerait la relance en
+        best-effort, et le correctif tuerait la fonction qu'il protege."""
+        res = _executer(
+            """
+            globalThis._refreshRuns = async () => {};
+            __reponses.push({ data: {
+              ok: false, status: "ABORTED_HASH_MISMATCH",
+              preverify: { safe_count: 4, hash_mismatch_count: 1, mismatch_details: [] },
+            }});
+            __reponses.push({ data: { ok: true, status: "UNDONE_PARTIAL", counts: { done: 4, skipped: 1 } }});
+            await M.__doUndoApply("r1");
+            await __modales[0].onConfirm();
+            __emit({ appels: __appels.map(a => a.params.atomic) });
+            """
+        )
+        self.assertEqual(res["appels"], [True, False], f"le repli a ete bloque par la garde : {res}")
 
 
 class CheminNominalTests(unittest.TestCase):

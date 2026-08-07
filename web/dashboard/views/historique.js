@@ -1322,7 +1322,24 @@ function _proposerUndoPartiel(runId, preverify) {
   });
 }
 
+// Garde de re-entrance de l'undo.
+//
+// La modale initiale passe `closeBeforeConfirm: true` : sans cela, la modale de
+// repli s'ouvrait ALORS QUE la premiere etait encore active — `dangerConfirmModal`
+// n'appelle `close()` qu'apres resolution de `onConfirm`. La fermeture differee
+// de la premiere restaurait alors le focus sur son declencheur, situe DERRIERE la
+// seconde modale, qui perdait le focus qu'elle venait de prendre.
+//
+// Fermer tot a une contrepartie, que la documentation de `dangerConfirmModal`
+// enonce : le declencheur redevient cliquable pendant l'appel reseau. Sans cette
+// garde, un double-clic lancerait deux annulations concurrentes sur le meme run.
+// L'appel de repli (`atomic: false`) n'est PAS bloque : il part apres le retour
+// du premier, donc apres la remise a zero du drapeau.
+let _undoEnVol = false;
+
 async function _doUndoApply(runId, options) {
+  if (_undoEnVol) return;
+  _undoEnVol = true;
   const atomic = !(options && options.atomic === false);
   try {
     const res = await apiPost("run/undo_last_apply", { run_id: runId, dry_run: false, atomic });
@@ -1370,6 +1387,8 @@ async function _doUndoApply(runId, options) {
     }
   } catch (err) {
     showToast({ type: "error", text: `Erreur : ${err && err.message || err}` });
+  } finally {
+    _undoEnVol = false;
   }
 }
 
@@ -1457,6 +1476,13 @@ function _onActionClick(ev) {
         countdownSeconds: 3,
         confirmLabel: "✗ Annuler l'apply",
         cancelLabel: "Garder l'apply",
+        // Cette confirmation peut en ouvrir une SECONDE (le repli partiel, quand
+        // le backend refuse l'undo atomique). Par defaut `dangerConfirmModal`
+        // ne se ferme qu'apres resolution de `onConfirm` : la modale de repli
+        // s'ouvrirait donc par-dessus celle-ci, et la fermeture differee de
+        // celle-ci renverrait ensuite le focus sur le bouton situe DERRIERE.
+        // On ferme donc AVANT ; la re-entrance est gardee par `_undoEnVol`.
+        closeBeforeConfirm: true,
         onConfirm: () => _doUndoApply(runId),
       });
       break;
