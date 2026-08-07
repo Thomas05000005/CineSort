@@ -195,6 +195,20 @@ def _resolve_state_dir(api: Any) -> Optional[Path]:
     return None
 
 
+def _a_disparu(item: Path) -> bool:
+    """L'element a-t-il REELLEMENT disparu du disque ?
+
+    Sens RESTRICTIF, comme sur tout chemin destructif : si l'existence ne peut
+    pas etre etablie (volume debranche, ACL, chemin devenu illisible), on repond
+    False, c'est-a-dire « je ne peux pas prouver la suppression ». Un rapport de
+    reset qui doute est utilisable ; un rapport qui affirme a tort ne l'est pas.
+    """
+    try:
+        return not item.exists()
+    except OSError:
+        return False
+
+
 def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
     """V3-09 — Reinitialise toutes les donnees utilisateur.
 
@@ -205,7 +219,13 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
     4. Preserver : logs (utiles pour debug si reset cause un probleme)
 
     Returns:
-        {ok: bool, backup_path?: str, removed?: list[str], error?: str}
+        {ok: bool, backup_path?: str, removed?: list[str], failed?: list[str],
+         message?: str, error?: str}
+
+        `removed` ne liste que ce qui a REELLEMENT disparu du disque, `failed`
+        ce qui a resiste. La suppression des dossiers passe par
+        `shutil.rmtree(ignore_errors=True)`, qui ne signale aucun echec : sans
+        controle a posteriori, les deux listes etaient confondues.
     """
     if confirmation_text != "RESET":
         return _err_response(
@@ -232,28 +252,62 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
 
         # 2. Suppression selective (preserve logs/)
         removed: list[str] = []
+        failed: list[str] = []
         for item in state_path.iterdir():
             if item.name == "logs":
                 continue
             if item.is_dir():
                 shutil.rmtree(item, ignore_errors=True)
             else:
-                try:
+                with contextlib.suppress(OSError):
                     item.unlink(missing_ok=True)
-                except OSError:
-                    continue
-            removed.append(item.name)
+            # `ignore_errors=True` ne leve RIEN : le seul temoin d'un echec est
+            # l'etat du disque APRES coup. Sans ce controle, `removed` annoncait
+            # ce qu'on avait TENTE de supprimer, pas ce qui avait disparu — et
+            # l'appelant recevait `ok: True` avec la liste complete alors que
+            # des donnees utilisateur etaient toujours la.
+            #
+            # Le cas n'est pas theorique : ce reset s'execute pendant que l'app
+            # TOURNE. Les threads de fond (cron retention, cron TTL quarantaine,
+            # watcher, serveur REST, job runner) ecrivent dans ce meme
+            # `state_dir` ; sous Windows un seul fichier ouvert par l'un d'eux
+            # fait echouer la suppression de son dossier parent.
+            if _a_disparu(item):
+                removed.append(item.name)
+            else:
+                failed.append(item.name)
 
-        logger.warning(
-            "V3-09 : reset complet effectue (%d items supprimes). Backup : %s",
-            len(removed),
-            backup_path,
-        )
-        return {
+        if failed:
+            logger.error(
+                "V3-09 : reset PARTIEL — %d items supprimes, %d SUBSISTENT (%s). Backup : %s",
+                len(removed),
+                len(failed),
+                ", ".join(sorted(failed)[:10]),
+                backup_path,
+            )
+        else:
+            logger.warning(
+                "V3-09 : reset complet effectue (%d items supprimes). Backup : %s",
+                len(removed),
+                backup_path,
+            )
+        payload: Dict[str, Any] = {
             "ok": True,
             "backup_path": str(backup_path),
             "removed": removed,
+            # Champ ADDITIF : les appelants existants qui ne lisent que `removed`
+            # gardent exactement leur comportement, en cessant d'etre trompes.
+            "failed": failed,
         }
+        if failed:
+            payload["message"] = (
+                f"Reinitialisation PARTIELLE : {len(removed)} element(s) supprime(s), "
+                f"{len(failed)} n'ont pas pu l'etre ({', '.join(sorted(failed)[:5])}). "
+                "Ils sont probablement ouverts par CineSort lui-meme : ferme puis "
+                "relance l'application, et relance la reinitialisation. "
+                f"La sauvegarde complete reste disponible : {backup_path}"
+            )
+        return payload
     except (OSError, shutil.Error) as exc:
         logger.exception("V3-09 : echec reset")
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
