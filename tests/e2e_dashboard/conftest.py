@@ -97,8 +97,9 @@ def e2e_server() -> Generator[Dict[str, Any], None, None]:
     # L'URL reste NUE. Jusqu'au 2026-08-07 le harnais ne devait son acces qu'au
     # BYPASS D'AUTH loopback — il n'eprouvait donc JAMAIS l'authentification, et
     # le retrait du bypass l'a mis a nu. Le jeton est desormais depose dans le
-    # localStorage par `_aller_au_dashboard`, avant tout script de la page : voir
-    # sa docstring pour la mesure qui a ecarte la variante `?ntoken=`.
+    # **sessionStorage** par la fixture `authenticated_page`, avant tout script
+    # de la page ; voir son corps pour les deux variantes ecartees par la mesure
+    # (`?ntoken=` dans l'URL, et `localStorage`).
     yield {
         "url": f"http://127.0.0.1:{port}",
         "dashboard_url": f"http://127.0.0.1:{port}/dashboard/",

@@ -372,15 +372,26 @@ class RateLimitHttpTests(unittest.TestCase):
             tombe sur la garde 410 Gone (P0 #233) avant meme d'atteindre l'auth,
             ce qui rendait le scenario rate-limit invisible.
 
+        DEUX NOTIONS DISTINCTES, A NE PAS CONFONDRE (2026-08-07) :
+          - l'exemption de RATE LIMITING pour le loopback est **CONSERVEE**
+            (`_is_rate_limited` sort tot pour `_LOCAL_CLIENT_IPS`) — c'est le
+            sujet de ce test ;
+          - le bypass d'AUTHENTIFICATION loopback est **RETIRE**. Une version
+            anterieure de cette docstring citait « memoire user BYPASS LOOPBACK
+            CONSERVE » et affirmait que le point 4 prouvait le bypass intact :
+            elle disait donc l'inverse du corps depuis le retrait.
+
         Strategie de re-ancrage (alignee sur scripts/_check_iter14_rate_limit_429.py) :
           1. Monkey-patch `_CineSortHandler._client_ip` pour simuler une IP LAN
-             (10.0.0.42) : le rate-limit redevient actif (loopback toujours exempte
-             par design, memoire user BYPASS LOOPBACK CONSERVE).
+             (10.0.0.42) : le rate-limit redevient actif (le loopback en reste
+             exempte par design).
           2. Pre-saturer le compteur _RateLimiter via record_failure (5 echecs).
           3. POST sur le VRAI chemin facade `/api/settings/get_settings` avec un
              bon token : on doit recevoir 429 + Retry-After (28e85c3 fix #2).
-          4. Verifier que le 5e POST loopback reel (sans patch) repond 401 et NON
-             429 -> le bypass loopback reste intact.
+          4. Verifier que le POST loopback reel (sans patch) N'est PAS 429 : il
+             rend 401, car l'authentification s'execute AVANT la garde 410 du
+             chemin legacy. L'assertion qui porte le sens du test est « ce n'est
+             pas 429 » ; le 401 en est la consequence, pas le sujet.
         """
         # 1. Simuler IP LAN distante via monkey-patch.
         original_client_ip = _CineSortHandler._client_ip

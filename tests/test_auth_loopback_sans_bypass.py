@@ -77,22 +77,40 @@ class _ServeurLocalMixin:
             "LOCALAPPDATA": os.environ.get("LOCALAPPDATA"),
         }
         os.environ["LOCALAPPDATA"] = cls._tmp
-        cls.api = CineSortApi()
-        cls.port = _port_libre()
-        cls.server = RestApiServer(cls.api, port=cls.port, token=_TOKEN)
-        cls.server.start()
+        cls.server = None
+        # `unittest` n'appelle `tearDownClass` QUE si `setUpClass` s'est terminee
+        # sans exception. Sans ce `try`, une levee de `CineSortApi()`, de
+        # `_port_libre()` (le port est rendu apres fermeture de la socket : un
+        # autre processus peut le prendre entre-temps) ou de `start()` laisserait
+        # `LOCALAPPDATA` pointe sur un repertoire que le nettoyage supprime
+        # ensuite — et les 52 `ERROR at setup` de Playwright reviendraient par ce
+        # chemin d'exception. C'est exactement la panne decrite plus haut,
+        # reouverte par la porte de derriere.
+        try:
+            cls.api = CineSortApi()
+            cls.port = _port_libre()
+            cls.server = RestApiServer(cls.api, port=cls.port, token=_TOKEN)
+            cls.server.start()
+        except BaseException:
+            cls._rendre_l_environnement()
+            raise
+
+    @classmethod
+    def _rendre_l_environnement(cls) -> None:
+        for nom, valeur in getattr(cls, "_env_precedent", {}).items():
+            if valeur is None:
+                os.environ.pop(nom, None)
+            else:
+                os.environ[nom] = valeur
+        shutil.rmtree(getattr(cls, "_tmp", ""), ignore_errors=True)
 
     @classmethod
     def tearDownClass(cls) -> None:
         try:
-            cls.server.stop()
+            if cls.server is not None:
+                cls.server.stop()
         finally:
-            for nom, valeur in cls._env_precedent.items():
-                if valeur is None:
-                    os.environ.pop(nom, None)
-                else:
-                    os.environ[nom] = valeur
-            shutil.rmtree(cls._tmp, ignore_errors=True)
+            cls._rendre_l_environnement()
 
     def _poster(self, route: str, jeton: str | None) -> tuple[int, dict]:
         conn = HTTPConnection("127.0.0.1", self.port, timeout=10)
@@ -205,9 +223,14 @@ class LEnvironnementEstRENDUTests(unittest.TestCase):
             _prefixe = "cinesort_auth_garde_"
 
         avant = dict(os.environ)
-        _Jetable.setUpClass()
-        pendant = os.environ.get("LOCALAPPDATA")
-        _Jetable.tearDownClass()
+        # `try/finally` : si `setUpClass` leve a mi-parcours, ce test ne doit pas
+        # laisser l'environnement pollue pour ses voisins — le defaut qu'il garde
+        # serait alors provoque PAR lui.
+        try:
+            _Jetable.setUpClass()
+            pendant = os.environ.get("LOCALAPPDATA")
+        finally:
+            _Jetable.tearDownClass()
         apres = dict(os.environ)
 
         self.assertEqual(pendant, _Jetable._tmp, "le harnais n'a pas isole l'etat")
@@ -229,8 +252,10 @@ class LEnvironnementEstRENDUTests(unittest.TestCase):
             _prefixe = "cinesort_auth_garde2_"
 
         avant = set(os.environ)
-        _Jetable.setUpClass()
-        _Jetable.tearDownClass()
+        try:
+            _Jetable.setUpClass()
+        finally:
+            _Jetable.tearDownClass()
 
         self.assertEqual(set(os.environ), avant, "le harnais a ajoute ou retire une variable d'environnement")
 

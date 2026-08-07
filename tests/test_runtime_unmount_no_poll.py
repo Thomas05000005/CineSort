@@ -174,9 +174,9 @@ def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None
         exclure_module="scan-banner",
     )
 
-    # CONTRE-EPREUVE : la banniere DOIT etre visible dans le journal. Si elle
-    # est absente, c'est que rien ne polle du tout — et l'assertion ci-dessous
-    # passerait pour la mauvaise raison, exactement comme avant.
+    # CONTRE-EPREUVE 1 : la banniere DOIT etre visible dans le journal. Si elle
+    # est absente, c'est que rien ne polle du tout — le harnais n'est pas
+    # authentifie, ou le journal de fetch n'est pas installe.
     banniere = [
         e
         for e in journal_fetch(dashboard_page, motif_url="/api/run/get_dashboard")
@@ -186,6 +186,25 @@ def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None
         "aucune requete de scan-banner observee : le harnais n'est pas authentifie, "
         "ou le journal de fetch n'est pas installe — l'assertion suivante ne prouverait rien"
     )
+
+    # CONTRE-EPREUVE 2 — LA PRECONDITION, ET ELLE N'EST PAS ACQUISE.
+    #
+    # `_startScanPolling` n'est arme QUE si un scan est actif au boot
+    # (`accueil.js` : `if (initialScan.active)`), ou apres un demarrage de scan.
+    # Le jeu de donnees de `e2e_server` n'a aucun run actif : mesure du
+    # 2026-08-07 sur la fenetre de base -> 0 requete imputable a l'Accueil.
+    #
+    # Sans ce garde-fou, `fuites == []` serait TRIVIALEMENT vrai et le test
+    # repasserait vide — la vacuite qu'il vient tout juste de perdre, sous une
+    # autre forme. Un `skip` EXPLICITE qui nomme sa precondition est honnete ;
+    # un vert silencieux ne l'est pas.
+    if not base:
+        pytest.skip(
+            "precondition absente : aucun polling imputable a l'Accueil pendant la ligne de base. "
+            "`_startScanPolling` exige un scan ACTIF au boot, que le jeu de donnees e2e ne fournit "
+            "pas. Rendre ce test effectif demande de semer un run actif dans la fixture partagee "
+            "(~50 tests en dependent) — a trancher separement."
+        )
 
     assert not fuites, (
         f"FUITE POLLING apres unmountAccueil : {len(fuites)} requete(s) imputables a la vue "
