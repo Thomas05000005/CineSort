@@ -215,21 +215,22 @@ class DashboardShellHttpTests(unittest.TestCase):
         """Le tunnel auth Bearer reel renvoie 401/200 selon le token.
 
         ITER 5 etape 2b — re-ancrage sur la VRAIE entree dispatch (path facade
-        /api/settings/get_settings, meme code path que prod). On simule un
-        client non-loopback via le kill-switch CINESORT_DISABLE_LOCAL_AUTH=1
-        (positionne dans setUpClass) qui neutralise le bypass design
-        (rest_server.py L443-462). Le check `client_ip in _LOCAL_CLIENT_IPS
-        && bind_host == "127.0.0.1"` est court-circuite par la 1ere condition
-        `not bypass_disabled`. Le code tombe alors dans la branche Bearer
-        nominale L463-508, comme pour un vrai client LAN sur bind 0.0.0.0.
+        /api/settings/get_settings, meme code path que prod).
 
-        Matrice attendue (cf bilan ITER 5 sections 1c + 3.4) :
-          - no-token   -> 401 (Authorization absent, L463/466)
-          - wrong-token-> 401 (hmac.compare_digest False, L475)
-          - valid-token-> 200 (dispatch facade settings/get_settings)
-          - loopback bypass-OFF (env vide) + meme requete -> 200 (bypass actif
-            L452-462, prouve que le bypass design est intact, memoire user
-            BYPASS LOOPBACK CONSERVE).
+        2026-08-07 : LE BYPASS LOOPBACK EST RETIRE. Ce test n'a plus besoin du
+        kill-switch pour observer l'authentification — elle s'applique
+        desormais a TOUT client, loopback compris.
+
+        Le point 4 asserait l'inverse de ce qu'on veut aujourd'hui : « loopback
+        + mauvais jeton -> 200 ». Il est CONSERVE mais retourne : c'est
+        precisement la garantie neuve, et l'assertion doit la verrouiller pour
+        qu'une reintroduction du bypass fasse rougir.
+
+        Matrice attendue :
+          - no-token    -> 401 (Authorization absent)
+          - wrong-token -> 401 (hmac.compare_digest False)
+          - valid-token -> 200 (dispatch facade settings/get_settings)
+          - loopback + wrong-token, SANS kill-switch -> 401 (plus de bypass)
         """
         # --- 1. no-token -> 401 (header Authorization absent) ----------------
         status_none, data_none = self._post("/api/settings/get_settings", body={}, token=None)
@@ -246,20 +247,22 @@ class DashboardShellHttpTests(unittest.TestCase):
         self.assertEqual(status_ok, 200, f"valid-token attendu 200, obtenu {status_ok}")
         self.assertIn("root", data_ok, f"reponse facade incomplete, data={data_ok}")
 
-        # --- 4. loopback bypass actif -> 200 meme avec wrong-token -----------
-        # On retire temporairement l'env var pour reactiver le bypass design.
-        # Preuve que BYPASS LOOPBACK CONSERVE est intact cote code de prod.
+        # --- 4. loopback + mauvais jeton -> 401 (le bypass est RETIRE) -------
+        # Le kill-switch est retire de l'environnement : c'est exactement la
+        # configuration ou l'ancien bypass accordait 200. Elle doit desormais
+        # rendre 401, sinon le bypass a ete reintroduit.
         saved_env = os.environ.pop("CINESORT_DISABLE_LOCAL_AUTH", None)
         try:
-            status_bypass, data_bypass = self._post("/api/settings/get_settings", body={}, token="wrong-token")
+            status_loopback, data_loopback = self._post("/api/settings/get_settings", body={}, token="wrong-token")
             self.assertEqual(
-                status_bypass,
-                200,
-                f"loopback bypass attendu 200 (bind=127.0.0.1+client=127.0.0.1), "
-                f"obtenu {status_bypass}. Si 401, le bypass design est casse "
-                f"(memoire user BYPASS LOOPBACK CONSERVE violee).",
+                status_loopback,
+                401,
+                f"loopback + mauvais jeton attendu 401, obtenu {status_loopback}. "
+                f"Si 200, le bypass d'auth loopback a ete REINTRODUIT : 172 methodes "
+                f"de facade en POST, dont 20 destructives, redeviennent atteignables "
+                f"sans jeton par tout processus local.",
             )
-            self.assertIn("root", data_bypass)
+            self.assertFalse(data_loopback.get("ok", True), f"ok devait etre False, data={data_loopback}")
         finally:
             # Restaurer l'env var pour les assertions suivantes / tests freres.
             if saved_env is None:

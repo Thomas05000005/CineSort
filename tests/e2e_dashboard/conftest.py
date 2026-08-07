@@ -24,6 +24,7 @@ if _e2e_dir not in sys.path:
 
 # Importer les donnees de test et les fonctions utilitaires
 import contextlib
+import json
 import shutil
 import socket
 import tempfile
@@ -93,6 +94,11 @@ def e2e_server() -> Generator[Dict[str, Any], None, None]:
     server.start()
     _wait_server_ready(port)
 
+    # L'URL reste NUE. Jusqu'au 2026-08-07 le harnais ne devait son acces qu'au
+    # BYPASS D'AUTH loopback — il n'eprouvait donc JAMAIS l'authentification, et
+    # le retrait du bypass l'a mis a nu. Le jeton est desormais depose dans le
+    # localStorage par `_aller_au_dashboard`, avant tout script de la page : voir
+    # sa docstring pour la mesure qui a ecarte la variante `?ntoken=`.
     yield {
         "url": f"http://127.0.0.1:{port}",
         "dashboard_url": f"http://127.0.0.1:{port}/dashboard/",
@@ -139,6 +145,63 @@ _ERREURS_RESEAU_TRANSITOIRES = ("ERR_NO_BUFFER_SPACE", "ERR_INSUFFICIENT_RESOURC
 #: 8 s d'attente du shell qui suivent, et suffisant pour qu'un port ephemere se
 #: libere (TIME_WAIT court sur les runners Windows).
 _PALIERS_GOTO_S = (0.0, 0.1, 0.3, 1.0)
+
+
+#: Journalise chaque `fetch` AVEC SA PILE D'APPEL, pour pouvoir attribuer une
+#: requete a son module d'origine.
+#:
+#: POURQUOI. Deux tests demandent « 0 requete de polling apres demontage de la
+#: vue ». Or `components/scan-banner.js` polle `run/get_dashboard` **toutes les
+#: 5 s de facon globale et permanente**, ET re-tique sur chaque `hashchange` —
+#: donc a chaque navigation declenchee par le test lui-meme. Filtrer par URL ne
+#: peut pas distinguer la banniere de la vue : c'est la MEME route.
+#:
+#: Ces tests ne s'en apercevaient pas parce que la banniere ne demarre PAS sans
+#: authentification (`initScanBanner` sort si `!hasToken()`), et le harnais
+#: n'avait aucun jeton — il vivait sur le bypass d'auth loopback. Le test
+#: `unmount_accueil` partait donc en `skip` a chaque execution : il n'a JAMAIS
+#: rien eprouve.
+_JS_JOURNAL_FETCH = r"""
+(() => {
+  try {
+    if (window.__cinesortFetchLog) return;
+    window.__cinesortFetchLog = [];
+    const _fetch = window.fetch;
+    window.fetch = function (...args) {
+      try {
+        const url = String((args[0] && args[0].url) || args[0] || "");
+        const pile = (new Error().stack || "");
+        window.__cinesortFetchLog.push({ t: performance.now(), url, pile });
+      } catch (e) { /* no-op */ }
+      return _fetch.apply(this, args);
+    };
+  } catch (e) { /* no-op */ }
+})();
+"""
+
+
+def journal_fetch(page, *, depuis_ms: float = 0.0, motif_url: str = "", exclure_module: str = "") -> list:
+    """Requetes `fetch` observees, attribuables a leur module appelant.
+
+    `exclure_module` filtre sur la PILE D'APPEL, pas sur l'URL : c'est le seul
+    moyen de distinguer deux appelants de la meme route (cf. `_JS_JOURNAL_FETCH`).
+    """
+    entrees = page.evaluate("() => (window.__cinesortFetchLog || []).slice()")
+    sortie = []
+    for e in entrees:
+        if e.get("t", 0) < depuis_ms:
+            continue
+        if motif_url and motif_url not in str(e.get("url", "")):
+            continue
+        if exclure_module and exclure_module in str(e.get("pile", "")):
+            continue
+        sortie.append(e)
+    return sortie
+
+
+def horloge_page(page) -> float:
+    """`performance.now()` de la page — la meme horloge que `journal_fetch`."""
+    return float(page.evaluate("() => performance.now()"))
 
 
 def _aller_au_dashboard(page, e2e_server: Dict[str, Any]) -> None:
@@ -313,6 +376,39 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
 
     url = e2e_server["dashboard_url"]
     token = e2e_server["token"]
+
+    # --- Authentification, AVANT que le moindre script de la page ne tourne ---
+    #
+    # C'est `sessionStorage` qu'il faut ecrire, pas `localStorage` : `getToken()`
+    # (core/state.js) lit sessionStorage EN PRIORITE et ne consulte localStorage
+    # que si le drapeau `cinesort.dashboard.persist` vaut "1". Une version
+    # intermediaire n'ecrivait que localStorage, sans ce drapeau : `getToken()`
+    # rendait une chaine vide et trois tests retombaient.
+    #
+    # Ecrire cette seule cle equivaut exactement a `setToken(token, persist=false)`
+    # — une session web connectee, sans « se souvenir de moi ». Le portillon de
+    # boot d'`app.js` la cherche explicitement et appelle `markTokenReady()` :
+    # les quatre requetes initiales partent donc AVEC le Bearer, sans attendre
+    # le deadline de 2 s.
+    #
+    # POURQUOI PAS `?ntoken=` DANS L'URL, comme le fait `app.py`. Mesure : deux
+    # tests de minuterie tombent. Cause ISOLEE (bypass restaure, jeton dans
+    # l'URL conserve : les memes deux tombent) — ce n'est pas le retrait du
+    # bypass. Quand `ntoken` est present, `app.js` appelle `setToken()` PUIS
+    # purge l'URL par `history.replaceState`, ce qui decale le demarrage que ces
+    # tests mesurent.
+    #
+    # POURQUOI ICI ET NON DANS `_aller_au_dashboard` : cette fonction traite de
+    # la REPRISE RESEAU (#924) et rien d'autre. Y greffer l'authentification a
+    # casse ses quatre tests unitaires, dont la page factice n'a evidemment pas
+    # d'`add_init_script` — deux sujets sans rapport dans une meme fonction.
+    page.add_init_script(
+        "try { sessionStorage.setItem('cinesort.dashboard.token', "
+        + json.dumps(token)
+        + "); } catch (e) { /* no-op */ }"
+    )
+    page.add_init_script(_JS_JOURNAL_FETCH)
+
     # AVANT le goto : une erreur d'amorcage survient pendant le chargement.
     _brancher_capture_console(page)
     _aller_au_dashboard(page, e2e_server)

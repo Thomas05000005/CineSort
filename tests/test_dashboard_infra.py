@@ -425,13 +425,26 @@ class RateLimitHttpTests(unittest.TestCase):
         finally:
             _CineSortHandler._client_ip = original_client_ip  # type: ignore[assignment]
 
-        # 4. Loopback NON patche : bypass actif, jamais 429.
-        # Le compteur 10.0.0.42 reste sature mais 127.0.0.1 doit toujours passer.
+        # 4. Loopback NON patche : toujours exempte du rate-limit.
+        #
+        # Ce que ce point mesure est INCHANGE — le compteur de 10.0.0.42 reste
+        # sature, et 127.0.0.1 ne doit pas en heriter. Seul le code attendu
+        # bouge : jusqu'au 2026-08-07 le bypass d'auth laissait passer la
+        # requete jusqu'a la garde du chemin legacy (410) ; depuis son retrait,
+        # l'authentification s'execute d'abord et un mauvais jeton rend 401.
+        #
+        # L'assertion qui porte le sens du test est la SECONDE : ce n'est pas
+        # 429. Un 401 prouve l'exemption aussi bien qu'un 410.
         status_loop = self._post("/api/get_settings", token="bad-token")
+        self.assertNotEqual(
+            status_loop,
+            429,
+            "loopback a herite du rate-limit de 10.0.0.42 : l'exemption locale est cassee",
+        )
         self.assertEqual(
             status_loop,
-            410,
-            f"loopback exempte du rate-limit, voie legacy 410 attendue, got {status_loop}",
+            401,
+            f"loopback + mauvais jeton attendu 401 depuis le retrait du bypass, got {status_loop}",
         )
 
     def test_rate_limit_does_not_block_valid_requests_before_threshold(self) -> None:
