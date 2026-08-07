@@ -498,6 +498,8 @@ def _execute_undo_ops(
     cleanup_residual_dirs_reversed = 0
     undo_conflicts_root = run_paths.run_dir / "_review" / "_undo_conflicts"
 
+    conflicts_details: List[Dict[str, Any]] = []
+
     hash_cache: Dict = {}
     preverify = preverify_undo_operations(reversible_ops, hash_cache=hash_cache)
     mismatch_ops = preverify["hash_mismatch"]
@@ -710,6 +712,18 @@ def _execute_undo_ops(
                     )
                     continue
                 conflict_moves += 1
+                # Ou est parti le film, en DONNEE et pas seulement dans une
+                # chaine de message. Avant, la seule trace de sa nouvelle place
+                # etait le texte de `error_message` ci-dessous : aucune surface
+                # ne pouvait lister ces fichiers ni proposer de les remettre.
+                conflicts_details.append(
+                    {
+                        "row_id": str(op.get("row_id") or ""),
+                        "src_path": str(current_path),
+                        "dst_path": str(conflict_dst),
+                        "blocked_by": str(target_path),
+                    }
+                )
                 failed += 1
                 _mark_undo_status(
                     store,
@@ -794,6 +808,7 @@ def _execute_undo_ops(
         "empty_folder_dirs_reversed": empty_folder_dirs_reversed,
         "cleanup_residual_dirs_reversed": cleanup_residual_dirs_reversed,
         "undo_conflicts_root": str(undo_conflicts_root),
+        "conflicts_details": conflicts_details,
         "aborted_atomic": False,
         "preverify": {
             "safe_count": len(preverify["safe"]),
@@ -1367,30 +1382,64 @@ def _execute_and_finalize_undo(
     # (saga reutilisee entre batches, MKDIR non rejournalise par le 2e apply).
     mkdir_dirs_removed = _undo_mkdir_ops(store, batch_id, log_fn, run_id=run_id)
 
-    status = "UNDONE_DONE" if failed == 0 else "UNDONE_PARTIAL"
+    # Ultra-audit 2026-08 — un undo qui n'a RESTAURE AUCUN fichier n'est pas un
+    # undo « termine », et il ne doit surtout pas consommer l'annulation.
+    #
+    # `done == 0 and failed == 0 and skipped > 0` veut dire : rien n'a bouge sur
+    # le disque, pas une seule fois. Les trois causes de `skipped` le garantissent
+    # (empreinte modifiee, source inverse introuvable, fichier disparu entre le
+    # check et le move) — aucune n'ecrit.
+    #
+    # Avant, ce cas rendait `UNDONE_DONE` et le message « Undo termine. », puis
+    # clotait le batch. Or `get_last_reversible_apply_batch` filtre `status='DONE'` :
+    # le batch sortait donc de la liste des annulables. L'utilisateur voyait un
+    # succes, ses films n'avaient pas bouge, et son droit a annuler etait
+    # consomme — la pire combinaison des trois.
+    #
+    # On ne finalise donc PAS : le batch reste `DONE`, donc encore annulable, et
+    # une nouvelle tentative rejouera ces memes ops (le chemin d'undo COMPLET,
+    # `_build_undo_preview_payload`, ne filtre pas sur `undo_status`, contrairement
+    # a l'undo selectif). C'est ce qui rend le « reessayer plus tard » reel.
+    rien_restaure = done == 0 and failed == 0 and skipped > 0
+    if rien_restaure:
+        status = "UNDONE_NONE"
+        log_fn(
+            "WARN",
+            f"UNDO sans effet batch={batch_id}: {skipped} operation(s) ignoree(s), aucun fichier restaure. "
+            "Le batch reste annulable.",
+        )
+    else:
+        status = "UNDONE_DONE" if failed == 0 else "UNDONE_PARTIAL"
     # F31 (revue R1) : finalisation tolerante (cf. _finalize_batch_undo_status).
-    _finalize_batch_undo_status(
-        store,
-        log_fn,
-        batch_id=batch_id,
-        status=status,
-        summary={
-            "run_id": run_id,
-            "batch_id": batch_id,
-            "undo": {
-                "done": done,
-                "skipped": skipped,
-                "failed": failed,
-                "irreversible": irreversible_count,
-                "conflicts_moved": undo_counts["conflict_moves"],
-                "empty_folder_dirs": int(preview_categories.get("empty_folder_dirs") or 0),
-                "cleanup_residual_dirs": int(preview_categories.get("cleanup_residual_dirs") or 0),
-                "empty_folder_dirs_reversed": empty_reversed,
-                "cleanup_residual_dirs_reversed": residual_reversed,
-                "mkdir_dirs_removed": mkdir_dirs_removed,
+    #
+    # Sautee quand rien n'a ete restaure : `_ALLOWED_BATCH_TRANSITIONS` n'autorise
+    # depuis `DONE` que les etats `UNDONE_*`, il n'existe donc AUCUN moyen de
+    # reecrire le resume en gardant le batch annulable. Ne pas finaliser est le
+    # seul choix qui preserve l'annulation — et c'est le bon, puisque le disque
+    # n'a pas bouge : il n'y a litteralement rien de neuf a enregistrer.
+    if not rien_restaure:
+        _finalize_batch_undo_status(
+            store,
+            log_fn,
+            batch_id=batch_id,
+            status=status,
+            summary={
+                "run_id": run_id,
+                "batch_id": batch_id,
+                "undo": {
+                    "done": done,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "irreversible": irreversible_count,
+                    "conflicts_moved": undo_counts["conflict_moves"],
+                    "empty_folder_dirs": int(preview_categories.get("empty_folder_dirs") or 0),
+                    "cleanup_residual_dirs": int(preview_categories.get("cleanup_residual_dirs") or 0),
+                    "empty_folder_dirs_reversed": empty_reversed,
+                    "cleanup_residual_dirs_reversed": residual_reversed,
+                    "mkdir_dirs_removed": mkdir_dirs_removed,
+                },
             },
-        },
-    )
+        )
 
     all_counts = {**undo_counts, "irreversible": irreversible_count}
     _write_undo_summary(
@@ -1402,11 +1451,23 @@ def _execute_and_finalize_undo(
         f"=== UNDO done batch={batch_id} done={done} skipped={skipped} failed={failed} "
         f"irreversible={irreversible_count} status={status} ===",
     )
-    api._notify.notify(
-        "undo_done",
-        t("notifications.title_undo_done"),
-        t("notifications.undo_done_body", done=done, failed=failed),
-    )
+    # Une notification « Annulation terminee — 0 restaure, 0 echec » sur un undo
+    # qui n'a rien fait est indistinguable d'un succes. Elle porte donc son propre
+    # titre et son propre niveau : c'est le seul canal qui survit a la fermeture
+    # de l'ecran d'annulation.
+    if rien_restaure:
+        api._notify.notify(
+            "undo_done",
+            t("notifications.title_undo_none"),
+            t("notifications.undo_none_body", skipped=skipped),
+            level="warning",
+        )
+    else:
+        api._notify.notify(
+            "undo_done",
+            t("notifications.title_undo_done"),
+            t("notifications.undo_done_body", done=done, failed=failed),
+        )
     if done > 0:
         api._dispatch_plugin_hook(
             "post_undo",
@@ -1430,7 +1491,19 @@ def _execute_and_finalize_undo(
             "empty_folder_dirs_reversed": empty_reversed,
             "cleanup_residual_dirs_reversed": residual_reversed,
         },
-        "message": t("errors.undo_done") if failed == 0 else t("errors.undo_done_with_anomalies"),
+        # `undo_still_available` est une DONNEE de la reponse, pas une deduction
+        # que l'UI devrait refaire depuis `status` : c'est ce champ qui lui dit
+        # de laisser le bouton « Annuler » actif.
+        "undo_still_available": bool(rien_restaure),
+        # Idem pour les films mis en quarantaine faute de pouvoir les remettre en
+        # place : leur destination ne doit pas rester prisonniere d'un message.
+        "conflicts": list(undo_counts.get("conflicts_details") or []),
+        "conflicts_root": str(undo_counts.get("undo_conflicts_root") or ""),
+        "message": (
+            t("errors.undo_none", skipped=skipped)
+            if rien_restaure
+            else (t("errors.undo_done") if failed == 0 else t("errors.undo_done_with_anomalies"))
+        ),
     }
 
 
@@ -1660,7 +1733,27 @@ def _validate_apply(
     # des fichiers a deplacer (avec marge 10%). Evite l'apply qui s'arrete a
     # mi-parcours, laissant DB/FS dans un etat partiel (cf CR-1).
     if not dry_run:
-        ok_disk, disk_info = check_disk_space_for_apply(cfg, rows, approved_keys)
+        # Le second volume : les bacs de l'apply vivent sous `<run_dir>/_review`
+        # (decision R8-002), donc sur le disque du `state_dir` et PAS sur celui
+        # de la bibliotheque. On ne lui impute que ce qui est resoluble ici :
+        # doublons ecartes et marques pour suppression. Best-effort de bout en
+        # bout — un echec de lecture rend un ensemble vide, ce qui ramene
+        # exactement au comportement d'avant.
+        _bucket_keys: Set[str] = set()
+        with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+            _bucket_keys |= _resolve_duplicate_loser_row_ids(merged_decisions, log_fn)
+        with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+            for _m in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
+                _mid = str(_m.get("row_id") or "").strip()
+                if _mid:
+                    _bucket_keys.add(_mid)
+        ok_disk, disk_info = check_disk_space_for_apply(
+            cfg,
+            rows,
+            approved_keys,
+            state_dir=Path(run_paths.run_dir),
+            bucket_keys={rid for rid in _bucket_keys if rid in approved_keys},
+        )
         if not ok_disk:
             _disk_msg = disk_info.get("message") or t("errors.disk_space_insufficient")
             log_fn("ERROR", _disk_msg)

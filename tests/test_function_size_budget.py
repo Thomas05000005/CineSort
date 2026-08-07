@@ -60,14 +60,23 @@ _PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent / "cinesort"
 # en review — c'est tout l'objet.
 # ---------------------------------------------------------------------------
 PLAFONDS: dict[tuple[str, str], int] = {
-    ("cinesort/app/apply_core.py", "apply_rows"): 744,
+    # 744 -> 773 : ultra-audit 2026-08. Deux clauses de la boucle par-row
+    # comptaient l'erreur sans jamais dire LAQUELLE (`error_messages` vide,
+    # « Erreurs : 1 » sans explication), et la clause d'etat n'attrapait pas le
+    # refus du garde anti-echappement de la racine.
+    ("cinesort/app/apply_core.py", "apply_rows"): 773,
     ("cinesort/domain/quality_score.py", "compute_quality_score"): 500,
+    # Nouvelle entree : le pre-check gagne le controle du second volume.
+    ("cinesort/app/disk_space_check.py", "check_disk_space_for_apply"): 101,
     ("cinesort/ui/api/library_support.py", "_build_library_rows"): 429,
     ("cinesort/ui/api/apply_support.py", "_execute_apply"): 385,
     ("cinesort/domain/scan_helpers.py", "discover_candidate_folders"): 382,
     ("cinesort/ui/api/apply_support.py", "_apply_changes_body"): 369,
     ("cinesort/ui/api/dashboard_support.py", "_build_dashboard_section"): 360,
-    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 335,
+    # 335 -> 350 : les conflits d'undo deviennent une DONNEE de la reponse
+    # (row_id, source, destination, ce qui bloquait) au lieu d'une chaine de
+    # message dont aucune surface ne pouvait rien faire.
+    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 350,
     ("cinesort/ui/api/run_flow_support.py", "_build_plan_job_fn"): 304,
     ("cinesort/ui/api/perceptual_support.py", "_execute_perceptual_analysis"): 298,
     ("cinesort/app/job_runner.py", "_run_worker"): 292,
@@ -118,7 +127,9 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/settings_support.py", "write_settings"): 152,
     ("cinesort/domain/perceptual/composite_score.py", "detect_cross_verdicts"): 150,
     ("cinesort/infra/rest_server.py", "_handle_post"): 150,
-    ("cinesort/ui/api/apply_support.py", "_validate_apply"): 150,
+    # 150 -> 170 : le pre-check d'espace disque regarde desormais le SECOND
+    # volume (les bacs vivent sous le state_dir, pas sous la bibliotheque).
+    ("cinesort/ui/api/apply_support.py", "_validate_apply"): 170,
     ("cinesort/ui/api/perceptual_support.py", "get_perceptual_compare_audio"): 149,
     ("cinesort/infra/probe/_normalize_merge.py", "_merge_probes"): 148,
     ("cinesort/app/job_runner.py", "start_job"): 147,
@@ -162,7 +173,10 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/domain/duplicate_compare.py", "compare_by_criteria"): 116,
     ("cinesort/domain/video_hash.py", "extract_video_thumbnails"): 116,
     ("cinesort/infra/integrations/poster_proxy.py", "serve_poster"): 114,
-    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 114,
+    # 114 -> 172 : un undo qui n'a restaure AUCUN fichier ne consomme plus
+    # l'annulation. Le cas et sa justification tiennent en une trentaine de
+    # lignes de commentaire — c'est le prix pour que personne ne les reperde.
+    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 172,
     ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 114,
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
     ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 114,

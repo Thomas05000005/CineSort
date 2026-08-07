@@ -2389,6 +2389,13 @@ def apply_rows(
             # contexte. Le run continue (res.errors++) car un seul film en echec
             # ne doit pas bloquer le reste du batch.
             res.errors += 1
+            # Le message doit remonter dans `error_messages`, comme le fait la
+            # clause PermissionError juste au-dessus. Sans lui, l'utilisateur lit
+            # « Erreurs : 1 » sans UNE SEULE ligne d'explication — le resume
+            # affiche un compteur et aucune section « ABANDONNE / EN ERREUR ».
+            # C'est le meme silence que la relecture R2 [D2] avait supprime
+            # ailleurs ; deux des trois clauses par-row l'avaient conserve.
+            _append_error_message(res, f"{getattr(folder, 'name', folder)} : {exc}")
             core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
             _logger.warning(
                 "apply: fs_error row_id=%s folder=%s err=%s",
@@ -2407,11 +2414,33 @@ def apply_rows(
                     )
                 except Exception:  # noqa: BLE001
                     _logger.debug("apply: audit_logger.error failed", exc_info=True)
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, core_mod.DestinationHorsRacineError) as exc:
             # State error : indique un bug (row malformee, decision incompatible).
             # On logge en error pour visibilite mais on n'arrete pas le batch :
             # comme pour FS errors, on marque la row en erreur et on continue.
+            #
+            # `DestinationHorsRacineError` ajoutee apres l'ultra-audit 2026-08. Le
+            # garde anti-echappement de la racine la leve, et elle n'etait attrapee
+            # par AUCUNE des deux clauses : un seul row dont la destination sort de
+            # la bibliotheque avortait TOUT le batch, apres que les rows
+            # precedentes avaient deja bouge sur disque. C'est la forme meme du
+            # defaut que la regle inviolable n4 decrit — un etat mixte, les rows
+            # restantes jamais traitees.
+            #
+            # Le TYPE est deliberement etroit. Une premiere version attrapait
+            # `RuntimeError` tout court : elle avalait aussi les crashs reels, et
+            # le rollback forward du mode atomique ne partait plus (mesure sur
+            # tests/test_apply_atomic_rollback_integration_v77.py, deux rouges).
+            # Un bug doit continuer de remonter ; un refus de garde, non.
+            #
+            # Refuser CE row reste le bon comportement ; ce qui ne l'etait pas,
+            # c'est d'emporter les autres avec lui. Le refus reste bruyant :
+            # `res.errors` monte ET le message part dans `error_messages` — sans
+            # quoi le resume afficherait « Erreurs : 1 » sans dire QUOI, ce qui
+            # sur un garde de securite reviendrait a le desarmer aux yeux de
+            # l'utilisateur.
             res.errors += 1
+            _append_error_message(res, f"{getattr(folder, 'name', folder)} : {exc}")
             core_mod._mark_skip(res, core_mod.SKIP_REASON_ERREUR_PRECEDENTE)
             _logger.error(
                 "apply: state_error row_id=%s folder=%s err=%s",

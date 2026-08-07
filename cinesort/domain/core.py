@@ -767,14 +767,36 @@ from cinesort.domain.path_utils import (  # noqa: E402  (re-export volontaire)
 )
 
 
+class DestinationHorsRacineError(RuntimeError):
+    """La destination calculee sort de la bibliotheque : ce row est REFUSE.
+
+    Type dedie, et non un `RuntimeError` nu, parce que la boucle par-row
+    d'`apply_rows` doit distinguer DEUX choses que le type generique confondait :
+
+    - ce refus-ci, qui ne concerne QUE le row en cours. L'emporter en avortant
+      tout le batch laisse les rows deja deplacees sur disque et les suivantes
+      jamais traitees — l'etat mixte que decrit la regle inviolable n4 ;
+    - n'importe quel autre `RuntimeError`, qui signale un bug et DOIT remonter :
+      c'est lui qui declenche le rollback forward du mode atomique.
+
+    Mesure : attraper `RuntimeError` sans distinction faisait passer un crash
+    injecte en plein apply pour une simple erreur de row — l'apply se declarait
+    `ok: True` avec `errors: 1` et le rollback atomique ne partait jamais
+    (tests/test_apply_atomic_rollback_integration_v77.py).
+
+    Herite de `RuntimeError` : tout code existant qui l'attrapait continue de
+    fonctionner a l'identique.
+    """
+
+
 def ensure_inside_root(cfg: Config, dst: Path) -> None:
-    """Raise RuntimeError if *dst* resolves outside cfg.root (path-traversal guard)."""
+    """Raise DestinationHorsRacineError if *dst* resolves outside cfg.root."""
     root_pw = _norm_win_path(cfg.root)
     dst_pw = _norm_win_path(dst)
     try:
         dst_pw.relative_to(root_pw)
     except ValueError:
-        raise RuntimeError(f"REFUS: destination hors ROOT: {dst}") from None
+        raise DestinationHorsRacineError(f"REFUS: destination hors ROOT: {dst}") from None
 
 
 def _is_cancel_requested(should_cancel: Optional[Callable[[], bool]]) -> bool:

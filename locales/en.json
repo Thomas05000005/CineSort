@@ -463,9 +463,11 @@
     "title_scan_error": "Scan error",
     "title_critical_error": "Critical error",
     "title_undo_unavailable": "Apply CANNOT be undone",
+    "title_undo_none": "Undo had no effect",
     "scan_done_body": "{{count}} movie(s) detected in {{elapsed}}s.",
     "apply_done_body": "{{renames}} renamed, {{moves}} moved, {{errors}} error(s).",
-    "undo_done_body": "{{done}} restored, {{failed}} failed."
+    "undo_done_body": "{{done}} restored, {{failed}} failed.",
+    "undo_none_body": "No movie restored: {{skipped}} operation(s) skipped. The apply is still undoable."
   },
   "errors": {
     "run_not_found": "The requested run was not found.",
@@ -508,6 +510,7 @@
     "undo_selective_done_with_anomalies": "Selective undo done with anomalies.",
     "undo_done": "Undo done.",
     "undo_done_with_anomalies": "Undo done with anomalies.",
+    "undo_none": "No movie was restored: {{skipped}} operation(s) skipped. Nothing changed on disk, and this apply is still undoable — you can try again.",
     "undo_atomic_refused": "Undo refused: some files have changed since apply. Re-run with atomic=false to force.",
     "undo_atomic_refused_detailed": "Undo refused: some files have been modified since apply. Details are in 'preverify'. Re-run with atomic=false to force anyway.",
     "no_reversible_apply_available": "No reversible apply.",

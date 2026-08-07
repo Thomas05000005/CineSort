@@ -14,9 +14,10 @@ coupe a mi-parcours par disque plein.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 _logger = logging.getLogger(__name__)
 
@@ -140,10 +141,61 @@ def estimate_apply_size(rows: List[Any], approved_keys: set) -> int:
     return total
 
 
+def _meme_volume(a: Path, b: Path) -> bool:
+    """Deux chemins sont-ils sur le meme volume ?
+
+    `st_dev` est le numero de serie du volume sous Windows et l'identifiant de
+    peripherique sous POSIX : c'est la reponse exacte quand elle est disponible.
+    On remonte au parent existant le plus proche, parce que `run_dir` peut ne pas
+    encore exister au moment du pre-check. Repli sur la lettre de lecteur, qui se
+    trompe sur un point de montage mais jamais dans le sens permissif : deux
+    lettres differentes sont toujours deux volumes differents.
+    """
+
+    def _stat_dev(chemin: Path) -> Optional[int]:
+        courant = chemin
+        for _ in range(16):
+            try:
+                return int(courant.stat().st_dev)
+            except OSError:
+                if courant.parent == courant:
+                    return None
+                courant = courant.parent
+        return None
+
+    dev_a, dev_b = _stat_dev(a), _stat_dev(b)
+    if dev_a is not None and dev_b is not None:
+        return dev_a == dev_b
+    return os.path.splitdrive(str(a))[0].lower() == os.path.splitdrive(str(b))[0].lower()
+
+
+def estimate_bucket_size(rows: List[Any], bucket_keys: set) -> int:
+    """Octets des rows qui partiront dans un BAC, et non a leur destination.
+
+    Les bacs `_conflicts`, `_duplicates_*`, `_user_marked_for_deletion` et
+    `_leftovers` vivent sous `<run_dir>/_review`, donc sous le `state_dir` —
+    en pratique `%LOCALAPPDATA%`, souvent sur le disque systeme, alors que la
+    bibliotheque est sur un disque de donnees.
+
+    MESURE (build_apply_context, 2026-08-06) : sur les SEPT buckets, SIX sont
+    sous `run_dir` ; seul `review_root` (quarantaine des non approuves) reste
+    sous `cfg.root`. Le pre-check ne regardait que ce dernier volume.
+    """
+    total = 0
+    for row in rows or []:
+        rid = str(getattr(row, "row_id", "") or "")
+        if rid and rid in bucket_keys:
+            total += _row_estimated_size(row)
+    return total
+
+
 def check_disk_space_for_apply(
     cfg: Any,
     rows: List[Any],
     approved_keys: set,
+    *,
+    state_dir: Optional[Path] = None,
+    bucket_keys: Optional[set] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """Verifie qu'il y a assez d'espace libre sur le volume de destination.
 
@@ -192,6 +244,47 @@ def check_disk_space_for_apply(
             f"avant de lancer l'apply."
         )
         return False, info
+
+    # SECOND VOLUME. Six des sept bacs de l'apply vivent sous `<run_dir>/_review`,
+    # donc sous le `state_dir` — en pratique %LOCALAPPDATA%, souvent le disque
+    # systeme, alors que la bibliotheque est sur un disque de donnees. Seul
+    # `review_root` (quarantaine des non approuves) reste sous `cfg.root`.
+    # Le pre-check ne regardait que ce dernier : un apply pouvait remplir C: en
+    # ayant verifie D:.
+    #
+    # On ne charge sur ce volume que ce qu'on sait y aller AVEC CERTITUDE au
+    # moment du pre-check : doublons ecartes et films marques pour suppression,
+    # tous deux resolubles depuis la base. Les CONFLITS n'en font pas partie —
+    # ils dependent de collisions de destination qu'on ne connait qu'a
+    # l'execution. Cette couverture est donc PARTIELLE, et c'est deliberе :
+    # majorer au total complet ressusciterait le faux « espace insuffisant » qui
+    # a deja bloque des apply legitimes deux fois (#698, Fix R6-04).
+    if state_dir is not None and bucket_keys:
+        state_path = Path(state_dir)
+        if not _meme_volume(target_root, state_path):
+            bucket_bytes = estimate_bucket_size(rows, bucket_keys)
+            if bucket_bytes > 0:
+                besoin_bacs = max(int(bucket_bytes * (1.0 + _SAFETY_MARGIN)), _MIN_FREE_BYTES)
+                try:
+                    usage_state = shutil.disk_usage(str(state_path))
+                except OSError as exc:
+                    _logger.warning("disk_space_check: disk_usage echoue sur %s: %s", state_path, exc)
+                else:
+                    info["bucket_root"] = str(state_path)
+                    info["bucket_free_bytes"] = int(usage_state.free)
+                    info["bucket_needed_bytes"] = int(besoin_bacs)
+                    info["bucket_estimated_bytes"] = int(bucket_bytes)
+                    if usage_state.free < besoin_bacs:
+                        info["message"] = (
+                            f"Espace disque insuffisant sur {state_path} : "
+                            f"{usage_state.free / (1024 * 1024):.0f} Mo libres, "
+                            f"{besoin_bacs / (1024 * 1024):.0f} Mo necessaires. "
+                            "Les doublons ecartes et les films marques pour suppression sont "
+                            "deplaces vers ce dossier, qui n'est PAS sur le meme disque que "
+                            f"votre bibliotheque ({target_root}). Liberez de l'espace avant "
+                            "de lancer l'apply."
+                        )
+                        return False, info
 
     free_mb = usage.free / (1024 * 1024)
     needed_mb = needed / (1024 * 1024)

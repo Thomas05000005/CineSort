@@ -200,8 +200,28 @@ class UndoAtomicEndToEndTests(unittest.TestCase):
 
         # 6. Undo best-effort : le fichier modifié est skip, pas d'erreur globale
         undo_res2 = api._undo_last_apply_impl(run_id=run_id, dry_run=False, atomic=False)
-        # aboutit : ok=True (undo_selective/standard), status peut être partial
-        self.assertIn(undo_res2.get("status"), ("UNDONE_DONE", "UNDONE_PARTIAL"))
+        self.assertTrue(undo_res2.get("ok"), "un skip n'est pas une erreur globale")
+
+        # Ce test acceptait « UNDONE_DONE » ici — sur un batch dont la SEULE
+        # opération est en mismatch, donc où RIEN n'a été restauré. Il verrouillait
+        # ainsi le défaut : l'utilisateur lisait « Undo terminé », ses films
+        # n'avaient pas bougé, et le batch sortait de la liste des annulables
+        # (`get_last_reversible_apply_batch` filtre `status='DONE'`).
+        self.assertEqual(undo_res2.get("status"), "UNDONE_NONE")
+        self.assertEqual(undo_res2["counts"]["done"], 0, "aucun fichier ne peut avoir été restauré ici")
+        self.assertGreater(undo_res2["counts"]["skipped"], 0)
+
+        # Et la conséquence qui compte pour l'utilisateur : il peut réessayer.
+        self.assertIs(undo_res2.get("undo_still_available"), True)
+        batch_apres = store.apply.get_last_reversible_apply_batch(run_id)
+        self.assertIsNotNone(
+            batch_apres,
+            "l'annulation a été consommée alors qu'aucun fichier n'a été restauré",
+        )
+
+        # Le fichier modifié n'a toujours pas bougé — c'est ce qui rend le
+        # « rien n'a été restauré » vrai, et pas seulement annoncé.
+        self.assertTrue(final_dst.exists())
 
 
 if __name__ == "__main__":

@@ -210,6 +210,35 @@ jobs:
         shell: pwsh
         run: python -m coverage report --fail-under=75
 
+      # Le seuil ci-dessus est GLOBAL : un module tres bas s'y noie dans la
+      # moyenne. MESURE sur les modules qui deplacent et renomment les films de
+      # l'utilisateur — avant cette branche, puis apres :
+      #
+      #   move_journal.py       97,3 %  ->  97,3 %
+      #   disk_space_check.py   92,4 %  ->  92,4 %
+      #   apply_core.py         75,2 %  ->  75,1 %
+      #   apply_support.py      61,7 %  ->  83,0 %   (etait SOUS le seuil global)
+      #   apply_rollback.py     60,9 %  ->  61,5 %   (toujours sous le seuil global)
+      #
+      # Les deux derniers passaient donc sous 75 % sans rien faire rougir, et
+      # `apply_rollback` — le code qui defait un apply rate — y reste. Ce second
+      # controle est un CLIQUET a marge zero : chaque plancher est la mesure du
+      # jour arrondie a l'entier inferieur. Il n'exige pas d'ecrire des tests
+      # aujourd'hui, il interdit de reculer.
+      #
+      # Un echec ici ne veut donc PAS dire « pas assez de tests » mais « la
+      # couverture d'un chemin destructif a BAISSE » : soit du code a ete ajoute
+      # sans test, soit un test a ete retire. Monter un plancher est une ligne de
+      # diff visible en review ; le baisser doit se justifier.
+      - name: Couverture des chemins destructifs (cliquet par module)
+        shell: pwsh
+        run: |
+          python -m coverage report --fail-under=97 --include="cinesort/app/move_journal.py"
+          python -m coverage report --fail-under=92 --include="cinesort/app/disk_space_check.py"
+          python -m coverage report --fail-under=75 --include="cinesort/app/apply_core.py"
+          python -m coverage report --fail-under=83 --include="cinesort/ui/api/apply_support.py"
+          python -m coverage report --fail-under=61 --include="cinesort/app/apply_rollback.py"
+
       # 9. Generation du rapport coverage HTML (telechargeable depuis Actions)
       - name: Rapport coverage HTML
         shell: pwsh
