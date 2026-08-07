@@ -386,6 +386,65 @@ class ApplyRepository(_BaseRepository):
                     out[rid] = int(summary.get("applied_count") or 0)
         return out
 
+    def append_apply_operation_a_la_suite(
+        self,
+        *,
+        batch_id: str,
+        op_type: str,
+        src_path: str,
+        dst_path: str,
+        reversible: bool,
+        row_id: Optional[str] = None,
+        src_sha1: Optional[str] = None,
+        src_size: Optional[int] = None,
+    ) -> int:
+        """Ajoute une operation en calculant son `op_index` DANS LA MEME transaction.
+
+        `idx_apply_ops_batch_opindex` impose `UNIQUE (batch_id, op_index)`. Une
+        operation ajoutee APRES coup — la mise en quarantaine d'undo, qui est un
+        vrai deplacement de fichier et doit donc etre annulable — ne peut pas
+        deviner son index.
+
+        POURQUOI L'ALLOCATION ET L'INSERTION SONT INDISSOCIABLES. Une premiere
+        version exposait `next_free_op_index()` puis laissait l'appelant appeler
+        `append_apply_operation()`. La connexion etait relachee entre les deux :
+        deux undo concurrents du MEME batch lisaient le meme index, l'un des
+        INSERT violait la contrainte, et l'appelant — qui absorbe l'erreur pour
+        ne pas avorter un undo deja engage sur le disque — laissait le
+        deplacement NON journalise. Le defaut que ce code corrige serait revenu
+        par la porte de derriere, en concurrence.
+
+        Le `SELECT` imbrique s'execute dans la meme instruction que l'`INSERT`,
+        donc sous le meme verrou d'ecriture SQLite.
+        """
+        self._ensure_apply_journal_tables()
+        now = time.time()
+        with self._managed_conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO apply_operations(
+                  batch_id, op_index, op_type, src_path, dst_path, reversible,
+                  undo_status, error_message, ts, row_id, src_sha1, src_size
+                )
+                SELECT ?, COALESCE(MAX(op_index), -1) + 1, ?, ?, ?, ?,
+                       'PENDING', NULL, ?, ?, ?, ?
+                FROM apply_operations WHERE batch_id=?
+                """,
+                (
+                    str(batch_id),
+                    str(op_type or "MOVE"),
+                    str(src_path),
+                    str(dst_path),
+                    1 if bool(reversible) else 0,
+                    now,
+                    str(row_id) if row_id else None,
+                    str(src_sha1) if src_sha1 else None,
+                    int(src_size) if src_size is not None else None,
+                    str(batch_id),
+                ),
+            )
+            return int(cur.lastrowid)
+
     def list_apply_operations(self, *, batch_id: str) -> List[Dict[str, Any]]:
         """Retourne les operations apply du batch dans l'ordre d'execution (op_index croissant)."""
         self._ensure_apply_journal_tables()
