@@ -42,30 +42,25 @@ _BATCH = "batch-987"
 class _RepoQuiEnregistre:
     """Repository d'apply minimal qui RETIENT ce qui est journalise."""
 
-    def __init__(self, index_libre: int = 7) -> None:
+    def __init__(self) -> None:
         self.marks: list = []
         self.operations_ajoutees: list = []
-        self._index_libre = index_libre
-        self.appels_index = 0
 
     # --- ce que `_execute_undo_ops` attend deja ---
     def mark_apply_operation_undo_status(self, **kw) -> None:
         self.marks.append(kw)
 
     # --- ce que le correctif ajoute ---
-    def next_free_op_index(self, *, batch_id: str) -> int:
-        self.appels_index += 1
-        assert batch_id == _BATCH, f"batch_id inattendu : {batch_id!r}"
-        return self._index_libre
-
-    def append_apply_operation(self, **kw) -> int:
+    def append_apply_operation_a_la_suite(self, **kw) -> int:
+        assert kw.get("batch_id") == _BATCH, f"batch_id inattendu : {kw.get('batch_id')!r}"
+        assert "op_index" not in kw, "l'index ne doit PAS venir de l'appelant : la course revient"
         self.operations_ajoutees.append(kw)
         return len(self.operations_ajoutees)
 
 
 class _StoreQuiEnregistre:
-    def __init__(self, index_libre: int = 7) -> None:
-        self.apply = _RepoQuiEnregistre(index_libre)
+    def __init__(self) -> None:
+        self.apply = _RepoQuiEnregistre()
 
     @property
     def marks(self):
@@ -147,17 +142,36 @@ class QuarantineJournaliseeTests(unittest.TestCase):
         self.assertIn("_undo_conflicts", ajoutee["dst_path"])
         self.assertTrue(Path(ajoutee["dst_path"]).is_file(), "le fichier n'est pas la ou le journal le dit")
 
-    def test_l_index_vient_de_la_BASE_et_non_des_ops_chargees(self) -> None:
-        """`UNIQUE (batch_id, op_index)`. La liste passee a `_execute_undo_ops`
-        est FILTREE sur `reversible` : son maximum local (ici 3) peut etre
-        inferieur au maximum reel du batch (ici 6), et reutiliser 4 violerait
-        la contrainte.
+    def test_l_appelant_ne_CHOISIT_PAS_l_index(self) -> None:
+        """`UNIQUE (batch_id, op_index)`, et la course qui allait avec.
+
+        Une premiere version exposait `next_free_op_index()` puis laissait
+        l'appelant appeler `append_apply_operation()`. La connexion etait
+        relachee ENTRE LES DEUX : deux undo concurrents du meme batch lisaient
+        le meme index, l'un des INSERT violait la contrainte, et
+        `_journaliser_quarantaine_undo` — qui absorbe l'erreur pour ne pas
+        avorter un undo deja engage sur le disque — laissait le deplacement NON
+        journalise. Le defaut corrige ici serait revenu en concurrence.
+
+        L'index est desormais calcule DANS l'instruction d'insertion. Ce test
+        verrouille le fait que l'appelant ne le fournit plus (l'assertion vit
+        dans la doublure, qui refuse un `op_index`).
         """
         self._jouer()
 
         ajoutee = self.store.apply.operations_ajoutees[0]
-        self.assertEqual(ajoutee["op_index"], 7, "l'index ne vient pas de la base")
-        self.assertEqual(self.store.apply.appels_index, 1, "la base est relue a chaque conflit")
+        self.assertNotIn("op_index", ajoutee)
+
+    def test_l_empreinte_du_fichier_quarantaine_est_PERSISTEE(self) -> None:
+        """Sans `src_sha1`/`src_size`, la pre-verification de l'undo (P1.2) ne
+        peut pas detecter qu'un utilisateur a remplace le fichier DANS le bac
+        entre la quarantaine et la reprise : elle le restaurerait en croyant
+        que c'est le sien."""
+        self._jouer()
+
+        ajoutee = self.store.apply.operations_ajoutees[0]
+        self.assertTrue(ajoutee.get("src_sha1"), "aucune empreinte : un remplacement passerait inapercu")
+        self.assertEqual(ajoutee.get("src_size"), len(b"le film"))
 
     def test_le_row_id_est_conserve(self) -> None:
         """Sans lui, l'aperçu par ligne ne peut pas rattacher la quarantaine au
@@ -234,6 +248,105 @@ class LEchecDuJournalNAvortePasLUndoTests(unittest.TestCase):
             any("NON journalisee" in m for m in avertissements),
             f"l'echec du journal est SILENCIEUX : {avertissements}",
         )
+
+
+class LInsertionAtomiqueSurUneVRAIEBaseTests(unittest.TestCase):
+    """Les tests ci-dessus passent par une DOUBLURE : ils prouvent le site
+    d'appel, pas le SQL. Ceux-ci s'executent contre un vrai `SQLiteStore`.
+
+    C'est la que vit le risque : `INSERT ... SELECT COALESCE(MAX(op_index),-1)+1
+    FROM apply_operations WHERE batch_id=?` doit rendre 0 sur un batch vide,
+    s'incrementer ensuite, et ne jamais violer `UNIQUE (batch_id, op_index)`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_987_sql_")
+        from cinesort.infra.db.sqlite_store import SQLiteStore
+
+        self.store = SQLiteStore(db_path=Path(self._tmp) / "cinesort.sqlite")
+        self.store.initialize()
+        # `apply_operations.batch_id` porte une FOREIGN KEY vers `apply_batches`.
+        # Sans batch reel, l'INSERT leve `IntegrityError` — ce que la premiere
+        # version de ces tests a decouvert, et qu'aucune doublure n'aurait pu
+        # montrer. C'est aussi la preuve que `_journaliser_quarantaine_undo`
+        # echouerait (silencieusement, par son `except`) si un appelant fournissait
+        # un `batch_id` vide : son WARN est donc necessaire, pas decoratif.
+        for batch in ("b1", "b2"):
+            self.store.apply.insert_apply_batch(
+                run_id=f"run-{batch}", dry_run=False, quarantine_unapproved=False, batch_id=batch
+            )
+
+    def tearDown(self) -> None:
+        with __import__("contextlib").suppress(Exception):
+            self.store.close()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _ajouter(self, batch: str = "b1") -> int:
+        return self.store.apply.append_apply_operation_a_la_suite(
+            batch_id=batch,
+            op_type="UNDO_QUARANTINE",
+            src_path="C:/a.mkv",
+            dst_path="C:/bac/a.mkv",
+            reversible=True,
+        )
+
+    def test_le_premier_index_d_un_batch_VIDE_vaut_zero(self) -> None:
+        """`MAX()` sur un ensemble vide rend NULL : sans le `COALESCE`, l'INSERT
+        ecrirait NULL et la contrainte d'unicite ne protegerait plus rien."""
+        self._ajouter()
+
+        ops = self.store.apply.list_apply_operations(batch_id="b1")
+        self.assertEqual([o["op_index"] for o in ops], [0])
+
+    def test_les_index_s_incrementent_sans_COLLISION(self) -> None:
+        for _ in range(5):
+            self._ajouter()
+
+        indices = [o["op_index"] for o in self.store.apply.list_apply_operations(batch_id="b1")]
+        self.assertEqual(indices, [0, 1, 2, 3, 4], indices)
+        self.assertEqual(len(set(indices)), len(indices), "deux operations partagent un index")
+
+    def test_l_index_est_PROPRE_a_chaque_batch(self) -> None:
+        """La contrainte porte sur le COUPLE : deux batchs distincts doivent
+        pouvoir avoir chacun leur index 0."""
+        self._ajouter("b1")
+        self._ajouter("b2")
+
+        self.assertEqual([o["op_index"] for o in self.store.apply.list_apply_operations(batch_id="b1")], [0])
+        self.assertEqual([o["op_index"] for o in self.store.apply.list_apply_operations(batch_id="b2")], [0])
+
+    def test_elle_prend_la_suite_des_operations_DEJA_presentes(self) -> None:
+        """Le cas reel : le batch porte deja les operations de l'apply."""
+        for i in range(3):
+            self.store.apply.append_apply_operation(
+                batch_id="b1",
+                op_index=i,
+                op_type="MOVE",
+                src_path=f"C:/s{i}",
+                dst_path=f"C:/d{i}",
+                reversible=True,
+            )
+
+        self._ajouter("b1")
+
+        indices = sorted(o["op_index"] for o in self.store.apply.list_apply_operations(batch_id="b1"))
+        self.assertEqual(indices, [0, 1, 2, 3], "la quarantaine n'a pas pris la suite")
+
+    def test_l_empreinte_est_bien_PERSISTEE_en_base(self) -> None:
+        self.store.apply.append_apply_operation_a_la_suite(
+            batch_id="b1",
+            op_type="UNDO_QUARANTINE",
+            src_path="C:/a.mkv",
+            dst_path="C:/bac/a.mkv",
+            reversible=True,
+            src_sha1="abc123",
+            src_size=4242,
+        )
+
+        op = self.store.apply.list_apply_operations(batch_id="b1")[0]
+        self.assertEqual(op["src_sha1"], "abc123")
+        self.assertEqual(op["src_size"], 4242)
+        self.assertEqual(op["undo_status"], "PENDING", "l'operation nait deja consommee")
 
 
 if __name__ == "__main__":

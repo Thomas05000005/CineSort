@@ -467,37 +467,6 @@ def _finalize_batch_undo_status(
         return False
 
 
-def _premier_index_libre(store: Any, reversible_ops: List[Dict[str, Any]]) -> int:
-    """Premier `op_index` disponible du batch en cours d'undo.
-
-    `reversible_ops` est FILTRE (`reversible == 1`) : son maximum local peut
-    donc etre inferieur au maximum reel du batch, et servirait un index deja
-    pris — `UNIQUE (batch_id, op_index)`. On interroge la base.
-
-    L'appelant n'appelle cette fonction QU'UNE FOIS par undo, puis incremente
-    localement : relire la base a chaque conflit n'apprendrait rien de plus,
-    puisque les lignes ajoutees dans la passe sont deja comptees par cette
-    incrementation. Rend 0 si le batch est introuvable — `append_apply_operation`
-    rejettera alors le doublon plutot que d'ecraser une ligne existante.
-    """
-    batch_id = ""
-    for op in reversible_ops:
-        batch_id = str(op.get("batch_id") or "")
-        if batch_id:
-            break
-    if not batch_id:
-        return 0
-    try:
-        return int(store.apply.next_free_op_index(batch_id=batch_id))
-    except (AttributeError, sqlite3.Error, OSError, TypeError, ValueError):
-        # Un store sans la methode (doublure de test ancienne) ou une base
-        # indisponible ne doit pas AVORTER l'undo en cours : les fichiers
-        # comptent plus que leur journal. Le journal de quarantaine sera
-        # simplement absent, et le WARN de `_journaliser_quarantaine_undo` le
-        # dira.
-        return 0
-
-
 def _journaliser_quarantaine_undo(
     store: Any,
     log_fn: Callable[[str, str], None],
@@ -505,7 +474,6 @@ def _journaliser_quarantaine_undo(
     op: Dict[str, Any],
     src: Path,
     dst: Path,
-    index_libre: int,
 ) -> None:
     """Inscrit le deplacement vers `_undo_conflicts` comme une operation annulable.
 
@@ -535,15 +503,29 @@ def _journaliser_quarantaine_undo(
     et refuser de continuer ne le ramenerait pas. Mais il est signale — un
     journal muet est precisement ce que #901 a coute.
     """
+    # L'EMPREINTE DU FICHIER QUARANTAINE, comme pour toute autre operation
+    # annulable. Sans `src_sha1`/`src_size`, la pre-verification de l'undo (P1.2)
+    # ne peut pas detecter qu'un utilisateur a remplace le fichier DANS le bac
+    # entre la quarantaine et la reprise : elle le restaurerait en croyant que
+    # c'est le sien. Le calcul porte sur `dst`, la position ACTUELLE du fichier.
+    empreinte = ""
+    taille: Optional[int] = None
     try:
-        store.apply.append_apply_operation(
+        empreinte = sha1_quick_cached(dst, None)
+        taille = int(dst.stat().st_size)
+    except (OSError, ValueError):
+        # Best-effort : une empreinte absente vaut mieux qu'un journal absent.
+        pass
+    try:
+        store.apply.append_apply_operation_a_la_suite(
             batch_id=str(op.get("batch_id") or ""),
-            op_index=int(index_libre),
             op_type="UNDO_QUARANTINE",
             src_path=str(src),
             dst_path=str(dst),
             reversible=True,
             row_id=str(op.get("row_id") or "") or None,
+            src_sha1=empreinte or None,
+            src_size=taille,
         )
     except (AttributeError, sqlite3.Error, OSError, TypeError, ValueError) as exc:
         log_fn(
@@ -583,8 +565,6 @@ def _execute_undo_ops(
     empty_folder_dirs_reversed = 0
     cleanup_residual_dirs_reversed = 0
     undo_conflicts_root = run_paths.run_dir / "_review" / "_undo_conflicts"
-    # #987 : calcule UNE fois, puis incremente localement (cf. sa docstring).
-    index_quarantaine = _premier_index_libre(store, reversible_ops)
 
     conflicts_details: List[Dict[str, Any]] = []
 
@@ -809,9 +789,7 @@ def _execute_undo_ops(
                     op=op,
                     src=current_path,
                     dst=conflict_dst,
-                    index_libre=index_quarantaine,
                 )
-                index_quarantaine += 1
                 # Ou est parti le film, en DONNEE et pas seulement dans une
                 # chaine de message. Avant, la seule trace de sa nouvelle place
                 # etait le texte de `error_message` ci-dessous : aucune surface
