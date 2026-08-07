@@ -2192,10 +2192,15 @@ function _openResetModal() {
     const scope = getSelectedScope();
     try {
       let res;
+      // `dry_run: false` EXPLICITE. Le defaut des deux routes est passe a True :
+      // elles sont exposees en POST et n'ont aucun argument obligatoire, donc un
+      // appel au corps vide effacait la base ou reinitialisait tous les reglages.
+      // Ici l'utilisateur a saisi CONFIRMER puis attendu le compte a rebours :
+      // l'intention est etablie, on la dit au serveur.
       if (scope === "__database__") {
-        res = await apiPost("settings/reset_database", {});
+        res = await apiPost("settings/reset_database", { dry_run: false });
       } else {
-        res = await apiPost("settings/reset_settings", { scope });
+        res = await apiPost("settings/reset_settings", { scope, dry_run: false });
       }
       close();
       if (res && res.data && res.data.ok) {

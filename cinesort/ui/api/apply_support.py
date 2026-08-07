@@ -467,6 +467,74 @@ def _finalize_batch_undo_status(
         return False
 
 
+def _journaliser_quarantaine_undo(
+    store: Any,
+    log_fn: Callable[[str, str], None],
+    *,
+    op: Dict[str, Any],
+    src: Path,
+    dst: Path,
+) -> None:
+    """Inscrit le deplacement vers `_undo_conflicts` comme une operation annulable.
+
+    #987 — POURQUOI CETTE OPERATION EXISTE. L'operation d'origine reste `FAILED`,
+    ce qui est la verite : son undo n'a pas abouti. Mais `FAILED` est TERMINAL
+    pour les trois chemins de reprise du depot — `undo_selected_rows` ne prend
+    que `PENDING`, `build_undo_by_row_preview` ne compte comme annulable que
+    `PENDING`, et `_revert_one_op` SAUTE les `FAILED`. Le film se retrouvait donc
+    dans un bac que plus rien ne savait atteindre.
+
+    POURQUOI PAS UN STATUT « REPRENABLE » SUR L'OPERATION D'ORIGINE, piste qui
+    vient d'abord a l'esprit : le fichier BLOQUANT n'a pas bouge. Le conflit
+    vient de `target_path`, auquel l'undo ne touche pas. Rendre l'operation
+    d'origine reprenable ferait donc rejouer un undo GARANTI de reconflicter, et
+    de re-deplacer le film dans le bac. Un cycle, pas une reprise.
+
+    Cette operation-ci nait `PENDING` et decrit un mouvement REELLEMENT
+    reversible ; les trois lecteurs la voient sans qu'aucun n'ait a connaitre un
+    nouveau vocabulaire, et aucune migration n'est necessaire (`undo_status` est
+    une colonne texte libre).
+
+    `src` -> `dst` decrit le mouvement QUI VIENT D'AVOIR LIEU ; l'annuler
+    remettra le film de `dst` vers `src`, c'est-a-dire a l'emplacement qu'il
+    occupait avant la quarantaine.
+
+    L'echec d'ecriture ne fait PAS echouer l'undo : le fichier est deja deplace,
+    et refuser de continuer ne le ramenerait pas. Mais il est signale — un
+    journal muet est precisement ce que #901 a coute.
+    """
+    # L'EMPREINTE DU FICHIER QUARANTAINE, comme pour toute autre operation
+    # annulable. Sans `src_sha1`/`src_size`, la pre-verification de l'undo (P1.2)
+    # ne peut pas detecter qu'un utilisateur a remplace le fichier DANS le bac
+    # entre la quarantaine et la reprise : elle le restaurerait en croyant que
+    # c'est le sien. Le calcul porte sur `dst`, la position ACTUELLE du fichier.
+    empreinte = ""
+    taille: Optional[int] = None
+    try:
+        empreinte = sha1_quick_cached(dst, None)
+        taille = int(dst.stat().st_size)
+    except (OSError, ValueError):
+        # Best-effort : une empreinte absente vaut mieux qu'un journal absent.
+        pass
+    try:
+        store.apply.append_apply_operation_a_la_suite(
+            batch_id=str(op.get("batch_id") or ""),
+            op_type="UNDO_QUARANTINE",
+            src_path=str(src),
+            dst_path=str(dst),
+            reversible=True,
+            row_id=str(op.get("row_id") or "") or None,
+            src_sha1=empreinte or None,
+            src_size=taille,
+        )
+    except (AttributeError, sqlite3.Error, OSError, TypeError, ValueError) as exc:
+        log_fn(
+            "WARN",
+            f"Quarantaine d'undo NON journalisee ({type(exc).__name__}: {exc}) — "
+            f"le fichier est dans {dst}, mais aucune reprise automatique ne le verra.",
+        )
+
+
 def _execute_undo_ops(
     api: Any,
     reversible_ops: List[Dict[str, Any]],
@@ -712,6 +780,16 @@ def _execute_undo_ops(
                     )
                     continue
                 conflict_moves += 1
+                # #987 : le deplacement vers le bac est une operation a part
+                # entiere, et reprenable. Le « pourquoi » est dans la docstring
+                # de `_journaliser_quarantaine_undo`.
+                _journaliser_quarantaine_undo(
+                    store,
+                    log_fn,
+                    op=op,
+                    src=current_path,
+                    dst=conflict_dst,
+                )
                 # Ou est parti le film, en DONNEE et pas seulement dans une
                 # chaine de message. Avant, la seule trace de sa nouvelle place
                 # etait le texte de `error_message` ci-dessous : aucune surface

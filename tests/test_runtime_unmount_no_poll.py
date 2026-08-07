@@ -123,52 +123,91 @@ def test_unmount_traitement_stops_polling_runtime(dashboard_page) -> None:
 
 @pytest.mark.runtime
 def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None:
-    """Vue Accueil : apres demontage, 0 requete `/api/run/get_dashboard` pendant 5s.
+    """Vue Accueil : apres demontage, 0 requete `run/get_dashboard` QUI LUI SOIT
+    IMPUTABLE pendant 5 s.
 
-    Symetrie avec le test Traitement. La vue Accueil polle `run/get_dashboard`
-    via _scanPolling. unmountAccueil() doit appeler _stopScanPolling().
+    CE TEST NE S'EST JAMAIS EXECUTE JUSQU'AU 2026-08-07. Il capturait toute
+    requete vers `run/get_dashboard`, sans distinguer l'appelant. Deux
+    consequences, mesurees :
+
+    1. `components/scan-banner.js` polle CETTE MEME ROUTE toutes les 5 s de
+       facon globale et permanente, et re-tique sur chaque `hashchange` — donc
+       a chaque navigation declenchee par le test. Ses requetes etaient
+       comptees comme une fuite de la vue Accueil.
+    2. La banniere ne demarre PAS sans authentification (`initScanBanner` sort
+       si `!hasToken()`). Or le harnais n'avait aucun jeton : il vivait sur le
+       bypass d'auth loopback. Il n'y avait donc AUCUN polling du tout, la
+       ligne de base valait 0, et le test partait en `skip` a chaque fois.
+
+    Le retrait du bypass a donne un jeton au harnais, la banniere a demarre, et
+    le test a signale « INCOHERENCE : 0 polling avant, 2 apres ». Les deux
+    requetes etaient celles de la banniere : un tick de `hashchange` et un tick
+    d'intervalle. Zero fuite reelle.
+
+    L'attribution se fait desormais par la PILE D'APPEL (`journal_fetch`), la
+    seule chose qui distingue deux appelants d'une meme route.
     """
-    captured: list[tuple[float, str]] = []
-
-    def _on_request(req) -> None:
-        try:
-            url = req.url
-        except Exception:
-            return
-        if "/api/run/get_dashboard" in url or "/api/run/get_status" in url:
-            captured.append((time.monotonic(), url))
-
-    dashboard_page.on("request", _on_request)
+    from tests.e2e_dashboard.conftest import horloge_page, journal_fetch
 
     # Arriver sur /accueil (defaut apres login).
     dashboard_page.evaluate("window.location.hash = '#/accueil'")
     dashboard_page.wait_for_timeout(800)
 
-    # Baseline : ~3s.
-    baseline_start = time.monotonic()
+    # Ligne de base : ~3 s, hors banniere.
+    base_debut = horloge_page(dashboard_page)
     dashboard_page.wait_for_timeout(3000)
-    baseline_polls = [(ts, u) for (ts, u) in captured if ts >= baseline_start]
+    base = journal_fetch(
+        dashboard_page, depuis_ms=base_debut, motif_url="/api/run/get_dashboard", exclure_module="scan-banner"
+    )
 
     # Naviguer vers /settings -> declenche unmountAccueil.
     dashboard_page.evaluate("window.location.hash = '#/settings'")
     dashboard_page.wait_for_timeout(500)
 
-    # Mesure : 5s post-unmount.
-    post_unmount_start = time.monotonic()
+    # Mesure : 5 s post-demontage.
+    apres_debut = horloge_page(dashboard_page)
     dashboard_page.wait_for_timeout(5000)
-    post_unmount_polls = [(ts, u) for (ts, u) in captured if ts >= post_unmount_start]
+    fuites = journal_fetch(
+        dashboard_page,
+        depuis_ms=apres_debut + 700,  # grace 700 ms (course tick/abort)
+        motif_url="/api/run/get_dashboard",
+        exclure_module="scan-banner",
+    )
 
-    # Tolerance grace 700ms (race tick/abort).
-    leaked = [(ts, u) for (ts, u) in post_unmount_polls if ts > post_unmount_start + 0.7]
+    # CONTRE-EPREUVE 1 : la banniere DOIT etre visible dans le journal. Si elle
+    # est absente, c'est que rien ne polle du tout — le harnais n'est pas
+    # authentifie, ou le journal de fetch n'est pas installe.
+    banniere = [
+        e
+        for e in journal_fetch(dashboard_page, motif_url="/api/run/get_dashboard")
+        if "scan-banner" in str(e.get("pile", ""))
+    ]
+    assert banniere, (
+        "aucune requete de scan-banner observee : le harnais n'est pas authentifie, "
+        "ou le journal de fetch n'est pas installe — l'assertion suivante ne prouverait rien"
+    )
 
-    if len(baseline_polls) > 0:
-        assert len(leaked) == 0, (
-            f"FUITE POLLING detectee apres unmountAccueil : "
-            f"{len(leaked)} requetes capturees dans la fenetre 5s post-unmount "
-            f"(baseline avant unmount : {len(baseline_polls)} polls en 3s). "
-            f"Echantillon : {leaked[:5]}"
+    # CONTRE-EPREUVE 2 — LA PRECONDITION, ET ELLE N'EST PAS ACQUISE.
+    #
+    # `_startScanPolling` n'est arme QUE si un scan est actif au boot
+    # (`accueil.js` : `if (initialScan.active)`), ou apres un demarrage de scan.
+    # Le jeu de donnees de `e2e_server` n'a aucun run actif : mesure du
+    # 2026-08-07 sur la fenetre de base -> 0 requete imputable a l'Accueil.
+    #
+    # Sans ce garde-fou, `fuites == []` serait TRIVIALEMENT vrai et le test
+    # repasserait vide — la vacuite qu'il vient tout juste de perdre, sous une
+    # autre forme. Un `skip` EXPLICITE qui nomme sa precondition est honnete ;
+    # un vert silencieux ne l'est pas.
+    if not base:
+        pytest.skip(
+            "precondition absente : aucun polling imputable a l'Accueil pendant la ligne de base. "
+            "`_startScanPolling` exige un scan ACTIF au boot, que le jeu de donnees e2e ne fournit "
+            "pas. Rendre ce test effectif demande de semer un run actif dans la fixture partagee "
+            "(~50 tests en dependent) — a trancher separement."
         )
-    else:
-        if len(post_unmount_polls) > 0:
-            pytest.fail(f"INCOHERENCE : 0 polling avant unmount Accueil, mais {len(post_unmount_polls)} polling apres.")
-        pytest.skip("Pas de polling actif sur Accueil dans cette config — non pertinent.")
+
+    assert not fuites, (
+        f"FUITE POLLING apres unmountAccueil : {len(fuites)} requete(s) imputables a la vue "
+        f"dans la fenetre de 5 s (ligne de base avant demontage : {len(base)} en 3 s). "
+        f"Echantillon : {[e['url'] for e in fuites[:3]]}"
+    )

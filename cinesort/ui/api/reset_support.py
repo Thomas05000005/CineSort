@@ -313,7 +313,7 @@ def _build_default_settings(api: Any) -> Dict[str, Any]:
     )
 
 
-def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
+def reset_settings(api: Any, scope: str = "all", *, dry_run: bool = True) -> Dict[str, Any]:
     """Reinitialise les settings (totalement ou par categorie).
 
     Cf spec 11 §5 Reset. Scope :
@@ -321,7 +321,16 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
       - "sources" / "analyse" / "nommage" / "bibliotheque" / "integrations" /
         "notifications" / "serveur" / "apparence" / "profils-qualite" / "avance"
 
-    Retourne {ok, reset_keys: [...], scope}.
+    `dry_run` VAUT True PAR DEFAUT. Cette methode est exposee en
+    `POST /api/settings/reset_settings` et n'a AUCUN argument obligatoire : un
+    appel au corps vide reinitialisait donc l'integralite des reglages
+    (`scope="all"`). Sur une frontiere destructive, l'omission doit produire
+    l'APERCU, jamais l'effet. L'appelant dont le travail EST de reinitialiser
+    le dit explicitement — c'est un parametre visible en revue, plus un defaut
+    invisible.
+
+    Retourne {ok, reset_keys: [...], scope, dry_run}. En apercu, `reset_keys`
+    porte EXACTEMENT ce que l'application aurait remis a zero.
     """
     scope_norm = str(scope or "all").strip().lower()
     if scope_norm not in _valid_reset_scopes():
@@ -344,6 +353,13 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
 
     # Si scope = all, on persiste tout le payload defauts
     if scope_norm == "all":
+        if dry_run:
+            return {
+                "ok": True,
+                "scope": "all",
+                "reset_keys": sorted(defaults.keys()),
+                "dry_run": True,
+            }
         try:
             api.settings.save_settings(defaults)
         except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
@@ -357,9 +373,20 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
             "ok": True,
             "scope": "all",
             "reset_keys": sorted(defaults.keys()),
+            "dry_run": False,
         }
 
     # Scope cible : on lit les settings courants et on remplace cle par cle
+    return _reinitialiser_un_scope(api, scope_norm, defaults, dry_run=dry_run)
+
+
+def _reinitialiser_un_scope(api: Any, scope_norm: str, defaults: Dict[str, Any], *, dry_run: bool) -> Dict[str, Any]:
+    """Remet a zero les cles d'UN scope (le cas `all` est traite en amont).
+
+    Extraite de `reset_settings` parce que l'ajout du mode apercu a porte cette
+    derniere a 111 LOC, au-dela du plafond de 100
+    (`test_function_size_budget`).
+    """
     try:
         current = api.settings.get_settings() or {}
     except (AttributeError, OSError, TypeError, ValueError) as exc:
@@ -383,6 +410,14 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
             patched.pop(key, None)
             reset_keys.append(key)
 
+    if dry_run:
+        return {
+            "ok": True,
+            "scope": scope_norm,
+            "reset_keys": reset_keys,
+            "dry_run": True,
+        }
+
     try:
         api.settings.save_settings(patched)
     except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
@@ -397,6 +432,7 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
         "ok": True,
         "scope": scope_norm,
         "reset_keys": reset_keys,
+        "dry_run": False,
     }
 
 
@@ -417,7 +453,7 @@ def _resolve_db_path(api: Any) -> Optional[Path]:
     return db_path_for_state_dir(state_path)
 
 
-def reset_database(api: Any) -> Dict[str, Any]:
+def reset_database(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
     """Wipe complet de la DB SQLite (films, runs, perceptual, scores, etc.).
 
     Backup automatique avant suppression vers
@@ -426,7 +462,14 @@ def reset_database(api: Any) -> Dict[str, Any]:
     IRREVERSIBLE cote DB mais le backup permet une restauration manuelle.
     Les settings.json et logs/ sont preserves.
 
-    Retourne {ok, backup_path, removed_db_path}.
+    `dry_run` VAUT True PAR DEFAUT. C'est la methode la plus destructive de
+    toute la surface REST, elle est exposee en
+    `POST /api/settings/reset_database`, et elle n'a AUCUN argument obligatoire :
+    un appel au corps vide effacait donc toute la bibliotheque de l'utilisateur.
+
+    Retourne {ok, backup_path, removed_db_path, dry_run}. En apercu, la reponse
+    porte en plus `db_size_bytes` et le chemin de sauvegarde QUI SERAIT ecrit,
+    et RIEN n'est touche : ni backup, ni fermeture de connexion, ni suppression.
     """
     state_path = _resolve_state_dir(api)
     if state_path is None:
@@ -455,6 +498,34 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "message": t("danger_zone.no_database_to_delete"),
         }
 
+    if dry_run:
+        # Apercu STRICT : on ne cree meme pas le dossier de sauvegarde. La seule
+        # I/O est un `stat` en lecture — un apercu qui ecrirait sur le disque ne
+        # serait plus un apercu.
+        taille = 0
+        with contextlib.suppress(OSError):
+            taille = int(db_path.stat().st_size)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "backup_path": "",
+            "removed_db_path": "",
+            "db_path": str(db_path),
+            "db_size_bytes": taille,
+            "backup_dir": str(state_path / "db" / "backups"),
+        }
+
+    return _executer_le_wipe(api, db_path, state_path)
+
+
+def _executer_le_wipe(api: Any, db_path: Path, state_path: Path) -> Dict[str, Any]:
+    """Sauvegarde puis supprime la base — la partie qui TOUCHE le disque.
+
+    Extraite de `reset_database` parce que l'ajout du mode apercu a porte cette
+    derniere a 117 LOC, au-dela du plafond de 100 (`test_function_size_budget`).
+    La couture n'est pas arbitraire : elle separe « valider et decrire » de
+    « detruire », et c'est exactement la frontiere que `dry_run` arbitre.
+    """
     backup_dir = state_path / "db" / "backups"
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -500,6 +571,7 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "ok": True,
             "backup_path": str(backup_path),
             "removed_db_path": str(db_path),
+            "dry_run": False,
         }
     except (OSError, shutil.Error) as exc:
         logger.exception("reset_database: echec")
