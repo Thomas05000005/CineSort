@@ -320,7 +320,11 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
         calls = []
 
         class _FakeRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
+            # `dry_run` accepte alors meme que ce test n'invoque JAMAIS la purge
+            # (`initial_delay_s=60`) : la signature reste ainsi conforme au site
+            # d'appel, et raccourcir ce delai un jour ne transformera pas
+            # l'appel en `TypeError` avale en silence par le cron.
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
                 calls.append(ttl_days)
                 return {"ok": True, "deleted": 0}
 
@@ -368,8 +372,16 @@ class TriggerNowTests(unittest.TestCase):
         trigger_now(api, ttl_days=15)  # l'absence d'exception EST l'assertion
 
     def test_trigger_now_swallows_runtime_error(self) -> None:
+        # `dry_run` est OBLIGATOIRE ici. Le site d'appel le passe par MOT-CLE :
+        # sans ce parametre, l'appel leve un `TypeError` AVANT d'atteindre le
+        # `raise`, et comme `_run_purge_once` attrape aussi `TypeError`, ce test
+        # restait vert sans jamais eprouver le chemin `RuntimeError`.
+        #
+        # MESURE (mutation : retirer `RuntimeError` du tuple d'`except`) :
+        #   doublure SANS `dry_run` -> le test passe    (il ne detectait rien)
+        #   doublure AVEC `dry_run` -> le test echoue   (il detecte enfin)
         class _BoomRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
                 raise RuntimeError("boom")
 
         api = SimpleNamespace(run=_BoomRun())
