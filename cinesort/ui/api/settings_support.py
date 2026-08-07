@@ -1984,7 +1984,23 @@ def _apply_tmdb_key_persistence(
 ) -> None:
     """Applique remember_key + tmdb_api_key selon le payload + l'existant."""
     existing_tmdb_key = str(existing_settings.get("tmdb_api_key") or "").strip()
-    remember_key = to_bool(settings.get("remember_key"), bool(existing_tmdb_key))
+    # Une cle APPORTEE par ce payload vaut intention de la retenir.
+    #
+    # Le defaut se calculait sur le seul existant. Sur un profil NEUF il valait
+    # donc False, et une cle fraichement saisie etait jetee des le premier
+    # enregistrement (`to_save["tmdb_api_key"] = ""`) sans un mot : l'utilisateur
+    # retrouvait un champ vide sans savoir pourquoi.
+    #
+    # La normalisation en LECTURE fait pourtant deja ce raisonnement
+    # (`payload.setdefault("remember_key", bool(tmdb_api_key))`, plus haut dans
+    # ce fichier). Les deux cotes divergeaient ; ils s'accordent maintenant.
+    #
+    # Ce n'est QUE le defaut : un `remember_key: false` explicite reste
+    # souverain, et continue d'effacer la cle. Ne pas transformer ceci en
+    # `or bool(cle_entrante)` applique APRES `to_bool` — ce serait ecraser le
+    # choix de l'utilisateur, pas combler son silence.
+    cle_entrante = str(settings.get("tmdb_api_key") or "").strip()
+    remember_key = to_bool(settings.get("remember_key"), bool(existing_tmdb_key) or bool(cle_entrante))
     to_save["remember_key"] = remember_key
     if not remember_key:
         to_save["tmdb_api_key"] = ""

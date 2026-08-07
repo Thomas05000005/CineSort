@@ -257,21 +257,31 @@ class RunFacade(_BaseFacade):
         return self._api._cleanup_old_runs_impl(retention_days)
 
     # VQ-2 QUARANTAINE-TTL : 3 endpoints filesystem `_review` ----------
-    def purge_quarantine_bucket(self, ttl_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+    def purge_quarantine_bucket(self, ttl_days: int = 30, dry_run: bool = True) -> Dict[str, Any]:
         """Purge les fichiers du bucket `_review` > `ttl_days` jours (defaut 30).
 
         Appele par le cron `cinesort.app.quarantine_ttl.start_quarantine_ttl_cron`
         au boot puis toutes les 24h. Aussi disponible manuellement (debug).
 
         Retourne `{ok, deleted, bytes_freed, considered, errors, by_subdir, ...}`.
+
+        `dry_run` vaut **True** par defaut, et c'est deliberе : cette methode est
+        exposee en REST (`POST /api/run/purge_quarantine_bucket`). Avec un defaut
+        a False, un appel au corps VIDE supprimait des fichiers de l'utilisateur.
+        Sur une frontiere destructive, l'omission doit produire l'APERCU, jamais
+        l'effet. Les deux appelants qui veulent vraiment supprimer le disent
+        desormais explicitement.
         """
         return self._api._purge_quarantine_bucket_impl(int(ttl_days), bool(dry_run))
 
-    def purge_quarantine_bucket_all(self, dry_run: bool = False) -> Dict[str, Any]:
+    def purge_quarantine_bucket_all(self, dry_run: bool = True) -> Dict[str, Any]:
         """Vider integralement le bucket `_review` (sauf `_duplicates_user_decided`).
 
         Appele par l'UI bouton "Vider maintenant" (parametres > Quarantaine),
         protege cote front par dangerConfirmModal (countdown 3s si > 50 fichiers).
+
+        `dry_run=True` par defaut, meme raison que ci-dessus. L'UI passe deja
+        `dry_run: false` explicitement (parametres.js) : elle est inchangee.
         """
         return self._api._purge_quarantine_bucket_all_impl(bool(dry_run))
 

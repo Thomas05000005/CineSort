@@ -320,7 +320,11 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
         calls = []
 
         class _FakeRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
+            # `dry_run` accepte alors meme que ce test n'invoque JAMAIS la purge
+            # (`initial_delay_s=60`) : la signature reste ainsi conforme au site
+            # d'appel, et raccourcir ce delai un jour ne transformera pas
+            # l'appel en `TypeError` avale en silence par le cron.
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
                 calls.append(ttl_days)
                 return {"ok": True, "deleted": 0}
 
@@ -340,16 +344,27 @@ class StartQuarantineTtlCronTests(unittest.TestCase):
 
 class TriggerNowTests(unittest.TestCase):
     def test_trigger_now_calls_api_run(self) -> None:
+        """Le cron doit demander la SUPPRESSION explicitement.
+
+        Le defaut de `purge_quarantine_bucket` est passe a `dry_run=True` : la
+        methode est exposee en REST, et un POST au corps vide y supprimait des
+        fichiers. Le cron est le seul appelant dont le travail EST de supprimer —
+        sans ce parametre, il deviendrait un no-op SILENCIEUX et la quarantaine
+        croitrait sans borne.
+
+        Ce test n'observait que les arguments positionnels : il serait reste vert
+        avec un cron devenu inoffensif.
+        """
         calls = []
 
         class _FakeRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
-                calls.append(ttl_days)
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
+                calls.append((ttl_days, dry_run))
                 return {"ok": True, "deleted": 7}
 
         api = SimpleNamespace(run=_FakeRun())
         trigger_now(api, ttl_days=15)
-        self.assertEqual(calls, [15])
+        self.assertEqual(calls, [(15, False)])
 
     def test_trigger_now_swallows_attribute_error(self) -> None:
         # api sans facade.run -> ne doit pas exploser.
@@ -357,8 +372,16 @@ class TriggerNowTests(unittest.TestCase):
         trigger_now(api, ttl_days=15)  # l'absence d'exception EST l'assertion
 
     def test_trigger_now_swallows_runtime_error(self) -> None:
+        # `dry_run` est OBLIGATOIRE ici. Le site d'appel le passe par MOT-CLE :
+        # sans ce parametre, l'appel leve un `TypeError` AVANT d'atteindre le
+        # `raise`, et comme `_run_purge_once` attrape aussi `TypeError`, ce test
+        # restait vert sans jamais eprouver le chemin `RuntimeError`.
+        #
+        # MESURE (mutation : retirer `RuntimeError` du tuple d'`except`) :
+        #   doublure SANS `dry_run` -> le test passe    (il ne detectait rien)
+        #   doublure AVEC `dry_run` -> le test echoue   (il detecte enfin)
         class _BoomRun:
-            def purge_quarantine_bucket(self, ttl_days: int):
+            def purge_quarantine_bucket(self, ttl_days: int, dry_run: bool = True):
                 raise RuntimeError("boom")
 
         api = SimpleNamespace(run=_BoomRun())

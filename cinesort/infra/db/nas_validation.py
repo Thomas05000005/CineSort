@@ -54,6 +54,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Import de MODULE (pas differe) : les deux fichiers vivent dans `infra/db` et
+# `pragma_profile` n'importe pas `nas_validation` — aucun cycle. Un import
+# paresseux ici aurait fait monter le cliquet des imports differes de la couche
+# infra (11 -> 12) pour rien.
+from cinesort.infra.db.pragma_profile import detect_storage_type
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,15 +104,37 @@ def db_local_guard(db_path: Path, allow_unc: bool = False) -> None:
           actionnable (mentionne la variable d'env de bypass).
     """
     path = Path(db_path)
+    # Le garde ne testait QUE la forme UNC (`\\serveur\partage`). Un lecteur
+    # RESEAU MAPPE (`Z:\`) ressemble a un disque local par son ecriture, et
+    # passait donc entierement au travers — alors que c'est exactement le meme
+    # SMB en dessous, avec le meme risque de corruption silencieuse.
+    #
+    # La detection existait deja dans le depot, a cote : `detect_storage_type`
+    # (pragma_profile) interroge `GetDriveTypeW` et rend 'nas_smb' sur
+    # DRIVE_REMOTE. Elle n'etait simplement pas branchee ici. On la reutilise
+    # plutot que d'en ecrire une seconde, qui divergerait.
+    reseau_mappe = False
     if not _is_unc_path(path):
-        return  # storage local, rien a verifier.
+        try:
+            reseau_mappe = str(detect_storage_type(path)).startswith("nas_")
+        except (OSError, TypeError, ValueError) as exc:
+            # Un echec de detection ne doit pas bloquer un demarrage legitime :
+            # sur ce point precis, la detection est un BONUS par rapport a la
+            # garde UNC, pas un pre-requis.
+            logger.debug("DB_LOCAL_GUARD : detection du type de lecteur impossible (%s)", exc)
+            reseau_mappe = False
+        if not reseau_mappe:
+            return  # storage local, rien a verifier.
+
+    nature = "lecteur reseau mappe" if reseau_mappe else "chemin UNC"
 
     env_override = str(os.environ.get(_ENV_ALLOW_UNC, "")).strip().lower() in _TRUTHY
     if allow_unc or env_override:
         logger.warning(
-            "DB_LOCAL_GUARD : DB SQLite sur chemin UNC autorisee par override "
+            "DB_LOCAL_GUARD : DB SQLite sur %s autorisee par override "
             "(allow_unc=%s, env %s=%s) : %s. Risque corruption SMB connu "
             "(Sonarr #1886). Surveiller les checkpoints WAL.",
+            nature,
             allow_unc,
             _ENV_ALLOW_UNC,
             os.environ.get(_ENV_ALLOW_UNC, ""),
@@ -115,8 +143,8 @@ def db_local_guard(db_path: Path, allow_unc: bool = False) -> None:
         return
 
     raise RuntimeError(
-        "DB_LOCAL_GUARD : la base SQLite CineSort est configuree sur un chemin "
-        f"UNC (partage SMB/CIFS) : {path}\n"
+        "DB_LOCAL_GUARD : la base SQLite CineSort est configuree sur un "
+        f"{nature} (partage SMB/CIFS) : {path}\n"
         "Le stockage SQLite sur SMB est connu pour provoquer des corruptions "
         "silencieuses (cf Sonarr #1886). CineSort refuse de demarrer par "
         "defaut.\n"
