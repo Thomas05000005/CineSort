@@ -13,7 +13,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain.i18n_messages import t
 from cinesort.ui.api import settings_support as _settings_support
@@ -209,6 +209,42 @@ def _a_disparu(item: Path) -> bool:
         return False
 
 
+def _vider_state_dir_sauf_logs(state_path: Path) -> Tuple[List[str], List[str]]:
+    """Supprime le contenu du `state_dir` sauf `logs/`, et dit CE QUI A DISPARU.
+
+    Retourne `(supprimes, restants)` — deux listes de noms, et non une seule
+    liste de tentatives.
+
+    `shutil.rmtree(ignore_errors=True)` ne leve RIEN : le seul temoin d'un echec
+    est l'etat du disque APRES coup. Sans le controle ci-dessous, l'appelant
+    annoncait ce qu'on avait TENTE de supprimer, pas ce qui avait disparu.
+
+    Le cas n'est pas theorique : le reset s'execute pendant que l'app TOURNE.
+    Les threads de fond (cron retention, cron TTL quarantaine, watcher, serveur
+    REST, job runner) ecrivent dans ce meme `state_dir` ; sous Windows un seul
+    fichier ouvert par l'un d'eux fait echouer la suppression de son dossier
+    parent.
+
+    `logs/` est preserve a dessein : c'est ce qui reste pour diagnostiquer un
+    reset qui s'est mal passe. Il ne figure dans aucune des deux listes.
+    """
+    supprimes: List[str] = []
+    restants: List[str] = []
+    for item in state_path.iterdir():
+        if item.name == "logs":
+            continue
+        if item.is_dir():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                item.unlink(missing_ok=True)
+        if _a_disparu(item):
+            supprimes.append(item.name)
+        else:
+            restants.append(item.name)
+    return supprimes, restants
+
+
 def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
     """V3-09 — Reinitialise toutes les donnees utilisateur.
 
@@ -250,32 +286,9 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
         logger.info("V3-09 : creation backup avant reset -> %s", backup_path)
         shutil.make_archive(str(backup_stem), "zip", root_dir=str(state_path))
 
-        # 2. Suppression selective (preserve logs/)
-        removed: list[str] = []
-        failed: list[str] = []
-        for item in state_path.iterdir():
-            if item.name == "logs":
-                continue
-            if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)
-            else:
-                with contextlib.suppress(OSError):
-                    item.unlink(missing_ok=True)
-            # `ignore_errors=True` ne leve RIEN : le seul temoin d'un echec est
-            # l'etat du disque APRES coup. Sans ce controle, `removed` annoncait
-            # ce qu'on avait TENTE de supprimer, pas ce qui avait disparu — et
-            # l'appelant recevait `ok: True` avec la liste complete alors que
-            # des donnees utilisateur etaient toujours la.
-            #
-            # Le cas n'est pas theorique : ce reset s'execute pendant que l'app
-            # TOURNE. Les threads de fond (cron retention, cron TTL quarantaine,
-            # watcher, serveur REST, job runner) ecrivent dans ce meme
-            # `state_dir` ; sous Windows un seul fichier ouvert par l'un d'eux
-            # fait echouer la suppression de son dossier parent.
-            if _a_disparu(item):
-                removed.append(item.name)
-            else:
-                failed.append(item.name)
+        # 2. Suppression selective (preserve logs/). `removed` decrit ce qui a
+        #    REELLEMENT disparu, `failed` ce qui a resiste — cf le helper.
+        removed, failed = _vider_state_dir_sauf_logs(state_path)
 
         if failed:
             logger.error(
