@@ -69,9 +69,19 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # Nouvelle entree : le pre-check gagne le controle du second volume.
     ("cinesort/app/disk_space_check.py", "check_disk_space_for_apply"): 101,
     ("cinesort/ui/api/library_support.py", "_build_library_rows"): 429,
-    ("cinesort/ui/api/apply_support.py", "_execute_apply"): 385,
+    # 385 -> 400 : #901 rouverte. La closure `record_apply_op` relance desormais
+    # l'echec d'ecriture au lieu de l'avaler (sans quoi le compteur d'echecs de
+    # journal reste a 0) et n'incremente `op_index` qu'apres succes. +2 lignes de
+    # code, +13 de commentaire qui disent POURQUOI le `raise` doit rester : c'est
+    # son absence qui avait fait rouvrir l'issue.
+    ("cinesort/ui/api/apply_support.py", "_execute_apply"): 400,
     ("cinesort/domain/scan_helpers.py", "discover_candidate_folders"): 382,
-    ("cinesort/ui/api/apply_support.py", "_apply_changes_body"): 369,
+    # 369 -> 386 : #901. `disk_touched` prend un TROISIEME terme (journal_failures)
+    # et le commentaire dit pourquoi chacun est necessaire. Le correctif rendait
+    # `op_index` honnete, ce qui le mettait a 0 sur un journal verrouille — donc
+    # eteignait l'alerte exactement dans le mode de panne qu'elle sert. Trouve en
+    # revue adversaire ; ces lignes existent pour que ca ne se reperde pas.
+    ("cinesort/ui/api/apply_support.py", "_apply_changes_body"): 386,
     ("cinesort/ui/api/dashboard_support.py", "_build_dashboard_section"): 360,
     # 335 -> 350 : les conflits d'undo deviennent une DONNEE de la reponse
     # (row_id, source, destination, ce qui bloquait) au lieu d'une chaine de

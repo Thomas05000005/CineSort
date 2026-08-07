@@ -125,8 +125,18 @@ class _CompteurEchecsJournal:
 
     Interpose UNE seule fois a l'entree d'`apply_rows`, avant tout autre
     emballage. Les `RecordOpWithJournal` et les closures d'injection de row_id
-    construits en aval l'enveloppent, donc tout echec finit par remonter ICI —
+    construits en aval l'enveloppent, donc tout echec qui REMONTE passe ICI —
     quel que soit le nombre de couches au-dessus.
+
+    CE QU'IL NE PEUT PAS VOIR, et qui a fait rouvrir #901 : un echec qu'une
+    couche INFERIEURE avale. Ce compteur n'observe que des exceptions ; une
+    couche qui logue un WARN et retourne normalement lui est invisible. C'est
+    exactement ce que faisait la closure de production (`apply_support`), et
+    la mesure etait sans appel — 3 dossiers deplaces, 3 ecritures de journal en
+    echec, `journal_failures = 0`. La contrepartie de ce design vit donc dans
+    cette closure : elle logue, puis RELANCE. Toute nouvelle couche entre
+    `apply_rows` et le store doit respecter la meme regle, sinon elle rend ce
+    compteur borgne sans qu'aucun test ne rougisse.
 
     Premiere tentative : compter sur le callable recu par `record_apply_op`.
     Elle ne marchait pas — ce callable est un emballage cree A L'INTERIEUR

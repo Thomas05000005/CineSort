@@ -104,14 +104,18 @@ def _run_body_with_harness(
     batch_id: Optional[str] = "batch-42",
     ops: int = 500,
     applied_count: int = 500,
+    journal_failures: int = 0,
     notify: Optional[_RecordingNotify] = None,
 ) -> Tuple[Dict[str, Any], _BodyHarness]:
     """Execute `_apply_changes_body` et rend AUSSI le harness (notifications).
 
-    `ops` = nombre d'operations journalisees (0 quand `insert_apply_batch` a
-    echoue : `record_apply_op` sort avant d'incrementer le compteur).
-    `applied_count` = ce que l'apply a REELLEMENT fait sur disque, independant
-    du journal.
+    `ops` = nombre d'operations journalisees ABOUTIES. Il vaut 0 dans DEUX cas
+    de nature opposee : `insert_apply_batch` en echec (record_apply_op sort avant
+    le compteur), et journal verrouille (chaque ecriture echoue — #901).
+    `applied_count` = ce que la boucle PAR ROW a fait sur disque. Il ne couvre
+    PAS les buckets de nettoyage, doublons ecartes et marques pour suppression.
+    `journal_failures` = operations journalisees en echec APRES un deplacement
+    deja fait : c'est le seul temoin du disque dans le second cas.
     """
     harness = _BodyHarness(store, notify=notify)
 
@@ -119,7 +123,11 @@ def _run_body_with_harness(
         kwargs["batch_state"][0] = batch_id
         kwargs["batch_state"][1] = int(ops)
         return (
-            core_mod.ApplyResult(applied_count=int(applied_count), considered_rows=500),
+            core_mod.ApplyResult(
+                applied_count=int(applied_count),
+                considered_rows=500,
+                journal_failures=int(journal_failures),
+            ),
             batch_id,
             int(ops),
         )
@@ -231,6 +239,51 @@ class ApplyPayloadAnnouncesUndoLossTests(unittest.TestCase):
 
         self.assertNotIn("journal_warning", out, "crier au loup ici userait l'alerte")
         self.assertEqual(harness.notify.errors(), [])
+
+    def test_journal_VERROUILLE_hors_rows_declenche_quand_meme_l_alerte(self) -> None:
+        """`ops == 0` a deux sens opposes, et un seul veut dire « rien n'a bouge ».
+
+        Trouve en revue adversaire du correctif #901, pas par un test. Depuis que
+        `op_index` compte les ecritures ABOUTIES au lieu des tentatives, il vaut 0
+        quand le journal est verrouille — exactement le mode de panne pour lequel
+        cette alerte existe. Et `applied_count` ne rattrape pas : il n'est
+        incremente que par la boucle PAR ROW (apply_core), donc un apply qui ne
+        deplace que des buckets (nettoyage residuel, doublons ecartes, marques
+        pour suppression) le laisse a 0 tout en ayant bel et bien bouge des
+        dossiers.
+
+        Sans le terme `journal_failures`, la reponse etait alors
+        `{"ok": True, "undo_available": False}` sans warning ni notification :
+        l'utilisateur voyait le toast vert « Apply termine — Undo possible 24 h »
+        alors que l'undo etait mort.
+        """
+        out, harness = _run_body_with_harness(
+            _CloseStore(),
+            ops=0,
+            applied_count=0,
+            journal_failures=3,
+        )
+
+        self.assertIs(out.get("undo_available"), False)
+        self.assertTrue(
+            str(out.get("journal_warning") or "").strip(),
+            f"des dossiers ont bouge sans journal et la reponse se tait : {out}",
+        )
+        self.assertEqual(
+            len(harness.notify.errors()),
+            1,
+            "la cloche est le seul canal qui survit a la fermeture de l'ecran d'apply",
+        )
+
+    def test_un_echec_de_journal_SEUL_ne_suffit_pas_a_rendre_l_undo_disponible(self) -> None:
+        """Contre-epreuve : le nouveau terme n'agit QUE sur l'alerte.
+
+        Il ne doit surtout pas se glisser dans `undo_available` — des ecritures
+        en echec sont l'inverse d'un undo possible.
+        """
+        out = _run_body(_CloseStore(), ops=0, applied_count=0, journal_failures=3)
+
+        self.assertIs(out.get("undo_available"), False)
 
     def test_chemin_nominal_annonce_undo_disponible(self) -> None:
         """NON-REGRESSION : sans incident, la reponse annonce l'undo comme disponible."""
