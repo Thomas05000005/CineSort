@@ -987,7 +987,9 @@ function _confirmRecompute() {
     consequence: `Cette opération va re-scorer ${total > 0 ? total + " " : ""}films classés à partir du profil de qualité actuel. ${eta}. Aucune modification sur les fichiers du disque. Réversible.`,
     confirmLabel: "Lancer le re-calcul",
     cancelLabel: "Annuler",
-    countdownSeconds: total > 50 ? 3 : 0,
+    // Regle n3 : delai derive du nombre de films par la modale
+    // (`gradedCountdownSeconds`), et non recalcule ici.
+    itemCount: total,
     onConfirm: async () => {
       await _startRecompute();
     },
