@@ -62,6 +62,56 @@ class LesDefautsDeFacadePREVISUALISENTTests(unittest.TestCase):
         self.assertIs(defaut, True, "un POST au corps vide ecrase le profil de scoring")
 
 
+class LaFacadeTRANSMETLeChoixTests(unittest.TestCase):
+    """La chaine complete doit porter le choix, pas seulement le defaut.
+
+    CE BLOC EXISTE PARCE QUE LA MUTATION DU SITE D'APPEL A REVELE UN TROU. Les
+    tests qui n'eprouvent que `reset_support` restent TOUS VERTS si la facade
+    cesse de transmettre `dry_run` — le support retombe alors sur son propre
+    defaut (`True`), et l'utilisateur qui demande une suppression REELLE obtient
+    un apercu. Echec silencieux : `ok=True`, et rien n'est efface.
+
+    C'est la regle « muter le SITE D'APPEL separement » : un test qui eprouve la
+    fonction laisse survivre la mutation qui retire son appel.
+    """
+
+    def _facade_settings(self, recu: list) -> SettingsFacade:
+        api = SimpleNamespace(
+            _reset_database_impl=lambda **kw: recu.append(("db", kw)) or {"ok": True},
+            _reset_settings_impl=lambda scope, **kw: recu.append(("settings", scope, kw)) or {"ok": True},
+        )
+        return SettingsFacade(api)
+
+    def test_reset_database_transmet_dry_run_FALSE(self) -> None:
+        recu: list = []
+
+        self._facade_settings(recu).reset_database(dry_run=False)
+
+        self.assertEqual(recu, [("db", {"dry_run": False})], "la facade a perdu le choix en route")
+
+    def test_reset_database_transmet_aussi_le_defaut(self) -> None:
+        recu: list = []
+
+        self._facade_settings(recu).reset_database()
+
+        self.assertEqual(recu, [("db", {"dry_run": True})])
+
+    def test_reset_settings_transmet_dry_run_ET_le_scope(self) -> None:
+        recu: list = []
+
+        self._facade_settings(recu).reset_settings("apparence", dry_run=False)
+
+        self.assertEqual(recu, [("settings", "apparence", {"dry_run": False})])
+
+    def test_reset_quality_profile_transmet_dry_run_FALSE(self) -> None:
+        recu: list = []
+        api = SimpleNamespace(_reset_quality_profile_impl=lambda **kw: recu.append(kw) or {"ok": True})
+
+        QualityFacade(api).reset_quality_profile(dry_run=False)
+
+        self.assertEqual(recu, [{"dry_run": False}], "la facade qualite a perdu le choix en route")
+
+
 class LApercuNeTOUCHERienSurDisqueTests(unittest.TestCase):
     """La preuve qui compte : on regarde le DISQUE, pas la valeur de retour.
 
