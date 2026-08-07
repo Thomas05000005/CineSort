@@ -209,6 +209,10 @@ class _StoreBase:
         # Nuance N23 : True quand le dernier _check_integrity() n'a pas reussi a
         # OUVRIR le fichier, et n'a donc RIEN pu dire de son contenu.
         self._integrity_unreadable: bool = False
+        # #986 : verdict d'integrite NON CONCLUANT (checkpoint WAL en echec).
+        # Distinct de `_integrity_unreadable` : la base est lisible, c'est le
+        # VERDICT qui ne fait pas autorite. Meme consequence — pas d'auto-restore.
+        self._integrity_non_concluant: bool = False
 
         # Nuance N21 (ultra-audit 2026-08-03) : memo des verifications de schema
         # deja faites par CE store sur CE fichier. Sans lui, chaque appel de
@@ -456,6 +460,23 @@ class _StoreBase:
                 "backup_used": None,
                 "ts": time.time(),
             }
+        elif self._integrity_non_concluant:
+            # #986 : meme raisonnement que N23, autre cause. Le checkpoint WAL a
+            # echoue, donc `integrity_check` a pu porter sur des pages perimees
+            # et signaler une corruption FANTOME. Un checkpoint echoue justement
+            # quand un AUTRE ecrivain tient la base : restaurer ici detruirait
+            # ses commits sur un diagnostic dont le code lui-meme dit qu'il n'est
+            # pas fiable.
+            #
+            # Statut DISTINCT de `unreadable` : la base est lisible, c'est le
+            # verdict qui ne fait pas autorite. L'operateur doit pouvoir
+            # distinguer les deux dans le journal.
+            self._integrity_event = {
+                "status": "inconclusive",
+                "raw": self._integrity_status,
+                "backup_used": None,
+                "ts": time.time(),
+            }
         elif self._integrity_status not in ("ok", "unknown"):
             self._attempt_auto_restore()
         # Nuance N28 : ce backup etait pousse a CHAQUE initialize(), migration
@@ -568,6 +589,7 @@ class _StoreBase:
         restauration. Le chemin de corruption reelle est inchange.
         """
         self._integrity_unreadable = False
+        self._integrity_non_concluant = False
         if not self.db_path.is_file():
             return "ok"
         try:
@@ -594,9 +616,32 @@ class _StoreBase:
                 try:
                     conn.execute("PRAGMA wal_checkpoint(RESTART)")
                 except sqlite3.OperationalError as exc:
-                    logger.warning(
-                        "wal_checkpoint failed before integrity_check (%s) — integrity check may use stale WAL pages",
+                    # #986 — UN CHECKPOINT EN ECHEC REND LE VERDICT NON FIABLE,
+                    # ET IL INTERDIT DESORMAIS L'AUTO-RESTAURATION.
+                    #
+                    # Le commentaire ci-dessus le dit deja : sans checkpoint, des
+                    # pages encore dans le WAL peuvent masquer une corruption
+                    # « OU EN SIGNALER UNE FANTOME ». Or le verdict etait malgre
+                    # tout traite comme assez autoritaire par `initialize()` pour
+                    # ECRASER la base vivante via `_attempt_auto_restore` — et un
+                    # checkpoint echoue precisement quand un AUTRE ecrivain tient
+                    # la base. Les commits de cet autre ecrivain disparaissaient.
+                    #
+                    # C'est exactement la forme tranchee par la nuance N23 vingt
+                    # lignes plus haut : un signal qui ne dit rien du CONTENU ne
+                    # doit pas declencher une restauration. La restauration etant
+                    # destructive, le doute va dans le sens RESTRICTIF.
+                    #
+                    # Le niveau passe de WARNING a ERROR : ce n'est plus une
+                    # simple information, cela change ce que fait le demarrage.
+                    self._integrity_non_concluant = True
+                    logger.error(
+                        "wal_checkpoint a echoue avant integrity_check (%s) — le verdict d'integrite porte "
+                        "peut-etre sur des pages WAL perimees. L'auto-restore N'EST PAS declenche : ecraser "
+                        "la base vivante sur un diagnostic non fiable detruirait les commits d'un autre "
+                        "ecrivain. Path: %s",
                         exc,
+                        self.db_path,
                     )
                 row = conn.execute("PRAGMA integrity_check").fetchone()
                 status = str(row[0]) if row else "unknown"
@@ -610,13 +655,26 @@ class _StoreBase:
 
         if status != "ok":
             # V2-11 : log en ERROR (et plus seulement WARNING) pour signaler
-            # une corruption silencieuse cote operateur. L'auto-restore est
-            # tente juste apres dans initialize().
-            logger.error(
-                "DB integrity check FAILED: %s. Path: %s. Auto-restore from backup will be attempted.",
-                status,
-                self.db_path,
-            )
+            # une corruption silencieuse cote operateur.
+            #
+            # #986 : ce message annoncait « Auto-restore from backup will be
+            # attempted » DANS TOUS LES CAS. Depuis que le checkpoint en echec
+            # interdit la restauration, cette phrase etait devenue fausse la
+            # moitie du temps — et c'est precisement le genre de log qui fait
+            # chercher un bug la ou il n'y en a pas.
+            if self._integrity_non_concluant:
+                logger.error(
+                    "DB integrity check a repondu : %s. Path: %s. Verdict NON CONCLUANT "
+                    "(le checkpoint WAL a echoue) : aucune restauration ne sera tentee.",
+                    status,
+                    self.db_path,
+                )
+            else:
+                logger.error(
+                    "DB integrity check FAILED: %s. Path: %s. Auto-restore from backup will be attempted.",
+                    status,
+                    self.db_path,
+                )
         return status
 
     def _attempt_auto_restore(self) -> None:
