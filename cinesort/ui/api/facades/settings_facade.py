@@ -71,19 +71,19 @@ class SettingsFacade(_BaseFacade):
         return self._api._get_user_data_size_impl()
 
     # ---------- Phase 4 backend-parametres-endpoints (spec 11 §5 + §2.9) ----------
-    def reset_settings(self, scope: str = "all") -> Dict[str, Any]:
+    def reset_settings(self, scope: str = "all", dry_run: bool = True) -> Dict[str, Any]:
         """Reinitialise les settings par categorie (ou tout).
 
         Cf CineSortApi._reset_settings_impl pour la doc complete.
         """
-        return self._api._reset_settings_impl(scope)
+        return self._api._reset_settings_impl(scope, dry_run=dry_run)
 
-    def reset_database(self) -> Dict[str, Any]:
+    def reset_database(self, dry_run: bool = True) -> Dict[str, Any]:
         """Wipe complet de la DB SQLite (films/runs/perceptual/scores) + backup.
 
         Cf CineSortApi._reset_database_impl pour la doc complete.
         """
-        return self._api._reset_database_impl()
+        return self._api._reset_database_impl(dry_run=dry_run)
 
     def get_profiles(self) -> Dict[str, Any]:
         """Liste tous les profils qualite (presets + custom).

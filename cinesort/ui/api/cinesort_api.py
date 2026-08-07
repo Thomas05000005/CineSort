@@ -1989,9 +1989,9 @@ class CineSortApi:
         except (OSError, KeyError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__, key="error")
 
-    def _reset_quality_profile_impl(self) -> Dict[str, Any]:
+    def _reset_quality_profile_impl(self, *, dry_run: bool = True) -> Dict[str, Any]:
         """Reinitialise le profil de scoring aux valeurs par defaut."""
-        return quality_profile_support.reset_quality_profile(self)
+        return quality_profile_support.reset_quality_profile(self, dry_run=dry_run)
 
     def _export_quality_profile_impl(self) -> Dict[str, Any]:
         """Exporte le profil de scoring actif en JSON (pour partage / backup)."""
@@ -2833,15 +2833,15 @@ class CineSortApi:
         return {"data": reset_support.get_user_data_size(self)}
 
     # ---------- Phase 4 backend-parametres-endpoints (spec 11 §5 + §2.9) ----------
-    def _reset_settings_impl(self, scope: str = "all") -> Dict[str, Any]:
+    def _reset_settings_impl(self, scope: str = "all", *, dry_run: bool = True) -> Dict[str, Any]:
         """Reinitialise les settings par categorie (ou tout)."""
 
-        return reset_support.reset_settings(self, scope)
+        return reset_support.reset_settings(self, scope, dry_run=dry_run)
 
-    def _reset_database_impl(self) -> Dict[str, Any]:
+    def _reset_database_impl(self, *, dry_run: bool = True) -> Dict[str, Any]:
         """Wipe complet de la DB SQLite (avec backup automatique)."""
 
-        return reset_support.reset_database(self)
+        return reset_support.reset_database(self, dry_run=dry_run)
 
     def _get_profiles_impl(self) -> Dict[str, Any]:
         """Liste tous les profils qualite (presets predefinis + custom)."""

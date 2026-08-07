@@ -313,11 +313,11 @@ class ResetSettingsTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_reject_unknown_scope(self) -> None:
-        out = reset_support.reset_settings(self.api, "marsupial")
+        out = reset_support.reset_settings(self.api, "marsupial", dry_run=False)
         self.assertFalse(out["ok"])
 
     def test_scope_all_returns_ok(self) -> None:
-        out = reset_support.reset_settings(self.api, "all")
+        out = reset_support.reset_settings(self.api, "all", dry_run=False)
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["scope"], "all")
         self.assertIsInstance(out["reset_keys"], list)
@@ -326,7 +326,7 @@ class ResetSettingsTests(unittest.TestCase):
     def test_scope_apparence_restores_default_theme(self) -> None:
         # Pre-store un theme custom
         self.api.settings._payload = {"theme": "neon-extra-extra"}
-        out = reset_support.reset_settings(self.api, "apparence")
+        out = reset_support.reset_settings(self.api, "apparence", dry_run=False)
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["scope"], "apparence")
         self.assertIn("theme", out["reset_keys"])
@@ -345,7 +345,7 @@ class ResetSettingsTests(unittest.TestCase):
             "active_quality_profile_id": "compact",
             "custom_quality_profiles": [{"id": "Foo", "version": 1}],
         }
-        out = reset_support.reset_settings(self.api, "profils-qualite")
+        out = reset_support.reset_settings(self.api, "profils-qualite", dry_run=False)
         self.assertTrue(out["ok"], out)
         # Apres reset, ces 2 cles doivent etre dans reset_keys
         self.assertIn("active_quality_profile_id", out["reset_keys"])
@@ -353,14 +353,14 @@ class ResetSettingsTests(unittest.TestCase):
 
     def test_scope_integrations_resets_tmdb_enabled(self) -> None:
         self.api.settings._payload = {"tmdb_enabled": False}
-        out = reset_support.reset_settings(self.api, "integrations")
+        out = reset_support.reset_settings(self.api, "integrations", dry_run=False)
         self.assertTrue(out["ok"], out)
         current = self.api.settings.get_settings()
         self.assertTrue(current.get("tmdb_enabled"))
 
     def test_scope_nommage_resets_template(self) -> None:
         self.api.settings._payload = {"naming_movie_template": "totally custom"}
-        out = reset_support.reset_settings(self.api, "nommage")
+        out = reset_support.reset_settings(self.api, "nommage", dry_run=False)
         self.assertTrue(out["ok"], out)
         current = self.api.settings.get_settings()
         self.assertEqual(current.get("naming_movie_template"), "{title} ({year})")
@@ -381,7 +381,7 @@ class ResetSettingsTests(unittest.TestCase):
             "profils-qualite",
             "avance",
         ):
-            out = reset_support.reset_settings(self.api, scope)
+            out = reset_support.reset_settings(self.api, scope, dry_run=False)
             self.assertTrue(out["ok"], f"Scope {scope} a echoue: {out}")
 
 
@@ -402,7 +402,7 @@ class ResetDatabaseTests(unittest.TestCase):
 
     def test_no_db_returns_ok_with_empty_backup(self) -> None:
         """Pas de DB existante : reset_database retourne ok=True sans backup."""
-        out = reset_support.reset_database(self.api)
+        out = reset_support.reset_database(self.api, dry_run=False)
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["backup_path"], "")
 
@@ -412,7 +412,7 @@ class ResetDatabaseTests(unittest.TestCase):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"SQLite format 3\x00" + b"DUMMY DATABASE CONTENT")
 
-        out = reset_support.reset_database(self.api)
+        out = reset_support.reset_database(self.api, dry_run=False)
         self.assertTrue(out["ok"], out)
         # Backup cree
         backup = Path(out["backup_path"])
@@ -429,7 +429,7 @@ class ResetDatabaseTests(unittest.TestCase):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         magic = b"SQLite format 3\x00CONTENU_MAGIQUE"
         db_path.write_bytes(magic)
-        out = reset_support.reset_database(self.api)
+        out = reset_support.reset_database(self.api, dry_run=False)
         self.assertTrue(out["ok"], out)
         backup = Path(out["backup_path"])
         self.assertEqual(backup.read_bytes(), magic)
@@ -440,7 +440,7 @@ class ResetDatabaseTests(unittest.TestCase):
         db_path.write_bytes(b"db")
         (db_path.with_name(db_path.name + "-wal")).write_bytes(b"wal")
         (db_path.with_name(db_path.name + "-shm")).write_bytes(b"shm")
-        out = reset_support.reset_database(self.api)
+        out = reset_support.reset_database(self.api, dry_run=False)
         self.assertTrue(out["ok"], out)
         self.assertFalse(db_path.exists())
         self.assertFalse((db_path.with_name(db_path.name + "-wal")).exists())
@@ -450,7 +450,7 @@ class ResetDatabaseTests(unittest.TestCase):
         db_path = db_path_for_state_dir(self.state_dir)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.write_bytes(b"db")
-        reset_support.reset_database(self.api)
+        reset_support.reset_database(self.api, dry_run=False)
         self.assertTrue(self.api._close_infra_called)
 
 
