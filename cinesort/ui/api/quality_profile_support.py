@@ -92,11 +92,25 @@ def save_quality_profile(api: Any, profile_json: Any) -> Dict[str, Any]:
         return err(f"save_quality_profile failed: {exc}", category="runtime", level="error")
 
 
-def reset_quality_profile(api: Any) -> Dict[str, Any]:
+def reset_quality_profile(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
+    """Remet le profil de scoring actif aux valeurs par defaut.
+
+    `dry_run` VAUT True PAR DEFAUT : la methode est exposee en
+    `POST /api/quality/reset_quality_profile` et n'a AUCUN argument obligatoire,
+    donc un appel au corps vide ecrasait le profil de l'utilisateur — poids,
+    seuils et tiers compris. En apercu, le profil par defaut est CALCULE et
+    retourne, mais rien n'est ecrit.
+
+    NB : aucune vue du dashboard n'appelle cette methode (elle figure dans
+    `KNOWN_ORPHAN_METHODS`). Elle reste neanmoins atteignable en REST, et c'est
+    precisement la surface que ce defaut concerne.
+    """
     try:
         profile = default_quality_profile()
+        if dry_run:
+            return {"ok": True, "dry_run": True, "profile": profile}
         saved = api._save_active_quality_profile(profile)
-        return {"ok": True, **saved}
+        return {"ok": True, "dry_run": False, **saved}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return err(f"reset_quality_profile failed: {exc}", category="runtime", level="error")
 

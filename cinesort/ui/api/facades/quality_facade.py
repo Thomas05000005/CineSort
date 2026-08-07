@@ -51,12 +51,12 @@ class QualityFacade(_BaseFacade):
         """
         return self._api._save_quality_profile_impl(profile_json)
 
-    def reset_quality_profile(self) -> Dict[str, Any]:
+    def reset_quality_profile(self, dry_run: bool = True) -> Dict[str, Any]:
         """Reinitialise le profil de scoring aux valeurs par defaut.
 
         Cf CineSortApi.reset_quality_profile pour la doc complete.
         """
-        return self._api._reset_quality_profile_impl()
+        return self._api._reset_quality_profile_impl(dry_run=dry_run)
 
     def export_quality_profile(self) -> Dict[str, Any]:
         """Exporte le profil de scoring actif en JSON.

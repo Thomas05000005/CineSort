@@ -313,7 +313,7 @@ def _build_default_settings(api: Any) -> Dict[str, Any]:
     )
 
 
-def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
+def reset_settings(api: Any, scope: str = "all", *, dry_run: bool = True) -> Dict[str, Any]:
     """Reinitialise les settings (totalement ou par categorie).
 
     Cf spec 11 §5 Reset. Scope :
@@ -321,7 +321,16 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
       - "sources" / "analyse" / "nommage" / "bibliotheque" / "integrations" /
         "notifications" / "serveur" / "apparence" / "profils-qualite" / "avance"
 
-    Retourne {ok, reset_keys: [...], scope}.
+    `dry_run` VAUT True PAR DEFAUT. Cette methode est exposee en
+    `POST /api/settings/reset_settings` et n'a AUCUN argument obligatoire : un
+    appel au corps vide reinitialisait donc l'integralite des reglages
+    (`scope="all"`). Sur une frontiere destructive, l'omission doit produire
+    l'APERCU, jamais l'effet. L'appelant dont le travail EST de reinitialiser
+    le dit explicitement — c'est un parametre visible en revue, plus un defaut
+    invisible.
+
+    Retourne {ok, reset_keys: [...], scope, dry_run}. En apercu, `reset_keys`
+    porte EXACTEMENT ce que l'application aurait remis a zero.
     """
     scope_norm = str(scope or "all").strip().lower()
     if scope_norm not in _valid_reset_scopes():
@@ -344,6 +353,13 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
 
     # Si scope = all, on persiste tout le payload defauts
     if scope_norm == "all":
+        if dry_run:
+            return {
+                "ok": True,
+                "scope": "all",
+                "reset_keys": sorted(defaults.keys()),
+                "dry_run": True,
+            }
         try:
             api.settings.save_settings(defaults)
         except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
@@ -357,6 +373,7 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
             "ok": True,
             "scope": "all",
             "reset_keys": sorted(defaults.keys()),
+            "dry_run": False,
         }
 
     # Scope cible : on lit les settings courants et on remplace cle par cle
@@ -383,6 +400,14 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
             patched.pop(key, None)
             reset_keys.append(key)
 
+    if dry_run:
+        return {
+            "ok": True,
+            "scope": scope_norm,
+            "reset_keys": reset_keys,
+            "dry_run": True,
+        }
+
     try:
         api.settings.save_settings(patched)
     except (AttributeError, OSError, KeyError, TypeError, ValueError) as exc:
@@ -397,6 +422,7 @@ def reset_settings(api: Any, scope: str = "all") -> Dict[str, Any]:
         "ok": True,
         "scope": scope_norm,
         "reset_keys": reset_keys,
+        "dry_run": False,
     }
 
 
@@ -417,7 +443,7 @@ def _resolve_db_path(api: Any) -> Optional[Path]:
     return db_path_for_state_dir(state_path)
 
 
-def reset_database(api: Any) -> Dict[str, Any]:
+def reset_database(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
     """Wipe complet de la DB SQLite (films, runs, perceptual, scores, etc.).
 
     Backup automatique avant suppression vers
@@ -426,7 +452,14 @@ def reset_database(api: Any) -> Dict[str, Any]:
     IRREVERSIBLE cote DB mais le backup permet une restauration manuelle.
     Les settings.json et logs/ sont preserves.
 
-    Retourne {ok, backup_path, removed_db_path}.
+    `dry_run` VAUT True PAR DEFAUT. C'est la methode la plus destructive de
+    toute la surface REST, elle est exposee en
+    `POST /api/settings/reset_database`, et elle n'a AUCUN argument obligatoire :
+    un appel au corps vide effacait donc toute la bibliotheque de l'utilisateur.
+
+    Retourne {ok, backup_path, removed_db_path, dry_run}. En apercu, la reponse
+    porte en plus `db_size_bytes` et le chemin de sauvegarde QUI SERAIT ecrit,
+    et RIEN n'est touche : ni backup, ni fermeture de connexion, ni suppression.
     """
     state_path = _resolve_state_dir(api)
     if state_path is None:
@@ -453,6 +486,23 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "backup_path": "",
             "removed_db_path": str(db_path),
             "message": t("danger_zone.no_database_to_delete"),
+        }
+
+    if dry_run:
+        # Apercu STRICT : on ne cree meme pas le dossier de sauvegarde. La seule
+        # I/O est un `stat` en lecture — un apercu qui ecrirait sur le disque ne
+        # serait plus un apercu.
+        taille = 0
+        with contextlib.suppress(OSError):
+            taille = int(db_path.stat().st_size)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "backup_path": "",
+            "removed_db_path": "",
+            "db_path": str(db_path),
+            "db_size_bytes": taille,
+            "backup_dir": str(state_path / "db" / "backups"),
         }
 
     backup_dir = state_path / "db" / "backups"
@@ -500,6 +550,7 @@ def reset_database(api: Any) -> Dict[str, Any]:
             "ok": True,
             "backup_path": str(backup_path),
             "removed_db_path": str(db_path),
+            "dry_run": False,
         }
     except (OSError, shutil.Error) as exc:
         logger.exception("reset_database: echec")
