@@ -461,16 +461,8 @@ class _StoreBase:
                 "ts": time.time(),
             }
         elif self._integrity_non_concluant:
-            # #986 : meme raisonnement que N23, autre cause. Le checkpoint WAL a
-            # echoue, donc `integrity_check` a pu porter sur des pages perimees
-            # et signaler une corruption FANTOME. Un checkpoint echoue justement
-            # quand un AUTRE ecrivain tient la base : restaurer ici detruirait
-            # ses commits sur un diagnostic dont le code lui-meme dit qu'il n'est
-            # pas fiable.
-            #
-            # Statut DISTINCT de `unreadable` : la base est lisible, c'est le
-            # verdict qui ne fait pas autorite. L'operateur doit pouvoir
-            # distinguer les deux dans le journal.
+            # #986 : meme raisonnement que N23, autre cause (checkpoint WAL en
+            # echec). Cf. la docstring de `_check_integrity`.
             self._integrity_event = {
                 "status": "inconclusive",
                 "raw": self._integrity_status,
@@ -587,6 +579,9 @@ class _StoreBase:
         Le premier cas est desormais renvoye avec le prefixe `unreadable: ` et
         pose `_integrity_unreadable`, que initialize() lit pour NE PAS tenter de
         restauration. Le chemin de corruption reelle est inchange.
+
+        #986 (2026-08-07) : meme raisonnement, TROISIEME cause — un checkpoint
+        WAL en echec. Cf. `_verdict_integrite`.
         """
         self._integrity_unreadable = False
         self._integrity_non_concluant = False
@@ -605,46 +600,7 @@ class _StoreBase:
             return f"{UNREADABLE_STATUS_PREFIX}{exc}"
         try:
             with closing(conn):
-                # Fix audit 2026-05-25 (v1.5.3) Vague H : flush WAL avant
-                # integrity_check. Sans checkpoint, des pages encore dans le
-                # WAL pouvaient masquer une corruption (ou en signaler une
-                # fantome) selon l'etat du -wal/-shm. RESTART force le merge
-                # complet vers le main file et reinitialise le WAL, donnant
-                # un check fiable et reproductible. Best-effort : si le
-                # checkpoint echoue (DB read-only, lock concurrent), on
-                # continue avec un warning plutot que de skip l'integrity.
-                try:
-                    conn.execute("PRAGMA wal_checkpoint(RESTART)")
-                except sqlite3.OperationalError as exc:
-                    # #986 — UN CHECKPOINT EN ECHEC REND LE VERDICT NON FIABLE,
-                    # ET IL INTERDIT DESORMAIS L'AUTO-RESTAURATION.
-                    #
-                    # Le commentaire ci-dessus le dit deja : sans checkpoint, des
-                    # pages encore dans le WAL peuvent masquer une corruption
-                    # « OU EN SIGNALER UNE FANTOME ». Or le verdict etait malgre
-                    # tout traite comme assez autoritaire par `initialize()` pour
-                    # ECRASER la base vivante via `_attempt_auto_restore` — et un
-                    # checkpoint echoue precisement quand un AUTRE ecrivain tient
-                    # la base. Les commits de cet autre ecrivain disparaissaient.
-                    #
-                    # C'est exactement la forme tranchee par la nuance N23 vingt
-                    # lignes plus haut : un signal qui ne dit rien du CONTENU ne
-                    # doit pas declencher une restauration. La restauration etant
-                    # destructive, le doute va dans le sens RESTRICTIF.
-                    #
-                    # Le niveau passe de WARNING a ERROR : ce n'est plus une
-                    # simple information, cela change ce que fait le demarrage.
-                    self._integrity_non_concluant = True
-                    logger.error(
-                        "wal_checkpoint a echoue avant integrity_check (%s) — le verdict d'integrite porte "
-                        "peut-etre sur des pages WAL perimees. L'auto-restore N'EST PAS declenche : ecraser "
-                        "la base vivante sur un diagnostic non fiable detruirait les commits d'un autre "
-                        "ecrivain. Path: %s",
-                        exc,
-                        self.db_path,
-                    )
-                row = conn.execute("PRAGMA integrity_check").fetchone()
-                status = str(row[0]) if row else "unknown"
+                status = self._verdict_integrite(conn)
         except sqlite3.DatabaseError as exc:
             logger.error(
                 "DB integrity check raised: %s. Path: %s. Consider restoring from backup.",
@@ -676,6 +632,50 @@ class _StoreBase:
                     self.db_path,
                 )
         return status
+
+    def _verdict_integrite(self, conn: sqlite3.Connection) -> str:
+        """Rend le verdict brut de `PRAGMA integrity_check`, WAL fusionne d'abord.
+
+        Fix audit 2026-05-25 (v1.5.3) Vague H : sans checkpoint, des pages encore
+        dans le WAL pouvaient masquer une corruption — OU EN SIGNALER UNE
+        FANTOME — selon l'etat du `-wal`/`-shm`. `RESTART` force le merge complet
+        vers le fichier principal et reinitialise le WAL, donnant un check fiable
+        et reproductible.
+
+        #986 — QUAND LE CHECKPOINT ECHOUE, LE VERDICT NE FAIT PAS AUTORITE.
+
+        Le traitement etait « best-effort » : un WARNING, puis on jugeait quand
+        meme. Or ce verdict redescendait dans `initialize()`, qui le tenait pour
+        assez sur pour appeler `_attempt_auto_restore` — soit un `os.replace`
+        SUR LA BASE VIVANTE. Et un checkpoint echoue precisement quand un AUTRE
+        ecrivain tient la base : ses commits disparaissaient, sur la foi d'un
+        diagnostic que le commentaire ci-dessus qualifie lui-meme de possiblement
+        fantome.
+
+        On pose donc `_integrity_non_concluant`, que `initialize()` lit pour NE
+        PAS restaurer — exactement ce que la nuance N23 fait pour « je n'ai pas
+        pu OUVRIR le fichier ». Le statut d'evenement reste DISTINCT
+        (`inconclusive`, pas `unreadable`) : la base est lisible, c'est le verdict
+        qui ne conclut pas, et l'operateur doit pouvoir separer les deux.
+
+        La restauration etant DESTRUCTIVE, le doute va vers le refus : ne pas
+        restaurer une base saine mal diagnostiquee est recuperable ; ecraser les
+        commits d'un autre ecrivain ne l'est pas.
+        """
+        try:
+            conn.execute("PRAGMA wal_checkpoint(RESTART)")
+        except sqlite3.OperationalError as exc:
+            self._integrity_non_concluant = True
+            logger.error(
+                "wal_checkpoint a echoue avant integrity_check (%s) — le verdict d'integrite porte "
+                "peut-etre sur des pages WAL perimees. L'auto-restore N'EST PAS declenche : ecraser "
+                "la base vivante sur un diagnostic non fiable detruirait les commits d'un autre "
+                "ecrivain. Path: %s",
+                exc,
+                self.db_path,
+            )
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        return str(row[0]) if row else "unknown"
 
     def _attempt_auto_restore(self) -> None:
         """V2-11 audit QA 20260504 : tente un restore auto depuis les backups
