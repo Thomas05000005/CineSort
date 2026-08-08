@@ -169,6 +169,39 @@ def _get_films_by_tier_impl(api: Any, tier: str, limit: int = _DEFAULT_LIMIT) ->
 # ---------------------------------------------------------------------------
 
 
+def _minuit_local(ts: float) -> float:
+    """Minuit LOCAL du jour contenant `ts`.
+
+    POURQUOI. La fenetre de `get_history` demarrait a `now - period * 86400`,
+    donc a l'HEURE COURANTE. Le bucket le plus ancien ne couvrait alors qu'une
+    fraction de journee — et les points sont regroupes par date locale
+    (`time.strftime("%Y-%m-%d", time.localtime(ts))`), si bien que cette
+    fraction formait quand meme un point a part entiere.
+
+    Deux consequences, la seconde etant un biais permanent :
+
+    1. la premiere barre du graphique etait un moignon, sans que rien ne le dise ;
+    2. ce point tombe toujours du cote `older` de la coupe en deux moities, et
+       `delta_films` est une SOMME : sur une bibliotheque a activite constante,
+       l'indicateur affichait une hausse qui ne mesurait que la troncature.
+
+    MESURE (31 jours d'activite strictement constante, 10 films/jour, la coupe
+    symetrique de #1008 etant deja appliquee) :
+
+        jour ancien COMPLET (10 films)  -> delta_films = +0
+        jour ancien PARTIEL (4 films)   -> delta_films = +6
+        jour ancien PARTIEL (1 film)    -> delta_films = +9
+
+    L'asymetrie de coupe corrigee par #1008 valait +10 : le residu etait donc du
+    meme ordre, et de meme signe.
+
+    `tm_isdst=-1` laisse le systeme resoudre l'heure d'ete : un jour de bascule,
+    minuit local n'est pas a un multiple de 86400 de celui de la veille.
+    """
+    jour = time.localtime(ts)
+    return time.mktime((jour.tm_year, jour.tm_mon, jour.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
 def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
     """KPIs evolution sur N derniers jours.
 
@@ -211,7 +244,7 @@ def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
         )
 
     now = time.time()
-    since = now - period * 86400.0
+    since = _minuit_local(now - period * 86400.0)
 
     # Recuperer les data raw du repository perceptual
     try:
