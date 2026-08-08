@@ -242,7 +242,7 @@ def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
             }
         )
 
-    # Calcul des deltas (recent vs older half)
+    # Deltas : deux fenetres de MEME longueur (jour median exclu si impair).
     delta_score = 0.0
     delta_films = 0
     delta_reject = 0
@@ -250,7 +250,7 @@ def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
     if len(points) >= 2:
         half = len(points) // 2
         older = [p for p in points[:half] if p.get("avg_score") is not None]
-        recent = [p for p in points[half:] if p.get("avg_score") is not None]
+        recent = [p for p in points[-half:] if p.get("avg_score") is not None]
         if older and recent:
             avg_older = sum(float(p["avg_score"]) for p in older) / len(older)
             avg_recent = sum(float(p["avg_score"]) for p in recent) / len(recent)
