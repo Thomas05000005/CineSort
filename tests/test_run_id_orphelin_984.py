@@ -25,9 +25,11 @@ autres peut orpheliner un `run_id` sans qu'aucune contrainte ne s'en apercoive.
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cinesort.infra.db.repositories.run import RunRepository
 from cinesort.infra.db.sqlite_store import SQLiteStore
@@ -244,6 +246,109 @@ class LaSYMETRIEEntreReserverEtLibererTests(_BaseReelle):
             f"la couverture de ce test a change : sautees={sorted(sautees)}. "
             f"Mettre a jour `_NON_SEMABLES` — ou mieux, apprendre a les semer.",
         )
+
+
+class _ConnexionQuiEchoue:
+    """Enveloppe une VRAIE connexion et fait echouer UNE table.
+
+    `sqlite3.Connection.execute` est en lecture seule : on ne peut pas le
+    remplacer sur l'instance. On enveloppe donc, en laissant tout le reste
+    passer — sinon on mesurerait « la base ne repond plus » et non le sujet.
+    """
+
+    def __init__(self, vraie, table: str, message: str) -> None:
+        self._vraie = vraie
+        self._table = table
+        self._message = message
+
+    def execute(self, sql, *a, **kw):
+        if f"FROM {self._table}" in sql:
+            raise sqlite3.OperationalError(self._message)
+        return self._vraie.execute(sql, *a, **kw)
+
+    def __getattr__(self, nom):
+        return getattr(self._vraie, nom)
+
+
+class UneErreurSQLiteINATTENDUENEstPasAvaleeTests(_BaseReelle):
+    """Un `except sqlite3.OperationalError` large declarerait le run_id LIBRE.
+
+    « database is locked », un schema invalide ou une erreur d'E/S ne disent RIEN
+    de la presence d'une orpheline. Les avaler ferait dire a la garde « libre »
+    sans avoir regarde toutes les tables : sa gestion d'erreur reintroduirait le
+    defaut qu'elle protege.
+
+    Seul « no such table » est tolerable — la table absente ne peut rien porter.
+    """
+
+    def _avec_echec(self, message: str):
+        import contextlib
+
+        vrai = self.store.run._managed_conn
+
+        @contextlib.contextmanager
+        def _fabrique():
+            with vrai() as conn:
+                yield _ConnexionQuiEchoue(conn, "anomalies", message)
+
+        return mock.patch.object(self.store.run, "_managed_conn", _fabrique)
+
+    def test_une_base_VERROUILLEE_fait_remonter_l_erreur(self) -> None:
+        with self._avec_echec("database is locked"):
+            with self.assertRaises(sqlite3.OperationalError) as ctx:
+                self.store.run.run_id_est_utilise("PEU-IMPORTE")
+
+        self.assertIn("locked", str(ctx.exception))
+
+    def test_une_table_ABSENTE_est_toleree(self) -> None:
+        """Contre-epreuve : sans elle, un `raise` systematique ferait echouer
+        tout demarrage de run sur une base partiellement migree."""
+        with self._avec_echec("no such table: anomalies"):
+            self.assertFalse(self.store.run.run_id_est_utilise("JAMAIS-VU"))
+
+
+class LeRemplacantEstREVALIDETests(_BaseReelle):
+    """Apres une collision, le nouvel identifiant doit etre verifie A SON TOUR.
+
+    `insert_run_pending` ne detecte que les collisions dans `runs` : un
+    remplacant qui tomberait sur une orpheline creerait un run heritant de ses
+    donnees — le defaut corrige, un niveau plus bas.
+    """
+
+    def _runner(self):
+        from cinesort.app.job_runner import JobRunner
+
+        runner = JobRunner.__new__(JobRunner)
+        runner._runs = {}
+        runner._store = self.store
+        return runner
+
+    def test_un_remplacant_qui_COLLISIONNE_est_rejete(self) -> None:
+        self._orpheline("PRIS")
+        tirages = iter(["PRIS", "LIBRE"])
+
+        with mock.patch(
+            "cinesort.app.job_runner.normalize_or_generate_run_id",
+            side_effect=lambda _: next(tirages),
+        ):
+            obtenu = self._runner()._run_id_de_remplacement()
+
+        self.assertEqual(obtenu, "LIBRE", "le remplacant collisionne avec une orpheline")
+
+    def test_une_collision_PERSISTANTE_echoue_BRUYAMMENT(self) -> None:
+        """Pas de boucle infinie : une collision qui ne se resout pas signale un
+        probleme reel (horloge figee, base incoherente) qu'il ne faut pas
+        masquer."""
+        self._orpheline("TOUJOURS-PRIS")
+
+        with mock.patch(
+            "cinesort.app.job_runner.normalize_or_generate_run_id",
+            side_effect=lambda _: "TOUJOURS-PRIS",
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                self._runner()._run_id_de_remplacement()
+
+        self.assertIn("run_id libre", str(ctx.exception))
 
 
 if __name__ == "__main__":
