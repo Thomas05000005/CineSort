@@ -477,6 +477,79 @@ class RunRepository(_BaseRepository):
                 out.update({str(r["run_id"]): int(r["cnt"]) for r in cur.fetchall()})
         return out
 
+    #: Tables portant un `run_id` et pouvant donc devenir ORPHELINES.
+    #:
+    #: La decision N26 fait deliberement survivre les lignes orphelines a
+    #: l'auto-reparation du schema (elle preserve le journal d'erreurs). Leur
+    #: `run_id` doit donc rester considere comme PRIS, sans quoi un nouveau run
+    #: heriterait du journal d'un run mort.
+    #:
+    #: MESURE (2026-08-07) : 12 tables portent un `run_id`, mais SEULES TROIS
+    #: ont une cle etrangere vers `runs` (`errors`, `quality_reports`,
+    #: `anomalies`). La cascade ne couvre donc qu'un quart du probleme.
+    #:
+    #: `tests/test_run_id_orphelin_984.py` rougit si une table portant un
+    #: `run_id` manque a cette liste — elle ne peut pas se perimer en silence.
+    _TABLES_PORTANT_RUN_ID: tuple[str, ...] = (
+        "anomalies",
+        "apply_batches",
+        "duplicate_decisions",
+        "errors",
+        "film_decisions_v2",
+        "film_field_locks",
+        "film_marked_for_deletion",
+        "film_tmdb_overrides",
+        "perceptual_reports",
+        "quality_reports",
+        "user_quality_feedback",
+    )
+
+    def run_id_est_utilise(self, run_id: str) -> bool:
+        """Vrai si ce `run_id` est pris — y compris par une ligne ORPHELINE.
+
+        `get_run()` ne consulte que `runs`, et rend donc `None` pour un run dont
+        seules des lignes enfants subsistent. La garde d'unicite de
+        `job_runner.start_job` s'appuyait sur elle : un `run_id` fantome etait
+        declare LIBRE, et le run suivant heritait du journal d'erreurs du run
+        mort — `list_errors('GHOST')` rendant l'erreur du precedent.
+
+        Ce n'est pas une precaution abstraite : `cinesort/infra/run_id.py`
+        documente une collision MESUREE du generateur au passage a l'heure
+        d'hiver, et annonce comme defense en profondeur « la PRIMARY KEY de
+        `runs` » — laquelle ne voit justement pas les orphelines.
+        """
+        rid = str(run_id or "").strip()
+        if not rid:
+            return False
+        self._ensure_runs_table()
+        with self._managed_conn() as conn:
+            cur = conn.execute("SELECT 1 FROM runs WHERE run_id=? LIMIT 1", (rid,))
+            if cur.fetchone() is not None:
+                return True
+            for table in self._TABLES_PORTANT_RUN_ID:
+                # Le nom vient d'une constante de classe, jamais d'une entree
+                # utilisateur — et l'appartenance est reverifiee ici pour que la
+                # surete soit LOCALE, lisible sans remonter a la definition.
+                if table not in self._TABLES_PORTANT_RUN_ID:  # pragma: no cover - garde de programmation
+                    raise ValueError(f"table hors liste blanche : {table!r}")
+                try:
+                    cur = conn.execute(f"SELECT 1 FROM {table} WHERE run_id=? LIMIT 1", (rid,))  # noqa: S608
+                except sqlite3.OperationalError as exc:
+                    # UNIQUEMENT « table absente » (base partiellement migree) :
+                    # elle ne peut alors porter aucune orpheline.
+                    #
+                    # Un `except` large avalerait aussi « database is locked »,
+                    # un schema invalide ou une erreur d'E/S — et
+                    # `run_id_est_utilise` declarerait le run_id LIBRE sans avoir
+                    # regarde toutes les tables. C'est exactement le defaut que
+                    # cette methode corrige, reintroduit par sa gestion d'erreur.
+                    if not self._is_missing_table_error(exc, table):
+                        raise
+                    continue
+                if cur.fetchone() is not None:
+                    return True
+        return False
+
     def delete_run(self, run_id: str) -> int:
         """Supprime un run de la DB.
 
@@ -503,19 +576,43 @@ class RunRepository(_BaseRepository):
             return 0
         self._ensure_runs_table()
         with self._managed_conn() as conn:
-            # PRAGMA foreign_keys=ON est applique au niveau de la connection
-            # par SQLiteStore (cf sqlite_store.py). Les CASCADE sur errors,
-            # quality_reports, anomalies se feront automatiquement.
-            cur = conn.execute("SELECT COUNT(*) AS n FROM errors WHERE run_id=?", (rid,))
-            errors_count = int(cur.fetchone()["n"] or 0)
-            cur = conn.execute("SELECT COUNT(*) AS n FROM quality_reports WHERE run_id=?", (rid,))
-            quality_count = int(cur.fetchone()["n"] or 0)
-            cur = conn.execute("SELECT COUNT(*) AS n FROM anomalies WHERE run_id=?", (rid,))
-            anomalies_count = int(cur.fetchone()["n"] or 0)
-
-            # perceptual_reports n'a PAS de FK CASCADE — purge explicite.
-            cur = conn.execute("DELETE FROM perceptual_reports WHERE run_id=?", (rid,))
-            perceptual_deleted = int(cur.rowcount or 0)
+            # #984 — ON SUPPRIME EXPLICITEMENT, ON NE COMPTE PLUS UNE PROMESSE.
+            #
+            # La version precedente COMPTAIT ces trois tables avant de supprimer
+            # le parent, en pariant sur la CASCADE. Le pari tombe des que la
+            # ligne `runs` n'existe pas : la CASCADE ne se declenche pas, les
+            # enfants RESTENT, et la methode retournait quand meme leur nombre.
+            # Mesure de l'issue : `delete_run('GHOST')` rendait 1 en ayant
+            # supprime 0 ligne, et `errors` en portait toujours une apres coup.
+            #
+            # Ce cas n'est pas theorique : la decision N26 fait deliberement
+            # SURVIVRE les lignes orphelines a l'auto-reparation du schema. Un
+            # `delete_run` sur un run fantome est donc le seul moyen de les
+            # nettoyer — et c'est precisement ce qu'il ne faisait pas.
+            #
+            # Supprimer d'abord les enfants rend la valeur retournee VRAIE, et
+            # marche que le parent existe ou non. La CASCADE devient une
+            # ceinture de securite, plus le mecanisme principal.
+            # SYMETRIE STRUCTURELLE AVEC `run_id_est_utilise`. On itere la MEME
+            # constante : toute table qui RESERVE un run_id doit etre purgee par
+            # sa suppression, sinon l'identifiant reste occupe pour toujours.
+            #
+            # Une premiere version enumerait trois tables a la main pendant que
+            # la garde en consultait onze. Une orpheline dans l'une des huit
+            # autres survivait donc a `delete_run`, et le run_id n'etait JAMAIS
+            # libere. L'asymetrie etait invisible parce que le test de nettoyage
+            # n'utilisait que `errors`.
+            enfants_supprimes = 0
+            for table in self._TABLES_PORTANT_RUN_ID:
+                if table == "apply_batches":
+                    continue  # purge dediee plus bas, avec ses operations liees
+                try:
+                    cur = conn.execute(f"DELETE FROM {table} WHERE run_id=?", (rid,))  # noqa: S608
+                except sqlite3.OperationalError as exc:
+                    if not self._is_missing_table_error(exc, table):
+                        raise
+                    continue
+                enfants_supprimes += int(cur.rowcount or 0)
 
             # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
             # AVANT de supprimer le run pour pouvoir compter les operations
@@ -541,15 +638,7 @@ class RunRepository(_BaseRepository):
             cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
             run_deleted = int(cur.rowcount or 0)
 
-        return (
-            run_deleted
-            + errors_count
-            + quality_count
-            + anomalies_count
-            + perceptual_deleted
-            + batches_deleted
-            + apply_ops_deleted
-        )
+        return run_deleted + enfants_supprimes + batches_deleted + apply_ops_deleted
 
     def list_runs_older_than(self, *, cutoff_ts: float) -> List[str]:
         """Retourne les run_ids dont la date la plus recente (started_ts > created_ts) est < cutoff_ts.
