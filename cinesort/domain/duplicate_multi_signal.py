@@ -100,15 +100,28 @@ class MultiSignalGroup:
 
     Attributs:
         members: identifiants opaques des items du groupe.
-        phase: phase qui a cree/elargi le groupe (strict_metadata, fuzzy_title, audio_fingerprint).
+        phase: phase qui a CREE le groupe (strict_metadata, fuzzy_title,
+            audio_fingerprint). Attention : ce n'est pas forcement la seule
+            phase qui a travaille dessus — cf. `augmented_members`.
         representative_title: titre du premier item du groupe (pour log/debug).
         representative_year: annee du premier item (pour log/debug).
+        augmented_members: sous-ensemble de `members` ajoute par une phase
+            POSTERIEURE a celle qui a cree le groupe (#972). Aujourd'hui seule
+            la Pass 1 de la Phase B alimente cette liste, en absorbant des
+            candidats dans un groupe Phase A deja constitue.
+
+            Sans cette provenance, un groupe Phase A augmente par le fuzzy est
+            indiscernable d'un groupe Phase A pur : `phase` vaut
+            `strict_metadata` dans les deux cas. `augment_groups_with_multi_signal`
+            jetait donc la contribution fuzzy en meme temps que le groupe qui la
+            portait, alors que `phase_counts` l'annoncait.
     """
 
     members: List[str] = field(default_factory=list)
     phase: str = PHASE_STRICT_METADATA
     representative_title: str = ""
     representative_year: int = 0
+    augmented_members: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -218,6 +231,30 @@ def _phase_a_strict_metadata(
     return groups, remaining
 
 
+def _indexer_les_groupes_phase_a(
+    existing_groups: List[MultiSignalGroup],
+) -> Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]]:
+    """Index (token-stable, annee) des groupes deja crees, pour la Pass 1.
+
+    La cle utilise `_index_token` (premier token apres tri) afin d'etre
+    invariante a l'ordre des mots, comme `token_sort_ratio`.
+
+    L'index porte la POSITION du groupe dans `existing_groups` : c'est elle qui
+    sert de cle d'unicite pour le compteur d'augmentations (#724).
+    `MultiSignalGroup` est un dataclass mutable non hashable, et deux groupes
+    distincts peuvent etre egaux au sens `__eq__` — un set de groupes ou une
+    comparaison par valeur fusionneraient donc des groupes differents.
+    """
+    idx: Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]] = {}
+    for gi, g in enumerate(existing_groups):
+        rep_norm = _normalize_title_for_fuzzy(g.representative_title)
+        if not rep_norm:
+            continue
+        token = _index_token(rep_norm)
+        idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, gi, g))
+    return idx
+
+
 def _phase_b_fuzzy_title(
     candidates: Sequence[MultiSignalCandidate],
     existing_groups: List[MultiSignalGroup],
@@ -264,26 +301,7 @@ def _phase_b_fuzzy_title(
     # #724 : positions (dans `existing_groups`) des groupes Phase A augmentes.
     augmented_group_indexes: set[int] = set()
 
-    # Indexer les groupes existants par (token-stable, annee)
-    # pour Phase A -> Phase B (ajout d'un candidat a un groupe existant).
-    # NB: la cle utilise `_index_token` (premier token apres tri) afin
-    # d'etre invariante a l'ordre des mots, comme token_sort_ratio.
-    # L'index porte la POSITION du groupe dans `existing_groups` : c'est elle
-    # qui sert de cle d'unicite pour le compteur d'augmentations (#724).
-    # `MultiSignalGroup` est un dataclass mutable non hashable, et deux groupes
-    # distincts peuvent etre egaux au sens `__eq__` — un set de groupes ou une
-    # comparaison par valeur fusionneraient donc des groupes differents.
-    def _phase_a_index() -> Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]]:
-        idx: Dict[Tuple[str, int], List[Tuple[str, int, MultiSignalGroup]]] = {}
-        for gi, g in enumerate(existing_groups):
-            rep_norm = _normalize_title_for_fuzzy(g.representative_title)
-            if not rep_norm:
-                continue
-            token = _index_token(rep_norm)
-            idx.setdefault((token, int(g.representative_year)), []).append((rep_norm, gi, g))
-        return idx
-
-    a_index = _phase_a_index()
+    a_index = _indexer_les_groupes_phase_a(existing_groups)
 
     def _find_group_match(c: MultiSignalCandidate) -> Optional[Tuple[int, MultiSignalGroup]]:
         norm = norm_titles[c.item_id]
@@ -308,6 +326,8 @@ def _phase_b_fuzzy_title(
         if match is not None:
             group_index, group_match = match
             group_match.members.append(c.item_id)
+            # #972 : provenance, cf. `MultiSignalGroup.augmented_members`.
+            group_match.augmented_members.append(c.item_id)
             consumed_ids.add(c.item_id)
             augmented_group_indexes.add(group_index)
             logger.debug(
@@ -632,6 +652,15 @@ def augment_groups_with_multi_signal(
         - `advisory`: True (signal informatif, pas un conflit de target)
         - `rows`: liste des row_id du groupe
 
+    La contribution de la Phase B prend DEUX formes, et les deux sont rendues
+    (#972) : les groupes qu'elle cree, et les groupes Phase A qu'elle AUGMENTE
+    en y absorbant un candidat. Un groupe de la seconde forme porte
+    `phase=strict_metadata` mais est annonce ici en `fuzzy_title`, la phase qui
+    a reellement fait la decouverte.
+
+    Un groupe Phase A PUR reste ecarte : la metadonnee stricte seule n'apporte
+    rien que le groupement de base n'ait deja arbitre.
+
     Args:
         base_groups: groupes existants (sortie de `find_duplicate_targets`).
         rows: PlanRows.
@@ -668,19 +697,52 @@ def augment_groups_with_multi_signal(
         new_members = [m for m in g.members if m not in existing_ids]
         if len(new_members) < 2 and not (len(g.members) >= 2 and any(m not in existing_ids for m in g.members)):
             continue
-        # Skip Phase A (deja gere par base_groups identique)
-        if g.phase == PHASE_STRICT_METADATA:
+        if _groupe_est_strict_PUR(g):
             continue
-        enriched.append(
-            {
-                "title": g.representative_title,
-                "year": g.representative_year,
-                "rows": [{"row_id": rid, "kind": "advisory"} for rid in g.members],
-                "existing_paths": [],
-                "plan_conflict": False,
-                "advisory": True,
-                "detection_phase": g.phase,
-            }
-        )
+        enriched.append(_advisory_depuis_groupe(g))
 
     return enriched
+
+
+def _groupe_est_strict_PUR(g: MultiSignalGroup) -> bool:
+    """Vrai si aucune phase posterieure n'a enrichi ce groupe Phase A (#972).
+
+    L'ancien code sautait TOUS les groupes `strict_metadata`, au motif ecrit
+    qu'ils seraient « deja geres par base_groups a l'identique ». Ce motif etait
+    faux la ou il figurait : le filtre precedent vient d'etablir que le groupe
+    porte au moins un membre absent de `base_groups`.
+
+    Il l'etait doublement, car la Pass 1 de la Phase B ABSORBE des candidats
+    dans les groupes Phase A (cf. `MultiSignalResult.phase_counts`, et #724 qui
+    avait deja corrige le compteur sur ce point). Le groupe garde alors
+    `phase=strict_metadata` tout en portant une decouverte fuzzy — celle-la
+    meme que l'integration promet d'ajouter. Mesure :
+
+        groupement    -> strict_metadata membres=['A','B','C'] fuzzy_title=1
+        augment(...)  -> ['A','B']        (C perdu, alors qu'annonce)
+
+    Un groupe Phase A PUR reste ecarte, mais pour la vraie raison : la
+    metadonnee stricte seule n'apporte rien que le groupement de base n'ait
+    deja arbitre (il en fait des fusions non bloquantes plutot que des
+    conflits). C'est un choix delibere, pas une consequence de l'ordre des
+    filtres.
+    """
+    return g.phase == PHASE_STRICT_METADATA and not g.augmented_members
+
+
+def _advisory_depuis_groupe(g: MultiSignalGroup) -> Dict[str, object]:
+    """Groupe multi-signal rendu au format `find_duplicate_targets`.
+
+    La phase ANNONCEE est celle qui a fait la DECOUVERTE : pour un groupe
+    Phase A augmente, c'est le fuzzy, pas la metadonnee stricte.
+    """
+    phase_annoncee = PHASE_FUZZY_TITLE if g.phase == PHASE_STRICT_METADATA else g.phase
+    return {
+        "title": g.representative_title,
+        "year": g.representative_year,
+        "rows": [{"row_id": rid, "kind": "advisory"} for rid in g.members],
+        "existing_paths": [],
+        "plan_conflict": False,
+        "advisory": True,
+        "detection_phase": phase_annoncee,
+    }
