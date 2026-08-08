@@ -527,12 +527,24 @@ class RunRepository(_BaseRepository):
             if cur.fetchone() is not None:
                 return True
             for table in self._TABLES_PORTANT_RUN_ID:
+                # Le nom vient d'une constante de classe, jamais d'une entree
+                # utilisateur — et l'appartenance est reverifiee ici pour que la
+                # surete soit LOCALE, lisible sans remonter a la definition.
+                if table not in self._TABLES_PORTANT_RUN_ID:  # pragma: no cover - garde de programmation
+                    raise ValueError(f"table hors liste blanche : {table!r}")
                 try:
                     cur = conn.execute(f"SELECT 1 FROM {table} WHERE run_id=? LIMIT 1", (rid,))  # noqa: S608
-                except sqlite3.OperationalError:
-                    # Table absente sur une base partiellement migree : elle ne
-                    # peut donc porter aucune orpheline. On ne fait PAS echouer
-                    # le demarrage d'un run pour autant.
+                except sqlite3.OperationalError as exc:
+                    # UNIQUEMENT « table absente » (base partiellement migree) :
+                    # elle ne peut alors porter aucune orpheline.
+                    #
+                    # Un `except` large avalerait aussi « database is locked »,
+                    # un schema invalide ou une erreur d'E/S — et
+                    # `run_id_est_utilise` declarerait le run_id LIBRE sans avoir
+                    # regarde toutes les tables. C'est exactement le defaut que
+                    # cette methode corrige, reintroduit par sa gestion d'erreur.
+                    if not self._is_missing_table_error(exc, table):
+                        raise
                     continue
                 if cur.fetchone() is not None:
                     return True
@@ -581,16 +593,26 @@ class RunRepository(_BaseRepository):
             # Supprimer d'abord les enfants rend la valeur retournee VRAIE, et
             # marche que le parent existe ou non. La CASCADE devient une
             # ceinture de securite, plus le mecanisme principal.
-            cur = conn.execute("DELETE FROM errors WHERE run_id=?", (rid,))
-            errors_count = int(cur.rowcount or 0)
-            cur = conn.execute("DELETE FROM quality_reports WHERE run_id=?", (rid,))
-            quality_count = int(cur.rowcount or 0)
-            cur = conn.execute("DELETE FROM anomalies WHERE run_id=?", (rid,))
-            anomalies_count = int(cur.rowcount or 0)
-
-            # perceptual_reports n'a PAS de FK CASCADE — purge explicite.
-            cur = conn.execute("DELETE FROM perceptual_reports WHERE run_id=?", (rid,))
-            perceptual_deleted = int(cur.rowcount or 0)
+            # SYMETRIE STRUCTURELLE AVEC `run_id_est_utilise`. On itere la MEME
+            # constante : toute table qui RESERVE un run_id doit etre purgee par
+            # sa suppression, sinon l'identifiant reste occupe pour toujours.
+            #
+            # Une premiere version enumerait trois tables a la main pendant que
+            # la garde en consultait onze. Une orpheline dans l'une des huit
+            # autres survivait donc a `delete_run`, et le run_id n'etait JAMAIS
+            # libere. L'asymetrie etait invisible parce que le test de nettoyage
+            # n'utilisait que `errors`.
+            enfants_supprimes = 0
+            for table in self._TABLES_PORTANT_RUN_ID:
+                if table == "apply_batches":
+                    continue  # purge dediee plus bas, avec ses operations liees
+                try:
+                    cur = conn.execute(f"DELETE FROM {table} WHERE run_id=?", (rid,))  # noqa: S608
+                except sqlite3.OperationalError as exc:
+                    if not self._is_missing_table_error(exc, table):
+                        raise
+                    continue
+                enfants_supprimes += int(cur.rowcount or 0)
 
             # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
             # AVANT de supprimer le run pour pouvoir compter les operations
@@ -616,15 +638,7 @@ class RunRepository(_BaseRepository):
             cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
             run_deleted = int(cur.rowcount or 0)
 
-        return (
-            run_deleted
-            + errors_count
-            + quality_count
-            + anomalies_count
-            + perceptual_deleted
-            + batches_deleted
-            + apply_ops_deleted
-        )
+        return run_deleted + enfants_supprimes + batches_deleted + apply_ops_deleted
 
     def list_runs_older_than(self, *, cutoff_ts: float) -> List[str]:
         """Retourne les run_ids dont la date la plus recente (started_ts > created_ts) est < cutoff_ts.

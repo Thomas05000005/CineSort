@@ -173,5 +173,78 @@ class DeleteRunDitLaVERITETests(_BaseReelle):
         self.assertEqual(self.store.run.delete_run("VRAI"), 3)
 
 
+class LaSYMETRIEEntreReserverEtLibererTests(_BaseReelle):
+    """Toute table qui RESERVE un run_id doit etre purgee par sa suppression.
+
+    CE BLOC EXISTE PARCE QUE J'AI CREE L'ASYMETRIE. La garde consultait onze
+    tables pendant que `delete_run` n'en purgeait que trois : une orpheline dans
+    l'une des huit autres survivait a la suppression, et le run_id restait
+    occupe POUR TOUJOURS.
+
+    Le premier test de nettoyage ne le voyait pas — il n'utilisait que `errors`,
+    qui etait justement l'une des trois purgees. Un test qui n'eprouve qu'un cas
+    favorable ne prouve rien de la regle.
+    """
+
+    def _semer(self, table: str, run_id: str) -> bool:
+        """Insere une ligne minimale dans `table`. Rend False si le schema
+        exige des colonnes qu'on ne sait pas fabriquer ici."""
+        with self.store._managed_conn() as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            colonnes = [(r[1], r[2], r[3]) for r in conn.execute(f"PRAGMA table_info({table})")]
+            noms, valeurs = [], []
+            for nom, typ, non_nul in colonnes:
+                if nom == "run_id":
+                    noms.append(nom)
+                    valeurs.append(run_id)
+                elif non_nul:
+                    noms.append(nom)
+                    valeurs.append(0 if "INT" in (typ or "").upper() or "REAL" in (typ or "").upper() else "x")
+            try:
+                conn.execute(
+                    f"INSERT INTO {table}({', '.join(noms)}) VALUES({', '.join('?' * len(noms))})",
+                    tuple(valeurs),
+                )
+            except Exception:
+                return False
+        return True
+
+    #: Tables que `_semer` ne sait pas remplir (schema exigeant des valeurs
+    #: qu'on ne peut pas fabriquer generiquement). Elles sont NOMMEES pour que le
+    #: saut soit visible : un test qui saute en silence ne prouve rien, et c'est
+    #: ainsi que des batteries entieres se vident sans qu'on le sache.
+    _NON_SEMABLES = ("film_decisions_v2",)
+
+    def test_chaque_table_qui_RESERVE_est_aussi_PURGEE(self) -> None:
+        non_liberees, sautees = [], []
+        for table in RunRepository._TABLES_PORTANT_RUN_ID:
+            rid = f"SYM-{table}"
+            if not self._semer(table, rid):
+                sautees.append(table)
+                continue
+            self.assertTrue(
+                self.store.run.run_id_est_utilise(rid),
+                f"{table} ne reserve meme pas le run_id — la garde ne la voit pas",
+            )
+            self.store.run.delete_run(rid)
+            if self.store.run.run_id_est_utilise(rid):
+                non_liberees.append(table)
+
+        self.assertEqual(
+            non_liberees,
+            [],
+            f"ces tables RESERVENT un run_id que `delete_run` ne libere PAS : {non_liberees}. "
+            f"L'identifiant reste occupe pour toujours.",
+        )
+        # Le saut doit rester BORNE et connu : sans cette assertion, un schema
+        # qui rendrait plus de tables non semables viderait ce test en silence.
+        self.assertEqual(
+            sorted(sautees),
+            sorted(self._NON_SEMABLES),
+            f"la couverture de ce test a change : sautees={sorted(sautees)}. "
+            f"Mettre a jour `_NON_SEMABLES` — ou mieux, apprendre a les semer.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

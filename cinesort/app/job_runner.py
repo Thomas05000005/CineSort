@@ -349,6 +349,31 @@ class JobRunner:
         self._active_run_id = None
         return None
 
+    #: Bornes du tirage d'un run_id de remplacement. Au-dela, on preferera un
+    #: echec bruyant a une boucle infinie : `normalize_or_generate_run_id` tire
+    #: sur l'horodatage, donc une collision persistante signale un probleme reel
+    #: (horloge figee, base corrompue) qu'il ne faut pas masquer.
+    _TIRAGES_RUN_ID_MAX = 8
+
+    def _run_id_de_remplacement(self) -> str:
+        """Tire un run_id neuf et VERIFIE qu'il est reellement libre.
+
+        #984 : les deux chemins de remplacement tiraient un identifiant sans
+        rappeler la garde. Or `insert_run_pending` ne detecte que les collisions
+        dans `runs` — une collision du REMPLACANT avec une ligne orpheline
+        creerait donc un run qui herite de ses donnees, c'est-a-dire exactement
+        le defaut corrige, un niveau plus bas.
+        """
+        candidat = normalize_or_generate_run_id(None)
+        for _ in range(self._TIRAGES_RUN_ID_MAX):
+            if candidat not in self._runs and not self._store.run.run_id_est_utilise(candidat):
+                return candidat
+            candidat = normalize_or_generate_run_id(None)
+        raise RuntimeError(
+            f"Impossible de tirer un run_id libre en {self._TIRAGES_RUN_ID_MAX} essais — "
+            f"horloge figee ou base incoherente."
+        )
+
     def start_job(
         self,
         *,
@@ -411,7 +436,7 @@ class JobRunner:
                     self._debug(f"start_job refused: run_id hint {run_id} already used", run_debug)
                     raise RuntimeError(f"Le run_id demande est deja utilise : {run_id}")
                 self._debug(f"start_job run_id collision for {run_id}, generating fallback id", run_debug)
-                run_id = normalize_or_generate_run_id(None)
+                run_id = self._run_id_de_remplacement()
 
             # Sprint 2 audit P0 #6 : insert_run_pending peut encore lever IntegrityError
             # malgre la pre-verification get_run() ci-dessus, en cas de race entre
@@ -447,7 +472,7 @@ class JobRunner:
                     f"start_job IntegrityError collision run_id={run_id}, regenerating",
                     run_debug,
                 )
-                run_id = normalize_or_generate_run_id(None)
+                run_id = self._run_id_de_remplacement()
                 try:
                     self._store.run.insert_run_pending(
                         run_id=run_id,
