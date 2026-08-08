@@ -100,15 +100,28 @@ class MultiSignalGroup:
 
     Attributs:
         members: identifiants opaques des items du groupe.
-        phase: phase qui a cree/elargi le groupe (strict_metadata, fuzzy_title, audio_fingerprint).
+        phase: phase qui a CREE le groupe (strict_metadata, fuzzy_title,
+            audio_fingerprint). Attention : ce n'est pas forcement la seule
+            phase qui a travaille dessus — cf. `augmented_members`.
         representative_title: titre du premier item du groupe (pour log/debug).
         representative_year: annee du premier item (pour log/debug).
+        augmented_members: sous-ensemble de `members` ajoute par une phase
+            POSTERIEURE a celle qui a cree le groupe (#972). Aujourd'hui seule
+            la Pass 1 de la Phase B alimente cette liste, en absorbant des
+            candidats dans un groupe Phase A deja constitue.
+
+            Sans cette provenance, un groupe Phase A augmente par le fuzzy est
+            indiscernable d'un groupe Phase A pur : `phase` vaut
+            `strict_metadata` dans les deux cas. `augment_groups_with_multi_signal`
+            jetait donc la contribution fuzzy en meme temps que le groupe qui la
+            portait, alors que `phase_counts` l'annoncait.
     """
 
     members: List[str] = field(default_factory=list)
     phase: str = PHASE_STRICT_METADATA
     representative_title: str = ""
     representative_year: int = 0
+    augmented_members: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -308,6 +321,11 @@ def _phase_b_fuzzy_title(
         if match is not None:
             group_index, group_match = match
             group_match.members.append(c.item_id)
+            # #972 : tracer la PROVENANCE. Le groupe garde `phase=strict_metadata`
+            # (c'est la Phase A qui l'a cree) ; sans cette trace, l'integration ne
+            # peut pas distinguer ce membre — apporte par le fuzzy — des membres
+            # d'origine, et jette les deux ensemble.
+            group_match.augmented_members.append(c.item_id)
             consumed_ids.add(c.item_id)
             augmented_group_indexes.add(group_index)
             logger.debug(
@@ -632,6 +650,15 @@ def augment_groups_with_multi_signal(
         - `advisory`: True (signal informatif, pas un conflit de target)
         - `rows`: liste des row_id du groupe
 
+    La contribution de la Phase B prend DEUX formes, et les deux sont rendues
+    (#972) : les groupes qu'elle cree, et les groupes Phase A qu'elle AUGMENTE
+    en y absorbant un candidat. Un groupe de la seconde forme porte
+    `phase=strict_metadata` mais est annonce ici en `fuzzy_title`, la phase qui
+    a reellement fait la decouverte.
+
+    Un groupe Phase A PUR reste ecarte : la metadonnee stricte seule n'apporte
+    rien que le groupement de base n'ait deja arbitre.
+
     Args:
         base_groups: groupes existants (sortie de `find_duplicate_targets`).
         rows: PlanRows.
@@ -668,9 +695,33 @@ def augment_groups_with_multi_signal(
         new_members = [m for m in g.members if m not in existing_ids]
         if len(new_members) < 2 and not (len(g.members) >= 2 and any(m not in existing_ids for m in g.members)):
             continue
-        # Skip Phase A (deja gere par base_groups identique)
-        if g.phase == PHASE_STRICT_METADATA:
+        # #972 : un groupe Phase A n'est saute que s'il est PUR.
+        #
+        # L'ancien `if g.phase == PHASE_STRICT_METADATA: continue` sautait TOUS
+        # les groupes Phase A, au motif ecrit qu'ils seraient « deja geres par
+        # base_groups a l'identique ». Ce motif etait faux a cet endroit : le
+        # filtre juste au-dessus vient d'etablir que le groupe porte au moins un
+        # membre absent de `base_groups`.
+        #
+        # Il l'etait doublement, car la Pass 1 de la Phase B ABSORBE des
+        # candidats dans les groupes Phase A (cf. `MultiSignalResult.phase_counts`,
+        # et #724 qui avait deja corrige le compteur sur ce point). Le groupe
+        # garde alors `phase=strict_metadata` tout en portant une decouverte
+        # fuzzy — celle-la meme que cette fonction promet d'ajouter. Mesure :
+        #
+        #     groupement    -> strict_metadata membres=['A','B','C'] fuzzy_title=1
+        #     augment(...)  -> ['A','B']        (C perdu, alors qu'annonce)
+        #
+        # Un groupe Phase A PUR reste saute, mais pour la vraie raison : la
+        # metadonnee stricte seule n'apporte rien que le groupement de base
+        # n'ait deja arbitre (il en fait des fusions non bloquantes plutot que
+        # des conflits). C'est un choix delibere, pas une consequence de l'ordre
+        # des filtres.
+        if g.phase == PHASE_STRICT_METADATA and not g.augmented_members:
             continue
+        # La phase ANNONCEE est celle qui a fait la decouverte : pour un groupe
+        # Phase A augmente, c'est le fuzzy, pas la metadonnee stricte.
+        phase_annoncee = PHASE_FUZZY_TITLE if g.phase == PHASE_STRICT_METADATA else g.phase
         enriched.append(
             {
                 "title": g.representative_title,
@@ -679,7 +730,7 @@ def augment_groups_with_multi_signal(
                 "existing_paths": [],
                 "plan_conflict": False,
                 "advisory": True,
-                "detection_phase": g.phase,
+                "detection_phase": phase_annoncee,
             }
         )
 
