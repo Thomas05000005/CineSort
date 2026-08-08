@@ -145,13 +145,60 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         self.assertIn("vec_films_hash", self._tables(), "la base existante n'a pas recu la 032")
         self.assertEqual(self._user_version(), 32)
 
-    def test_elle_est_IDEMPOTENTE(self) -> None:
-        """Rejouable sans dommage : c'est ce que son en-tete promet."""
+    def test_un_rejeu_ne_DETRUIT_PAS_les_donnees(self) -> None:
+        """L'idempotence qui compte : rejouer la 032 preserve le contenu.
+
+        DEUX CORRECTIONS SUCCESSIVES ONT ETE NECESSAIRES ICI.
+
+        1. La premiere version enchainait deux `apply()` sans rien entre eux.
+           Elle n'eprouvait RIEN — mesure :
+
+               apres 1er apply : user_version=32
+               migrations que le 2e apply va jouer : []
+
+           Le manager saute toute migration deja appliquee : le second appel
+           etait un no-op, et le test assertait qu'un no-op ne change rien.
+           Signale par CodeRabbit sur la PR #1011, verifie par la mesure.
+
+        2. Remettre `user_version` a 31 fait bien rejouer la 032 — mais le
+           motif avance pour ce correctif (« sinon on ne detecte pas la
+           suppression de IF NOT EXISTS ») est FAUX, et la mutation le montre :
+           retirer les trois `IF NOT EXISTS` du fichier laisse le test VERT.
+           La raison est dans le manager lui-meme, qui absorbe ces erreurs :
+
+               db: migration 032 — instruction 0 ignoree (idempotence):
+                   table vec_films_hash already exists
+
+           Aucun test passant par `apply()` ne peut donc eprouver la presence
+           de `IF NOT EXISTS` : la garde vit un cran plus haut. Ecrire une
+           assertion sur cette base aurait produit un vert permanent presente
+           comme une preuve.
+
+        CE QUE CE TEST EPROUVE DONC. La propriete qui reste observable, et qui
+        est celle qui compte pour un utilisateur : un rejeu ne doit pas
+        RECREER la table, donc pas perdre ses lignes. Une migration ecrite en
+        `DROP TABLE` + `CREATE TABLE` passerait toutes les assertions de forme
+        (tables identiques, version 32) en detruisant les donnees.
+        """
         _manager(self.db).apply()
+        with sqlite3.connect(str(self.db)) as conn:
+            conn.execute("INSERT INTO vec_films_hash(film_id, embedding) VALUES (7, ?)", (b"",))
+            conn.commit()
         avant = self._tables()
 
+        with sqlite3.connect(str(self.db)) as conn:
+            conn.execute("PRAGMA user_version = 31")
+        self.assertIn("vec_films_hash", self._tables(), "precondition : la table doit rester en place")
+
         _manager(self.db).apply()
 
+        with sqlite3.connect(str(self.db)) as conn:
+            lignes = conn.execute("SELECT film_id FROM vec_films_hash").fetchall()
+        self.assertEqual(
+            [r[0] for r in lignes],
+            [7],
+            "le rejeu a PERDU les lignes : la migration recree la table au lieu de la respecter",
+        )
         self.assertEqual(self._tables(), avant)
         self.assertEqual(self._user_version(), 32)
 
