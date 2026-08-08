@@ -111,6 +111,12 @@ def e2e_server() -> Generator[Dict[str, Any], None, None]:
         "old_run_id": info["old_run_id"],
         "rows": rows,
         "_server": server,
+        # #1002 : expose pour la fixture `scan_actif`, qui doit semer un run EN
+        # COURS dans l'etat memoire de CETTE api (`_active_run_id` lit
+        # `api._runs`, pas la base). Le store n'est pas expose ici : la fixture
+        # prend celui de l'api via `_get_or_create_infra`, car le `store` local
+        # ci-dessus est une SECONDE instance ouverte sur le meme fichier.
+        "_api": api,
     }
 
     server.stop()
@@ -460,6 +466,68 @@ def authenticated_page(page, e2e_server: Dict[str, Any]):
 def dashboard_page(authenticated_page):
     """Alias pour authenticated_page."""
     return authenticated_page
+
+
+@pytest.fixture(scope="function")
+def scan_actif(e2e_server: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
+    """Sème un run EN COURS dans l'etat memoire du serveur e2e (#1002).
+
+    POURQUOI CETTE FIXTURE EXISTE. `accueil.js` n'arme son polling que si un
+    scan est actif au boot (`if (initialScan.active)`), et le jeu de donnees de
+    `e2e_server` n'en contient aucun. Le test de fuite de polling de l'Accueil
+    mesurait donc une ligne de base de ZERO : son assertion « aucune fuite »
+    etait trivialement vraie, et il ne pouvait rien eprouver.
+
+    POURQUOI ELLE NE DEMARRE PAS SON PROPRE SERVEUR. C'etait la premiere des
+    deux directions proposees par l'issue. Elle ajouterait un serveur REST de
+    plus sur un port ephemere, alors que #924 — `net::ERR_NO_BUFFER_SPACE`,
+    encore une occurrence sur ~25 executions de `main` — designe precisement le
+    nombre de serveurs comme piste structurelle. Corriger un test en aggravant
+    un defaut ouvert n'est pas un correctif.
+
+    POURQUOI ELLE NE TOUCHE PAS AU JEU DE DONNEES COMMUN. C'etait la seconde
+    direction. La fixture est en portee module et une cinquantaine de tests en
+    dependent ; y ajouter un run actif les exposerait tous a une carte « Scan en
+    cours » qu'ils n'attendent pas.
+
+    CE QU'ELLE FAIT. Elle emprunte le chemin de PRODUCTION
+    (`run_flow_support._preparer_le_run` : `_reserve_unique_run`, puis
+    `_build_cfg_from_settings`, puis `RunState`) plutot que de fabriquer un
+    double. Un faux objet exposant `running=True` satisferait `_active_run_id`
+    sans rien prouver de ce que le dashboard recoit reellement.
+
+    Elle retire le run en sortie : la fixture serveur est partagee par le
+    module, et un run laisse en cours contaminerait les tests suivants.
+    """
+    from cinesort.ui.api._run_state import RunState
+
+    api = e2e_server["_api"]
+    # Le couple (store, runner) vient de l'api elle-meme, comme en production :
+    # `api._runner` n'existe pas, et le store de la fixture est une SECONDE
+    # instance ouverte sur le meme fichier.
+    store, runner = api._get_or_create_infra(e2e_server["state_dir"])
+
+    run_id, run_paths = api._reserve_unique_run(store, e2e_server["state_dir"])
+    cfg = api._build_cfg_from_settings(
+        get_settings_dict(e2e_server["root"], e2e_server["state_dir"]),
+        e2e_server["root"],
+    )
+    rs = RunState(run_paths, cfg, runner=runner, store=store)
+    # `_active_run_id` exige les DEUX : `running` vrai ET `done` faux.
+    rs.running = True
+    rs.done = False
+    rs.total = 15
+    rs.idx = 3
+    rs.current_folder = "Inception (2010)"
+
+    with api._runs_lock:
+        api._runs[run_id] = rs
+
+    try:
+        yield {"run_id": run_id, "run_state": rs}
+    finally:
+        with api._runs_lock:
+            api._runs.pop(run_id, None)
 
 
 @pytest.fixture(autouse=True)

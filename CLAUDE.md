@@ -167,6 +167,43 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    une MESURE, pas une ressemblance — c'est en s'en dispensant que ce fichier
    avait affirme une causalite que l'experience a ensuite refutee.
 
+**L'ESPACE DISQUE avant d'accuser son propre changement.** Le 2026-08-08, quatre
+tests de `test_apply_disk_check_recursive_v796.py` ont echoue sur une branche
+dont le diff ne touchait ni le disque ni l'apply. La cause etait dans le HELPER
+de fixture, pas dans le code teste :
+
+```
+_sized(folder / "Extras" / "bonus.bin", 80 * MB)
+    handle.truncate(size)
+E   OSError: [Errno 28] No space left on device      <- 137 Mo libres sur 454 Go
+```
+
+Un echec environnemental porte le nom du test qu'il frappe, jamais celui de sa
+cause. `df -h` coute une seconde et tranche ; sans lui, on « corrige » du code
+sain. `Errno 28`, `WinError 5/32` et `ERR_NO_BUFFER_SPACE` sont tous des
+epuisements de ressource — la meme famille, pas des defauts de logique.
+
+Deux pieges de mesure rencontres en reparant :
+
+- **La taille LOGIQUE ment sur les fichiers creux.** Les fixtures fabriquent
+  leurs faux `.mkv` par `truncate()`, que NTFS laisse creux : une somme des
+  `Length` annoncait **133 822 Go** dans un repertoire, sur un disque de 454 Go.
+  Supprimer douze dossiers « de 38 Go » a rendu **0,05 Go**. La seule grandeur
+  honnete est l'espace LIBRE mesure avant et apres.
+- **Les worktrees s'accumulent en silence** : 212 sur cette machine, ~21 Go.
+  `git worktree remove --force` puis `git worktree prune` ; retirer un worktree
+  ne supprime PAS sa branche. Archiver `git diff HEAD` avant, la purge etant
+  irreversible.
+
+**Les processus de session survivent des JOURS.** Six `python.exe` tournaient
+depuis 3 a 5 jours — deux `http.server`, et surtout deux boucles d'entretien de
+la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
+`gh pr update-branch` : elle agissait **encore seule sur le depot**. Tout demon
+lance en session doit avoir une condition d'arret, et une fin de campagne doit
+inclure son extinction. Un `Get-Process python` en debut de session longue les
+revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
+non encore mesuree, pour le `WinError 5` du point 3.
+
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
