@@ -7,6 +7,45 @@ name: gitleaks
 # Gitleaks v8 utilise ~150 patterns built-in + extensions custom possible
 # via .gitleaks.toml.
 
+# PORTEE DU SCAN — a lire avant d'interpreter un resultat (#996).
+#
+# `gitleaks-action` ne scanne PAS l'arbre livre : il scanne une PLAGE DE
+# COMMITS, et la plage depend de l'evenement.
+#
+#     pull_request      --log-opts=<plage de commits de la PR>
+#     push              plage before..after du push
+#     workflow_dispatch AUCUNE plage -> tout l'historique
+#
+# Trois consequences, chacune ayant deja coute une enquete :
+#
+# 1. Un run vert sur `main` ne dit rien de l'HISTORIQUE, seulement des commits
+#    du push. Les 60 premiers runs verts de ce workflow ont ete lus comme
+#    « le depot est propre » ; personne n'avait regarde.
+#
+# 2. Une fausse cle corrigee au commit SUIVANT laisse le run ROUGE : le commit
+#    fautif est toujours dans la plage. Il faut ECRASER le commit (squash /
+#    amend), pas ajouter un correctif par-dessus.
+#
+# 3. `git log -p` inclut les MESSAGES de commit, qui sont donc scannes aussi.
+#    Decrire un secret detecte en le RECOPIANT dans le message le reintroduit
+#    dans la plage scannee.
+#
+# PREMIER SCAN COMPLET, declenche manuellement le 2026-08-06 : `leaks found: 57`.
+# Les 57 ont ete verifies un par un — AUCUN n'est un vrai secret. Ce sont des
+# exemples de documentation (10 dans docs/api/ENDPOINTS.md), des captures de
+# sortie de tests (32 dans docs/internal/r8/) et des fixtures de tests portant
+# des valeurs hexadecimales evidemment factices.
+#
+# Le seul en code de PRODUCTION est `app.py:248`, ou la regle `generic-api-key`
+# s'est declenchee sur un INTERVALLE EN SECONDES — une multiplication de minutes
+# par soixante, dont l'entropie mesuree atteint 3,50.
+#
+# Ces valeurs ne sont volontairement pas recopiees ici : d'apres le point 3
+# ci-dessus, ce fichier et le message de commit qui l'introduit sont eux-memes
+# dans la plage scannee.
+#
+# Aucune suppression n'a donc ete ajoutee : un `.gitleaksignore` cacherait aussi
+# les vrais secrets futurs aux memes emplacements.
 on:
   push:
     branches: [main]

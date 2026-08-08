@@ -122,7 +122,7 @@ def test_unmount_traitement_stops_polling_runtime(dashboard_page) -> None:
 
 
 @pytest.mark.runtime
-def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None:
+def test_unmount_accueil_stops_dashboard_polling_runtime(scan_actif, dashboard_page) -> None:
     """Vue Accueil : apres demontage, 0 requete `run/get_dashboard` QUI LUI SOIT
     IMPUTABLE pendant 5 s.
 
@@ -149,7 +149,13 @@ def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None
     """
     from tests.e2e_dashboard.conftest import horloge_page, journal_fetch
 
-    # Arriver sur /accueil (defaut apres login).
+    # REMONTAGE FORCE. `authenticated_page` a pu monter l'Accueil AVANT que
+    # `scan_actif` ne seme le run — et poser le meme hash qu'actuellement ne
+    # declenche aucun `hashchange`, donc aucun remontage. On passe par une autre
+    # route pour garantir que `initAccueil` refait son `get_dashboard` APRES
+    # l'ensemencement : c'est ce fetch qui arme `_startScanPolling`.
+    dashboard_page.evaluate("window.location.hash = '#/settings'")
+    dashboard_page.wait_for_timeout(500)
     dashboard_page.evaluate("window.location.hash = '#/accueil'")
     dashboard_page.wait_for_timeout(800)
 
@@ -187,24 +193,23 @@ def test_unmount_accueil_stops_dashboard_polling_runtime(dashboard_page) -> None
         "ou le journal de fetch n'est pas installe — l'assertion suivante ne prouverait rien"
     )
 
-    # CONTRE-EPREUVE 2 — LA PRECONDITION, ET ELLE N'EST PAS ACQUISE.
+    # CONTRE-EPREUVE 2 — LA PRECONDITION, DESORMAIS ACQUISE (#1002).
     #
     # `_startScanPolling` n'est arme QUE si un scan est actif au boot
-    # (`accueil.js` : `if (initialScan.active)`), ou apres un demarrage de scan.
-    # Le jeu de donnees de `e2e_server` n'a aucun run actif : mesure du
-    # 2026-08-07 sur la fenetre de base -> 0 requete imputable a l'Accueil.
+    # (`accueil.js` : `if (initialScan.active)`). Le jeu de donnees de
+    # `e2e_server` n'en a aucun : jusqu'au 2026-08-08, la ligne de base valait
+    # 0, `fuites == []` etait TRIVIALEMENT vrai, et ce test partait en `skip`.
     #
-    # Sans ce garde-fou, `fuites == []` serait TRIVIALEMENT vrai et le test
-    # repasserait vide — la vacuite qu'il vient tout juste de perdre, sous une
-    # autre forme. Un `skip` EXPLICITE qui nomme sa precondition est honnete ;
-    # un vert silencieux ne l'est pas.
-    if not base:
-        pytest.skip(
-            "precondition absente : aucun polling imputable a l'Accueil pendant la ligne de base. "
-            "`_startScanPolling` exige un scan ACTIF au boot, que le jeu de donnees e2e ne fournit "
-            "pas. Rendre ce test effectif demande de semer un run actif dans la fixture partagee "
-            "(~50 tests en dependent) — a trancher separement."
-        )
+    # La fixture `scan_actif` seme desormais un run EN COURS. Cette assertion
+    # remplace le `skip` : elle exige que la ligne de base soit NON VIDE, donc
+    # qu'il y ait bien quelque chose a fuir. Sans elle, le test redeviendrait
+    # vide en silence le jour ou l'ensemencement cesserait de fonctionner.
+    assert base, (
+        "aucun polling imputable a l'Accueil pendant la ligne de base, alors que "
+        "`scan_actif` a seme un run en cours. Soit `_extractScanProgress` ne voit plus "
+        "l'`active_run_id` du payload `get_dashboard`, soit le remontage de la vue n'a "
+        "pas eu lieu — dans les deux cas l'assertion de fuite ci-dessous ne prouverait rien."
+    )
 
     assert not fuites, (
         f"FUITE POLLING apres unmountAccueil : {len(fuites)} requete(s) imputables a la vue "
