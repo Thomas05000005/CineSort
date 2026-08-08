@@ -12,6 +12,7 @@ Les Smart Playlists sont persistees dans settings.json sous la cle
 
 from __future__ import annotations
 
+import dataclasses as _dataclasses
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from cinesort.domain import core as _core
 from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy
 from cinesort.domain.film_identity import compute_film_id, is_path_film_id
 from cinesort.domain.i18n_messages import t
@@ -2297,6 +2299,23 @@ _VALID_LOCK_SOURCES = {
 }
 
 
+#: Noms de champ qu'un verrou peut REELLEMENT proteger.
+#:
+#: DERIVE, PAS RECOPIE. `merge_metadata` compare `locked_fields` aux cles du
+#: dict de la nouvelle row, et ce dict vient de `plan_row_to_jsonable(PlanRow)`.
+#: Mesure du 2026-08-08 : la conversion preserve exactement les 31 noms de
+#: champs du dataclass — zero cle ajoutee, zero perdue. Les champs de `PlanRow`
+#: sont donc la source de verite, et une liste ecrite a la main divergerait au
+#: premier champ ajoute.
+#:
+#: L'import est TOP-LEVEL. Une premiere version le faisait en LOCAL, au motif
+#: ecrit qu'un import de module creerait un cycle — affirmation jamais mesuree,
+#: et FAUSSE : ce module importe deja plusieurs `cinesort.domain.*` en tete, et
+#: l'import conjoint passe. L'import local avait de surcroit un cout reel, en
+#: faisant rougir le cliquet `test_lazy_imports_bounded`.
+_CHAMPS_VERROUILLABLES = frozenset(f.name.lower() for f in _dataclasses.fields(_core.PlanRow))
+
+
 def _get_field_locks_repo_safe(api: Any):
     """Acces best-effort au FieldLocksRepository (sans crash si infra HS).
 
@@ -2318,9 +2337,27 @@ def set_field_lock(
 ) -> Dict[str, Any]:
     """Vague P / VP-G : pose un verrou sur un champ d'un film.
 
+    ATTENTION — `field_name` N'EST PAS VALIDE, ET UN MAUVAIS NOM EST SILENCIEUX.
+
+    Aucune liste blanche : n'importe quelle chaine est acceptee, persistee, et
+    rend `{ok: True}`. Le nom n'est confronte a la realite qu'au rematch, dans
+    `merge_metadata`, qui le compare aux CLES DE LA PLAN ROW. Un nom qui ne
+    correspond a aucune cle donne donc un verrou parfaitement inoperant :
+    l'utilisateur voit un cadenas ferme et son titre est ecrase au rescan.
+
+    MESURE (2026-08-07) — l'exemple donne ici jusqu'a cette date etait FAUX :
+
+        verrou sur 'proposed_title'  -> titre preserve : True
+        verrou sur 'title'           -> titre preserve : FALSE
+
+    Les noms operants sont fixes et gardes par
+    `tests/test_field_locks_noms_qui_protegent.py`.
+
     Args:
         film_id: cle stable du film (`tmdb:<id>` ou `path:<sha1>`).
-        field_name: nom du champ a verrouiller (ex. "title", "year").
+        field_name: CLE DE PLAN ROW a verrouiller — `"proposed_title"`,
+            `"proposed_year"`. Insensible a la casse. Surtout PAS un libelle
+            d'affichage (`"title"`, `"titre"`) : ils ne protegent rien.
         locked_value: valeur a verrouiller (serialisee JSON cote repo).
         source: origine du lock (`ui_lock` par defaut, audit only).
 
@@ -2334,6 +2371,15 @@ def set_field_lock(
         return _err_response("film_id requis.", category="validation", level="info", log_module=__name__)
     if not fname:
         return _err_response("field_name requis.", category="validation", level="info", log_module=__name__)
+    if fname.lower() not in _CHAMPS_VERROUILLABLES:
+        return _err_response(
+            f"Champ « {fname} » inconnu : un verrou pose dessus ne protegerait RIEN. "
+            f"Employer une cle de plan row (ex. « proposed_title », « proposed_year »), "
+            f"pas un libelle d'affichage.",
+            category="validation",
+            level="info",
+            log_module=__name__,
+        )
 
     src = str(source or "ui_lock").strip().lower()
     if src not in _VALID_LOCK_SOURCES:
@@ -2374,6 +2420,15 @@ def set_field_lock(
 
 def clear_field_lock(api: Any, film_id: str, field_name: str) -> Dict[str, Any]:
     """Vague P / VP-G : retire un verrou champ-par-champ.
+
+    NE VALIDE PAS `field_name`, DELIBEREMENT — a l'inverse de `set_field_lock`.
+
+    Avant que la validation n'existe, n'importe quel nom pouvait etre persiste ;
+    des verrous fantomes (`"title"`, `"year"`) dorment donc dans les bases
+    existantes. Refuser ici les noms hors liste blanche les rendrait
+    INEFFACABLES : l'utilisateur verrait un cadenas qu'aucun geste ne peut
+    retirer. La restriction va sur le chemin qui CREE, jamais sur celui qui
+    nettoie.
 
     Returns:
         `{ok: True, removed: bool, film_id, field_name}` en cas de succes,

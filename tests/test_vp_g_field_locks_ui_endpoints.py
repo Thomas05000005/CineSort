@@ -150,24 +150,24 @@ class LibrarySupportSetFieldLockTests(unittest.TestCase):
         res = library_support.set_field_lock(
             api,
             film_id="tmdb:603",
-            field_name="title",
+            field_name="proposed_title",
             locked_value="The Matrix",
             source="ui_lock",
         )
         self.assertTrue(res["ok"])
         self.assertEqual(res["film_id"], "tmdb:603")
-        self.assertEqual(res["field_name"], "title")
+        self.assertEqual(res["field_name"], "proposed_title")
         self.assertEqual(res["source"], "ui_lock")
         self.assertGreater(res["locked_at"], 0)
         # Verifier delegation au repo
         repo: _FakeRepo = api._store.field_locks
         self.assertEqual(len(repo.calls), 1)
         self.assertEqual(repo.calls[0][0], "set_lock")
-        self.assertEqual(repo.calls[0][1], ("tmdb:603", "title", "The Matrix"))
+        self.assertEqual(repo.calls[0][1], ("tmdb:603", "proposed_title", "The Matrix"))
 
     def test_set_field_lock_rejects_empty_film_id(self):
         api = _FakeApi()
-        res = library_support.set_field_lock(api, film_id="", field_name="title")
+        res = library_support.set_field_lock(api, film_id="", field_name="proposed_title")
         self.assertFalse(res["ok"])
         self.assertEqual(len(api._store.field_locks.calls), 0)
 
@@ -183,7 +183,7 @@ class LibrarySupportSetFieldLockTests(unittest.TestCase):
         res = library_support.set_field_lock(
             api,
             film_id="tmdb:1",
-            field_name="title",
+            field_name="proposed_title",
             locked_value="x",
             source="evil_script",
         )
@@ -193,27 +193,27 @@ class LibrarySupportSetFieldLockTests(unittest.TestCase):
     def test_set_field_lock_handles_store_unavailable(self):
         """Si _get_or_create_infra leve, on retourne err runtime, pas crash."""
         api = _NoStoreApi()
-        res = library_support.set_field_lock(api, film_id="tmdb:1", field_name="title")
+        res = library_support.set_field_lock(api, film_id="tmdb:1", field_name="proposed_title")
         self.assertFalse(res["ok"])
 
 
 class LibrarySupportClearFieldLockTests(unittest.TestCase):
     def test_clear_field_lock_idempotent_no_lock(self):
         api = _FakeApi()
-        res = library_support.clear_field_lock(api, "tmdb:999", "title")
+        res = library_support.clear_field_lock(api, "tmdb:999", "proposed_title")
         self.assertTrue(res["ok"])
         self.assertFalse(res["removed"])
 
     def test_clear_field_lock_removes_existing(self):
         api = _FakeApi()
-        library_support.set_field_lock(api, film_id="tmdb:1", field_name="title", locked_value="x")
-        res = library_support.clear_field_lock(api, "tmdb:1", "title")
+        library_support.set_field_lock(api, film_id="tmdb:1", field_name="proposed_title", locked_value="x")
+        res = library_support.clear_field_lock(api, "tmdb:1", "proposed_title")
         self.assertTrue(res["ok"])
         self.assertTrue(res["removed"])
 
     def test_clear_field_lock_rejects_empty(self):
         api = _FakeApi()
-        self.assertFalse(library_support.clear_field_lock(api, "", "title")["ok"])
+        self.assertFalse(library_support.clear_field_lock(api, "", "proposed_title")["ok"])
         self.assertFalse(library_support.clear_field_lock(api, "tmdb:1", "")["ok"])
 
 
@@ -227,16 +227,16 @@ class LibrarySupportListFieldLocksTests(unittest.TestCase):
 
     def test_list_field_locks_returns_all(self):
         api = _FakeApi()
-        library_support.set_field_lock(api, film_id="tmdb:42", field_name="title", locked_value="Star Wars")
-        library_support.set_field_lock(api, film_id="tmdb:42", field_name="year", locked_value=1977)
+        library_support.set_field_lock(api, film_id="tmdb:42", field_name="proposed_title", locked_value="Star Wars")
+        library_support.set_field_lock(api, film_id="tmdb:42", field_name="proposed_year", locked_value=1977)
         # Autre film -> ne doit pas apparaitre
-        library_support.set_field_lock(api, film_id="tmdb:43", field_name="title", locked_value="Other")
+        library_support.set_field_lock(api, film_id="tmdb:43", field_name="proposed_title", locked_value="Other")
 
         res = library_support.list_field_locks(api, "tmdb:42")
         self.assertTrue(res["ok"])
         self.assertEqual(len(res["locks"]), 2)
         field_names = {lk["field_name"] for lk in res["locks"]}
-        self.assertEqual(field_names, {"title", "year"})
+        self.assertEqual(field_names, {"proposed_title", "proposed_year"})
 
     def test_list_field_locks_empty_film_id_rejects(self):
         api = _FakeApi()
@@ -266,7 +266,7 @@ class LibraryFacadeDelegationTests(unittest.TestCase):
         facade, api = self._make_facade()
         res = facade.set_field_lock(
             film_id="tmdb:603",
-            field_name="title",
+            field_name="proposed_title",
             locked_value="Matrix",
             source="ui_lock",
         )
@@ -275,14 +275,14 @@ class LibraryFacadeDelegationTests(unittest.TestCase):
 
     def test_facade_clear_field_lock_delegates(self):
         facade, api = self._make_facade()
-        facade.set_field_lock(film_id="tmdb:1", field_name="title", locked_value="x")
-        res = facade.clear_field_lock(film_id="tmdb:1", field_name="title")
+        facade.set_field_lock(film_id="tmdb:1", field_name="proposed_title", locked_value="x")
+        res = facade.clear_field_lock(film_id="tmdb:1", field_name="proposed_title")
         self.assertTrue(res["ok"])
         self.assertTrue(res["removed"])
 
     def test_facade_list_field_locks_delegates(self):
         facade, api = self._make_facade()
-        facade.set_field_lock(film_id="tmdb:42", field_name="title", locked_value="SW")
+        facade.set_field_lock(film_id="tmdb:42", field_name="proposed_title", locked_value="SW")
         res = facade.list_field_locks(film_id="tmdb:42")
         self.assertTrue(res["ok"])
         self.assertEqual(len(res["locks"]), 1)
