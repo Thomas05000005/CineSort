@@ -240,8 +240,10 @@ Elles ont coute du temps ; les consigner evite de le repayer.
   `(root / relative).resolve()` puis `resolved.relative_to(root)`, avec un `root`
   lui-meme `.resolve()` dans les 3 branches de `_resolve_locales_root`. `resolve()`
   suivant les liens, un symlink interne pointant dehors est attrape. Correct.
-- **Appels JS vers un endpoint inexistant** — **0**. 105 endpoints litteraux extraits de
-  `apiPost("...")` croises avec les 172 methodes des 6 facades : tous resolvent. Les 2
+- **Appels JS vers un endpoint inexistant** — **0**. 107 endpoints litteraux prefixes,
+  extraits de `apiPost("...")` et croises avec les 172 methodes des 6 facades : tous
+  resolvent. Commande de remesure :
+  `grep -rhoE "apiPost\(\s*[\"'\`][a-zA-Z0-9_/]+[\"'\`]" web/ --include=*.js | grep -oE "[\"'\`][a-zA-Z0-9_/]+[\"'\`]" | tr -d "\"'\`" | sort -u | grep "/" | wc -l`. Les 2
   appels dynamiques (`parametres.js:1048` et `:2399`) passent des noms construits
   (`runtime/recheck_probe_tools` / `runtime/get_probe_tools_status`), qui existent.
   `apiPost("open_path")` n'apparait plus que dans un **commentaire**
