@@ -55,15 +55,23 @@ _EXIT = "\nprocess.exit(0);\n"
 
 #: Un hote minimal : le seul membre que la vue touche est `innerHTML`, plus
 #: add/removeEventListener. On enregistre les ecouteurs pour pouvoir verifier
-#: que le demontage les retire vraiment.
+#: que le demontage les retire vraiment, ET on GARDE le rappel — sans lui, on ne
+#: peut eprouver que l'etat interne de la vue, jamais ce qu'elle envoie.
 _HOTE = r"""
 function fauxHote() {
   return {
     innerHTML: "",
     ecouteurs: 0,
-    addEventListener() { this.ecouteurs += 1; },
-    removeEventListener() { this.ecouteurs -= 1; },
+    rappel: null,
+    addEventListener(_type, fn) { this.ecouteurs += 1; this.rappel = fn; },
+    removeEventListener() { this.ecouteurs -= 1; this.rappel = null; },
   };
+}
+
+/** Declenche le VRAI gestionnaire de la vue sur un bouton porteur de `dataset`. */
+function cliquer(hote, dataset) {
+  const cible = { dataset, closest: () => cible };
+  hote.rappel({ target: cible });
 }
 """
 
@@ -88,7 +96,16 @@ __emit({ routes: globalThis.__appels.map((a) => a.route) });
         self.assertEqual(res["routes"], ["library/get_library_podiums"])
 
     def test_la_fenetre_de_mois_est_TRANSMISE(self) -> None:
-        """Un selecteur qui n'envoie pas son choix affiche toujours la meme chose."""
+        """Un selecteur qui n'envoie pas son choix affiche toujours la meme chose.
+
+        CE TEST A DEJA ETE UN FAUX VERT. Sa premiere version posait
+        `M.__t._state.mois = 24` puis assertait `_state.mois === 24` : elle
+        verifiait que la valeur qu'elle venait d'ecrire etait celle qu'elle avait
+        ecrite. Elle serait restee verte si la vue avait cesse d'envoyer `months`
+        au backend — c'est-a-dire dans le seul cas qu'elle pretendait couvrir.
+        Elle porte desormais sur le PARAMETRE REELLEMENT ENVOYE, en declenchant
+        le vrai gestionnaire de clic.
+        """
         res = self._run(
             r"""
 globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
@@ -96,14 +113,39 @@ globalThis.__reponses["library/get_library_timeline"] = { ok: true, months: [] }
 const h = fauxHote();
 M.__init(h);
 await new Promise((r) => setTimeout(r, 0));
-M.__t._state.mois = 24;
-M.__t._state.onglet = "timeline";
 globalThis.__appels.length = 0;
+cliquer(h, { statsOnglet: "timeline" });
 await new Promise((r) => setTimeout(r, 0));
-__emit({ etat: M.__t._state.mois });
+cliquer(h, { statsMois: "24" });
+await new Promise((r) => setTimeout(r, 0));
+const t = globalThis.__appels.filter((a) => a.route === "library/get_library_timeline");
+__emit({ dernier: t.length ? t[t.length - 1].params : null, nb: t.length });
 """
         )
-        self.assertEqual(res["etat"], 24)
+        self.assertGreaterEqual(res["nb"], 1, "aucun appel a la chronologie n'a ete emis")
+        self.assertEqual(
+            res["dernier"],
+            {"months": 24},
+            "la fenetre choisie n'est pas transmise au backend : le selecteur est decoratif",
+        )
+
+    def test_la_DIMENSION_du_rollup_est_TRANSMISE(self) -> None:
+        """Meme contrat pour l'autre selecteur de la vue."""
+        res = self._run(
+            r"""
+globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
+globalThis.__reponses["library/get_scoring_rollup"] = { ok: true, groups: [] };
+const h = fauxHote();
+M.__init(h);
+await new Promise((r) => setTimeout(r, 0));
+globalThis.__appels.length = 0;
+cliquer(h, { statsDimension: "codec" });
+await new Promise((r) => setTimeout(r, 0));
+const t = globalThis.__appels.filter((a) => a.route === "library/get_scoring_rollup");
+__emit({ dernier: t.length ? t[t.length - 1].params : null });
+"""
+        )
+        self.assertEqual(res["dernier"], {"by": "codec"})
 
 
 class UneABSENCENEstPasUnZEROTests(unittest.TestCase):
