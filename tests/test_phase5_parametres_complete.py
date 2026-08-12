@@ -5,7 +5,7 @@ Verifie que la vue parametres.js implemente bien :
 - Mode expert persiste dans settings.expert_mode (backend)
 - Recherche live + highlight + raccourci Ctrl+K
 - Reset modale avec scopes (10 + database) + CONFIRMER + countdown 3s
-- Profils Qualite : selecteur actif + sliders poids + validation somme ~1.00
+- Profils Qualite : selecteur actif + sliders poids + validation somme ~100
 """
 
 from __future__ import annotations
@@ -244,12 +244,31 @@ class ProfilsQualiteTests(unittest.TestCase):
         for w in ("resolution", "bitrate", "codec", "audio_bitrate", "audio_channels", "subtitles_fr"):
             self.assertIn(w, self.js, f"composante {w} manquante")
 
-    def test_weights_default_sum_to_one(self) -> None:
-        # _DEFAULT_WEIGHTS doit sommer a 1.00 (somme : 0.25+0.20+0.15+0.20+0.10+0.10 = 1.00)
-        self.assertIn("_DEFAULT_WEIGHTS", self.js)
-        self.assertIn("resolution: 0.25", self.js)
-        self.assertIn("bitrate: 0.20", self.js)
-        self.assertIn("codec: 0.15", self.js)
+    def test_les_poids_par_defaut_sont_ceux_du_SCORING(self) -> None:
+        """CE TEST COMPARAIT UNE CHAINE DE CODE SOURCE, et c'est ce qui l'a rendu
+        inutile.
+
+        Il exigeait `resolution: 0.25`, `bitrate: 0.20`, `codec: 0.15` — six
+        poids qu'aucune ligne du moteur de scoring ne lit. Il est reste vert
+        pendant tout ce temps, pendant que bouger les curseurs correspondants
+        REMETTAIT les vrais poids (video/audio/extras) aux valeurs d'usine. Un
+        test de chaine ne detecte rien quand le code casse, et tombe quand il
+        s'ameliore : les deux se sont produits ici.
+
+        Il porte desormais sur les VALEURS, comparees a la source de verite —
+        `default_quality_profile()["weights"]` du backend. Le contrat complet de
+        l'ecran vit dans `tests/test_poids_profil_qualite_ecran.py`.
+        """
+        from cinesort.domain.quality_score import default_quality_profile
+
+        attendus = default_quality_profile()["weights"]
+        self.assertEqual(set(attendus), {"video", "audio", "extras"})
+        for cle, valeur in attendus.items():
+            self.assertIn(
+                f"{cle}: {valeur}",
+                self.js,
+                f"le poids par defaut « {cle} » de l'ecran ne vaut pas celui du backend ({valeur})",
+            )
 
     def test_save_profile_new(self) -> None:
         self.assertIn("settings/save_profile", self.js)
@@ -259,10 +278,16 @@ class ProfilsQualiteTests(unittest.TestCase):
         self.assertIn('data-parametres-profils-action="recompute"', self.js)
         self.assertIn("quality/recompute_all_scores", self.js)
 
-    def test_weight_sum_validation_tolerance_5pct(self) -> None:
-        # 0.95 <= total <= 1.05
-        self.assertIn("0.95", self.js)
-        self.assertIn("1.05", self.js)
+    def test_la_somme_des_poids_est_validee_dans_la_forme_du_backend(self) -> None:
+        """La forme canonique est en POINTS DE POURCENTAGE (somme 100).
+
+        L'ancienne assertion exigeait les bornes 0.95/1.05 — la validation en
+        fraction — qui aurait refuse tout profil reel, `default_quality_profile()`
+        rendant {video: 60, audio: 30, extras: 10}.
+        """
+        self.assertIn("_SOMME_POIDS = 100", self.js)
+        self.assertIn("_TOLERANCE_POIDS", self.js)
+        self.assertNotIn("total < 0.95", self.js, "la validation en fraction subsiste")
 
     def test_tier_strict_decreasing_validation(self) -> None:
         # platinum > gold > silver > bronze
