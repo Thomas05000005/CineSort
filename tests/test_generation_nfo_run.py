@@ -87,7 +87,7 @@ function labelForFlag(f) { return String(f); }
 const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
 """
 
-_EXTRA = "export const __nfo = _genererLesNfo;\n"
+_EXTRA = "export const __nfo = _genererLesNfo;\nexport const __clic = _onActionClick;\n"
 _EXIT = "\nprocess.exit(0);\n"
 _BOUTON = 'const btn = { disabled: false, textContent: "🎬 Générer les .nfo" };\n'
 
@@ -157,6 +157,42 @@ __emit({ reels: globalThis.__appels.filter((a) => a.params && a.params.dry_run =
         )
         self.assertEqual(res["reels"], [{"run_id": "run-42", "dry_run": False}])
         self.assertIn("success", res["toasts"])
+
+
+class LeBOUTONEstVraimentBRANCHETests(_Base):
+    """Muter le SITE D'APPEL separement, et pas seulement la fonction.
+
+    Les tests ci-dessus appellent `_genererLesNfo` directement : ils restaient
+    tous VERTS quand on debranchait le bouton du repartiteur d'actions. Une
+    fonction juste ne sert a rien si aucun bouton ne l'atteint — c'est meme
+    exactement le defaut que toute cette vague corrige (des methodes de facade
+    completes et inatteignables).
+
+    CE QUE CE TEST NE COUVRE PAS, ET IL FAUT LE DIRE. Il synthetise le bouton
+    plutot que de le rendre. Renommer l'attribut `data-historique-action` dans
+    le HTML de la barre d'actions le laisse donc VERT (mutation mesuree). Le
+    rendu du panneau exige un `selectedRun` complet et tout son contexte ; les
+    quatre boutons voisins de cette barre ont exactement la meme couverture.
+    C'est une limite connue, pas une couverture supposee.
+    """
+
+    def test_le_clic_sur_le_bouton_atteint_la_generation(self) -> None:
+        res = self._run(
+            _APERCU
+            + r"""
+globalThis.__accepte = false;
+const bouton = { dataset: { historiqueAction: "export-nfo", runId: "run-77" }, disabled: false, textContent: "🎬" };
+bouton.closest = (sel) => (sel.indexOf("historique-action") >= 0 ? bouton : null);
+M.__clic({ target: bouton });
+await new Promise((r) => setTimeout(r, 0));
+__emit({ appels: globalThis.__appels.map((a) => ({ route: a.route, run_id: a.params && a.params.run_id })) });
+"""
+        )
+        self.assertEqual(
+            res["appels"],
+            [{"route": "run/export_run_nfo", "run_id": "run-77"}],
+            "le bouton « Générer les .nfo » n'atteint pas la generation",
+        )
 
 
 class LaCONFIRMATIONDitLesVRAISChiffresTests(_Base):
