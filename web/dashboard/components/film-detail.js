@@ -151,6 +151,50 @@ function _renderErrorState(msg) {
  * Hero
  * =========================================================== */
 
+/**
+ * Noms de champ qu'un verrou PROTEGE REELLEMENT.
+ *
+ * Ce sont des CLES DE PLAN ROW, pas des libelles d'affichage. Mesure du
+ * 2026-08-07 : un verrou pose sur `"title"` rend `ok: true`, affiche un cadenas
+ * ferme, et le titre est ecrase au rescan suivant — `merge_metadata` compare
+ * `locked_fields` aux cles de la nouvelle row, ou `"title"` n'existe pas.
+ * Le backend refuse desormais les noms inconnus (#1017), mais l'interface ne
+ * doit pas compter sur ce refus pour etre correcte.
+ */
+const CHAMPS_VERROUILLABLES = { proposed_title: "le titre", proposed_year: "l'annee" };
+
+/** Le film est-il verrouille sur ce champ ? Lu depuis l'etat, jamais devine. */
+function estVerrouille(champ) {
+  const verrous = (_state.data && _state.data._verrous) || [];
+  return verrous.some((v) => String(v && v.field_name).toLowerCase() === champ);
+}
+
+/**
+ * Bouton cadenas d'un champ.
+ *
+ * Rendu vide si le film n'a pas d'identite (`film_id`) : sans elle, les trois
+ * endpoints de verrous ne peuvent pas nommer le film, et un cadenas cliquable
+ * qui echoue silencieusement serait pire que pas de cadenas du tout.
+ */
+function cadenasHtml(champ, valeur) {
+  const filmId = (_state.data && _state.data.film_id) || "";
+  if (!filmId || !CHAMPS_VERROUILLABLES[champ]) return "";
+  const verrouille = estVerrouille(champ);
+  const quoi = CHAMPS_VERROUILLABLES[champ];
+  const libelle = verrouille
+    ? `Déverrouiller ${quoi} : il redeviendra modifiable par un re-match TMDb`
+    : `Verrouiller ${quoi} : un re-match TMDb ne l'écrasera plus`;
+  return ` <button type="button"
+        class="film-detail-lock${verrouille ? " film-detail-lock--on" : ""}"
+        data-film-action="toggle-field-lock"
+        data-field-name="${escapeHtml(champ)}"
+        data-field-value="${escapeHtml(String(valeur == null ? "" : valeur))}"
+        data-locked="${verrouille ? "1" : "0"}"
+        aria-pressed="${verrouille ? "true" : "false"}"
+        title="${escapeHtml(libelle)}"
+        aria-label="${escapeHtml(libelle)}">${verrouille ? "🔒" : "🔓"}</button>`;
+}
+
 function _renderHero(data) {
   const row = data.row || {};
   const candidates = Array.isArray(row.candidates) ? row.candidates : [];
@@ -245,7 +289,7 @@ function _renderHero(data) {
       ${posterHtml}
       <div class="film-detail-meta">
         <h2 id="film-detail-title" class="film-detail-title">
-          ${escapeHtml(title)}${year ? ` <span class="film-detail-year">(${escapeHtml(String(year))})</span>` : ""}
+          ${escapeHtml(title)}${cadenasHtml("proposed_title", title)}${year ? ` <span class="film-detail-year">(${escapeHtml(String(year))})</span>${cadenasHtml("proposed_year", year)}` : ""}
         </h2>
         ${metaLine ? `<div class="film-detail-meta-line">${metaLine}</div>` : ""}
         <div class="film-detail-meta-stats">
@@ -787,6 +831,10 @@ async function _handleAction(action, btn) {
   }
 
   switch (action) {
+    case "toggle-field-lock":
+      _basculerLeVerrou(btn);
+      break;
+
     case "open-analysis":
       _state.activeTab = "analysis";
       _renderAll();
@@ -1481,12 +1529,80 @@ async function _reload() {
     _state.data = data;
     _state.loading = false;
     _renderAll();
+    // Les verrous arrivent APRES le premier rendu, deliberement : un appel de
+    // plus en serie retarderait toute la fiche pour une icone. Le second rendu
+    // ne se fait que si la reponse concerne toujours le film affiche.
+    _chargerLesVerrous(rowId, seq);
   } catch (e) {
     // F05 : meme garde sur l'echec, sinon l'erreur du film A efface la fiche B.
     if (seq !== _state.loadSeq || _state.rowId !== rowId) return;
     _state.loading = false;
     _state.data = null;
     _renderInto(_renderErrorState(e && (e.message || String(e))));
+  }
+}
+
+/**
+ * Charge l'etat des verrous du film affiche, puis repeint.
+ *
+ * Best-effort et SILENCIEUX en cas d'echec : l'absence de verrous n'est pas une
+ * erreur d'affichage de fiche. Les cadenas apparaissent alors deverrouilles —
+ * ce qui est le bon defaut, puisqu'un clic reposera la question au serveur.
+ *
+ * Les gardes `loadSeq` / `rowId` sont celles du chargement principal : sans
+ * elles, la reponse d'un film A repeindrait la fiche d'un film B ouvert
+ * entre-temps.
+ */
+async function _chargerLesVerrous(rowId, seq) {
+  const filmId = (_state.data && _state.data.film_id) || "";
+  if (!filmId) return;
+  try {
+    const res = await apiPost("library/list_field_locks", { film_id: filmId });
+    const data = (res && res.data) || res || {};
+    if (seq !== _state.loadSeq || _state.rowId !== rowId || !_state.data) return;
+    if (data.ok === false) return;
+    _state.data._verrous = Array.isArray(data.locks) ? data.locks : [];
+    _renderAll();
+  } catch (e) {
+    /* silencieux : cf. docstring */
+  }
+}
+
+/**
+ * Pose ou retire le verrou d'un champ, puis relit l'etat REEL.
+ *
+ * On ne bascule PAS l'icone localement : le serveur peut refuser (nom de champ
+ * inconnu, store indisponible), et une icone qui ment sur l'etat d'un verrou
+ * est exactement le defaut que #1017 a corrige cote backend.
+ */
+async function _basculerLeVerrou(btn) {
+  const champ = String(btn.dataset.fieldName || "");
+  const filmId = (_state.data && _state.data.film_id) || "";
+  if (!champ || !filmId) return;
+  const etaitVerrouille = btn.dataset.locked === "1";
+  const route = etaitVerrouille ? "library/clear_field_lock" : "library/set_field_lock";
+  const params = etaitVerrouille
+    ? { film_id: filmId, field_name: champ }
+    : { film_id: filmId, field_name: champ, locked_value: String(btn.dataset.fieldValue || "") };
+  btn.disabled = true;
+  try {
+    const res = await apiPost(route, params);
+    const data = (res && res.data) || res || {};
+    if (data.ok === false) {
+      showToast({ type: "error", text: data.user_message || data.message || "Le verrou n'a pas pu être modifié." });
+      return;
+    }
+    showToast({
+      type: "success",
+      text: etaitVerrouille
+        ? "Verrou retiré : ce champ redeviendra modifiable par un re-match."
+        : "Verrou posé : un re-match TMDb n'écrasera plus ce champ.",
+    });
+    await _chargerLesVerrous(_state.rowId, _state.loadSeq);
+  } catch (e) {
+    showToast({ type: "error", text: "Le verrou n'a pas pu être modifié." });
+  } finally {
+    btn.disabled = false;
   }
 }
 

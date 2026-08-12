@@ -1,0 +1,245 @@
+"""Les cinq actions d'integration doivent poser la BONNE route, et rendre la reponse.
+
+CE QUE CES BOUTONS RENDENT ATTEIGNABLE. Cinq methodes de facade existaient,
+testees cote backend, et n'etaient appelees par AUCUN code du dashboard.
+`docs/TROUBLESHOOTING.md` donne pourtant le rapport de coherence Jellyfin comme
+*la* solution utilisateur a un probleme documente — une reponse que personne ne
+pouvait suivre.
+
+CE QUE CE FICHIER EPROUVE, ET POURQUOI PAS AUTRE CHOSE. Une action d'integration
+n'a que deux facons de se tromper qui comptent : appeler la mauvaise route, ou
+perdre l'information de la reponse. Les deux sont verifiees sur la VRAIE source
+`web/dashboard/views/parametres.js` (cf. `tests/_jsexec.py`) — un test qui
+chercherait la chaine `get_jellyfin_sync_report` dans le fichier passerait au
+vert sur du code mort.
+
+POURQUOI `request_radarr_upgrade` N'EST PAS LA. Elle exige un `radarr_movie_id`,
+donc elle appartient a la fiche d'un film, pas a un reglage global. La cabler ici
+aurait demande d'inventer un champ de saisie d'identifiant Radarr — une interface
+que personne n'a demandee, pour une methode qui a deja son domicile naturel
+ailleurs. Elle reste donc dans `KNOWN_ORPHAN_METHODS`, et ce fichier ne pretend
+pas le contraire.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from tests._jsexec import ROOT, require_node, run_module_test
+
+PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
+
+#: Les cinq routes que la page doit rendre atteignables.
+ROUTES_ATTENDUES = (
+    "integrations/get_jellyfin_sync_report",
+    "integrations/refresh_jellyfin_library_now",
+    "integrations/get_plex_sync_report",
+    "integrations/refresh_plex_library_now",
+    "integrations/test_email_report",
+)
+
+_STUBS = r"""
+globalThis.window = { addEventListener() {}, removeEventListener() {}, location: { hash: "" } };
+globalThis.document = {
+  addEventListener() {}, removeEventListener() {},
+  getElementById() { return null; }, querySelector() { return null; },
+  querySelectorAll() { return []; },
+  createElement() { return { style: {}, classList: { add() {}, remove() {} }, appendChild() {} }; },
+  body: { appendChild() {}, classList: { add() {}, remove() {} } },
+};
+
+globalThis.__appels = [];
+globalThis.__reponses = {};
+
+function apiPost(route, params) {
+  globalThis.__appels.push({ route, params });
+  const r = globalThis.__reponses[route];
+  return Promise.resolve(r === undefined ? { ok: true } : r);
+}
+function invalidateSettingsCache() {}
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function showToast(o) { globalThis.__toasts.push(o); }
+globalThis.__toasts = [];
+function dangerConfirmModal() { return Promise.resolve(true); }
+function t(k) { return String(k); }
+function formatBytes() { return ""; }
+function registerRoute() {}
+function navigate() {}
+const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
+"""
+
+_EXTRA = (
+    "export const __ACTIONS = ACTIONS_DE_SECTION;\n"
+    "export const __rendreSectionActions = _renderSectionActions;\n"
+    "export const __lancer = _lancerActionDeSection;\n"
+    "export const __rendreReponse = _rendreReponseAction;\n"
+)
+
+_EXIT = "\nprocess.exit(0);\n"
+
+#: Un bouton et sa section, tels que le DOM les porterait. Le `closest` remonte
+#: a la section, qui expose la zone de sortie : c'est ce chemin-la qui casse si
+#: le rendu et le gestionnaire divergent.
+_FAUX_DOM = r"""
+function fauxBouton(route) {
+  const sortie = { textContent: "", className: "" };
+  const section = { querySelector: () => sortie };
+  const btn = {
+    dataset: { sectionAction: route },
+    disabled: false,
+    closest: () => section,
+  };
+  return { btn, sortie };
+}
+"""
+
+
+class LesCinqActionsSontDECLAREESTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+    def test_les_routes_declarees_sont_exactement_les_cinq(self) -> None:
+        res = self._run(
+            r"""
+const routes = [];
+for (const actions of Object.values(M.__ACTIONS)) for (const a of actions) routes.push(a.route);
+__emit({ routes });
+"""
+        )
+        self.assertEqual(sorted(res["routes"]), sorted(ROUTES_ATTENDUES))
+
+    def test_chaque_action_porte_un_libelle_et_une_explication(self) -> None:
+        """Un bouton sans titre laisse l'utilisateur deviner ce qu'il declenche."""
+        res = self._run(
+            r"""
+const manques = [];
+for (const actions of Object.values(M.__ACTIONS)) for (const a of actions) {
+  if (!a.label || !a.titre || !a.rendu) manques.push(a.route);
+}
+__emit({ manques });
+"""
+        )
+        self.assertEqual(res["manques"], [])
+
+    def test_une_section_SANS_action_ne_rend_rien(self) -> None:
+        """Le rendu ne doit pas semer des barres d'action vides partout."""
+        res = self._run('__emit({ html: M.__rendreSectionActions({ id: "tmdb" }) });')
+        self.assertEqual(res["html"], "")
+
+    def test_la_section_jellyfin_rend_ses_DEUX_boutons(self) -> None:
+        res = self._run('__emit({ html: M.__rendreSectionActions({ id: "jellyfin" }) });')
+        self.assertIn("integrations/get_jellyfin_sync_report", res["html"])
+        self.assertIn("integrations/refresh_jellyfin_library_now", res["html"])
+        self.assertIn('data-section-actions-out="jellyfin"', res["html"])
+
+
+class LActionAPPELLELaRouteDeSonBoutonTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=_FAUX_DOM + driver + _EXIT, timeout=90)
+
+    def test_le_rapport_jellyfin_appelle_sa_route(self) -> None:
+        res = self._run(
+            r"""
+const { btn } = fauxBouton("integrations/get_jellyfin_sync_report");
+globalThis.__reponses["integrations/get_jellyfin_sync_report"] = { ok: true, missing: 3, matched: 41 };
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(res["appels"], ["integrations/get_jellyfin_sync_report"])
+
+    def test_une_route_INCONNUE_n_appelle_rien(self) -> None:
+        """Un bouton dont la route n'est pas declaree ne doit pas partir au hasard."""
+        res = self._run(
+            r"""
+const { btn } = fauxBouton("integrations/format_c_drive");
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(res["appels"], [])
+
+    def test_un_REFUS_affiche_le_message_du_backend(self) -> None:
+        res = self._run(
+            r"""
+const { btn, sortie } = fauxBouton("integrations/refresh_plex_library_now");
+globalThis.__reponses["integrations/refresh_plex_library_now"] =
+  { ok: false, user_message: "URL Plex absente." };
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ texte: sortie.textContent, classe: sortie.className });
+"""
+        )
+        self.assertEqual(res["texte"], "URL Plex absente.")
+        self.assertIn("--error", res["classe"])
+
+    def test_le_bouton_est_reactive_meme_apres_un_echec(self) -> None:
+        """Un bouton laisse desactive rendrait l'action injouable jusqu'au rechargement."""
+        res = self._run(
+            r"""
+const { btn } = fauxBouton("integrations/test_email_report");
+globalThis.__reponses["integrations/test_email_report"] = { ok: false, message: "SMTP KO" };
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ disabled: btn.disabled });
+"""
+        )
+        self.assertFalse(res["disabled"])
+
+
+class LeRapportRENDSesChiffresTests(unittest.TestCase):
+    """Un rapport de coherence existe POUR ses chiffres : les reduire a « OK »
+    perdrait exactement l'information qu'on est venu chercher."""
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+    def test_les_compteurs_apparaissent(self) -> None:
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "rapport" }, { ok: true, missing: 3, matched: 41 }) });
+"""
+        )
+        self.assertIn("3", res["texte"])
+        self.assertIn("41", res["texte"])
+
+    def test_une_cle_ABSENTE_n_est_pas_rendue_comme_zero(self) -> None:
+        """Une absence de mesure ne doit pas passer pour une mesure nulle."""
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "rapport" }, { ok: true, matched: 41 }) });
+"""
+        )
+        self.assertNotIn("0 absents", res["texte"])
+        self.assertIn("41", res["texte"])
+
+    def test_un_rapport_SANS_aucun_compteur_retombe_sur_le_message(self) -> None:
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "rapport" }, { ok: true, message: "Rien à comparer." }) });
+"""
+        )
+        self.assertEqual(res["texte"], "Rien à comparer.")
+
+    def test_une_action_de_type_message_ne_cherche_pas_de_compteurs(self) -> None:
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "message" }, { ok: true, missing: 3, message: "Rafraîchissement demandé." }) });
+"""
+        )
+        self.assertEqual(res["texte"], "Rafraîchissement demandé.")
+
+
+if __name__ == "__main__":
+    unittest.main()

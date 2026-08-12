@@ -7888,6 +7888,70 @@ body.v5-notif-lock {
   font-weight: var(--fw-regular, 400);
 }
 
+/* Cadenas de verrouillage d'un champ (titre, annee) — vague B1.
+   Discret tant qu'il est ouvert, franc une fois ferme : l'etat verrouille est
+   une information que l'utilisateur doit pouvoir lire d'un coup d'oeil, alors
+   que le cadenas ouvert ne doit pas concurrencer le titre. */
+/* Actions d'une section d'integration (rapports, rafraichissements, email de
+   test) — vague B2. Une ligne de boutons discrets, et une zone de sortie qui
+   porte la reponse du serveur : un rapport de coherence rend des CHIFFRES, pas
+   un simple accuse, et ils doivent rester lisibles. */
+.parametres-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-1, #333);
+}
+
+.parametres-section-actions-out {
+  flex: 1 1 100%;
+  font-size: var(--fs-sm, 0.9rem);
+  color: var(--text-2, #bbb);
+  min-height: 1.2em;
+}
+
+.parametres-section-actions-out--ok {
+  color: var(--ok, #4caf50);
+}
+
+.parametres-section-actions-out--error {
+  color: var(--danger, #e5534b);
+}
+
+.parametres-section-actions-out--info {
+  color: var(--text-2, #bbb);
+  font-style: italic;
+}
+
+.film-detail-lock {
+  background: none;
+  border: 0;
+  padding: 0 0.15em;
+  font-size: 0.7em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+  vertical-align: middle;
+  transition: opacity 120ms ease;
+}
+
+.film-detail-lock:hover,
+.film-detail-lock:focus-visible {
+  opacity: 1;
+}
+
+.film-detail-lock--on {
+  opacity: 1;
+}
+
+.film-detail-lock:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+
 .film-detail-meta-line {
   color: var(--text-2, #bbb);
   font-size: var(--fs-sm, 0.9rem);
