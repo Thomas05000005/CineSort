@@ -504,6 +504,49 @@ class RunRepository(_BaseRepository):
         "user_quality_feedback",
     )
 
+    #: Tables dont la ligne N'APPARTIENT PAS au run : `delete_run` y EFFACE le
+    #: `run_id` au lieu de supprimer la ligne.
+    #:
+    #: LES DEUX LISTES CI-DESSUS ET CI-DESSOUS REPONDENT A DEUX QUESTIONS
+    #: DIFFERENTES, et les confondre etait une simplification de trop.
+    #: `run_id_est_utilise` demande « cet identifiant est-il reference quelque
+    #: part ? » — il doit donc voir TOUTES les tables. `delete_run` demande
+    #: « qu'est-ce qui appartient a ce run ? » — ce n'est pas la meme chose.
+    #:
+    #: `film_field_locks` est le seul cas aujourd'hui : l'identite d'un verrou
+    #: est `(film_id, field_name)`, son `run_id` est documente « audit,
+    #: optionnel », et son schema le declare `TEXT NOT NULL DEFAULT ''`. Un
+    #: verrou est une INTENTION DE L'UTILISATEUR : il doit survivre a la
+    #: suppression du run pendant lequel il a ete pose.
+    #:
+    #: MESURE : les deux ecrivains de production laissent `run_id=''`, donc
+    #: aucune perte AUJOURD'HUI. Mais le cron de retention (90 j) appelle
+    #: `cleanup_old_runs` -> `delete_run` : le jour ou un appelant renseignerait
+    #: le champ, les verrous permanents disparaitraient sans un mot.
+    #:
+    #: Effacer le `run_id` plutot que la ligne satisfait les DEUX invariants a la
+    #: fois : le verrou survit, et l'identifiant cesse d'etre reference — donc
+    #: `run_id_est_utilise` le rend enfin libre, ce qui est precisement ce que
+    #: #984 exigeait.
+    _TABLES_DETACHEES_AU_LIEU_D_ETRE_PURGEES: tuple[str, ...] = ("film_field_locks",)
+
+    def _detacher_du_run(self, conn: Any, table: str, rid: str) -> int:
+        """Efface le `run_id` des lignes de `table` rattachees a `rid`.
+
+        Rend le nombre de lignes detachees, pour que `delete_run` le compte comme
+        il compterait des suppressions : le run cesse d'etre reference dans les
+        deux cas.
+        """
+        if table not in self._TABLES_DETACHEES_AU_LIEU_D_ETRE_PURGEES:  # pragma: no cover - garde de programmation
+            raise ValueError(f"table hors liste de detachement : {table!r}")
+        try:
+            cur = conn.execute(f"UPDATE {table} SET run_id='' WHERE run_id=?", (rid,))  # noqa: S608
+        except sqlite3.OperationalError as exc:
+            if not self._is_missing_table_error(exc, table):
+                raise
+            return 0
+        return int(cur.rowcount or 0)
+
     def run_id_est_utilise(self, run_id: str) -> bool:
         """Vrai si ce `run_id` est pris — y compris par une ligne ORPHELINE.
 
@@ -606,6 +649,9 @@ class RunRepository(_BaseRepository):
             for table in self._TABLES_PORTANT_RUN_ID:
                 if table == "apply_batches":
                     continue  # purge dediee plus bas, avec ses operations liees
+                if table in self._TABLES_DETACHEES_AU_LIEU_D_ETRE_PURGEES:
+                    enfants_supprimes += self._detacher_du_run(conn, table, rid)
+                    continue
                 try:
                     cur = conn.execute(f"DELETE FROM {table} WHERE run_id=?", (rid,))  # noqa: S608
                 except sqlite3.OperationalError as exc:
