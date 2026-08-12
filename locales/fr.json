@@ -74,7 +74,8 @@
       "history": "Historique",
       "qij": "QIJ",
       "settings": "Paramètres",
-      "help": "Aide"
+      "help": "Aide",
+      "statistiques": "Statistiques"
     },
     "aria_label": "Navigation CineSort v5",
     "about": "A propos",

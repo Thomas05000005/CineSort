@@ -1566,14 +1566,28 @@ def _save_section_probe(payload: Dict[str, Any], *, default_probe_backend: str) 
     # Utile pour les NAS SMB lents ou les gros fichiers 4K qui depassent 30s.
     # V5-04 : `probe_workers` int [0..16] (0=auto), `probe_parallelism_enabled` bool.
     workers_raw = to_int(payload.get("probe_workers"), 0)
-    return {
+    out: Dict[str, Any] = {
         "probe_backend": normalize_probe_backend(payload.get("probe_backend"), default_backend=default_probe_backend),
-        "mediainfo_path": str(payload.get("mediainfo_path") or "").strip(),
-        "ffprobe_path": str(payload.get("ffprobe_path") or "").strip(),
         "probe_timeout_s": max(5.0, min(300.0, to_float(payload.get("probe_timeout_s"), 30.0))),
         "probe_workers": max(0, min(16, workers_raw)),
         "probe_parallelism_enabled": to_bool(payload.get("probe_parallelism_enabled"), True),
     }
+    # LES DEUX CHEMINS D'OUTILS SUIVENT LA MEME REGLE QUE `set_probe_tool_paths` :
+    # cle ABSENTE = silence (on garde), cle presente et VIDE = demande (on efface).
+    #
+    # Le correctif de `set_probe_tool_paths` ne suffisait pas : cette section est
+    # la PORTE PRINCIPALE, et elle ecrivait les deux chemins inconditionnellement.
+    # Mesure, sur un state_dir reel, apres avoir enregistre les deux outils :
+    #
+    #     save_settings({"theme": "luxe"})  ->  ffprobe_path = ''  mediainfo_path = ''
+    #
+    # Un client REST postant une charge utile partielle effacait donc la
+    # configuration des outils par la grande porte, pendant que la petite etait
+    # gardee. Corriger un motif a un endroit ne le corrige pas ailleurs.
+    for cle in ("mediainfo_path", "ffprobe_path"):
+        if cle in payload:
+            out[cle] = str(payload.get(cle) or "").strip()
+    return out
 
 
 def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:

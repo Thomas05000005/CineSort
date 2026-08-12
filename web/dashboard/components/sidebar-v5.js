@@ -36,6 +36,8 @@ export const NAV_ITEMS = [
     svg: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' },
   { id: "history",      labelKey: "sidebar.nav.history",     shortcut: "Alt+5",
     svg: '<polyline points="3 12 3 4 21 4 21 20 3 20 3 12"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="20"/>' },
+  { id: "statistiques", labelKey: "sidebar.nav.statistiques",
+    svg: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>' },
   { id: "_separator" },
   { id: "settings",     labelKey: "sidebar.nav.settings",    shortcut: "Alt+6",
     svg: '<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/>' },

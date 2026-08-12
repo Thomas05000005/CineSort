@@ -68,11 +68,18 @@ DYNAMIC_ALLOWED_SITES: dict[tuple[str, str], int] = {
     # declarative que le reste de la page, et
     # `tests/test_actions_integration_parametres.py` verrouille la liste exacte.
     ("web/dashboard/views/parametres.js", "route"): 1,
+    # Vague C : la vue Statistiques choisit sa route selon l'onglet actif. UN
+    # site physique pour trois endpoints, tous declares plus bas, et la table
+    # `_ROUTES` est verrouillee par `tests/test_vue_statistiques.py`.
+    ("web/dashboard/views/statistiques.js", "route"): 1,
 }
 
 # Les endpoints resolus derriere les sites dynamiques ci-dessus. Chacun doit
 # rester une methode valide de sa facade (garde contre un rename backend).
 DYNAMIC_RESOLVED_ENDPOINTS: tuple[str, ...] = (
+    "library/get_library_podiums",
+    "library/get_library_timeline",
+    "library/get_scoring_rollup",
     "run/export_run_report",
     "integrations/get_jellyfin_sync_report",
     "runtime/get_log_paths",
