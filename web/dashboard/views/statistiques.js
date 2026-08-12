@@ -329,7 +329,7 @@ async function _charger(onglet, hote) {
     } else {
       _state.data[onglet] = data;
     }
-  } catch (e) {
+  } catch {
     _state.erreurs[onglet] = "Le serveur n'a pas répondu.";
   } finally {
     _state.chargement[onglet] = false;
