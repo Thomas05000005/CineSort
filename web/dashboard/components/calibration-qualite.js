@@ -328,14 +328,18 @@ function _preparerImport(contenu) {
     entrant = null;
   }
   // « OBJET » NE SUFFIT PAS A RECONNAITRE UN PROFIL. En JS, `[1,2,3]` est un
-  // objet et `{}` en est un aussi : les deux passaient, produisant un diff vide
+  // objet et `{}` en est un aussi : les deux passaient, produisant un diff VIDE
   // qu'on aurait pu confirmer — donc un profil ecrase par du neant. Trouve par
   // le test avant l'ecran. Un profil PORTE au moins un de ses groupes connus.
+  //
+  // Pas de `Array.isArray` ici : un tableau issu de `JSON.parse` ne peut pas
+  // porter de propriete nommee, donc il echoue deja sur `GROUPES.some`. Ce garde
+  // a ete ecrit puis RETIRE — aucune mutation ne pouvait le faire rougir, et une
+  // garde qu'aucun test ne peut voir n'en est pas une.
   const GROUPES = ["weights", "tiers", "toggles", "custom_rules"];
   const ressembleAUnProfil =
     entrant &&
     typeof entrant === "object" &&
-    !Array.isArray(entrant) &&
     GROUPES.some((g) => Object.prototype.hasOwnProperty.call(entrant, g));
   if (!ressembleAUnProfil) {
     showToast({ type: "error", text: "Ce fichier n'est pas un profil CineSort lisible." });
