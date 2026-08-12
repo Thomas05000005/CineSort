@@ -34,6 +34,8 @@ import { formatBytes } from "../core/format.js";
 import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
 // Vague D2 : le simulateur que l'avertissement ci-dessous reclame depuis toujours.
 import { ouvrirSimulateurQualite } from "../components/simulateur-qualite.js";
+// Vague D3 : les regles custom modifient score et tier, et etaient increables.
+import { ouvrirReglesQualite } from "../components/regles-qualite.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1336,7 +1338,10 @@ function _renderProfilsQualite() {
       <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-simulateur>
         🧪 Simuler un profil
       </button>
-      <span class="parametres-hint">Compare avant / après sur vos films, sans rien modifier.</span>
+      <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-regles>
+        ⚙ Règles personnalisées
+      </button>
+      <span class="parametres-hint">Comparez avant / après, ou affinez le score avec vos propres règles.</span>
     </p>
     <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
       <label class="parametres-hierarchy-toggle">
@@ -3639,6 +3644,15 @@ function _bindProfilsQualite(container) {
   // Le simulateur : une LECTURE, donc aucune confirmation.
   container.querySelectorAll("[data-parametres-ouvrir-simulateur]").forEach((btn) => {
     btn.addEventListener("click", () => ouvrirSimulateurQualite());
+  });
+
+  // Les regles courantes du profil sont passees telles quelles : le builder ne
+  // les redecouvre pas, il les EDITE.
+  container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const draft = _state.profileDraft || {};
+      ouvrirReglesQualite(draft.custom_rules || []);
+    });
   });
 
   // Boutons d'action
