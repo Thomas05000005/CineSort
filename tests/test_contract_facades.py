@@ -61,8 +61,7 @@ KNOWN_ORPHAN_METHODS = frozenset(
         # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
         # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
         "integrations.request_radarr_upgrade",
-        "run.export_run_nfo",
-        "run.export_run_report",
+        "run.export_run_nfo",  # B4 : NON cablable — parametre inerte et rows sans les champs necessaires — defaut a corriger d'abord
         "runtime.get_log_paths",
         "library.get_film_history",
         "quality.analyze_perceptual_batch",
@@ -87,15 +86,15 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.set_active_profile",
         "quality.simulate_quality_preset",
         "quality.validate_custom_rules",
-        "run.check_duplicates_fusion",
-        "run.cleanup_old_runs",
-        "run.export_apply_audit",
-        "run.get_cleanup_residual_preview",
-        "run.import_watchlist",
-        "run.list_apply_history",
-        "run.list_pending_runs",
-        "run.purge_quarantine_bucket",
-        "run.undo_by_row_preview",
+        "run.check_duplicates_fusion",  # B4 : NON cablable — gardee par la variable d'ENVIRONNEMENT serveur CINESORT_FUSION_DOUBLONS, qu'aucune ligne applicative ne positionne
+        "run.cleanup_old_runs",  # B4 : NON cablable — doublon : la purge tourne DEJA seule via le cron de retention (24 h)
+        "run.export_apply_audit",  # B4 : NON cablable — le parametre `limit` n'est pas transmis ; a traiter avec le defaut, pas par-dessus
+        "run.get_cleanup_residual_preview",  # B4 : NON cablable — obstacle majeur signale par la contre-lecture, non tranche
+        "run.import_watchlist",  # B4 : NON cablable — aucun domicile UI : la capacite n'a pas d'ecran d'accueil
+        "run.list_apply_history",  # B4 : NON cablable — aucune action ne peut cibler un batch affiche : `undo_last_apply` n'accepte pas de batch_id
+        "run.list_pending_runs",  # B4 : NON cablable — le bouton « Reprendre » qu'elle appelle refuse 1 des 3 statuts listes (_RESUMABLE_DB_STATES)
+        "run.purge_quarantine_bucket",  # B4 : NON cablable — doublon partiel de « Vider maintenant », deja cable sur le meme perimetre
+        "run.undo_by_row_preview",  # B4 : NON cablable — la preview par film n'expose ni apply_ts ni expired ; le cabler reactive l'impasse UNDONE_PARTIAL
         "runtime.check_for_updates",
         "runtime.get_event_ts",
         "runtime.get_probe",

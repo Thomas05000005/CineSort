@@ -80,6 +80,7 @@ DYNAMIC_RESOLVED_ENDPOINTS: tuple[str, ...] = (
     "library/get_library_podiums",
     "library/get_library_timeline",
     "library/get_scoring_rollup",
+    "run/export_run_report",
     "integrations/get_jellyfin_sync_report",
     "integrations/get_plex_sync_report",
     "integrations/refresh_jellyfin_library_now",
