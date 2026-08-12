@@ -10259,6 +10259,14 @@ body.v5-notif-lock {
   color: var(--text-1, #eee);
 }
 
+/* WCAG 2.4.7 — un onglet atteint au clavier doit se VOIR. Convention du depot :
+   chaque composant interactif porte sa propre regle, aucune ne retire l'outline. */
+.stats-onglet:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
 .stats-onglet.is-active {
   color: var(--accent, #6ea8fe);
   border-bottom-color: var(--accent, #6ea8fe);
@@ -10338,6 +10346,22 @@ body.v5-notif-lock {
   text-align: right;
 }
 
+/* Un <svg> est un element EN LIGNE : sans cette regle il s'assoit sur la ligne
+   de base et reserve sous lui la place d'un jambage, ce qui decale chaque barre
+   de quelques pixels vers le haut et desaligne la colonne entiere. */
+.stats-barre {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+}
+
+/* Porteur de la couleur de tier. Il n'a pas d'apparence propre — son role est de
+   QUALIFIER la barre qu'il contient (`.stats-tier--*` ci-dessous) — mais il lui
+   faut une boite, sinon le <span> reste en ligne et rend au meme decalage. */
+.stats-tier {
+  display: block;
+}
+
 .stats-barre-fond { fill: var(--surface-3, #262626); }
 .stats-barre-pleine { fill: var(--accent, #6ea8fe); }
 
@@ -10360,6 +10384,11 @@ body.v5-notif-lock {
 }
 
 .stats-choix:hover { color: var(--text-1, #eee); }
+
+.stats-choix:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
 
 .stats-choix.is-active {
   background: var(--accent-soft, rgba(110, 168, 254, 0.15));
