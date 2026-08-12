@@ -75,6 +75,10 @@ DYNAMIC_ALLOWED_SITES: dict[tuple[str, str], int] = {
 DYNAMIC_RESOLVED_ENDPOINTS: tuple[str, ...] = (
     "run/export_run_report",
     "integrations/get_jellyfin_sync_report",
+    "runtime/get_log_paths",
+    "runtime/purge_probe_cache",
+    "settings/get_naming_presets",
+    "settings/get_user_data_size",
     "integrations/get_plex_sync_report",
     "integrations/refresh_jellyfin_library_now",
     "integrations/refresh_plex_library_now",
