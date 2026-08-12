@@ -531,6 +531,54 @@ def scan_actif(e2e_server: Dict[str, Any]) -> Generator[Dict[str, Any], None, No
 
 
 @pytest.fixture(autouse=True)
+def _jeton_pour_page_nue(request):
+    """Authentifie AUSSI les tests qui prennent `page` au lieu de `authenticated_page`.
+
+    LE DEFAUT QUE CECI CORRIGE. Le retrait du bypass d'auth loopback (#1001) a
+    donne un jeton a `authenticated_page`, mais les fichiers de sweep prennent
+    `page` NU — 52 occurrences dans le seul `test_lotc_sweep_traitement.py`.
+    Ces pages n'avaient donc plus aucun jeton, donc plus aucune donnee.
+
+    LA CI NE POUVAIT PAS LE VOIR : son perimetre ignore `tests/e2e_dashboard`.
+    Mesure A/B sur `test_lotc_sweep_accueil.py`, une seule variable :
+
+        au commit AVANT #1001 (bypass present) : 1 failed, 8 passed
+        sur `main` apres #1001                 : 9 failed
+        avec cette fixture                     : 1 failed, 8 passed
+
+    Sur le repertoire entier : 59 -> 51 echecs, 39 -> 47 passes.
+
+    CE QUI RESTE ROUGE N'EST PAS DE CE FAIT. Les echecs residuels des fichiers
+    `test_dash_*` sont ANTERIEURS : `test_dash_02` + `test_dash_04` donnent
+    9 failed / 2 passed a l'IDENTIQUE avant #1001 et avec cette fixture.
+
+    POURQUOI UNE FIXTURE AUTOUSE PLUTOT QUE 150 SUBSTITUTIONS. Le jeton se
+    depose en une ligne, avant tout script de la page ; corriger fichier par
+    fichier laisserait le prochain test ecrit avec `page` retomber dans le meme
+    trou, en silence.
+
+    POURQUOI UN OPT-OUT. `test_dash_01_login.py` prend `page` nu DELIBEREMENT :
+    il eprouve l'ecran de login (`#loginToken`). Lui injecter un jeton ferait
+    afficher le shell d'emblee et le test n'eprouverait plus rien. Il porte donc
+    le marqueur `sans_jeton`.
+
+    RESOLUTION PARESSEUSE de `e2e_server`, comme `_reset_rate_limiter` juste en
+    dessous : en parametre direct, cet autouse demarrerait un serveur REST pour
+    tout module qui n'en veut pas.
+    """
+    if request.node.get_closest_marker("sans_jeton"):
+        return
+    if "page" not in request.fixturenames or "e2e_server" not in request.fixturenames:
+        return
+    page = request.getfixturevalue("page")
+    jeton = request.getfixturevalue("e2e_server")["token"]
+    page.add_init_script(
+        "try { sessionStorage.setItem('cinesort.dashboard.token', " + json.dumps(jeton) + "); } catch (e) {}"
+    )
+    page.add_init_script(_JS_JOURNAL_FETCH)
+
+
+@pytest.fixture(autouse=True)
 def _reset_rate_limiter(request):
     """Reset le rate limiter entre chaque test.
 
