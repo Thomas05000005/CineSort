@@ -195,6 +195,70 @@ __emit({ params: globalThis.__appels[0].params });
         self.assertEqual(res["params"]["preset_id"], "compact")
         self.assertEqual(res["params"]["scope"], "library")
 
+    def test_enregistrer_envoie_le_VRAI_profil_du_preset(self) -> None:
+        """LE defaut que ce test aurait du attraper des le debut.
+
+        La reponse de simulation ne porte AUCUNE cle `profile` — sa charge utile
+        est `before`/`after`/`delta`/`top_winners`… (mesure sur
+        `quality_simulator_support.py`). Une premiere version envoyait
+        `_etat.resultat.profile || {}` : elle enregistrait donc un profil VIDE
+        sous le nom du preset, sans jamais echouer. Aucun de mes tests ne
+        regardait CE QUI EST ENVOYE.
+        """
+        res = self._run(
+            _REPONSE
+            + r"""
+globalThis.__reponses["quality/get_quality_presets"] = {
+  ok: true,
+  presets: [{ preset_id: "remux_strict", profile_id: "CinemaLux_RemuxStrict_v1",
+              profile_json: { id: "CinemaLux_RemuxStrict_v1", weights: { video: 66, audio: 30, extras: 4 } } }],
+};
+await M.__t._simuler();
+await M.__t._enregistrer();
+const e = globalThis.__appels.filter((a) => a.route === "quality/save_custom_quality_preset")[0];
+__emit({ envoye: e ? e.params : null });
+"""
+        )
+        env = res["envoye"]
+        self.assertIsNotNone(env, "aucun enregistrement n'a eu lieu")
+        self.assertEqual(env["name"], "Remux strict")
+        self.assertEqual(
+            env["profile_json"]["weights"],
+            {"video": 66, "audio": 30, "extras": 4},
+            "un profil VIDE a ete enregistre sous le nom du preset",
+        )
+
+    def test_un_preset_INTROUVABLE_n_enregistre_RIEN(self) -> None:
+        res = self._run(
+            _REPONSE
+            + r"""
+globalThis.__reponses["quality/get_quality_presets"] = { ok: true, presets: [] };
+await M.__t._simuler();
+await M.__t._enregistrer();
+__emit({ ecritures: globalThis.__appels.filter((a) => a.route === "quality/save_custom_quality_preset").length,
+         toasts: globalThis.__toasts.map((t) => t.type) });
+"""
+        )
+        self.assertEqual(res["ecritures"], 0)
+        self.assertIn("error", res["toasts"])
+
+    def test_changer_de_preset_PERIME_le_resultat_affiche(self) -> None:
+        """Sinon l'ecran montre les chiffres d'un preset sous le nom d'un autre,
+        et « Enregistrer » porte sur celui qu'on ne regarde plus."""
+        res = self._run(
+            _REPONSE
+            + r"""
+await M.__t._simuler();
+const avant = !!M.__t._etat.resultat;
+// On rejoue exactement ce que fait le gestionnaire de clic.
+M.__t._etat.preset = "compact";
+M.__t._etat.resultat = null;
+__emit({ avant, apres: !!M.__t._etat.resultat });
+"""
+        )
+        self.assertTrue(res["avant"])
+        self.assertFalse(res["apres"])
+
     def test_enregistrer_SANS_simulation_n_ecrit_rien(self) -> None:
         """Un profil qu'on n'a pas vu a l'oeuvre est exactement ce que
         l'avertissement de l'interface demande d'eviter."""
