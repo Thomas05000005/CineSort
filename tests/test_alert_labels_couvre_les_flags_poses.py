@@ -88,16 +88,47 @@ def _cles_flag_map() -> set[str]:
     fin = texte.index("\n};", debut)
     corps = texte[debut:fin]
 
-    cles = set(re.findall(r"^\s+([A-Za-z_$][\w$]*)\s*:\s*\{", corps, re.M))
-    # Chaque entree de premier niveau ouvre un objet ; le compte doit concorder.
-    ouvertures = len(re.findall(r"^\s+[\"'A-Za-z_$][^\n:]*:\s*\{", corps, re.M))
-    if not cles or len(cles) != ouvertures:
+    cles = _cles_par_profondeur(corps)
+    if not cles:
         raise AssertionError(
-            f"l'extraction des cles de FLAG_MAP ne suit plus le fichier : "
-            f"{len(cles)} cle(s) reconnue(s) pour {ouvertures} entree(s) ouvrant un objet. "
-            f"Corriger CE parseur, pas `alert-labels.js` — sans quoi les cles manquees "
-            f"seraient signalees comme absentes de FLAG_MAP."
+            "aucune cle lue dans FLAG_MAP : le parseur ne suit plus le fichier. "
+            "Corriger CE parseur, pas `alert-labels.js` — sans quoi toutes les cles "
+            "seraient signalees comme absentes de FLAG_MAP."
         )
+    return cles
+
+
+def _cles_par_profondeur(corps: str) -> set[str]:
+    """Cles de PREMIER NIVEAU de `FLAG_MAP`, lues par profondeur d'accolades.
+
+    POURQUOI PAS UNE EXPRESSION REGULIERE, ET POURQUOI LA RELACHER SERAIT PIRE.
+    La version d'origine employait `^\\s{2}([a-z][a-z0-9_]*)\\s*:\\s*\\{` :
+    exactement deux espaces, minuscules seulement. sourcery-ai l'a signalee comme
+    fragile a un reformatage, et il a raison sur ce point — mais la correction
+    qu'il propose, elargir le motif, est FAUSSE, et la mesure le montre :
+
+        motif large `^\\s+(...)` : 29 cles
+        profondeur d'accolades   : 28 cles
+        vue en trop par le motif : ['action']
+
+    `action` est une cle IMBRIQUEE dans une entree. Le motif d'origine ne
+    l'attrapait que par accident — grace a l'indentation exacte qu'on lui
+    reprochait. L'elargir supprime cet accident et fait entrer les cles
+    imbriquees dans l'ensemble compare, ce qui aurait rendu le test faux dans
+    l'autre sens.
+
+    La profondeur d'accolades, elle, ne depend ni de l'indentation, ni de la
+    casse, ni du jeu de caracteres : elle lit la STRUCTURE. C'est la grandeur
+    qu'on voulait depuis le debut.
+    """
+    cles: set[str] = set()
+    profondeur = 0
+    for ligne in corps.splitlines():
+        if profondeur == 1:
+            m = re.match(r"([A-Za-z_$][\w$]*)\s*:", ligne.strip())
+            if m:
+                cles.add(m.group(1))
+        profondeur += ligne.count("{") - ligne.count("}")
     return cles
 
 
