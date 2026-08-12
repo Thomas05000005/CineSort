@@ -201,13 +201,27 @@ class UneERREURSQLITEDeclencheLeRepliTests(unittest.TestCase):
         store.quality.list_user_quality_feedback.return_value = []
         return store
 
-    def test_l_export_retombe_sur_le_defaut_au_lieu_de_lever(self) -> None:
+    def test_l_export_ne_LEVE_pas_et_REFUSE_franchement(self) -> None:
+        """Deux exigences, et la seconde a ete ajoutee apres coup.
+
+        La premiere version de ce test n'exigeait que « ne pas lever » et
+        assertait `ok: True`. C'etait insuffisant : sur une base verrouillee,
+        l'utilisateur obtenait un fichier a partager contenant le profil PAR
+        DEFAUT, sous SON nom et SON auteur — le defaut meme que ce fichier
+        corrige, revenu par le chemin d'erreur.
+
+        Le repli sur le defaut reste juste quand il n'y a PAS de profil actif
+        (cf. `test_sans_profil_actif_on_exporte_le_defaut`) : le defaut est alors
+        bien celui qui s'applique. Il ne l'est pas quand on n'a RIEN pu lire.
+        """
         with mock.patch.object(
             self.api, "_get_or_create_infra", return_value=(self._store_qui_leve(), mock.MagicMock())
         ):
-            res = self.api._export_shareable_profile_impl(name="x")
+            res = self.api._export_shareable_profile_impl(name="Mon reglage", author="Thomas")
 
-        self.assertTrue(res["ok"], "une base verrouillee fait echouer l'export au lieu du repli")
+        self.assertFalse(res["ok"], "une base verrouillee produit quand meme un fichier a partager")
+        self.assertNotIn("content", res, "un contenu exportable a ete produit malgre l'echec de lecture")
+        self.assertIn("pas pu être lu", str(res.get("user_message") or res.get("message") or ""))
 
     def test_la_calibration_retombe_sur_le_defaut_au_lieu_de_lever(self) -> None:
         with mock.patch.object(
