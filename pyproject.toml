@@ -109,6 +109,7 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 markers = [
     "runtime: tests qui démarrent l'app ou le serveur réel (exclus des sweeps rapides)",
+    "sans_jeton: le test éprouve l'écran de login — ne PAS lui injecter de jeton d'authentification",
 ]
 
 [tool.ruff]

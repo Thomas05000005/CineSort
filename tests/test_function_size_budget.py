@@ -136,7 +136,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_actions_support.py", "_rematch_tmdb_and_update_plan"): 184,
     ("cinesort/infra/integrations/poster_proxy.py", "fetch_and_cache"): 180,
     ("cinesort/domain/quality_score.py", "_score_video"): 175,
-    ("cinesort/ui/api/dashboard_support.py", "_compute_active_insights"): 175,
+    # 175 -> 176 : l'insight « DNR partiel » etait le dernier site de cette
+    # fonction a compter sur les 20 derniers runs au lieu du dernier scan. UNE
+    # ligne (`dnr_run_ids`), et la fonction etait pile a son plafond. Le
+    # « pourquoi » vit dans la docstring de `count_v2_warnings_flag` et dans
+    # `tests/test_audit_wave3_r2_counter_and_insight.py`, pas ici : ce corps
+    # n'avait pas a grossir de neuf lignes de commentaire.
+    ("cinesort/ui/api/dashboard_support.py", "_compute_active_insights"): 176,
     ("cinesort/domain/perceptual/comparison.py", "build_comparison_report"): 174,
     ("cinesort/domain/quality_score.py", "_build_quality_presets_catalog"): 167,
     ("cinesort/app/jellyfin_validation.py", "build_sync_report"): 165,
@@ -224,7 +230,6 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/domain/perceptual/audio_perceptual.py", "analyze_clipping_segments"): 106,
     ("cinesort/infra/db/migration_manager.py", "_split_sql_statements"): 106,
     ("cinesort/infra/db/pragma_profile.py", "_record_pragma_history"): 106,
-    ("cinesort/ui/api/quality_audit_support.py", "get_history"): 106,
     ("cinesort/domain/quality_score.py", "_apply_custom_rules_helper"): 105,
     ("cinesort/infra/plex_client.py", "get_movies"): 105,
     ("cinesort/infra/probe/tools_manager.py", "_build_tool_status"): 105,

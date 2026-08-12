@@ -5,6 +5,14 @@ Lancer : pytest tests/e2e_dashboard/test_dash_01_login.py -v
 
 from __future__ import annotations
 
+import pytest
+
+#: Ces tests eprouvent l'ECRAN DE LOGIN : ils prennent `page` nu DELIBEREMENT.
+#: `_jeton_pour_page_nue` (conftest) doit donc les laisser tranquilles — un
+#: jeton injecte ferait afficher le shell d'emblee et `#loginToken` ne serait
+#: jamais visible.
+pytestmark = pytest.mark.sans_jeton
+
 
 class TestDashLogin:
     """Tests d'authentification au dashboard distant."""

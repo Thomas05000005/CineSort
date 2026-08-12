@@ -22,9 +22,20 @@ from cinesort.ui.api import dashboard_support
 class _FakePerceptual:
     def __init__(self, by_run):
         self._by_run = by_run
+        self.warnings_calls = []
 
     def list_perceptual_reports(self, run_id=None):
         return self._by_run.get(run_id, [])
+
+    def count_v2_warnings_flag(self, flag=None, run_ids=None):
+        """Enregistre le PERIMETRE demande — c'est lui que le test inspecte."""
+        self.warnings_calls.append(list(run_ids or []))
+        total = 0
+        for rid in run_ids or []:
+            for report in self._by_run.get(rid, []):
+                if str(flag or "") in (report.get("adjustments_applied") or ""):
+                    total += 1
+        return total
 
 
 class _FakeStore:
@@ -70,6 +81,56 @@ class ActiveInsightsUsesLatestScanRunTests(unittest.TestCase):
             api=None, store=store, run_ids=["R1"], settings={}, librarian_data=None
         )
         self.assertIsNotNone(self._reject_insight(insights))
+
+
+class DnrInsightScopedToLatestScanTests(unittest.TestCase):
+    """Audit 2026-08-08 — le jumeau du defaut D, sur l'insight « DNR partiel ».
+
+    L'insight Reject ci-dessus a ete scope au dernier scan, et
+    `_compute_v2_tier_distribution` l'a ete aussi (R6-F). L'insight DNR est reste
+    le SEUL site de `_compute_active_insights` a consommer `run_ids` entier, soit
+    les 20 derniers runs : chaque re-scan re-ecrit une ligne
+    `perceptual_reports` par film, donc un meme film etait annonce une fois par
+    scan. Le libelle dit « N films », et le clic renvoie vers la Bibliotheque du
+    dernier run : le nombre annonce et la liste obtenue divergeaient.
+    """
+
+    def _dnr_insight(self, insights):
+        return next((i for i in insights if str(i.get("type")) == "dnr_partial"), None)
+
+    def test_dnr_insight_counts_latest_scan_only(self):
+        real_scan = "20260101_100000"
+        older_scan = "20251231_090000"
+        # Le MEME film (une ligne par run) porte le flag dans les deux scans.
+        film = {"adjustments_applied": "-6 perceptual_visual (dnr_partial)"}
+        store = _FakeStore({real_scan: [film], older_scan: [film]})
+
+        insights = dashboard_support._compute_active_insights(
+            api=None,
+            store=store,
+            run_ids=[real_scan, older_scan],
+            settings={},
+            librarian_data=None,
+            latest_scan_rid=real_scan,
+        )
+
+        self.assertEqual(
+            store.perceptual.warnings_calls,
+            [[real_scan]],
+            "le comptage DNR doit porter sur le DERNIER scan, pas sur les 20 derniers runs",
+        )
+        ins = self._dnr_insight(insights)
+        self.assertIsNotNone(ins, "l'insight DNR doit etre present (1 film sur le dernier scan)")
+        self.assertEqual(int(ins.get("count")), 1, "un film re-scane reste UN film")
+
+    def test_dnr_insight_falls_back_to_first_run_without_latest(self):
+        # Retro-compat : sans latest_scan_rid, on retombe sur le run le plus
+        # recent de `run_ids`, jamais sur la liste entiere.
+        store = _FakeStore({"R1": [{"adjustments_applied": "-6 perceptual_visual (dnr_partial)"}], "R2": []})
+        dashboard_support._compute_active_insights(
+            api=None, store=store, run_ids=["R1", "R2"], settings={}, librarian_data=None
+        )
+        self.assertEqual(store.perceptual.warnings_calls, [["R1"]])
 
 
 class RenderApplyCounterReadsDecisionStateTests(unittest.TestCase):

@@ -202,6 +202,73 @@ def _minuit_local(ts: float) -> float:
     return time.mktime((jour.tm_year, jour.tm_mon, jour.tm_mday, 0, 0, 0, 0, 0, -1))
 
 
+def _deltas_sur_journees_completes(points, store, now, period):
+    """Compare deux fenetres de MEME duree, faites de journees COMPLETES.
+
+    `points` compte `period + 1` seaux, dont DEUX sont structurellement
+    PARTIELS : le plus ancien (traite en amont par `_minuit_local`) et
+    AUJOURD'HUI (`until_ts=now`). Or `delta_films` et `delta_reject` sont des
+    SOMMES : tout seau partiel present dans une moitie et pas dans l'autre
+    devient une tendance qui ne mesure que la troncature.
+
+    MESURE, activite strictement constante a 10 films/jour, `t` = films deja
+    classes aujourd'hui. Une tendance honnete rend 0 pour tout `t` :
+
+        coupe                  t=0    t=2    t=5   t=10
+        [:half] / [half:]      +0     +2     +5    +10    <- defaut d'origine
+        [:half] / [-half:]    -10     -8     -5     +0    <- signe INVERSE
+        exclure puis couper    +0     +0     +0     +0    <- retenue
+
+    `[-half:]` egalise les longueurs mais garde le seau partiel et jette le jour
+    median, qui est complet : la hausse permanente devient une BAISSE permanente,
+    de meme amplitude. Elle ne paraissait juste que sous t=10, la valeur que
+    fixait la fixture du test.
+
+    ON EXCLUT D'ABORD, ON COUPE ENSUITE : ecrire `points[half:-1]` ne vaut que si
+    le nombre de seaux est IMPAIR — sur 7 jours (8 seaux) cette forme compare
+    4 journees a 3, ce que les tests multi-periodes ont attrape.
+
+    `delta_reject` SUIT LES MEMES BORNES. Il interrogeait le depot avec
+    `now - (period // 2) * 86400` d'un cote et `since` de l'autre, soit 15,0
+    jours contre 15,34 a 8 h du matin. Mesure sur un depot factice a debit
+    constant : `delta_reject = -3` la ou 0 est attendu. Signale par CodeRabbit
+    sur la PR #1018.
+    """
+    delta_score = 0.0
+    delta_films = 0
+    delta_reject = 0
+
+    if len(points) >= 3:
+        complets = points[:-1]
+        moitie = len(complets) // 2
+        older = [p for p in complets[:moitie] if p.get("avg_score") is not None]
+        recent = [p for p in complets[-moitie:] if p.get("avg_score") is not None]
+        if older and recent:
+            avg_older = sum(float(p["avg_score"]) for p in older) / len(older)
+            avg_recent = sum(float(p["avg_score"]) for p in recent) / len(recent)
+            delta_score = round(avg_recent - avg_older, 1)
+        delta_films = sum(int(p.get("count_films") or 0) for p in recent) - sum(
+            int(p.get("count_films") or 0) for p in older
+        )
+
+    # Memes bornes que ci-dessus, exprimees en horodatages : aujourd'hui exclu,
+    # puis deux tranches egales. `count_v2_tier_since` n'a pas de borne haute,
+    # on l'obtient par difference.
+    demi = max(1, period // 2)
+    fin_recent = _minuit_local(now)
+    debut_recent = fin_recent - demi * 86400.0
+    debut_older = debut_recent - demi * 86400.0
+    try:
+        depuis_fin = store.perceptual.count_v2_tier_since(tier="reject", since_ts=fin_recent)
+        depuis_recent = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_recent)
+        depuis_older = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_older)
+        delta_reject = (depuis_recent - depuis_fin) - (depuis_older - depuis_recent)
+    except (OSError, AttributeError, TypeError, ValueError):
+        delta_reject = 0
+
+    return delta_score, delta_films, delta_reject
+
+
 def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
     """KPIs evolution sur N derniers jours.
 
@@ -275,30 +342,7 @@ def get_history(api: Any, period_days: int = 30) -> Dict[str, Any]:
             }
         )
 
-    # Calcul des deltas (recent vs older half)
-    delta_score = 0.0
-    delta_films = 0
-    delta_reject = 0
-
-    if len(points) >= 2:
-        half = len(points) // 2
-        older = [p for p in points[:half] if p.get("avg_score") is not None]
-        recent = [p for p in points[half:] if p.get("avg_score") is not None]
-        if older and recent:
-            avg_older = sum(float(p["avg_score"]) for p in older) / len(older)
-            avg_recent = sum(float(p["avg_score"]) for p in recent) / len(recent)
-            delta_score = round(avg_recent - avg_older, 1)
-        delta_films = sum(int(p.get("count_films") or 0) for p in recent) - sum(
-            int(p.get("count_films") or 0) for p in older
-        )
-
-    # Reject count : compter les films Reject ajoutes pendant la periode
-    try:
-        reject_recent = store.perceptual.count_v2_tier_since(tier="reject", since_ts=now - (period // 2) * 86400.0)
-        reject_older = store.perceptual.count_v2_tier_since(tier="reject", since_ts=since) - reject_recent
-        delta_reject = reject_recent - reject_older
-    except (OSError, AttributeError, TypeError, ValueError):
-        delta_reject = 0
+    delta_score, delta_films, delta_reject = _deltas_sur_journees_completes(points, store, now, period)
 
     return {
         "ok": True,

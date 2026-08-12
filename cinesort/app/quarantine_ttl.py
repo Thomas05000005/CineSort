@@ -745,7 +745,7 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
             # divergerait de purge_scope_files_count et de ce que l'UI a annonce
             # a l'utilisateur (FIX #8). Le resync final (_sync_arrival_manifest)
             # le remet a jour tout seul.
-            elif child.is_file() and child.name != _TTL_MANIFEST_NAME:
+            elif child.is_file() and not _is_ttl_manifest_file(child.name):
                 try:
                     top_stats["considered"] += 1
                     size = int(child.stat().st_size)

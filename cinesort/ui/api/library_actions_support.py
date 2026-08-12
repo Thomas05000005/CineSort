@@ -553,6 +553,44 @@ def _list_locked_field_names(api: Any, film_id: str) -> List[str]:
     return [str(lk.get("field_name") or "") for lk in locks if lk.get("field_name")]
 
 
+def _locked_field_names_for_rematch(api: Any, target_film_id: str, new_film_id: str) -> List[str]:
+    """Noms verrouilles a honorer au re-match, sous LES DEUX identites du film.
+
+    Chercher sous la seule identite derivee de la NOUVELLE row rendait les
+    verrous invisibles des qu'un id TMDb etait connu.
+
+    `new_film_id` vient de `compute_film_id(plan_row_to_jsonable(PlanRow))`, donc
+    de `asdict(PlanRow)` — et le dataclass `PlanRow` NE PORTE AUCUN champ
+    `tmdb_id` (31 champs : `tmdb_collection_id`, `tv_tmdb_series_id`, jamais
+    `tmdb_id`). `compute_film_id` n'y trouve jamais d'id TMDb et rend donc
+    invariablement `path:<sha1(folder|video)>`.
+
+    L'identite issue de `target` (la row persistee), elle, peut etre un
+    `tmdb:<id>` : `enrich_tmdb_ids_by_title` ecrit `row["tmdb_id"]` dans
+    plan.jsonl (tmdb_support.py:262 puis `write_plan_jsonl`) depuis le thread
+    `tmdb-enrich-<run_id>` de fin de scan, et `set_film_tmdb_candidate` migre
+    explicitement les verrous vers `tmdb:<id>` (library_support.py:1978).
+
+    Les deux bouts ne se rencontraient jamais : verrous ranges sous `tmdb:<id>`,
+    re-match les cherchant sous `path:<sha1>` -> zero nom verrouille ->
+    `merge_metadata(replace_data=True)` ecrasait TOUT, titre corrige a la main
+    compris. Le verrou etait inoperant pour tout film dont l'id TMDb est connu —
+    c'est-a-dire precisement ceux qu'un re-match modifie.
+
+    L'UNION est deliberee, plutot que « prendre l'identite de target » : elle ne
+    peut qu'AJOUTER de la protection, jamais en retirer, et elle couvre les deux
+    sens de la transition `path:` <-> `tmdb:` sans dependre de l'ordre des
+    operations de l'utilisateur. La seconde lecture n'a lieu que si les deux
+    identites different, donc jamais sur un film sans id TMDb.
+
+    Cf tests/test_field_locks_id_du_rescan.py.
+    """
+    noms = _list_locked_field_names(api, new_film_id)
+    if target_film_id and target_film_id != new_film_id:
+        noms = list(dict.fromkeys(noms + _list_locked_field_names(api, target_film_id)))
+    return noms
+
+
 def _scan_subtitle_expected_languages(settings: Dict[str, Any]) -> Optional[List[str]]:
     """Langues de sous-titres attendues, DERIVEES COMME AU SCAN.
 
@@ -787,7 +825,7 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
                 except (OSError, AttributeError, TypeError, ValueError) as exc:
                     logger.warning("migrate_locks failed: %s", exc)
 
-        locked_names = _list_locked_field_names(api, new_film_id)
+        locked_names = _locked_field_names_for_rematch(api, old_film_id, new_film_id)
         if locked_names:
             # source = nouvelle row enrichie, target = ancienne row preservee
             new_row_json = merge_metadata(

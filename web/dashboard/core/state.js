@@ -1,5 +1,7 @@
 /* core/state.js — Gestion du token et de l'etat global du dashboard */
 
+import { clearCache } from "./cache.js";
+
 const TOKEN_KEY = "cinesort.dashboard.token";
 const PERSIST_KEY = "cinesort.dashboard.persist";
 
@@ -198,6 +200,19 @@ export function clearToken() {
   for (const cb of _onClearCallbacks) {
     try { cb(); } catch (e) { /* silencieux : un cleanup ne doit pas bloquer le logout */ }
   }
+  // Audit transverse 2026-08-09 : le token partait, les DONNEES restaient.
+  // apiPost archive dans localStorage un instantane des reponses de la
+  // whitelist `_CACHEABLE` (run/get_dashboard, settings/get_settings,
+  // integrations/get_*_libraries...) pour servir de repli hors ligne. Ces
+  // entrees ont un TTL de 24 h et personne ne les effacait : `clearCache()`
+  // etait ecrit pour ca depuis J14 et n'avait AUCUN appelant en production.
+  // Se deconnecter laissait donc, dans le navigateur, la liste des films et
+  // les chemins de la bibliotheque — un dashboard consulte depuis le
+  // telephone d'un tiers sur le LAN est precisement le cas d'usage vise.
+  // La purge est placee APRES les callbacks : elles ne dependent pas du
+  // cache, et l'ordre inverse ferait passer `cb()` hors de la fenetre de
+  // 600 caracteres inspectee par test_dashboard_interval_cleanup.
+  clearCache();
 }
 
 /** Retourne true si un token est present. */
