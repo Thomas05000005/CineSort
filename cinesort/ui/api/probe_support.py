@@ -174,6 +174,36 @@ def recheck_probe_tools(
         )
 
 
+def _chemin_demande(incoming: Dict[str, Any], settings: Dict[str, Any], cle: str) -> str:
+    """Chemin d'outil apres une mise a jour PARTIELLE.
+
+    LA DISTINCTION EST ENTRE « ABSENT » ET « VIDE », et elle n'est pas
+    cosmetique :
+
+      - cle ABSENTE de la charge utile  -> l'appelant ne parle pas de cet outil,
+        on garde ce qui est enregistre ;
+      - cle presente mais VIDE          -> l'utilisateur a efface le champ, on
+        efface. C'est une demande, pas un oubli.
+
+    LE DEFAUT QUE CECI CORRIGE. Les deux chemins etaient lus dans la seule charge
+    utile, puis ecrits tous les deux. Un appel qui ne parlait que de ffprobe
+    ecrasait donc MediaInfo par une chaine vide — et rendait `ok: True`. Mesure,
+    sur un state_dir reel :
+
+        AVANT  ffprobe   : C:\\outils\\ffprobe.exe
+        AVANT  mediainfo : C:\\outils\\mediainfo.exe
+        appel  {"ffprobe_path": ...}   -> ok: True
+        APRES  mediainfo : ''            <- efface
+
+    L'endpoint est expose en REST : n'importe quel client qui envoie une charge
+    utile partielle — ce que fait naturellement un formulaire a un seul champ —
+    detruisait la configuration de l'autre outil sans le dire.
+    """
+    if cle not in incoming:
+        return str(settings.get(cle) or "").strip()
+    return str(incoming.get(cle) or "").strip()
+
+
 def set_probe_tool_paths(
     api: Any,
     payload: Optional[Dict[str, Any]] = None,
@@ -185,8 +215,8 @@ def set_probe_tool_paths(
         incoming = payload if isinstance(payload, dict) else {}
         settings = api.settings.get_settings()
         state_dir = normalize_user_path(settings.get("state_dir"), state.default_state_dir())
-        ff_path = str(incoming.get("ffprobe_path") or "").strip()
-        mi_path = str(incoming.get("mediainfo_path") or "").strip()
+        ff_path = _chemin_demande(incoming, settings, "ffprobe_path")
+        mi_path = _chemin_demande(incoming, settings, "mediainfo_path")
         backend = normalize_probe_backend(incoming.get("probe_backend") or settings.get("probe_backend"))
 
         if ff_path:
