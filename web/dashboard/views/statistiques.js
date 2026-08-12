@@ -285,7 +285,13 @@ function _rendreRollup(d) {
   }
   const lignes = groupes
     .map((g) => {
-      const score = g.avg_score == null ? null : Number(g.avg_score);
+      // UN SCORE NON NUMERIQUE N'EST PAS UN SCORE. `Number("abc")` rend NaN, et
+      // `NaN.toFixed(1)` rend la chaine « NaN » — affichee telle quelle dans la
+      // colonne. `Number.isFinite` couvre du meme geste NaN, Infinity et les
+      // valeurs non convertibles ; toutes se lisent alors « — », comme une
+      // absence, ce qu'elles sont.
+      const brut = g.avg_score == null ? null : Number(g.avg_score);
+      const score = Number.isFinite(brut) ? brut : null;
       // `group_name` EST LA CLE REELLE — verifiee dans
       // `library_support.py:_get_scoring_rollup_impl`, qui construit
       // `{"group_name", "count", "avg_score", "tier_distribution", "top_film_ids"}`.
@@ -346,15 +352,30 @@ const _ROUTES = new Map([
   ["rollup", () => ["library/get_scoring_rollup", { by: _state.dimension }]],
 ]);
 
+//: Numero de la derniere requete emise, par onglet. Une reponse dont le numero
+//: n'est plus le dernier est PERIMEE : elle a ete doublee par une autre.
+const _jetons = {};
+
 async function _charger(onglet, hote) {
   const fabrique = _ROUTES.get(onglet);
   if (!fabrique) return;
   const [route, params] = fabrique();
+
+  // POURQUOI UN JETON. Deux clics rapides sur « 6 mois » puis « 24 mois »
+  // emettent deux requetes ; rien ne garantit qu'elles reviennent dans l'ordre.
+  // Sans jeton, la reponse LENTE ecrase la rapide et l'ecran affiche 6 mois
+  // alors que le bouton 24 est actif — un chiffre faux sous une etiquette juste,
+  // et rien pour le signaler. Le demontage de la vue a le meme probleme : une
+  // reponse en vol ecrit dans un etat qu'on vient de quitter.
+  const jeton = (_jetons[onglet] = (_jetons[onglet] || 0) + 1);
+  const estPerimee = () => _jetons[onglet] !== jeton || _hote !== hote;
+
   _state.chargement[onglet] = true;
   _state.erreurs[onglet] = "";
   _rendre(hote);
   try {
     const res = await apiPost(route, params);
+    if (estPerimee()) return;
     const data = (res && res.data) || res || {};
     if (data.ok === false) {
       _state.erreurs[onglet] = data.user_message || data.message || "Chargement impossible.";
@@ -362,10 +383,13 @@ async function _charger(onglet, hote) {
       _state.data[onglet] = data;
     }
   } catch {
+    if (estPerimee()) return;
     _state.erreurs[onglet] = "Le serveur n'a pas répondu.";
   } finally {
-    _state.chargement[onglet] = false;
-    _rendre(hote);
+    if (!estPerimee()) {
+      _state.chargement[onglet] = false;
+      _rendre(hote);
+    }
   }
 }
 

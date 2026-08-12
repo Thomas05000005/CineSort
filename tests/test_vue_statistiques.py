@@ -268,6 +268,21 @@ class UneABSENCENEstPasUnZEROTests(unittest.TestCase):
     def _run(self, driver: str) -> dict:
         return run_module_test(STATS_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
 
+    def test_un_score_NON_NUMERIQUE_se_lit_comme_une_absence(self) -> None:
+        """`Number("abc")` rend NaN, et `NaN.toFixed(1)` rend la CHAINE « NaN ».
+
+        Elle s'affichait telle quelle dans la colonne Score, sans jamais lever.
+        """
+        for valeur in ('"abc"', "NaN", "Infinity", "{}"):
+            with self.subTest(valeur=valeur):
+                res = self._run(
+                    f"__emit({{ html: M.__t._rendreRollup({{ ok: true, groups: "
+                    f'[{{ group_name: "X", count: 1, avg_score: {valeur} }}] }}) }});'
+                )
+                self.assertNotIn("NaN", res["html"])
+                self.assertNotIn("Infinity", res["html"])
+                self.assertIn("—", res["html"])
+
     def test_un_score_ABSENT_s_affiche_en_tiret_pas_en_zero(self) -> None:
         res = self._run(
             r"""
@@ -420,6 +435,54 @@ __emit({ html: M.__t._rendreRollup({ ok: true, groups: [
         res = self._run('__emit({ a: M.__t._moisCourt("2026-08"), b: M.__t._moisCourt("bidon") });')
         self.assertEqual(res["a"], "août 26")
         self.assertEqual(res["b"], "bidon", "une entree illisible doit passer telle quelle, pas devenir vide")
+
+
+class UneREPONSEPERIMEENEcrasePasLaFraicheTests(unittest.TestCase):
+    """Deux clics rapides emettent deux requetes ; rien ne garantit l'ordre.
+
+    Sans jeton d'invalidation, la reponse LENTE ecrase la rapide : l'ecran
+    affiche 6 mois alors que le bouton 24 est actif — un chiffre faux sous une
+    etiquette juste, et rien pour le signaler.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_la_reponse_lente_d_un_appel_DOUBLE_est_ignoree(self) -> None:
+        res = run_module_test(
+            STATS_JS,
+            stubs=_STUBS,
+            extra=_EXTRA,
+            driver=_HOTE
+            + r"""
+// Le stub rend `Promise.resolve(__reponses[route])`, qui ADOPTE une promesse :
+// on peut donc y deposer une promesse EN ATTENTE et la resoudre quand on veut.
+globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
+let libererLeLent = null;
+globalThis.__reponses["library/get_library_timeline"] = new Promise((r) => { libererLeLent = r; });
+const h = fauxHote();
+M.__init(h);
+await new Promise((r) => setTimeout(r, 0));
+M.__t._state.onglet = "timeline";
+
+M.__t._charger("timeline", h);        // appel LENT : sa reponse est en attente
+// Le second appel repond tout de suite.
+globalThis.__reponses["library/get_library_timeline"] = { ok: true, months: [{ month: "2026-01", count: 222 }] };
+M.__t._charger("timeline", h);        // appel RAPIDE
+await new Promise((r) => setTimeout(r, 0));
+
+libererLeLent({ ok: true, months: [{ month: "2026-01", count: 111 }] });  // le lent revient EN DERNIER
+await new Promise((r) => setTimeout(r, 0));
+__emit({ compte: M.__t._state.data.timeline.months[0].count });
+"""
+            + _EXIT,
+            timeout=90,
+        )
+        self.assertEqual(
+            res["compte"],
+            222,
+            "la reponse perimee a ecrase la fraiche : l'ecran montre un chiffre qui n'est plus le bon",
+        )
 
 
 class LeDEMONTAGERetireSonEcouteurTests(unittest.TestCase):
