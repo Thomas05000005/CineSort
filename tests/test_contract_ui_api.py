@@ -73,6 +73,7 @@ DYNAMIC_ALLOWED_SITES: dict[tuple[str, str], int] = {
 # Les endpoints resolus derriere les sites dynamiques ci-dessus. Chacun doit
 # rester une methode valide de sa facade (garde contre un rename backend).
 DYNAMIC_RESOLVED_ENDPOINTS: tuple[str, ...] = (
+    "run/export_run_report",
     "integrations/get_jellyfin_sync_report",
     "runtime/get_log_paths",
     "runtime/purge_probe_cache",

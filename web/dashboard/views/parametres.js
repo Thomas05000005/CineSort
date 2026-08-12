@@ -1678,7 +1678,7 @@ async function _executerActionDeSection(action, route, btn, ecrire) {
       return;
     }
     ecrire(_rendreReponseAction(action, data), "ok");
-  } catch (e) {
+  } catch {
     ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
   } finally {
     btn.disabled = false;
