@@ -1876,9 +1876,10 @@ def _compute_active_insights(
             }
         )
 
-    # 4. DNR partiel (nouveau insight §15)
+    # 4. DNR partiel (nouveau insight §15) — perimetre = DERNIER scan, cf R6-F.
+    dnr_run_ids = [latest_scan_rid] if latest_scan_rid else run_ids[:1]
     try:
-        dnr_count = store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=run_ids)
+        dnr_count = store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=dnr_run_ids)
         if dnr_count > 0:
             insights.append(
                 {

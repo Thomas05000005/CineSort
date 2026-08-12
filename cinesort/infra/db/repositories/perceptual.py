@@ -274,7 +274,7 @@ class PerceptualRepository(_BaseRepository):
             return int(row[0] or 0) if row else 0
 
     def count_v2_warnings_flag(self, *, flag: str, run_ids: List[str]) -> int:
-        """Compte les rows dont le global_score_v2_json contient un warning matching `flag`.
+        """Compte les FILMS dont le global_score_v2_json contient un warning matching `flag`.
 
         Scan naif via LIKE sur le JSON ; suffit pour 1000-10000 rows.
 
@@ -282,6 +282,14 @@ class PerceptualRepository(_BaseRepository):
         meme raison que `get_global_tier_v2_distribution` — le total est une
         SOMME sur les paquets, un run_id present dans deux paquets serait
         compte deux fois alors que le `IN` unique le dedoublonnait.
+
+        AUDIT 2026-06-14 (R7-15), volet manquant : `COUNT(DISTINCT row_id)`, comme
+        `count_v2_tier_since` et `get_global_score_v2_trend`. Ce site etait reste
+        en `COUNT(*)`, donc un film re-scane comptait une fois PAR RUN alors que
+        l'appelant (insight « N films en DNR partiel ») annonce un nombre de
+        films. La dedup ne vaut qu'A L'INTERIEUR d'un paquet — c'est suffisant
+        ici : l'appelant ne passe qu'un run, et un `row_id` ne peut apparaitre
+        deux fois dans un meme run (PK `(run_id, row_id)`).
         """
         ids = list(dict.fromkeys(run_ids or []))
         if not ids:
@@ -294,7 +302,7 @@ class PerceptualRepository(_BaseRepository):
                 placeholders = ",".join("?" * len(chunk))
                 cur = conn.execute(
                     f"""
-                    SELECT COUNT(*) FROM perceptual_reports
+                    SELECT COUNT(DISTINCT row_id) FROM perceptual_reports
                     WHERE run_id IN ({placeholders})
                       AND global_score_v2_json LIKE ?
                     """,

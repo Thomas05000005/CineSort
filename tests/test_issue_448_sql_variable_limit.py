@@ -230,8 +230,15 @@ class SqlVariableLimitTests(unittest.TestCase):
         )
 
     def test_compte_warnings_v2_identique_au_dela_de_la_borne(self) -> None:
+        # La bibliotheque de test ne porte le flag `dnr_partial` que sur `S|0`,
+        # mais ce MEME film est present dans les trois runs (chaque run re-ecrit
+        # une ligne `perceptual_reports` par film). L'appelant — l'insight
+        # « N films en DNR partiel » de la Home — annonce un nombre de FILMS :
+        # la reponse attendue est donc 1, pas une par run. Cette assertion valait
+        # 3 avant le passage a `COUNT(DISTINCT row_id)`, alignant ce site sur
+        # `count_v2_tier_since` et `get_global_score_v2_trend` (R7-15).
         reference = self.store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=list(REAL_RUNS))
-        self.assertEqual(reference, 3)
+        self.assertEqual(reference, 1)
         self.assertEqual(
             self.store.perceptual.count_v2_warnings_flag(flag="dnr_partial", run_ids=_padded(REAL_RUNS)),
             reference,
