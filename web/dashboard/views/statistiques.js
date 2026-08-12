@@ -146,35 +146,86 @@ function _rendreTimeline(d) {
       <p class="stats-vide">Aucun film daté sur cette fenêtre.</p></div>`;
   }
   const max = Math.max(...mois.map((m) => Number(m.count) || 0), 1);
-  const L = 44;
-  const H = 140;
-  const largeur = mois.length * L;
+  const L = 44; // largeur naturelle d'un mois
+  const H = 168;
+  const HAUT = 26; // place reservee aux etiquettes de valeur
+  const BAS = 22; // place reservee aux etiquettes de mois
+  const GOUTTIERE = 34; // colonne de gauche : l'echelle
+  const PLEIN = H - HAUT - BAS; // hauteur utile d'une barre a 100 %
+  const base = H - BAS;
+  const largeur = GOUTTIERE + mois.length * L;
+  const y = (v) => base - Math.round((v / max) * PLEIN);
+
+  // L'ECHELLE. Sans elle, une barre deux fois plus haute qu'une autre se lit,
+  // mais « 88 films » ne se lit pas : le graphe montre des proportions et cache
+  // les grandeurs. Deux graduations suffisent (le maximum et sa moitie) ; au-dela
+  // le fond devient plus bavard que les donnees. `Set` evite la graduation en
+  // double quand max vaut 1.
+  const graduations = [...new Set([max, Math.round(max / 2)])].filter((v) => v > 0);
+  const echelle = graduations
+    .map(
+      (v) => `<g>
+        <line x1="${GOUTTIERE}" y1="${y(v)}" x2="${largeur}" y2="${y(v)}" class="stats-grille-ligne"/>
+        <text x="${GOUTTIERE - 6}" y="${y(v) + 3}" text-anchor="end" class="stats-axe">${v}</text>
+      </g>`
+    )
+    .join("");
+
   const barres = mois
     .map((m, i) => {
       const n = Number(m.count) || 0;
-      const h = Math.round((n / max) * (H - 28));
-      const x = i * L + 8;
-      const y = H - 20 - h;
+      const h = base - y(n);
+      const x = GOUTTIERE + i * L + 8;
+      const l = L - 16;
+      // ZERO EST UNE MESURE, PAS UNE ABSENCE — mais une barre de 2 px a la
+      // couleur d'accent se lit « quelques films ». Le mois creux garde donc une
+      // marque, dans une classe qui la montre comme un creux.
+      const vide = n <= 0;
       return `<g class="stats-mois">
         <title>${escapeHtml(_moisCourt(m.month))} : ${n} film(s)</title>
-        <rect x="${x}" y="${y}" width="${L - 16}" height="${Math.max(h, 2)}" rx="3" class="stats-barre-pleine"/>
-        <text x="${x + (L - 16) / 2}" y="${H - 6}" text-anchor="middle" class="stats-axe">${escapeHtml(
+        <rect x="${x}" y="${vide ? base - 2 : y(n)}" width="${l}" height="${vide ? 2 : Math.max(h, 2)}"
+              rx="3" class="${vide ? "stats-barre-vide" : "stats-barre-pleine"}"/>
+        <text x="${x + l / 2}" y="${H - 6}" text-anchor="middle" class="stats-axe">${escapeHtml(
           _moisCourt(m.month)
         )}</text>
-        ${n > 0 ? `<text x="${x + (L - 16) / 2}" y="${y - 4}" text-anchor="middle" class="stats-valeur-barre">${n}</text>` : ""}
+        ${n > 0 ? `<text x="${x + l / 2}" y="${y(n) - 6}" text-anchor="middle" class="stats-valeur-barre">${n}</text>` : ""}
       </g>`;
     })
     .join("");
+
   const note = _SOURCES[String(d.source || "")] || "";
+  // LE GRAPHE S'ADAPTE A SON CONTENEUR. Mesure au navigateur : a taille fixe,
+  // 12 mois faisaient deja apparaitre une barre de defilement dans la colonne
+  // centrale (inspecteur ouvert), alors que la page avait de la place en
+  // hauteur. Il se contracte donc jusqu'a son minimum lisible, et ne defile
+  // qu'au-dela ; il ne grandit jamais au-dela de sa taille naturelle, sinon
+  // 6 mois donneraient six pavés.
+  const minimum = GOUTTIERE + mois.length * 26;
   return `<div class="stats-corps">
     <div class="stats-choix-barre">${boutons}</div>
     <div class="stats-graphe-hote">
-      <svg class="stats-graphe" width="${largeur}" height="${H}" viewBox="0 0 ${largeur} ${H}"
-           role="img" aria-label="Films ajoutés par mois">${barres}</svg>
+      <svg class="stats-graphe" viewBox="0 0 ${largeur} ${H}" style="--stats-large: ${largeur}px; --stats-min: ${minimum}px"
+           role="img" aria-label="Films ajoutés par mois, maximum ${max}">
+        ${echelle}
+        <line x1="${GOUTTIERE}" y1="${base}" x2="${largeur}" y2="${base}" class="stats-base"/>
+        ${barres}
+      </svg>
     </div>
     ${note ? `<p class="stats-note">ⓘ ${escapeHtml(note)}</p>` : ""}
   </div>`;
 }
+
+/* Libelles de tier — les MEMES que /bibliotheque et /accueil. Un ecran n'invente
+   pas son vocabulaire : « Platine » ici et « Platinum » ailleurs donnerait deux
+   noms au meme objet. */
+const _TIER_LABELS = {
+  platinum: "Platinum",
+  gold: "Gold",
+  silver: "Silver",
+  bronze: "Bronze",
+  reject: "Reject",
+  unknown: "Non identifié",
+};
 
 /** Couleur de tier a partir d'un score : les memes seuils que la vue Qualité. */
 function _tierDuScore(score) {
@@ -184,6 +235,23 @@ function _tierDuScore(score) {
   if (score >= 55) return "silver";
   if (score >= 40) return "bronze";
   return "reject";
+}
+
+/**
+ * Cellule de niveau : le NOM du tier, puis sa barre.
+ *
+ * LE NOM N'EST PAS DECORATIF. Sans lui, le tier ne se lit qu'a la couleur de la
+ * barre — or `silver` (gris) et `platinum` (gris clair) sont deja proches a
+ * l'oeil nu, et indistinguables pour un daltonien comme en impression noir et
+ * blanc. WCAG 1.4.1 : aucune information ne doit passer par la seule couleur.
+ */
+function _celluleDeTier(score) {
+  if (score == null) return "";
+  const tier = _tierDuScore(score);
+  return `<span class="stats-tier stats-tier--${tier}">
+    <span class="stats-tier-nom">${escapeHtml(_TIER_LABELS[tier] || tier)}</span>
+    ${_barre(score, 100, 96)}
+  </span>`;
 }
 
 function _rendreRollup(d) {
@@ -204,14 +272,14 @@ function _rendreRollup(d) {
         <td class="stats-nom" title="${escapeHtml(String(nom))}">${escapeHtml(String(nom))}</td>
         <td class="stats-num">${(Number(g.count) || 0).toLocaleString("fr-FR")}</td>
         <td class="stats-num">${score == null ? "—" : score.toFixed(1)}</td>
-        <td>${score == null ? "" : `<span class="stats-tier stats-tier--${_tierDuScore(score)}">${_barre(score, 100, 96)}</span>`}</td>
+        <td>${_celluleDeTier(score)}</td>
       </tr>`;
     })
     .join("");
   return `<div class="stats-corps">
     <div class="stats-choix-barre">${choix}</div>
     <table class="stats-table">
-      <thead><tr><th>Groupe</th><th class="stats-num">Films</th><th class="stats-num">Score</th><th>Répartition</th></tr></thead>
+      <thead><tr><th>Groupe</th><th class="stats-num">Films</th><th class="stats-num">Score</th><th>Niveau</th></tr></thead>
       <tbody>${lignes}</tbody>
     </table>
     <p class="stats-note">Trié par nombre de films, puis par score.</p>

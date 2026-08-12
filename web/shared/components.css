@@ -10355,11 +10355,22 @@ body.v5-notif-lock {
   max-width: 120px;
 }
 
-/* Porteur de la couleur de tier. Il n'a pas d'apparence propre — son role est de
-   QUALIFIER la barre qu'il contient (`.stats-tier--*` ci-dessous) — mais il lui
-   faut une boite, sinon le <span> reste en ligne et rend au meme decalage. */
+/* Porteur de la couleur de tier : il QUALIFIE la barre qu'il contient
+   (`.stats-tier--*` plus bas) et porte le nom du niveau a cote d'elle. */
 .stats-tier {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Le nom du niveau. Largeur fixe pour que les barres s'alignent d'une ligne a
+   l'autre : sans elle, « Platinum » et « Gold » decalent chacun la leur. */
+.stats-tier-nom {
+  flex: 0 0 4.75rem;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-2xs, 0.72rem);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .stats-barre-fond { fill: var(--surface-3, #262626); }
@@ -10404,17 +10415,53 @@ body.v5-notif-lock {
   padding-bottom: 0.5rem;
 }
 
-.stats-graphe { display: block; }
+/* Le graphe se contracte jusqu'a son minimum lisible avant de faire defiler, et
+   ne grandit jamais au-dela de sa taille naturelle : `--stats-large` et
+   `--stats-min` sont poses par la vue, qui seule connait le nombre de mois. */
+.stats-graphe {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: var(--stats-large, 100%);
+  min-width: var(--stats-min, 0);
+}
 
 .stats-axe {
   fill: var(--text-3, #888);
   font-size: 10px;
 }
 
+/* L'echelle se lit SOUS les donnees : assez visible pour situer une hauteur,
+   assez discrete pour ne pas concurrencer les barres. */
+.stats-grille-ligne {
+  stroke: var(--border-1, #333);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.stats-base {
+  stroke: var(--border-2, var(--border-1, #444));
+  stroke-width: 1;
+}
+
+/* Un mois SANS film garde une marque — sinon rien ne distingue « aucun film »
+   de « mois hors fenetre » — mais dans la couleur d'un creux, pas dans celle
+   d'une valeur. */
+.stats-barre-vide { fill: var(--border-2, #3a3a3a); }
+
+/* L'etiquette d'une barre flotte au-dessus d'elle, donc parfois SUR une ligne de
+   graduation. Constate au navigateur en theme « aaa » (contraste renforce, ou
+   `--border-1` est presque blanc) : la ligne barrait « 34 » et « 41 ». Le halo
+   `paint-order: stroke` redessine le fond derriere les glyphes — `--bg` est le
+   seul jeton OPAQUE, les `--surface-*` sont des voiles translucides. */
 .stats-valeur-barre {
   fill: var(--text-2, #bbb);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--bg, #111);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .stats-mois:hover .stats-barre-pleine { fill: var(--accent-hover, var(--accent, #6ea8fe)); }
