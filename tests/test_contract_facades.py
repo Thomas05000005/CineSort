@@ -63,7 +63,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "integrations.request_radarr_upgrade",
         "library.get_library_podiums",
         "library.get_library_timeline",
-        "run.export_run_nfo",  # B4 : NON cablable — parametre inerte et rows sans les champs necessaires — defaut a corriger d'abord
         "library.get_film_history",
         "library.get_scoring_rollup",
         "quality.analyze_perceptual_batch",
