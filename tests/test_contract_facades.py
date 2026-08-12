@@ -80,7 +80,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.get_quality_report",
         "quality.import_quality_profile",
         "quality.import_shareable_profile",
-        "quality.reset_quality_profile",
         "quality.save_custom_quality_preset",
         "quality.save_profile",
         "quality.save_quality_profile",
