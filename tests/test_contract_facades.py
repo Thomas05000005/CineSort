@@ -65,7 +65,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "library.get_library_timeline",
         "run.export_run_nfo",
         "run.export_run_report",
-        "runtime.get_log_paths",
         "library.get_film_history",
         "library.get_scoring_rollup",
         "quality.analyze_perceptual_batch",
@@ -99,18 +98,15 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "run.list_pending_runs",
         "run.purge_quarantine_bucket",
         "run.undo_by_row_preview",
-        "runtime.check_for_updates",
+        "runtime.check_for_updates",  # B3 : NON cablable — doublon d'une capacite deja presente dans l'UI
         "runtime.get_event_ts",
         "runtime.get_probe",
-        "runtime.get_tools_status",
-        "runtime.purge_probe_cache",
-        "runtime.reset_incremental_cache",
-        "runtime.run_nas_benchmark",
-        "runtime.set_probe_tool_paths",
-        "settings.get_naming_presets",
-        "settings.get_user_data_size",
-        "settings.preview_naming_template",
-        "settings.reset_all_user_data",
+        "runtime.get_tools_status",  # B3 : NON cablable — ALIAS STRICT de get_probe_tools_status, deja cable (app.js) ; le cabler creerait un doublon de requete ET sortirait la reponse de la liste blanche du cache hors-ligne
+        "runtime.reset_incremental_cache",  # B3 : NON cablable — impossible de dresser la liste d'elements qu'exige la regle des actions destructives
+        "runtime.run_nas_benchmark",  # B3 : NON cablable — aucun parametre de chemin : « tester mon NAS » est irrealisable en l'etat
+        "runtime.set_probe_tool_paths",  # B3 : NON cablable — perte de donnees sur payload partiel
+        "settings.preview_naming_template",  # B3 : NON cablable — `sample_row_id` est INERTE : #460 documente que la branche chargeant un vrai film « etait morte depuis sa premiere ligne »
+        "settings.reset_all_user_data",  # B3 : NON cablable — exige que l'utilisateur TAPE « RESET » (reset_support.py:266) ; dangerConfirmModal n'a aucune affordance de saisie
         "settings.set_locale",
     }
 )
