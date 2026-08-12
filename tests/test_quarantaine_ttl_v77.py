@@ -273,6 +273,32 @@ class PurgeReviewBucketAllTests(unittest.TestCase):
         manifest = json.loads((review / _TTL_MANIFEST_NAME).read_text(encoding="utf-8"))
         self.assertNotIn(orphan.name, manifest)
 
+    def test_orphan_manifest_tmp_not_purged_nor_counted(self) -> None:
+        """Audit 2026-08-08 : le meme orphelin, vu par la PURGE cette fois.
+
+        Le cas ci-dessus vit dans cette classe mais n'exerce que l'inventaire :
+        il n'appelle jamais `purge_review_bucket_all`. La purge, elle, testait
+        `child.name != _TTL_MANIFEST_NAME`, qui ne couvre pas les `.tmp.*` —
+        contrairement aux deux autres sites du module, qui passent tous par
+        `_is_ttl_manifest_file`. Consequence : « Vider maintenant » supprimait ce
+        temporaire ET l'ajoutait a `deleted`, alors que le total annonce dans la
+        modale de confirmation (`_iter_review_files`) l'exclut. Le retour
+        divergeait donc de ce qui avait ete annonce a l'utilisateur — ce que le
+        commentaire du site (FIX #8) dit mot pour mot vouloir eviter.
+        """
+        _write_file(self.root / "_review" / "MyFilm" / "movie.mkv", days_ago=1)
+        review = self.root / "_review"
+        orphan = review / f"{_TTL_MANIFEST_NAME}.tmp.12345.67890"
+        orphan.write_text("{}", encoding="utf-8")
+
+        annonce = list_review_bucket_files(self.cfg)["files_count"]
+        res = purge_review_bucket_all(self.cfg)
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["deleted"], annonce, "le retour doit correspondre au total annonce")
+        self.assertEqual(res["deleted"], 1, "seul le vrai film est un contenu de quarantaine")
+        self.assertTrue(orphan.exists(), "un temporaire du manifest n'est pas du contenu a purger")
+
 
 def _arreter_le_cron(api: SimpleNamespace, thread: "threading.Thread | None") -> None:
     """Pose l'evenement d'arret du cron et attend sa mort effective.
