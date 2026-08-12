@@ -137,9 +137,40 @@ class SaveSectionCleanupTests(unittest.TestCase):
 class SaveSectionProbeTests(unittest.TestCase):
     def test_defaults(self) -> None:
         result = _save_section_probe({}, default_probe_backend="ffprobe")
-        self.assertEqual(result["mediainfo_path"], "")
-        self.assertEqual(result["ffprobe_path"], "")
         self.assertEqual(result["probe_timeout_s"], 30.0)
+
+    def test_une_cle_de_chemin_ABSENTE_n_est_pas_reecrite(self) -> None:
+        """LE CONTRAT A CHANGE, ET C'ETAIT LE BUT.
+
+        Cette section ecrivait les deux chemins d'outils inconditionnellement.
+        Comme `to_save` part de l'existant, toute sauvegarde qui ne les nommait
+        pas les remplacait par "". Mesure, sur un state_dir reel, apres avoir
+        enregistre les deux outils :
+
+            save_settings({"theme": "luxe"})  ->  ffprobe_path = ''
+                                                  mediainfo_path = ''
+
+        Les omettre est SANS RISQUE pour la forme finale des reglages :
+        `_LITERAL_DEFAULTS` porte les deux cles, donc elles existent toujours
+        dans le settings.json ecrit (verifie). Ce que l'omission preserve, c'est
+        la VALEUR deja enregistree.
+        """
+        result = _save_section_probe({}, default_probe_backend="ffprobe")
+
+        self.assertNotIn("mediainfo_path", result, "une cle absente de la charge utile est reecrite")
+        self.assertNotIn("ffprobe_path", result)
+
+    def test_une_cle_de_chemin_VIDE_efface_bien(self) -> None:
+        """L'autre sens : le champ vide de l'utilisateur reste une demande."""
+        result = _save_section_probe({"ffprobe_path": "", "mediainfo_path": "  "}, default_probe_backend="ffprobe")
+
+        self.assertEqual(result["ffprobe_path"], "")
+        self.assertEqual(result["mediainfo_path"], "")
+
+    def test_un_chemin_transmis_est_ecrit(self) -> None:
+        result = _save_section_probe({"ffprobe_path": r"  C:\o\ffprobe.exe  "}, default_probe_backend="ffprobe")
+
+        self.assertEqual(result["ffprobe_path"], r"C:\o\ffprobe.exe")
 
     def test_probe_timeout_clamped_low(self) -> None:
         result = _save_section_probe({"probe_timeout_s": 1.0}, default_probe_backend="ffprobe")
