@@ -65,12 +65,40 @@ _PREFIXES_DYNAMIQUES = ("subtitle_missing_", "subtitle_forced_only_")
 
 
 def _cles_flag_map() -> set[str]:
-    """Cles de premier niveau du litteral `FLAG_MAP` de alert-labels.js."""
+    """Cles de premier niveau du litteral `FLAG_MAP` de alert-labels.js.
+
+    LA REGEX EST LARGE, ET LE PARSEUR SE SURVEILLE. Une premiere version exigeait
+    exactement DEUX espaces d'indentation et des cles strictement en minuscules.
+    Signale par sourcery-ai sur la PR #1029, et la consequence est precise : si
+    l'extraction RATE une cle pourtant presente, le test l'annonce comme
+    « absente de FLAG_MAP » — un faux positif qui casse la CI sans qu'aucun
+    defaut n'existe, et qui envoie corriger le mauvais fichier.
+
+    Deux mesures plutot qu'une :
+
+    1. l'indentation est libre (`^\\s+`) et le jeu de caracteres elargi, donc un
+       reformatage ne casse plus rien ;
+    2. le nombre de cles extraites est confronte au nombre d'ouvertures d'objet
+       du bloc. Si le parseur cesse de voir la carte, il le DIT au lieu de rendre
+       un ensemble ampute — c'est la difference entre un outil qui echoue et un
+       outil qui ment.
+    """
     texte = _JS.read_text(encoding="utf-8")
     debut = texte.index("const FLAG_MAP")
     fin = texte.index("\n};", debut)
     corps = texte[debut:fin]
-    return set(re.findall(r"^\s{2}([a-z][a-z0-9_]*)\s*:\s*\{", corps, re.M))
+
+    cles = set(re.findall(r"^\s+([A-Za-z_$][\w$]*)\s*:\s*\{", corps, re.M))
+    # Chaque entree de premier niveau ouvre un objet ; le compte doit concorder.
+    ouvertures = len(re.findall(r"^\s+[\"'A-Za-z_$][^\n:]*:\s*\{", corps, re.M))
+    if not cles or len(cles) != ouvertures:
+        raise AssertionError(
+            f"l'extraction des cles de FLAG_MAP ne suit plus le fichier : "
+            f"{len(cles)} cle(s) reconnue(s) pour {ouvertures} entree(s) ouvrant un objet. "
+            f"Corriger CE parseur, pas `alert-labels.js` — sans quoi les cles manquees "
+            f"seraient signalees comme absentes de FLAG_MAP."
+        )
+    return cles
 
 
 def _est_cible_warning_flags(noeud: ast.AST) -> bool:
