@@ -85,6 +85,21 @@ const FLAG_MAP = {
     severity: "critical",
     action: null,
   },
+  // Voisin immediat de root_level_source : les deux sont poses par le SCAN et
+  // reportes ensemble par _SCAN_ONLY_WARNING_FLAGS (library_actions_support.py),
+  // dont le commentaire les appelle des « badges UI ». root_level_source avait son
+  // etiquette, bonus_video non — l'asymetrie portait sur deux flags manipules par
+  // la meme ligne de code. Pose par plan_support_core.py:1051 via
+  // `flags = getattr(r, "warning_flags", None)` puis `.append()`, forme que la
+  // convention « grep warning_flags.append() » de l'en-tete de ce fichier ne
+  // voyait pas.
+  bonus_video: {
+    icon: "🎁",
+    label: "Vidéo bonus",
+    description: "Cette vidéo a été reconnue comme un bonus (making-of, featurette, scène coupée) d'un dossier partagé avec le film principal. Elle est classée à part et n'emportera jamais le dossier entier.",
+    severity: "info",
+    action: { kind: "ignore", label: "Ignorer" },
+  },
   integrity_header_invalid: {
     icon: "🛡",
     label: "Intégrité fichier invalide",
@@ -206,6 +221,23 @@ const FLAG_MAP = {
     label: "Durée — probablement un autre film",
     description: "La durée diffère trop fortement de TMDb pour être une simple édition étendue : il s'agit probablement d'un autre film. Vérifier le match avant Apply.",
     severity: "critical",
+    action: { kind: "open_film", label: "Voir détail" },
+  },
+  // Pose par plan_support_replan.py:925 en AFFECTATION
+  // (`result_row.warning_flags = [runtime_hard_excluded_flag]`), forme invisible a
+  // la convention « grep warning_flags.append() » de l'en-tete de ce fichier —
+  // d'ou son absence jusqu'ici. Or son commentaire d'origine
+  // (domain/runtime_hard_filter.py) dit exactement a quoi il sert :
+  //   « utile pour debug user en UI : "Pourquoi mon film n'a pas matche ?" »
+  // Sans etiquette, l'utilisateur lisait le code interne suivi de « Alerte (non
+  // documentee). Signalez-la si elle est frequente. » : l'application lui
+  // demandait de signaler son propre flag, la ou elle devait expliquer un
+  // non-match.
+  runtime_hard_filter_excluded_candidate: {
+    icon: "⏱",
+    label: "Candidat écarté sur la durée",
+    description: "Au moins un candidat TMDb a été écarté parce que sa durée s'éloigne de plus d'une heure de celle du fichier, sans édition longue détectée (Director's Cut, Extended…). C'est souvent la bonne réponse — mais si le film n'est pas identifié, ou mal, c'est ici qu'il faut regarder : une durée de fichier erronée écarte le bon candidat.",
+    severity: "info",
     action: { kind: "open_film", label: "Voir détail" },
   },
   // AUDIT 2026-06-14 (R6-I) : flag emis par la detection de doublons quand
