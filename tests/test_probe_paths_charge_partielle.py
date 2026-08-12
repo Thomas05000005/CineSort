@@ -102,6 +102,43 @@ class UneCleABSENTEPreserveLExistantTests(_Base):
         self.assertEqual(self._chemins(), (_FF, _MI))
 
 
+class LaPORTEPRINCIPALESuitLaMEMERegleTests(_Base):
+    """`set_probe_tool_paths` n'est pas le seul chemin d'ecriture.
+
+    CE QUE LA REVUE DU LOT A ATTRAPE. Corriger `set_probe_tool_paths` laissait
+    intacte la PORTE PRINCIPALE : `_save_section_probe` ecrivait les deux chemins
+    inconditionnellement. Mesure, sur un state_dir reel, apres enregistrement des
+    deux outils :
+
+        save_settings({"theme": "luxe"})  ->  ffprobe_path = ''
+                                              mediainfo_path = ''
+
+    Un client REST postant une charge utile partielle effacait donc la
+    configuration des outils par la grande porte, pendant que la petite etait
+    gardee. Corriger un motif a un endroit ne le corrige pas ailleurs.
+    """
+
+    def test_une_sauvegarde_qui_ne_parle_pas_des_outils_ne_les_touche_pas(self) -> None:
+        self.assertEqual(self._chemins(), (_FF, _MI))
+
+        self.api.settings.save_settings({"theme": "luxe"})
+
+        self.assertEqual(
+            self._chemins(),
+            (_FF, _MI),
+            "une sauvegarde partielle a efface la configuration des outils de sonde",
+        )
+
+    def test_une_sauvegarde_qui_VIDE_explicitement_efface_quand_meme(self) -> None:
+        reglages = self.api.settings.get_settings() or {}
+        reglages["ffprobe_path"] = ""
+        reglages["mediainfo_path"] = ""
+
+        self.api.settings.save_settings(reglages)
+
+        self.assertEqual(self._chemins(), ("", ""))
+
+
 class UneCleVIDEEfaceBienTests(_Base):
     """L'AUTRE SENS : un correctif qui rend le chemin ineffacable est aussi faux.
 
