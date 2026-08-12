@@ -38,9 +38,17 @@ from pathlib import Path
 
 _RACINE = Path("cinesort")
 
-# Mesure du 2026-08-06. Ce nombre ne se recopie pas : il se remesure, et il ne
-# doit JAMAIS remonter.
-PLAFOND = 68
+# Ce nombre ne se recopie pas : il se remesure, et il ne doit JAMAIS remonter.
+#
+#   68 au 2026-08-06 (mesure d'origine)
+#   65 apres le passage des 3 lectures du profil qualite actif a
+#      `_ERREURS_DE_LECTURE_DU_PROFIL` (cinesort_api.py) : une base verrouillee
+#      y faisait REMONTER `sqlite3.OperationalError` au lieu du repli prevu.
+#
+# Le cliquet a signale la baisse tout seul — c'est son autre sens. Sans lui, un
+# plafond reste acquis apres un correctif et 3 sites pourraient revenir en
+# silence.
+PLAFOND = 65
 
 
 def _noms_exceptions(handler: ast.ExceptHandler) -> set[str]:

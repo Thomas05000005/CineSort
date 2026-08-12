@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -204,6 +205,65 @@ def _cleanup_reason_label(reason: str) -> str:
         "none_eligible": "aucun dossier sidecar-only éligible trouvé",
         "no_families_enabled": "aucune famille résiduelle n'est activée",
     }.get(raw, raw or "inconnue")
+
+
+#: Erreurs attendues quand on interroge le store pour le profil actif.
+#:
+#: `sqlite3.Error` N'HERITE PAS DE `OSError` — regle inviolable n4 du depot. Sans
+#: elle dans le tuple, une base verrouillee ne declenchait pas le repli sur le
+#: profil par defaut : l'exception REMONTAIT. Mesure, en injectant
+#: `sqlite3.OperationalError("database is locked")` au niveau du STORE (couche de
+#: production, pas au niveau d'un callable) :
+#:
+#:     export_shareable_profile -> OperationalError remonte
+#:     get_calibration_report   -> OperationalError remonte
+#:
+#: Les deux ont desormais un repli propre.
+_ERREURS_DE_LECTURE_DU_PROFIL = (sqlite3.Error, OSError, TypeError, ValueError)
+
+
+def _profil_actif_ou_defaut(actif: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Profil de qualite ACTIF de l'utilisateur, ou le profil par defaut a defaut.
+
+    LE DEFAUT QUE CECI CORRIGE. Deux fonctions testaient
+    `isinstance(actif.get("profile_json"), str)` avant de deserialiser. Or le
+    repository DECODE deja la colonne :
+
+        quality.py:67  "profile_json": self._decode_row_json(..., expected_type=dict)
+
+    La condition etait donc TOUJOURS fausse, et les deux retombaient
+    systematiquement sur `default_quality_profile()`. Mesure sur un store reel,
+    profil personnalise enregistre puis relu :
+
+        type rendu par le repository : dict
+        isinstance(pj, str)          : False
+        poids du profil par defaut   : resolution=None
+        poids du profil utilisateur  : resolution=99.0
+
+    Consequences, silencieuses toutes les deux : `export_shareable_profile`
+    partageait le profil PAR DEFAUT sous le nom de l'utilisateur, et
+    `get_calibration_report` calculait ses suggestions de poids sur un profil
+    que l'utilisateur n'emploie pas.
+
+    LES DEUX FORMES SONT ACCEPTEES ICI. Le dict est la forme de production ; la
+    chaine reste toleree parce qu'une base ancienne, ou un decodage qui echoue
+    et retombe sur la valeur brute, peut encore en produire une. Refuser la
+    chaine ferait perdre le profil dans ces cas-la, ce qui est precisement le
+    defaut qu'on corrige.
+    """
+    if not actif:
+        return default_quality_profile()
+    brut = actif.get("profile_json")
+    if isinstance(brut, dict) and brut:
+        return brut
+    if isinstance(brut, str) and brut:
+        try:
+            decode = json.loads(brut)
+        except (ValueError, TypeError):
+            return default_quality_profile()
+        if isinstance(decode, dict) and decode:
+            return decode
+    return default_quality_profile()
 
 
 class CineSortApi:
@@ -2481,19 +2541,13 @@ class CineSortApi:
 
         try:
             store, _runner = self._get_or_create_infra(self._get_state_dir())
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             store = None
         try:
             active = store.quality.get_active_quality_profile() if store else None
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             active = None
-        if active and isinstance(active.get("profile_json"), str):
-            try:
-                profile = json.loads(active["profile_json"])
-            except (ValueError, TypeError):
-                profile = default_quality_profile()
-        else:
-            profile = default_quality_profile()
+        profile = _profil_actif_ou_defaut(active)
 
         wrapped = wrap_profile_for_export(
             profile,
@@ -2661,13 +2715,13 @@ class CineSortApi:
 
         try:
             store, _runner = self._get_or_create_infra(self._get_state_dir())
-        except (OSError, TypeError, ValueError) as exc:
+        except _ERREURS_DE_LECTURE_DU_PROFIL as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if store is None:
             return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
             feedbacks = store.quality.list_user_quality_feedback(limit=10_000)
-        except (OSError, TypeError, ValueError) as exc:
+        except _ERREURS_DE_LECTURE_DU_PROFIL as exc:
             self.log_api_exception("get_calibration_report", exc)
             return _err_response("Lecture feedbacks échouée.", category="runtime", level="error", log_module=__name__)
 
@@ -2675,16 +2729,16 @@ class CineSortApi:
         # Profil actif pour calculer la suggestion
         try:
             prof = store.quality.get_active_quality_profile()
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             prof = None
-        if prof and isinstance(prof.get("profile_json"), str):
-            try:
-                payload = json.loads(prof["profile_json"])
-                current_weights = payload.get("weights") or {}
-            except (ValueError, TypeError):
-                current_weights = {}
-        else:
-            current_weights = default_quality_profile().get("weights", {})
+        # UN PROFIL SANS POIDS RETOMBE SUR CEUX DU DEFAUT, et ce n'est pas une
+        # commodite : `validate_quality_profile` INJECTE les poids par defaut
+        # quand ils manquent (mesure : un profil ampute de sa cle `weights` en
+        # ressort avec video=60/audio=30/extras=10). Ce sont donc bien eux qui
+        # regissent le scoring de ce profil-la, et c'est sur eux que la
+        # suggestion doit porter. Rendre {} ferait taire la calibration sur un
+        # profil que l'utilisateur emploie pourtant.
+        current_weights = _profil_actif_ou_defaut(prof).get("weights") or default_quality_profile().get("weights", {})
 
         suggestion = suggest_weight_adjustment(bias, current_weights) if current_weights else None
         return {

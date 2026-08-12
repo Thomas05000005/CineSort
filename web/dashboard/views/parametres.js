@@ -28,6 +28,7 @@
 
 import { apiPost, invalidateSettingsCache } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
+import { formatBytes } from "../core/format.js";
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
 // natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
 import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
@@ -1531,6 +1532,51 @@ const ACTIONS_DE_SECTION = {
       rendu: "message",
     },
   ],
+  // --- Vague B3 : runtime et reglages ---------------------------------------
+  logs: [
+    {
+      route: "runtime/get_log_paths",
+      label: "Où sont les journaux ?",
+      titre: "Affiche les chemins des fichiers de log sur ce poste",
+      rendu: "chemins",
+    },
+  ],
+  outils: [
+    {
+      route: "runtime/purge_probe_cache",
+      label: "Vider le cache de sonde",
+      titre: "Oublie les mesures techniques déjà faites : elles seront refaites au prochain scan",
+      rendu: "message",
+      // DESTRUCTIVE : la regle du depot exige une confirmation qui NOMME la
+      // consequence. Le cache de sonde n'est pas de la donnee utilisateur, mais
+      // le vider fait repayer chaque mesure technique au prochain scan — sur une
+      // grande bibliotheque, c'est long, et l'utilisateur doit le savoir avant.
+      confirmation: {
+        titre: "Vider le cache de sonde ?",
+        corps:
+          "Les mesures techniques déjà faites (codec, résolution, HDR, pistes audio) seront oubliées. " +
+          "Elles seront refaites au prochain scan, ce qui peut être long sur une grande bibliothèque. " +
+          "Aucun film et aucun réglage n'est supprimé.",
+        libelle: "Vider le cache",
+      },
+    },
+  ],
+  templates: [
+    {
+      route: "settings/get_naming_presets",
+      label: "Modèles proposés",
+      titre: "Liste les modèles de nommage fournis avec l'application",
+      rendu: "presets",
+    },
+  ],
+  "stockage-sqlite": [
+    {
+      route: "settings/get_user_data_size",
+      label: "Taille des données",
+      titre: "Mesure la place occupée par la base et les données de runs",
+      rendu: "taille",
+    },
+  ],
 };
 
 function _renderSectionActions(section) {
@@ -1570,6 +1616,10 @@ function _trouverAction(route) {
  * dans la reponse sont affichees. Une cle absente n'est pas rendue « 0 », ce qui
  * ferait passer une absence de mesure pour une mesure nulle.
  */
+//: Cles d'enveloppe d'une reponse d'API : elles ne portent jamais de donnee
+//: metier, et un rendu generique qui les prendrait pour telle mentirait.
+const _CLES_ENVELOPPE = new Set(["ok", "error", "message", "user_message", "category", "level"]);
+
 function _rendreReponseAction(action, data) {
   if (action.rendu === "rapport") {
     const compteurs = [
@@ -1584,10 +1634,58 @@ function _rendreReponseAction(action, data) {
       .map(([cle, libelle]) => `${String(data[cle])} ${libelle}`);
     if (compteurs.length) return compteurs.join(" · ");
   }
+  if (action.rendu === "chemins") {
+    // Les cles d'ENVELOPPE sont exclues : sans cela, une reponse sans chemin
+    // mais avec un `message` rendait « message : ... » comme s'il s'agissait
+    // d'un chemin, au lieu de retomber sur le message. Mesure : le sous-test
+    // `chemins` du repli echouait exactement la-dessus.
+    const chemins = Object.entries(data)
+      .filter(([cle, v]) => !_CLES_ENVELOPPE.has(cle) && typeof v === "string" && v)
+      .map(([cle, v]) => `${cle} : ${v}`);
+    if (chemins.length) return chemins.join(" | ");
+  }
+  if (action.rendu === "presets") {
+    const liste = Array.isArray(data.presets) ? data.presets : [];
+    // Un preset peut etre une chaine ou un objet {name, template} : on ne
+    // suppose pas la forme, on rend ce qui est lisible.
+    const noms = liste.map((p) => (typeof p === "string" ? p : p && (p.name || p.label || p.template))).filter(Boolean);
+    if (noms.length) return `${noms.length} modèle(s) : ${noms.join(" · ")}`;
+  }
+  if (action.rendu === "taille") {
+    // `get_user_data_size` rend `{size_mb, items}` -- des MEGAOCTETS et un
+    // COMPTE, pas des octets. Une premiere version passait toute valeur
+    // numerique a `formatBytes` : les megaoctets sortaient mille fois trop
+    // petits, et le nombre d'elements etait affiche comme un poids.
+    const parts = [];
+    if (typeof data.size_mb === "number") parts.push(`${data.size_mb} Mo`);
+    if (typeof data.items === "number") parts.push(`${data.items} élément(s)`);
+    if (parts.length) return parts.join(" · ");
+  }
   return String(data.user_message || data.message || "Terminé.");
 }
 
-async function _lancerActionDeSection(container, btn) {
+/** Appelle la route et rend sa reponse dans la zone de sortie de la section. */
+async function _executerActionDeSection(action, route, btn, ecrire) {
+  ecrire("En cours…", "info");
+  btn.disabled = true;
+  try {
+    const res = await apiPost(route, {});
+    const data = (res && res.data) || res || {};
+    if (data.ok === false) {
+      // Le message du backend passe AVANT tout libelle generique : c'est lui qui
+      // dit pourquoi (URL absente, jeton invalide, serveur injoignable).
+      ecrire(String(data.user_message || data.message || "L'action a échoué."), "error");
+      return;
+    }
+    ecrire(_rendreReponseAction(action, data), "ok");
+  } catch {
+    ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function _lancerActionDeSection(container, btn) {
   const route = btn.dataset.sectionAction || "";
   const action = _trouverAction(route);
   if (!action) return;
@@ -1601,23 +1699,29 @@ async function _lancerActionDeSection(container, btn) {
     sortie.textContent = texte;
     sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
   };
-  ecrire("En cours…", "info");
-  btn.disabled = true;
-  try {
-    const res = await apiPost(route, {});
-    const data = (res && res.data) || res || {};
-    if (data.ok === false) {
-      // Le message du backend passe AVANT tout libelle generique : c'est lui qui
-      // dit pourquoi (URL absente, jeton invalide, serveur injoignable).
-      ecrire(String(data.user_message || data.message || "L'action a échoué."), "error");
-      return;
-    }
-    ecrire(_rendreReponseAction(action, data), "ok");
-  } catch (e) {
-    ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
-  } finally {
-    btn.disabled = false;
+  // Une action destructive DOIT nommer sa consequence avant de partir. La regle
+  // du depot l'exige, et c'est le seul endroit ou l'utilisateur peut encore dire
+  // non — apres, l'effet est fait.
+  //
+  // LE CONTRAT DE `dangerConfirmModal` EST PAR RAPPEL, PAS PAR PROMESSE. Mesure
+  // sur le source : la fonction n'est pas `async` et ne porte AUCUN `return`
+  // avec valeur. Une premiere version de ce code faisait
+  // `const accepte = await dangerConfirmModal({...}); if (!accepte) return;` :
+  // `accepte` valait donc toujours `undefined`, et l'action ne partait JAMAIS.
+  // Elle passait aussi `body:`, option que la modale ne destructure pas — la
+  // consequence etait silencieusement jetee, en violation de la regle n3.
+  // Les 12 autres sites d'appel du depot utilisent tous `consequence` +
+  // `onConfirm` ; celui-ci etait le seul a s'en ecarter.
+  if (action.confirmation) {
+    dangerConfirmModal({
+      title: action.confirmation.titre,
+      consequence: action.confirmation.corps,
+      confirmLabel: action.confirmation.libelle,
+      onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
+    });
+    return;
   }
+  return _executerActionDeSection(action, route, btn, ecrire);
 }
 
 function _renderCategoryPanel(categoryId) {
