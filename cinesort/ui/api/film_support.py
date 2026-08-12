@@ -18,6 +18,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from cinesort.domain.film_history import identity_key_from_dict
+from cinesort.domain.film_identity import compute_film_id
 from cinesort.infra import state
 
 # Import module-style (et non `from ... import TmdbClient`) : c'est la
@@ -144,6 +145,28 @@ def _fetch_tmdb_extras(api: Any, tmdb_id: int) -> Dict[str, Any]:
     except (OSError, AttributeError, KeyError, TypeError, ValueError) as exc:
         logger.debug("_fetch_tmdb_extras error: %s", exc)
     return out
+
+
+def _identite_du_film(row: Any) -> str:
+    """Identite du film, telle que l'attendent les trois endpoints de verrous.
+
+    POURQUOI CE CHAMP EXISTE, ET CE QUE SON ABSENCE COUTAIT.
+    `set_field_lock`, `list_field_locks` et `clear_field_lock` exigent un
+    `film_id` de la forme `tmdb:<id>` ou `path:<sha1(folder|video)>`. La seconde
+    n'est PAS calculable cote navigateur -- il faut un SHA-1 du chemin. Le front
+    n'avait donc AUCUN moyen de NOMMER le film, et la fonctionnalite de verrous
+    restait inatteignable depuis l'interface : avant la vague B1,
+    `grep -rn "set_field_lock" web/` ne rendait rien.
+
+    `compute_film_id` est la MEME fonction que celle employee par
+    `set_film_tmdb_candidate` et par `_rematch_tmdb_and_update_plan` : l'identite
+    exposee ici est donc exactement celle sous laquelle les verrous sont ranges.
+    En calculer une autre donnerait une interface d'apparence fonctionnelle dont
+    les verrous seraient invisibles au re-match.
+    """
+    if not isinstance(row, dict):
+        return ""
+    return compute_film_id(row)
 
 
 def _resolve_chosen_tmdb_id(row: Dict[str, Any], candidates: List[Dict[str, Any]]) -> int:
@@ -586,9 +609,6 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
 
     # Spec 06 §3.1 : enrichissement runtime + director + overview depuis TMDb
     extras = _fetch_tmdb_extras(api, tmdb_id) if tmdb_id > 0 else {}
-    runtime = extras.get("runtime")
-    director = extras.get("director")
-    overview = extras.get("overview")
 
     return {
         "ok": True,
@@ -600,10 +620,11 @@ def _get_film_full_impl(api: Any, run_id: Optional[str], row_id: str) -> Dict[st
         "history": history,
         "poster_url": poster_url,
         "tmdb_id": tmdb_id,
+        "film_id": _identite_du_film(row),
         # Spec 06 §3.1 : champs top-level pour le hero du Modal Film
-        "runtime": runtime,
-        "director": director,
-        "overview": overview,
+        "runtime": extras.get("runtime"),
+        "director": extras.get("director"),
+        "overview": extras.get("overview"),
         # R7-12 : etat des corrections manuelles -> actions d'annulation UI.
         "has_tmdb_override": _has_override,
         "is_marked_for_deletion": _is_marked,

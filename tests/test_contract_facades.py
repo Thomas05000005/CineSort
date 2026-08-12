@@ -60,22 +60,14 @@ KNOWN_ORPHAN_METHODS = frozenset(
         # les 6 vues mortes supprimees (status/logs/jellyfin/plex/radarr.js) — la
         # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
         # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
-        "integrations.get_jellyfin_sync_report",
-        "integrations.get_plex_sync_report",
         "integrations.request_radarr_upgrade",
         "library.get_library_podiums",
         "library.get_library_timeline",
         "run.export_run_nfo",
         "run.export_run_report",
         "runtime.get_log_paths",
-        "integrations.refresh_jellyfin_library_now",
-        "integrations.refresh_plex_library_now",
-        "integrations.test_email_report",
-        "library.clear_field_lock",
         "library.get_film_history",
         "library.get_scoring_rollup",
-        "library.list_field_locks",
-        "library.set_field_lock",
         "quality.analyze_perceptual_batch",
         "quality.analyze_quality_batch",
         "quality.apply_quality_preset",

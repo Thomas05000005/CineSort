@@ -1474,6 +1474,152 @@ function _renderSubSidebar() {
   </aside>`;
 }
 
+/**
+ * Actions d'une section d'integration — vague B2.
+ *
+ * CE QUE CES BOUTONS RENDENT ATTEIGNABLE. Six methodes de facade existaient,
+ * testees cote backend, et n'etaient appelees par AUCUN code du dashboard.
+ * `docs/TROUBLESHOOTING.md` donne pourtant le rapport de coherence Jellyfin
+ * comme *la* solution utilisateur a un probleme documente — une reponse que
+ * personne ne pouvait suivre.
+ *
+ * DECLARATIF, ET NON CABLE EN DUR : la page entiere est batie sur un schema,
+ * et une exception codee a la main pour six boutons aurait diverge au premier
+ * champ ajoute. Chaque entree porte sa route, son libelle, et la facon de
+ * rendre sa reponse.
+ *
+ * `request_radarr_upgrade` n'est PAS ici : elle exige un `radarr_movie_id`,
+ * donc elle appartient a la fiche d'un film, pas a un reglage global. La
+ * cabler ici aurait demande d'inventer un champ de saisie d'identifiant
+ * Radarr — une interface que personne n'a demandee, pour une methode qui a
+ * deja son domicile naturel ailleurs.
+ */
+const ACTIONS_DE_SECTION = {
+  jellyfin: [
+    {
+      route: "integrations/get_jellyfin_sync_report",
+      label: "Rapport de cohérence",
+      titre: "Compare la bibliothèque Jellyfin au dernier scan et liste les écarts",
+      rendu: "rapport",
+    },
+    {
+      route: "integrations/refresh_jellyfin_library_now",
+      label: "Rafraîchir maintenant",
+      titre: "Demande à Jellyfin de re-scanner sa bibliothèque immédiatement",
+      rendu: "message",
+    },
+  ],
+  plex: [
+    {
+      route: "integrations/get_plex_sync_report",
+      label: "Rapport de cohérence",
+      titre: "Compare la bibliothèque Plex au dernier scan et liste les écarts",
+      rendu: "rapport",
+    },
+    {
+      route: "integrations/refresh_plex_library_now",
+      label: "Rafraîchir maintenant",
+      titre: "Demande à Plex de re-scanner sa bibliothèque immédiatement",
+      rendu: "message",
+    },
+  ],
+  email: [
+    {
+      route: "integrations/test_email_report",
+      label: "Envoyer un email de test",
+      titre: "Envoie un rapport d'exemple pour valider la configuration SMTP",
+      rendu: "message",
+    },
+  ],
+};
+
+function _renderSectionActions(section) {
+  const actions = ACTIONS_DE_SECTION[section.id];
+  if (!actions || !actions.length) return "";
+  const boutons = actions
+    .map(
+      (a) => `<button type="button" class="v5-btn v5-btn--sm v5-btn--ghost"
+        data-section-action="${_esc(a.route)}"
+        title="${_esc(a.titre)}">${_esc(a.label)}</button>`
+    )
+    .join("");
+  return `<div class="parametres-section-actions">${boutons}
+    <div class="parametres-section-actions-out" data-section-actions-out="${_esc(section.id)}"></div>
+  </div>`;
+}
+
+/** Retrouve la definition d'une action a partir de sa route. */
+function _trouverAction(route) {
+  for (const actions of Object.values(ACTIONS_DE_SECTION)) {
+    const trouvee = actions.find((a) => a.route === route);
+    if (trouvee) return trouvee;
+  }
+  return null;
+}
+
+/**
+ * Met en forme la reponse d'une action de section.
+ *
+ * DEUX RENDUS, PARCE QU'IL Y A DEUX NATURES DE REPONSE. Un rafraichissement ou
+ * un email de test rend un accuse ; un rapport de coherence rend des CHIFFRES
+ * que l'utilisateur doit pouvoir lire. Les afficher tous les deux comme un
+ * simple « OK » perdrait precisement l'information pour laquelle le rapport
+ * existe.
+ *
+ * Les compteurs sont lus SANS invention : seules les cles reellement presentes
+ * dans la reponse sont affichees. Une cle absente n'est pas rendue « 0 », ce qui
+ * ferait passer une absence de mesure pour une mesure nulle.
+ */
+function _rendreReponseAction(action, data) {
+  if (action.rendu === "rapport") {
+    const compteurs = [
+      ["manquants", "absents de la médiathèque"],
+      ["missing", "absents de la médiathèque"],
+      ["extra", "présents en trop"],
+      ["orphans", "orphelins"],
+      ["matched", "concordants"],
+      ["total", "films comparés"],
+    ]
+      .filter(([cle]) => data[cle] !== undefined && data[cle] !== null)
+      .map(([cle, libelle]) => `${String(data[cle])} ${libelle}`);
+    if (compteurs.length) return compteurs.join(" · ");
+  }
+  return String(data.user_message || data.message || "Terminé.");
+}
+
+async function _lancerActionDeSection(container, btn) {
+  const route = btn.dataset.sectionAction || "";
+  const action = _trouverAction(route);
+  if (!action) return;
+  const sectionEl = btn.closest("[data-section-id]");
+  const sortie = sectionEl && sectionEl.querySelector("[data-section-actions-out]");
+  // `textContent` et non `innerHTML` : la reponse du backend n'est PAS de la
+  // mise en forme, et l'echapper serait a la fois inutile et visible
+  // (`&amp;` a l'ecran). Le rendu ci-dessus ne produit donc aucune balise.
+  const ecrire = (texte, classe) => {
+    if (!sortie) return;
+    sortie.textContent = texte;
+    sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
+  };
+  ecrire("En cours…", "info");
+  btn.disabled = true;
+  try {
+    const res = await apiPost(route, {});
+    const data = (res && res.data) || res || {};
+    if (data.ok === false) {
+      // Le message du backend passe AVANT tout libelle generique : c'est lui qui
+      // dit pourquoi (URL absente, jeton invalide, serveur injoignable).
+      ecrire(String(data.user_message || data.message || "L'action a échoué."), "error");
+      return;
+    }
+    ecrire(_rendreReponseAction(action, data), "ok");
+  } catch (e) {
+    ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function _renderCategoryPanel(categoryId) {
   const group = PARAMETRES_GROUPS.find((c) => c.id === categoryId) || PARAMETRES_GROUPS[0];
   const visibleSections = (group.sections || []).filter((s) => _sectionMatches(_state.searchQuery, s));
@@ -1487,6 +1633,7 @@ function _renderCategoryPanel(categoryId) {
       <div class="parametres-empty">Aucun paramètre ne correspond à votre recherche dans cette catégorie.</div>
     </section>`;
   }
+
 
   const sectionsHtml = visibleSections.map((section) => {
     const status = _sectionStatus(section, _state.settings);
@@ -1508,7 +1655,7 @@ function _renderCategoryPanel(categoryId) {
         <h3 class="parametres-section-title">${_highlightLabel(section.label, _state.searchQuery)}</h3>
         ${badge}
       </header>
-      <div class="parametres-section-body">${extraTop}${fields}</div>
+      <div class="parametres-section-body">${extraTop}${fields}${_renderSectionActions(section)}</div>
     </section>`;
   }).join("");
 
@@ -2375,6 +2522,13 @@ function _bindFields(container) {
       }
       input.type = reveal ? "text" : "password";
     });
+  });
+
+  // Actions d'integration (vague B2) : rapports de coherence, rafraichissements,
+  // email de test. Une seule delegation pour les cinq, la route etant portee par
+  // le bouton — c'est la meme discipline declarative que le reste de la page.
+  container.querySelectorAll("[data-section-action]").forEach((btn) => {
+    btn.addEventListener("click", () => _lancerActionDeSection(container, btn));
   });
 
   // Test buttons (TMDb, Jellyfin, Plex, Radarr, OMDb)

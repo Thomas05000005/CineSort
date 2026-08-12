@@ -56,11 +56,30 @@ DYNAMIC_ALLOWED_SITES: dict[tuple[str, str], int] = {
     #                              : "runtime/get_probe_tools_status"
     # L2207 : boutons "Tester" -> dataset.testMethod (5 integrations)
     ("web/dashboard/views/parametres.js", "method"): 2,
+    # Vague B1 : le cadenas de verrouillage d'un champ. La route depend de
+    # l'etat du verrou -- `clear_field_lock` s'il est pose, `set_field_lock`
+    # sinon -- et les DEUX branches sont couvertes par
+    # `tests/test_cadenas_verrous_fiche_film.py`, qui verifie la route ET le
+    # nom de champ transmis.
+    ("web/dashboard/components/film-detail.js", "route"): 1,
+    # Vague B2 : les cinq actions d'integration (rapports de coherence,
+    # rafraichissements, email de test). La route est portee par le bouton, donc
+    # UN seul site physique pour cinq endpoints — c'est la meme discipline
+    # declarative que le reste de la page, et
+    # `tests/test_actions_integration_parametres.py` verrouille la liste exacte.
+    ("web/dashboard/views/parametres.js", "route"): 1,
 }
 
-# Les 7 endpoints resolus derriere les sites dynamiques ci-dessus. Chacun doit
+# Les endpoints resolus derriere les sites dynamiques ci-dessus. Chacun doit
 # rester une methode valide de sa facade (garde contre un rename backend).
 DYNAMIC_RESOLVED_ENDPOINTS: tuple[str, ...] = (
+    "integrations/get_jellyfin_sync_report",
+    "integrations/get_plex_sync_report",
+    "integrations/refresh_jellyfin_library_now",
+    "integrations/refresh_plex_library_now",
+    "integrations/test_email_report",
+    "library/clear_field_lock",
+    "library/set_field_lock",
     "runtime/get_probe_tools_status",
     "runtime/recheck_probe_tools",
     "integrations/test_jellyfin_connection",
