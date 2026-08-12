@@ -2539,14 +2539,34 @@ class CineSortApi:
         brut du profil sans wrap.
         """
 
+        # ON NE PARTAGE PAS UN PROFIL QU'ON N'A PAS PU LIRE.
+        #
+        # Le repli sur le profil par defaut est legitime quand il n'y a PAS de
+        # profil actif — le defaut est alors bien celui qui s'applique. Il ne
+        # l'est pas quand la LECTURE a echoue : on ne sait alors rien, et
+        # exporter le defaut sous le nom de l'utilisateur lui fait partager un
+        # reglage qui n'est pas le sien. Mesure, en injectant
+        # `sqlite3.OperationalError("database is locked")` au niveau du store :
+        #
+        #     ok: True, name: "Mon reglage", author: "Thomas",
+        #     poids: {video 60, audio 30, extras 10}   <- le DEFAUT
+        #
+        # C'est le defaut que cette fonction corrigeait, revenu par le chemin
+        # d'erreur. Une base verrouillee (autre processus CineSort, sauvegarde en
+        # cours) suffit a le declencher. Un echec ne devient pas un succes
+        # silencieux : ici il devient un REFUS explicite, reessayable.
         try:
             store, _runner = self._get_or_create_infra(self._get_state_dir())
-        except _ERREURS_DE_LECTURE_DU_PROFIL:
-            store = None
-        try:
             active = store.quality.get_active_quality_profile() if store else None
-        except _ERREURS_DE_LECTURE_DU_PROFIL:
-            active = None
+        except _ERREURS_DE_LECTURE_DU_PROFIL as exc:
+            self.log_api_exception("export_shareable_profile", exc)
+            return _err_response(
+                "Votre profil de qualité n'a pas pu être lu ; rien n'a été exporté. "
+                "Fermez toute autre fenêtre CineSort puis réessayez.",
+                category="runtime",
+                level="error",
+                log_module=__name__,
+            )
         profile = _profil_actif_ou_defaut(active)
 
         wrapped = wrap_profile_for_export(
