@@ -307,25 +307,21 @@ function _rendre(hote) {
  * Chargement
  * =========================================================== */
 
-const _ROUTES = {
-  podiums: () => ["library/get_library_podiums", {}],
-  timeline: () => ["library/get_library_timeline", { months: _state.mois }],
-  rollup: () => ["library/get_scoring_rollup", { by: _state.dimension }],
-};
+// UNE `Map`, PAS UN OBJET LITTERAL. `onglet` vient du `dataset` d'un bouton,
+// donc du DOM. Sur un objet litteral, une recherche par cle non statique
+// traverse aussi le PROTOTYPE : `_ROUTES["constructor"]` rend `Object`, valeur
+// VRAIE, donc appelee. Une `Map` n'a pas de cles heritees — la classe entiere de
+// probleme disparait au lieu d'etre gardee au cas par cas.
+const _ROUTES = new Map([
+  ["podiums", () => ["library/get_library_podiums", {}]],
+  ["timeline", () => ["library/get_library_timeline", { months: _state.mois }]],
+  ["rollup", () => ["library/get_scoring_rollup", { by: _state.dimension }]],
+]);
 
 async function _charger(onglet, hote) {
-  // `onglet` vient du `dataset` d'un bouton, donc du DOM. Une recherche par cle
-  // NON STATIQUE sur un objet litteral traverse aussi son prototype :
-  // `_ROUTES["constructor"]` rend `Object`, qui est VRAI — le garde `if (!fab)`
-  // laisserait alors passer, et `fab()` s'executerait. Le scenario est
-  // improbable ici (les trois ids sont ecrits par cette vue), mais le garde
-  // coute une ligne et ne depend d'aucune supposition sur l'appelant.
-  if (!Object.prototype.hasOwnProperty.call(_ROUTES, onglet)) return;
-  // Pas de controle de type ici : toutes les valeurs PROPRES de `_ROUTES` sont
-  // des fonctions par construction, et les trois routes sont verrouillees par
-  // `tests/test_vue_statistiques.py`. Un `typeof` de plus serait une garde
-  // qu'aucune mutation ne peut faire rougir — donc pas une garde.
-  const [route, params] = _ROUTES[onglet]();
+  const fabrique = _ROUTES.get(onglet);
+  if (!fabrique) return;
+  const [route, params] = fabrique();
   _state.chargement[onglet] = true;
   _state.erreurs[onglet] = "";
   _rendre(hote);
