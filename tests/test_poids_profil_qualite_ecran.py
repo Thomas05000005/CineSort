@@ -210,5 +210,33 @@ __emit({ appels: globalThis.__appels.map((a) => a.route) });
         )
 
 
+class LeBoutonDuSIMULATEUREstBRANCHETests(_Base):
+    """Cinquieme fois dans cette campagne : une fonction juste et inatteignable.
+
+    Le simulateur vit dans son propre module ; ses tests l'eprouvent chez lui.
+    Rien ne garantit pour autant que le bouton de l'ecran Parametres l'ouvre —
+    c'est exactement le defaut que toute cette vague corrige.
+    """
+
+    def test_le_clic_ouvre_le_simulateur(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__ouvertures = 0;
+// Le module du simulateur est stubbe : on n'eprouve ICI que le CABLAGE.
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-simulateur") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bind(conteneur);
+__emit({ branche: typeof boutons[0].rappel === "function" });
+"""
+        )
+        self.assertTrue(
+            res["branche"],
+            "le bouton « Simuler un profil » n'a aucun gestionnaire : il est decoratif",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
