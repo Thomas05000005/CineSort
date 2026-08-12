@@ -214,6 +214,7 @@ import { initDoublons, unmountDoublons } from "./views/doublons.js"; // /doublon
 // Phase 3.4 (spec 09-historique.md) : nouvelle vue Historique refondue
 // (timeline groupee par jour + filtres + inspecteur 5 onglets).
 import { initHistorique, unmountHistorique, initRunDetailPage, unmountRunDetailPage } from "./views/historique.js"; // /historique (nouvelle UI) + /run/:id (page standalone)
+import { initStatistiques, unmountStatistiques } from "./views/statistiques.js"; // /statistiques (vague C)
 // Phase 3.4 (spec 10-qualite.md) : nouvelle vue Qualité audit transverse
 // (6 sections + filtres + re-calcul scores).
 import { initQualite, unmountQualite } from "./views/qualite.js"; // /qualite (nouvelle UI)
@@ -346,6 +347,11 @@ registerRoute("/historique", { view: "view-qij", guard: requireAuth, init: (el, 
 registerRoute("/run/:id", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initRunDetailPage(el, opts); return unmountRunDetailPage; } });
 // Phase 3.4 : /qualite cable la nouvelle vue Qualité refondue (spec 10).
 registerRoute("/qualite", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initQualite(el, opts); return unmountQualite; } });
+// Vague C : trois analyses qui existaient cote backend et qu'aucun code du
+// dashboard n'appelait. Meme mount point que les autres vues « pleine page »
+// (view-qij) : la vue remplit elle-meme son container.
+registerRoute("/statistiques", { view: "view-qij", guard: requireAuth, init: (el, opts) => { initStatistiques(el, opts); return unmountStatistiques; } });
+
 // Phase 3.1-D : /parametres cable la nouvelle vue refondue (spec 11-parametres.md).
 registerRoute("/parametres", { view: "view-settings", guard: requireAuth, init: (el, opts) => { initParametres(el, opts); return unmountParametres; } });
 // Phase 3.5 : /aide cable la nouvelle vue refondue (spec 12-aide.md).
@@ -370,6 +376,7 @@ const SIDEBAR_ROUTE_ALIAS = {
   doublons: "/doublons",  // AUDIT 2026-06-13 (R5-E) : entree menu Doublons.
   quality: "/qualite",
   history: "/historique",
+  statistiques: "/statistiques",
   settings: "/parametres",
   help: "/aide",
   // Compat ascendante : si la sidebar utilise encore l'id "qij" (v7-fusion),
