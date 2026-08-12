@@ -67,13 +67,10 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.apply_quality_preset",
         "quality.compare_perceptual",
         "quality.export_quality_profile",
-        "quality.export_shareable_profile",
-        "quality.get_calibration_report",
         "quality.get_profiles",
         "quality.get_quality_presets",
         "quality.get_quality_report",
         "quality.import_quality_profile",
-        "quality.import_shareable_profile",
         "quality.save_profile",
         "quality.set_active_profile",
         "run.check_duplicates_fusion",  # B4 : NON cablable — gardee par la variable d'ENVIRONNEMENT serveur CINESORT_FUSION_DOUBLONS, qu'aucune ligne applicative ne positionne

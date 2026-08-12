@@ -26,10 +26,10 @@ import ni export, donc le seul reellement verifie.
 CE QUE CE FICHIER VERROUILLE
 ============================
 
-1. `scripts/check_js_syntax.mjs` est vert sur l'arbre reel et couvre les 52
+1. `scripts/check_js_syntax.mjs` est vert sur l'arbre reel et couvre les 53
    `.js` du dashboard (+ le `.mjs` de `web/dashboard/tests/`).
 2. Le goal d'analyse de CHAQUE fichier est celui de son chargement reel.
-3. MUTATION : une erreur de syntaxe injectee dans n'importe lequel des 53
+3. MUTATION : une erreur de syntaxe injectee dans n'importe lequel des 54
    fichiers fait rougir le verificateur — les 50 sont testes.
 4. MUTATION : le contrat de chargement de `bootstrap-debug.js` (script
    classique, pas de module) est verifie lui aussi.
@@ -112,7 +112,7 @@ class OutillagePresentTests(unittest.TestCase):
         self.assertEqual(
             data.get("type"),
             "module",
-            'package.json doit declarer "type": "module" : les 52 .js de web/dashboard/ sont des '
+            'package.json doit declarer "type": "module" : les 53 .js de web/dashboard/ sont des '
             "modules ESM, et sans cette declaration `node --check` sort en 0 sur une erreur averee.",
         )
 
@@ -126,7 +126,7 @@ class VerificateurSurArbreReelTests(unittest.TestCase):
         self.assertEqual(payload["failures"], [])
         self.assertEqual(payload["problems"], [])
 
-    def test_les_52_js_du_dashboard_sont_couverts(self) -> None:
+    def test_les_53_js_du_dashboard_sont_couverts(self) -> None:
         """L'inventaire doit couvrir TOUS les .js reellement presents.
 
         Le compte exact est une ANCRE : il attrape un `rglob` devenu muet, un
@@ -139,8 +139,10 @@ class VerificateurSurArbreReelTests(unittest.TestCase):
         `web/dashboard/components/simulateur-qualite.js` (comparaison avant /
         apres d'un preset, cf. vague D2), puis de 51 a 52 avec
         `web/dashboard/components/regles-qualite.js` (builder de regles custom,
-        cf. vague D3) : ajouter un module du dashboard se declare ici, ce n'est
-        pas un effet de bord silencieux.
+        cf. vague D3), puis de 52 a 53 avec
+        `web/dashboard/components/calibration-qualite.js` (options, rapport de
+        calibration et partage, cf. vague D4) : ajouter un module du dashboard se
+        declare ici, ce n'est pas un effet de bord silencieux.
         """
         proc = _run_checker("--plan", "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -150,7 +152,7 @@ class VerificateurSurArbreReelTests(unittest.TestCase):
         attendus = {
             p.relative_to(REPO).as_posix() for p in sorted(DASHBOARD.rglob("*.js")) if "node_modules" not in p.parts
         }
-        self.assertEqual(len(attendus), 52, f"le dashboard ne contient plus 52 .js mais {len(attendus)}")
+        self.assertEqual(len(attendus), 53, f"le dashboard ne contient plus 53 .js mais {len(attendus)}")
         self.assertEqual(
             attendus - couverts,
             set(),

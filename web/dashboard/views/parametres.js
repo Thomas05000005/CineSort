@@ -36,6 +36,8 @@ import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js
 import { ouvrirSimulateurQualite } from "../components/simulateur-qualite.js";
 // Vague D3 : les regles custom modifient score et tier, et etaient increables.
 import { ouvrirReglesQualite } from "../components/regles-qualite.js";
+// Vague D4 : le rapport de calibration que l'interface promet depuis toujours.
+import { ouvrirCalibrationQualite } from "../components/calibration-qualite.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1340,6 +1342,9 @@ function _renderProfilsQualite() {
       </button>
       <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-regles>
         ⚙ Règles personnalisées
+      </button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-calibration>
+        🎚 Réglages fins
       </button>
       <span class="parametres-hint">Comparez avant / après, ou affinez le score avec vos propres règles.</span>
     </p>
@@ -3648,6 +3653,10 @@ function _bindProfilsQualite(container) {
 
   // Les regles courantes du profil sont passees telles quelles : le builder ne
   // les redecouvre pas, il les EDITE.
+  container.querySelectorAll("[data-parametres-ouvrir-calibration]").forEach((btn) => {
+    btn.addEventListener("click", () => ouvrirCalibrationQualite());
+  });
+
   container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const draft = _state.profileDraft || {};
