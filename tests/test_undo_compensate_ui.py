@@ -89,6 +89,7 @@ def _delai_effectif(modale: dict) -> int:
         return int(explicite)
     return _graded(int(modale.get("itemCount") or 0))
 
+
 # Doublures des imports de `historique.js`. Seules `apiPost`,
 # `dangerConfirmModal` et `showToast` comptent ici ; les autres existent pour
 # que le module se charge.
