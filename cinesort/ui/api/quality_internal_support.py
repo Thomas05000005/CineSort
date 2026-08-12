@@ -48,8 +48,58 @@ def save_active_quality_profile(api: Any, profile_json: Dict[str, Any]) -> Dict[
     }
 
 
+def profil_durable_des_reglages(api: Any) -> Dict[str, Any] | None:
+    """Profil que l'utilisateur a choisi, tel que les REGLAGES le conservent.
+
+    LE SENS EST UNIQUE : reglages -> base. `settings.custom_quality_profiles`
+    est la bibliotheque durable (elle survit a `reset_database`, qui n'efface
+    que le fichier SQLite, et part avec la sauvegarde des reglages) ; la base
+    n'en est que la materialisation, ce que lit le scoring.
+
+    CE QUE CETTE FONCTION EMPECHE. `reset_database` supprime le fichier SQLite
+    entier. Sans elle, `ensure_quality_profile` reconstruisait le profil PAR
+    DEFAUT, et le reglage patiemment ajuste disparaissait sans un mot — mesure
+    de bout en bout : poids video 70 -> 60, `ok: True`, aucun avertissement. Un
+    utilisateur qui appuie sur « Reinitialiser la base » pour reparer un scan
+    perdait son profil au passage.
+
+    Rend `None` si les reglages ne nomment aucun profil, ou si celui qu'ils
+    nomment est introuvable ou invalide — l'appelant retombe alors sur le
+    defaut, comme avant.
+    """
+    try:
+        settings = api.settings.get_settings() or {}
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    pid = str(settings.get("active_quality_profile_id") or "").strip()
+    if not pid:
+        return None
+    for entree in settings.get("custom_quality_profiles") or []:
+        if not isinstance(entree, dict) or str(entree.get("id") or "") != pid:
+            continue
+        ok, _errs, normalise = validate_quality_profile(entree)
+        # Un profil devenu invalide (schema durci entre deux versions) ne doit pas
+        # bloquer le demarrage : on le laisse passer la main au defaut.
+        return normalise if ok else None
+    return None
+
+
 def ensure_quality_profile(_api: Any, store: SQLiteStore) -> Dict[str, Any]:
     active = store.quality.get_active_quality_profile()
+    if not active:
+        # La base est vide — premier lancement, ou `reset_database`. On rematerialise
+        # depuis les reglages AVANT de retomber sur le defaut.
+        durable = profil_durable_des_reglages(_api)
+        if durable:
+            store.quality.save_quality_profile(
+                profile_id=str(durable["id"]),
+                version=int(durable.get("version") or 1),
+                profile_json=durable,
+                is_active=True,
+            )
+            restaure = store.quality.get_active_quality_profile()
+            if restaure:
+                return restaure
     if active and isinstance(active.get("profile_json"), dict):
         ok, _errs, normalized = validate_quality_profile(active.get("profile_json"))
         if ok:

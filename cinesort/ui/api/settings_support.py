@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -833,6 +834,11 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 # Pour les listes : la valeur sera deep-copiee a chaque appel pour eviter le
 # partage de la default mutable entre payloads (piege classique).
 _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
+    # --- Profils qualite personnalises (bibliotheque durable) ---
+    # Cf. `_save_section_quality_profiles` : ces deux cles n'etaient reclamees
+    # par aucune section d'ecriture, donc jamais persistees.
+    ("custom_quality_profiles", []),
+    ("active_quality_profile_id", ""),
     # --- TMDb ---
     ("tmdb_enabled", True),
     ("tmdb_timeout_s", 10.0),
@@ -1693,6 +1699,47 @@ def _save_section_plugins(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _save_section_quality_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Bibliotheque durable des profils qualite personnalises.
+
+    POURQUOI CETTE SECTION EXISTE. `to_save` part de l'existant puis chaque
+    `_save_section_*` reclame SES cles : c'est une liste blanche par omission.
+    Une cle qu'aucune section ne reclame n'est jamais recopiee — elle disparait
+    silencieusement, et `save_settings` rend quand meme `ok: True`.
+
+    Ces deux cles-la n'etaient reclamees par personne. Mesure, sur un state_dir
+    neuf, en relisant le settings.json ECRIT :
+
+        custom_quality_profiles   -> ABSENTE du fichier
+        active_quality_profile_id -> ABSENTE du fichier
+        locale (temoin)           -> "en", ecrite
+
+    Consequences en chaine, toutes silencieuses :
+
+      - `quality.save_profile` rendait `{"ok": true, "profile_id": ...}` et ne
+        persistait RIEN ;
+      - `quality.set_active_profile` repondait ensuite « Profil inconnu » pour le
+        profil qu'on venait de « sauvegarder » ;
+      - `settings.reset_database` detruisait le profil actif — seule copie, elle
+        vivait en base — sans rien restaurer ni avertir (mesure : poids video
+        70 -> 60, le defaut).
+
+    `profiles_support_crud.py` et `reset_support.py` lisent et ecrivent pourtant
+    ces deux cles depuis toujours : c'est la section d'ecriture qui manquait, pas
+    les lecteurs.
+
+    Les entrees non-dict sont ecartees plutot que de faire echouer la
+    sauvegarde ENTIERE des reglages : un profil malforme ne doit pas emporter
+    avec lui les 118 autres cles.
+    """
+    brut = payload.get("custom_quality_profiles")
+    profils = [copy.deepcopy(e) for e in brut if isinstance(e, dict)] if isinstance(brut, list) else []
+    return {
+        "custom_quality_profiles": profils,
+        "active_quality_profile_id": str(payload.get("active_quality_profile_id") or ""),
+    }
+
+
 def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "email_enabled": to_bool(payload.get("email_enabled"), False),
@@ -2188,6 +2235,7 @@ def _save_settings_payload_locked(
     to_save.update(_save_section_rest_api(settings))
     to_save.update(_save_section_watch(settings))
     to_save.update(_save_section_plugins(settings))
+    to_save.update(_save_section_quality_profiles(settings))
     to_save.update(_save_section_email(settings))
     to_save.update(_save_section_subtitles(settings))
     to_save.update(_save_section_perceptual(settings))
