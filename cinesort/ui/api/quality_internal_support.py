@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cinesort.infra.state as state
-from cinesort.domain import default_quality_profile, validate_quality_profile
+from cinesort.domain import default_quality_profile, list_quality_presets, validate_quality_profile
 from cinesort.infra.db import SQLiteStore
 from cinesort.ui.api.settings_support import normalize_user_path
 
@@ -74,14 +74,52 @@ def profil_durable_des_reglages(api: Any) -> Dict[str, Any] | None:
     pid = str(settings.get("active_quality_profile_id") or "").strip()
     if not pid:
         return None
-    for entree in settings.get("custom_quality_profiles") or []:
-        if not isinstance(entree, dict) or str(entree.get("id") or "") != pid:
-            continue
+    for entree in _candidats_par_id(settings, pid):
         ok, _errs, normalise = validate_quality_profile(entree)
         # Un profil devenu invalide (schema durci entre deux versions) ne doit pas
         # bloquer le demarrage : on le laisse passer la main au defaut.
         return normalise if ok else None
     return None
+
+
+def _candidats_par_id(settings: Dict[str, Any], pid: str) -> List[Dict[str, Any]]:
+    """Profils portant cet id : d'abord les personnalises, puis les PRESETS.
+
+    LES PRESETS COMPTENT AUTANT QUE LES CUSTOMS, et l'oublier creait une
+    divergence pire que le defaut d'origine. Mesure, apres `reset_database` avec
+    un preset actif :
+
+        preset actif             base restauree     ce que l'ecran AFFICHE
+        CinemaLux_RemuxStrict_v1 CinemaLux_v1       CinemaLux_RemuxStrict_v1
+        video 66 / extras 4      video 60 / extras 10
+
+    L'ecran continuait d'annoncer le preset choisi — parce que `get_profiles`
+    prefere l'id des REGLAGES a celui de la base (`active_id_raw or db_active_id`)
+    — pendant que le scoring tournait sur le profil par defaut. Les trois presets
+    testes divergeaient tous.
+
+    C'est le rendre DURABLE qui a cree ce trou : avant, l'id n'etait jamais
+    persiste, `active_id_raw` valait "", et l'affichage retombait sur la base,
+    donc restait coherent. Un correctif peut eteindre une coherence existante :
+    apres avoir rendu une valeur durable, il faut verifier TOUS ses lecteurs.
+    """
+    customs = [
+        e
+        for e in (settings.get("custom_quality_profiles") or [])
+        if isinstance(e, dict) and str(e.get("id") or "") == pid
+    ]
+    if customs:
+        return customs
+    # `get_profiles` accepte l'id du profil OU celui du preset : la resolution
+    # doit accepter les deux, sinon un id valide a l'ecran serait introuvable ici.
+    presets = []
+    for row in list_quality_presets(include_profiles=True):
+        profil = row.get("profile_json")
+        if not isinstance(profil, dict):
+            continue
+        if pid in (str(profil.get("id") or ""), str(row.get("preset_id") or "")):
+            presets.append(profil)
+    return presets
 
 
 def ensure_quality_profile(_api: Any, store: SQLiteStore) -> Dict[str, Any]:

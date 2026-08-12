@@ -203,6 +203,79 @@ class UneSauvegardePARTIELLENEfaceRienTests(_BaseApi):
         self.assertEqual(self._biblio(), ([], ""), "l'effacement demande n'a pas eu lieu")
 
 
+class UnPRESETActifSurvitAussiTests(_BaseApi):
+    """LES PRESETS COMPTENT AUTANT QUE LES PROFILS PERSONNALISES.
+
+    Une premiere version ne cherchait l'id actif que dans
+    `custom_quality_profiles`. Pour un PRESET, elle rendait `None`, la base
+    repartait sur le profil par defaut — mais l'ecran continuait d'annoncer le
+    preset choisi, parce que `get_profiles` prefere l'id des REGLAGES a celui de
+    la base (`active_id_raw or db_active_id`).
+
+    MESURE, apres `reset_database`, sur les trois presets testes :
+
+        preset actif                base restauree   affiche a l'ecran
+        CinemaLux_RemuxStrict_v1    CinemaLux_v1     CinemaLux_RemuxStrict_v1
+        video 66 / extras 4         video 60 / 10
+        Compact_v1                  CinemaLux_v1     Compact_v1
+        video 50 / extras 20        video 60 / 10
+        StreamingOptimal_v1         CinemaLux_v1     StreamingOptimal_v1
+        video 55 / extras 20        video 60 / 10
+
+    C'etait PIRE que le defaut d'origine : l'ecran mentait sur le profil qui
+    score reellement la bibliotheque. Et c'est le fait de rendre l'id DURABLE
+    qui a ouvert ce trou — avant, il n'etait jamais persiste, l'affichage
+    retombait sur la base et restait coherent. Apres avoir rendu une valeur
+    durable, il faut verifier TOUS ses lecteurs.
+    """
+
+    #: Trois presets aux poids DIFFERENTS du defaut : sans cela, un profil non
+    #: restaure serait indiscernable d'un profil restaure.
+    _PRESETS = ("CinemaLux_RemuxStrict_v1", "Compact_v1", "StreamingOptimal_v1")
+
+    def _poids_actifs(self) -> dict:
+        q = self.api.quality.get_quality_profile() or {}
+        pj = q.get("profile_json") or q.get("profile") or {}
+        return dict(pj.get("weights") or {})
+
+    def _id_actif_en_base(self) -> str:
+        q = self.api.quality.get_quality_profile() or {}
+        pj = q.get("profile_json") or q.get("profile") or {}
+        return str(pj.get("id") or "")
+
+    def test_les_presets_sont_restaures_avec_LEURS_poids(self) -> None:
+        defaut = default_quality_profile().get("weights")
+        for pid in self._PRESETS:
+            with self.subTest(preset=pid):
+                self.assertTrue(self.api.quality.set_active_profile(pid).get("ok"))
+                avant = self._poids_actifs()
+                self.assertNotEqual(avant, defaut, f"{pid} a les memes poids que le defaut : il ne prouverait rien")
+
+                self.api.settings.reset_database(dry_run=False)
+
+                self.assertEqual(
+                    self._poids_actifs(),
+                    avant,
+                    f"{pid} n'a pas ete restaure : la bibliotheque est desormais scoree avec un autre profil",
+                )
+
+    def test_l_ecran_et_la_BASE_disent_le_meme_profil(self) -> None:
+        """La grandeur qui compte n'est pas « un profil existe » mais « c'est le
+        MEME des deux cotes »."""
+        for pid in self._PRESETS:
+            with self.subTest(preset=pid):
+                self.api.quality.set_active_profile(pid)
+                self.api.settings.reset_database(dry_run=False)
+
+                affiche = str((self.api.quality.get_profiles() or {}).get("active_profile_id") or "")
+
+                self.assertEqual(
+                    affiche,
+                    self._id_actif_en_base(),
+                    "l'ecran annonce un profil que la base n'a pas : le scoring tourne sur un autre",
+                )
+
+
 class LaREINITIALISATIONVOULUEMarcheTOUJOURSTests(_BaseApi):
     """L'AUTRE SENS, et c'est la moitie qu'on oublie.
 
