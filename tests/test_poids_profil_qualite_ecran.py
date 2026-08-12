@@ -71,6 +71,7 @@ _EXTRA = (
     "export const __somme = _SOMME_POIDS;\n"
     "export const __reinit = _reinitialiserLeBrouillonDeProfil;\n"
     "export const __etat = _state;\n"
+    "export const __bind = _bindProfilsQualite;\n"
 )
 _EXIT = "\nprocess.exit(0);\n"
 
@@ -166,6 +167,46 @@ __emit({ brouillon: M.__etat.profileDraft });
             res["brouillon"]["weights"],
             {"video": 99},
             "le brouillon a ete ecrase alors que les defauts n'ont pas pu etre lus",
+        )
+
+
+class LeBOUTONEstVraimentBRANCHETests(_Base):
+    """Muter le SITE D'APPEL separement, et pas seulement la fonction.
+
+    Les tests ci-dessus appellent `_reinitialiserLeBrouillonDeProfil`
+    directement : ils restaient tous VERTS quand on rebranchait le bouton sur
+    l'ancienne recopie de constantes. Une fonction juste ne sert a rien si le
+    bouton ne l'atteint pas.
+    """
+
+    def test_le_clic_sur_Reinitialiser_demande_les_defauts_au_backend(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__reponses["quality/reset_quality_profile"] = {
+  ok: true, profile: { tiers: { platinum: 70, gold: 66, silver: 55, bronze: 40 },
+                       weights: { video: 60, audio: 30, extras: 10 } },
+};
+// Un conteneur minimal : seul le selecteur des boutons d'action rend quelque
+// chose, les autres bindings de la section recoivent une liste vide.
+const boutons = [{ dataset: { parametresProfilsAction: "reset" }, rappel: null,
+                   addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("parametres-profils-action") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bind(conteneur);
+// Le binding de la section charge aussi d'autres donnees ; on ne retient que
+// les appels DECLENCHES PAR LE CLIC.
+globalThis.__appels.length = 0;
+boutons[0].rappel();
+await new Promise((r) => setTimeout(r, 0));
+__emit({ appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(
+            res["appels"],
+            ["quality/reset_quality_profile"],
+            "le bouton « Reinitialiser » n'atteint pas la lecture des defauts du backend",
         )
 
 
