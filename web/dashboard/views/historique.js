@@ -667,6 +667,8 @@ function _buildInspectorSections(selectedRun) {
         <div class="historique-inspector-actions">
           <button type="button" class="v5-btn v5-btn--secondary" data-historique-action="view-report" data-run-id="${escapeHtml(selectedRun.run_id)}">📄 Voir rapport complet</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="resume" data-run-id="${escapeHtml(selectedRun.run_id)}">↻ Reprendre ce run</button>
+          <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="csv" title="Télécharge le rapport de ce run au format CSV (lisible par Excel)">⬇ Exporter en CSV</button>
+          <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="json" title="Télécharge le rapport de ce run au format JSON">⬇ Exporter en JSON</button>
           ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
         </div>
@@ -1421,6 +1423,61 @@ async function _refreshRuns() {
   } catch { /* silencieux */ }
 }
 
+/**
+ * Telecharge le rapport d'un run — vague B4.
+ *
+ * `run/export_run_report` existait, testee, et n'etait appelee par AUCUN code du
+ * dashboard : `grep -rn "export_run_report" web/` ne rendait rien.
+ *
+ * ELLE ECRIT UN FICHIER COTE SERVEUR, ET C'EST CE QUI SEMBLAIT L'EXCLURE — un
+ * navigateur ne peut pas aller le chercher. Mais elle rend AUSSI son contenu
+ * dans la reponse (`content`), et son propre commentaire de production le dit :
+ * « l'UI telecharge via Blob et exige content ». Le fichier serveur est un effet
+ * de bord, pas le livrable.
+ *
+ * LE TEXTE EST PRIS TEL QUEL. Le CSV porte un BOM UTF-8 et des CRLF, poses
+ * expres pour qu'Excel le lise ; le reserialiser (un JSON.stringify sur un objet
+ * reconstruit, par exemple) les perdrait tous les deux. On enveloppe donc la
+ * chaine exacte.
+ */
+async function _exporterLeRapport(runId, format, btn) {
+  const fmt = String(format || "json").toLowerCase();
+  const etiquette = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "…";
+  }
+  try {
+    const res = await apiPost("run/export_run_report", { run_id: runId, fmt });
+    const data = (res && res.data) || res || {};
+    if (data.ok === false || typeof data.content !== "string") {
+      showToast({
+        type: "error",
+        text: data.user_message || data.message || "Le rapport n'a pas pu être exporté.",
+      });
+      return;
+    }
+    const types = { csv: "text/csv;charset=utf-8", json: "application/json", html: "text/html;charset=utf-8" };
+    const blob = new Blob([data.content], { type: types[fmt] || "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cinesort-rapport-${runId}.${fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast({ type: "success", text: `Rapport exporté (${data.rows_total || 0} ligne(s)).` });
+  } catch (e) {
+    showToast({ type: "error", text: "Le rapport n'a pas pu être exporté." });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = etiquette;
+    }
+  }
+}
+
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
   const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
@@ -1442,6 +1499,9 @@ function _onActionClick(ev) {
       break;
     case "resume":
       if (runId) navigateTo(`/traitement#run-${encodeURIComponent(runId)}`);
+      break;
+    case "export-report":
+      if (runId) _exporterLeRapport(runId, target.dataset.format || "json", target);
       break;
     case "undo-apply":
       // Action dangereuse — dangerConfirmModal (P0 #233, cf feedback-cinesort-actions-dangereuses).
