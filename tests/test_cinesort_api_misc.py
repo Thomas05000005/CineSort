@@ -359,9 +359,24 @@ class TestExportShareableProfile(unittest.TestCase):
             )
 
     def test_export_store_init_failure(self) -> None:
+        """Le store injoignable REFUSE l'export au lieu de partager le defaut.
+
+        CE TEST VERROUILLAIT L'ANCIEN COMPORTEMENT (« fallback : utilise default
+        profile »), et ce comportement etait un defaut : sur une panne de
+        lecture, l'utilisateur partageait le profil PAR DEFAUT sous SON nom, avec
+        `ok: True`. Mesure :
+
+            ok: True, name: "Mon reglage", author: "Thomas",
+            poids: {video 60, audio 30, extras 10}   <- le DEFAUT
+
+        Le repli reste legitime quand il n'y a PAS de profil actif — le defaut
+        est alors bien celui qui s'applique — mais pas quand on n'a rien pu lire.
+        """
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("no disk")):
             result = self.api._export_shareable_profile_impl()
-            self.assertTrue(result["ok"])  # fallback : utilise default profile
+
+        self.assertFalse(result["ok"], "un store injoignable produit quand meme un fichier a partager")
+        self.assertIn("pas pu être lu", str(result.get("user_message") or result.get("message") or ""))
 
     def test_export_corrupt_profile_json(self) -> None:
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
