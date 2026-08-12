@@ -1468,7 +1468,7 @@ async function _exporterLeRapport(runId, format, btn) {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     showToast({ type: "success", text: `Rapport exporté (${data.rows_total || 0} ligne(s)).` });
-  } catch (e) {
+  } catch {
     showToast({ type: "error", text: "Le rapport n'a pas pu être exporté." });
   } finally {
     if (btn) {
