@@ -1664,31 +1664,8 @@ function _rendreReponseAction(action, data) {
   return String(data.user_message || data.message || "Terminé.");
 }
 
-async function _lancerActionDeSection(container, btn) {
-  const route = btn.dataset.sectionAction || "";
-  const action = _trouverAction(route);
-  if (!action) return;
-  const sectionEl = btn.closest("[data-section-id]");
-  const sortie = sectionEl && sectionEl.querySelector("[data-section-actions-out]");
-  // `textContent` et non `innerHTML` : la reponse du backend n'est PAS de la
-  // mise en forme, et l'echapper serait a la fois inutile et visible
-  // (`&amp;` a l'ecran). Le rendu ci-dessus ne produit donc aucune balise.
-  const ecrire = (texte, classe) => {
-    if (!sortie) return;
-    sortie.textContent = texte;
-    sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
-  };
-  // Une action destructive DOIT nommer sa consequence avant de partir. La regle
-  // du depot l'exige, et c'est le seul endroit ou l'utilisateur peut encore dire
-  // non — apres, l'effet est fait.
-  if (action.confirmation) {
-    const accepte = await dangerConfirmModal({
-      title: action.confirmation.titre,
-      body: action.confirmation.corps,
-      confirmLabel: action.confirmation.libelle,
-    });
-    if (!accepte) return;
-  }
+/** Appelle la route et rend sa reponse dans la zone de sortie de la section. */
+async function _executerActionDeSection(action, route, btn, ecrire) {
   ecrire("En cours…", "info");
   btn.disabled = true;
   try {
@@ -1706,6 +1683,45 @@ async function _lancerActionDeSection(container, btn) {
   } finally {
     btn.disabled = false;
   }
+}
+
+function _lancerActionDeSection(container, btn) {
+  const route = btn.dataset.sectionAction || "";
+  const action = _trouverAction(route);
+  if (!action) return;
+  const sectionEl = btn.closest("[data-section-id]");
+  const sortie = sectionEl && sectionEl.querySelector("[data-section-actions-out]");
+  // `textContent` et non `innerHTML` : la reponse du backend n'est PAS de la
+  // mise en forme, et l'echapper serait a la fois inutile et visible
+  // (`&amp;` a l'ecran). Le rendu ci-dessus ne produit donc aucune balise.
+  const ecrire = (texte, classe) => {
+    if (!sortie) return;
+    sortie.textContent = texte;
+    sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
+  };
+  // Une action destructive DOIT nommer sa consequence avant de partir. La regle
+  // du depot l'exige, et c'est le seul endroit ou l'utilisateur peut encore dire
+  // non — apres, l'effet est fait.
+  //
+  // LE CONTRAT DE `dangerConfirmModal` EST PAR RAPPEL, PAS PAR PROMESSE. Mesure
+  // sur le source : la fonction n'est pas `async` et ne porte AUCUN `return`
+  // avec valeur. Une premiere version de ce code faisait
+  // `const accepte = await dangerConfirmModal({...}); if (!accepte) return;` :
+  // `accepte` valait donc toujours `undefined`, et l'action ne partait JAMAIS.
+  // Elle passait aussi `body:`, option que la modale ne destructure pas — la
+  // consequence etait silencieusement jetee, en violation de la regle n3.
+  // Les 12 autres sites d'appel du depot utilisent tous `consequence` +
+  // `onConfirm` ; celui-ci etait le seul a s'en ecarter.
+  if (action.confirmation) {
+    dangerConfirmModal({
+      title: action.confirmation.titre,
+      consequence: action.confirmation.corps,
+      confirmLabel: action.confirmation.libelle,
+      onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
+    });
+    return;
+  }
+  return _executerActionDeSection(action, route, btn, ecrire);
 }
 
 function _renderCategoryPanel(categoryId) {

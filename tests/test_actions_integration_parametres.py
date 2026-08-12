@@ -91,7 +91,23 @@ function escapeHtml(s) {
 function showToast(o) { globalThis.__toasts.push(o); }
 globalThis.__toasts = [];
 globalThis.__confirmations = [];
-function dangerConfirmModal(o) { globalThis.__confirmations.push(o); return Promise.resolve(globalThis.__accepte !== false); }
+globalThis.__enCours = null;
+// FIDELE A LA PRODUCTION, ET C'EST TOUT L'ENJEU. `dangerConfirmModal` n'est pas
+// `async` et ne porte AUCUN `return` avec valeur : elle rappelle `onConfirm` ou
+// `onCancel`. Le stub precedent rendait `Promise.resolve(true)` — un contrat que
+// le code reel n'offre pas — et rendait donc VERT un appelant qui faisait
+// `const accepte = await dangerConfirmModal(...)`, ou `accepte` valait toujours
+// `undefined` et ou l'action ne partait jamais.
+function dangerConfirmModal(o) {
+  globalThis.__confirmations.push(o);
+  if (globalThis.__accepte === false) {
+    if (o.onCancel) o.onCancel();
+    return;
+  }
+  // La vraie modale attend la resolution de `onConfirm` avant de se fermer ; on
+  // expose la promesse pour que le test puisse en faire autant.
+  globalThis.__enCours = o.onConfirm ? o.onConfirm() : null;
+}
 function t(k) { return String(k); }
 function formatBytes() { return ""; }
 function registerRoute() {}
@@ -296,18 +312,57 @@ __emit({ appels: globalThis.__appels.map((a) => a.route), confirmations: globalT
         self.assertEqual(res["appels"], [], "la purge est partie malgre un refus de confirmation")
         self.assertEqual(res["confirmations"], 1, "aucune confirmation n'a ete demandee")
 
+    def test_une_confirmation_ACCEPTEE_lance_bien_l_action(self) -> None:
+        """LE test qui manquait.
+
+        Sans lui, `await dangerConfirmModal(...)` — une fonction qui ne rend
+        RIEN — donnait `undefined`, le garde `if (!accepte) return;` sortait, et
+        la purge n'etait JAMAIS lancee : un bouton mort, silencieux, derriere une
+        modale qui s'affichait normalement. Trois tests de confirmation restaient
+        verts parce qu'ils n'eprouvaient que le chemin du REFUS.
+        """
+        res = self._run(
+            r"""
+globalThis.__accepte = true;
+globalThis.__reponses["runtime/purge_probe_cache"] = { ok: true, items: 42 };
+const { btn } = fauxBouton("runtime/purge_probe_cache");
+M.__lancer({ querySelectorAll: () => [] }, btn);
+await globalThis.__enCours;
+__emit({ appels: globalThis.__appels.map((a) => a.route), confirmations: globalThis.__confirmations.length });
+"""
+        )
+        self.assertEqual(
+            res["appels"],
+            ["runtime/purge_probe_cache"],
+            "la confirmation a ete acceptee mais l'action n'est jamais partie",
+        )
+        self.assertEqual(res["confirmations"], 1)
+
     def test_la_confirmation_NOMME_la_consequence(self) -> None:
+        """La cle est `consequence`, la seule que la modale destructure.
+
+        Elle recevait `body`, que `dangerConfirmModal` ignore : la modale
+        s'affichait SANS sa consequence, en violation de la regle n3 du depot.
+        Asserter sur la cle transmise ne suffisait pas — il faut asserter sur
+        celle que la modale LIT.
+        """
         res = self._run(
             r"""
 globalThis.__accepte = false;
 const { btn } = fauxBouton("runtime/purge_probe_cache");
 await M.__lancer({ querySelectorAll: () => [] }, btn);
-__emit({ corps: globalThis.__confirmations[0].body, titre: globalThis.__confirmations[0].title });
+const c = globalThis.__confirmations[0];
+__emit({ corps: c.consequence, titre: c.title, cles: Object.keys(c) });
 """
         )
         self.assertIn("refaites au prochain scan", res["corps"])
         self.assertIn("Aucun film", res["corps"])
         self.assertTrue(res["titre"])
+        self.assertNotIn(
+            "body",
+            res["cles"],
+            "`body` n'est pas une option de dangerConfirmModal : ce qu'on y met est jete",
+        )
 
     def test_une_action_NON_destructive_ne_demande_rien(self) -> None:
         """Une confirmation sur tout devient un reflexe, donc plus une garde."""
