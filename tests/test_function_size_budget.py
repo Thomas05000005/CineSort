@@ -216,7 +216,10 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
     ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 114,
     ("cinesort/infra/db/sqlite_store.py", "_bootstrap_schema_latest"): 112,
-    ("cinesort/ui/api/settings_support.py", "_save_settings_payload_locked"): 112,
+    # `_save_settings_payload_locked` a quitte cette liste : sa chaine de sections
+    # est passee dans `_appliquer_les_sections`, et elle est repassee sous le
+    # seuil. Le cliquet l'a signalee comme PERIMEE — c'est son autre sens, celui
+    # qui empeche un plafond de rester acquis apres un decoupage.
     ("cinesort/ui/api/settings_support.py", "read_settings"): 110,
     ("cinesort/app/plan_support_dedup.py", "_augment_candidates_from_nfo_tmdb_id"): 109,
     ("cinesort/infra/tmdb_client.py", "purge_expired_tmdb_cache"): 109,

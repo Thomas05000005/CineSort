@@ -1699,6 +1699,62 @@ def _save_section_plugins(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _appliquer_les_sections(
+    to_save: Dict[str, Any],
+    settings: Dict[str, Any],
+    *,
+    default_collection_folder_name: str,
+    default_empty_folders_folder_name: str,
+    default_residual_cleanup_folder_name: str,
+    default_probe_backend: str,
+    debug_enabled: bool,
+) -> None:
+    """Recopie dans `to_save` tout ce que les sections savent lire.
+
+    C'EST ICI QUE SE DECIDE CE QUI EST PERSISTE, ET NULLE PART AILLEURS.
+    `to_save` part de l'existant ; une cle que AUCUNE section ci-dessous ne
+    reclame n'est jamais recopiee — elle disparait en silence, et
+    `save_settings` rend quand meme `ok: True`. C'est une liste blanche par
+    omission, et son oubli est un defaut recurrent : le commentaire de la
+    section `naming` en garde la trace (« 3 sections ajoutees pour persister
+    16 champs UI qui etaient silencieusement droppes »), et
+    `_save_section_quality_profiles` est le meme oubli, decouvert plus tard.
+
+    AJOUTER UNE CLE DE REGLAGE, C'EST AJOUTER SA SECTION ICI.
+    """
+    to_save.update(_save_section_tmdb(settings))
+    to_save.update(
+        _save_section_cleanup(
+            settings,
+            default_collection_folder_name=default_collection_folder_name,
+            default_empty_folders_folder_name=default_empty_folders_folder_name,
+            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+        )
+    )
+    to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
+    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
+    to_save.update(_save_section_scan_max_workers(settings))
+    to_save.update(_save_section_scan_flags(settings))
+    to_save.update(_save_section_jellyfin(settings))
+    to_save.update(_save_section_plex(settings))
+    to_save.update(_save_section_radarr(settings))
+    to_save.update(_save_section_omdb(settings))
+    # Fix audit 2026-05-24 (v1.5.0) : 3 sections ajoutees pour persister 16 champs UI
+    # qui etaient silencieusement droppes (meme bug pattern que OMDb).
+    to_save.update(_save_section_naming(settings))
+    to_save.update(_save_section_sources(settings))
+    to_save.update(_save_section_advanced(settings))
+    to_save.update(_save_section_notifications(settings))
+    to_save.update(_save_section_rest_api(settings))
+    to_save.update(_save_section_watch(settings))
+    to_save.update(_save_section_plugins(settings))
+    to_save.update(_save_section_quality_profiles(settings))
+    to_save.update(_save_section_email(settings))
+    to_save.update(_save_section_subtitles(settings))
+    to_save.update(_save_section_perceptual(settings))
+    to_save.update(_save_section_appearance(settings, debug_enabled=debug_enabled))
+
+
 def _save_section_quality_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Bibliotheque durable des profils qualite personnalises.
 
@@ -2209,37 +2265,15 @@ def _save_settings_payload_locked(
     to_save["root"] = str(root_path)
     to_save["roots"] = [str(r) for r in roots_paths]
     to_save["state_dir"] = str(state_dir)
-    to_save.update(_save_section_tmdb(settings))
-    to_save.update(
-        _save_section_cleanup(
-            settings,
-            default_collection_folder_name=default_collection_folder_name,
-            default_empty_folders_folder_name=default_empty_folders_folder_name,
-            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
-        )
+    _appliquer_les_sections(
+        to_save,
+        settings,
+        default_collection_folder_name=default_collection_folder_name,
+        default_empty_folders_folder_name=default_empty_folders_folder_name,
+        default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+        default_probe_backend=default_probe_backend,
+        debug_enabled=debug_enabled,
     )
-    to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
-    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
-    to_save.update(_save_section_scan_max_workers(settings))
-    to_save.update(_save_section_scan_flags(settings))
-    to_save.update(_save_section_jellyfin(settings))
-    to_save.update(_save_section_plex(settings))
-    to_save.update(_save_section_radarr(settings))
-    to_save.update(_save_section_omdb(settings))
-    # Fix audit 2026-05-24 (v1.5.0) : 3 sections ajoutees pour persister 16 champs UI
-    # qui etaient silencieusement droppes (meme bug pattern que OMDb).
-    to_save.update(_save_section_naming(settings))
-    to_save.update(_save_section_sources(settings))
-    to_save.update(_save_section_advanced(settings))
-    to_save.update(_save_section_notifications(settings))
-    to_save.update(_save_section_rest_api(settings))
-    to_save.update(_save_section_watch(settings))
-    to_save.update(_save_section_plugins(settings))
-    to_save.update(_save_section_quality_profiles(settings))
-    to_save.update(_save_section_email(settings))
-    to_save.update(_save_section_subtitles(settings))
-    to_save.update(_save_section_perceptual(settings))
-    to_save.update(_save_section_appearance(settings, debug_enabled=debug_enabled))
 
     # Profils de renommage : normaliser preset + templates
     _apply_naming_preset(to_save, settings)
