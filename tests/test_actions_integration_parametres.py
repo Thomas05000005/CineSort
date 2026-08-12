@@ -29,13 +29,39 @@ from tests._jsexec import ROOT, require_node, run_module_test
 
 PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
 
-#: Les cinq routes que la page doit rendre atteignables.
+#: Les routes que la page doit rendre atteignables.
+#:
+#: B2 : les cinq actions d'integration. B3 : quatre methodes runtime/settings.
+#:
+#: CETTE LISTE EST COURTE POUR UNE RAISON, ET LA RAISON EST MESUREE. La vague B3
+#: portait sur ONZE methodes orphelines ; sept ne sont PAS cablees, chacune pour
+#: un motif verifie dans le code et consigne dans `KNOWN_ORPHAN_METHODS` :
+#:
+#:   runtime.get_tools_status        alias STRICT de get_probe_tools_status, deja
+#:                                   cable (app.js) et seul present dans la liste
+#:                                   blanche du cache hors-ligne
+#:   runtime.check_for_updates       doublon d'une capacite deja presente
+#:   settings.preview_naming_template `sample_row_id` est INERTE (#460 : la branche
+#:                                   qui chargeait un vrai film « etait morte
+#:                                   depuis sa premiere ligne »)
+#:   settings.reset_all_user_data    exige que l'utilisateur TAPE « RESET » ;
+#:                                   `dangerConfirmModal` n'a pas d'affordance de
+#:                                   saisie
+#:   runtime.set_probe_tool_paths    perte de donnees sur payload partiel
+#:   runtime.reset_incremental_cache impossible de dresser la liste d'elements
+#:                                   qu'exige la regle des actions destructives
+#:   runtime.run_nas_benchmark       aucun parametre de chemin : « tester mon NAS »
+#:                                   est irrealisable en l'etat
 ROUTES_ATTENDUES = (
     "integrations/get_jellyfin_sync_report",
     "integrations/refresh_jellyfin_library_now",
     "integrations/get_plex_sync_report",
     "integrations/refresh_plex_library_now",
     "integrations/test_email_report",
+    "runtime/get_log_paths",
+    "runtime/purge_probe_cache",
+    "settings/get_naming_presets",
+    "settings/get_user_data_size",
 )
 
 _STUBS = r"""
@@ -64,7 +90,24 @@ function escapeHtml(s) {
 }
 function showToast(o) { globalThis.__toasts.push(o); }
 globalThis.__toasts = [];
-function dangerConfirmModal() { return Promise.resolve(true); }
+globalThis.__confirmations = [];
+globalThis.__enCours = null;
+// FIDELE A LA PRODUCTION, ET C'EST TOUT L'ENJEU. `dangerConfirmModal` n'est pas
+// `async` et ne porte AUCUN `return` avec valeur : elle rappelle `onConfirm` ou
+// `onCancel`. Le stub precedent rendait `Promise.resolve(true)` — un contrat que
+// le code reel n'offre pas — et rendait donc VERT un appelant qui faisait
+// `const accepte = await dangerConfirmModal(...)`, ou `accepte` valait toujours
+// `undefined` et ou l'action ne partait jamais.
+function dangerConfirmModal(o) {
+  globalThis.__confirmations.push(o);
+  if (globalThis.__accepte === false) {
+    if (o.onCancel) o.onCancel();
+    return;
+  }
+  // La vraie modale attend la resolution de `onConfirm` avant de se fermer ; on
+  // expose la promesse pour que le test puisse en faire autant.
+  globalThis.__enCours = o.onConfirm ? o.onConfirm() : null;
+}
 function t(k) { return String(k); }
 function formatBytes() { return ""; }
 function registerRoute() {}
@@ -98,14 +141,14 @@ function fauxBouton(route) {
 """
 
 
-class LesCinqActionsSontDECLAREESTests(unittest.TestCase):
+class LesActionsSontDECLAREESTests(unittest.TestCase):
     def setUp(self) -> None:
         require_node(self)
 
     def _run(self, driver: str) -> dict:
         return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
 
-    def test_les_routes_declarees_sont_exactement_les_cinq(self) -> None:
+    def test_les_routes_declarees_sont_exactement_celles_attendues(self) -> None:
         res = self._run(
             r"""
 const routes = [];
@@ -239,6 +282,147 @@ __emit({ texte: M.__rendreReponse({ rendu: "message" }, { ok: true, missing: 3, 
 """
         )
         self.assertEqual(res["texte"], "Rafraîchissement demandé.")
+
+
+class UneActionDESTRUCTIVEDemandeConfirmationTests(unittest.TestCase):
+    """La regle du depot : nommer la consequence AVANT d'agir.
+
+    `purge_probe_cache` ne detruit pas de donnee utilisateur, mais elle fait
+    repayer chaque mesure technique au prochain scan. Sur une grande
+    bibliotheque c'est long, et c'est le genre de cout qu'on ne decouvre pas
+    apres coup.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=_FAUX_DOM + driver + _EXIT, timeout=90)
+
+    def test_un_REFUS_de_confirmation_n_appelle_RIEN(self) -> None:
+        """Le test qui compte : dire non doit vraiment tout arreter."""
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+const { btn } = fauxBouton("runtime/purge_probe_cache");
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ appels: globalThis.__appels.map((a) => a.route), confirmations: globalThis.__confirmations.length });
+"""
+        )
+        self.assertEqual(res["appels"], [], "la purge est partie malgre un refus de confirmation")
+        self.assertEqual(res["confirmations"], 1, "aucune confirmation n'a ete demandee")
+
+    def test_une_confirmation_ACCEPTEE_lance_bien_l_action(self) -> None:
+        """LE test qui manquait.
+
+        Sans lui, `await dangerConfirmModal(...)` — une fonction qui ne rend
+        RIEN — donnait `undefined`, le garde `if (!accepte) return;` sortait, et
+        la purge n'etait JAMAIS lancee : un bouton mort, silencieux, derriere une
+        modale qui s'affichait normalement. Trois tests de confirmation restaient
+        verts parce qu'ils n'eprouvaient que le chemin du REFUS.
+        """
+        res = self._run(
+            r"""
+globalThis.__accepte = true;
+globalThis.__reponses["runtime/purge_probe_cache"] = { ok: true, items: 42 };
+const { btn } = fauxBouton("runtime/purge_probe_cache");
+M.__lancer({ querySelectorAll: () => [] }, btn);
+await globalThis.__enCours;
+__emit({ appels: globalThis.__appels.map((a) => a.route), confirmations: globalThis.__confirmations.length });
+"""
+        )
+        self.assertEqual(
+            res["appels"],
+            ["runtime/purge_probe_cache"],
+            "la confirmation a ete acceptee mais l'action n'est jamais partie",
+        )
+        self.assertEqual(res["confirmations"], 1)
+
+    def test_la_confirmation_NOMME_la_consequence(self) -> None:
+        """La cle est `consequence`, la seule que la modale destructure.
+
+        Elle recevait `body`, que `dangerConfirmModal` ignore : la modale
+        s'affichait SANS sa consequence, en violation de la regle n3 du depot.
+        Asserter sur la cle transmise ne suffisait pas — il faut asserter sur
+        celle que la modale LIT.
+        """
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+const { btn } = fauxBouton("runtime/purge_probe_cache");
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+const c = globalThis.__confirmations[0];
+__emit({ corps: c.consequence, titre: c.title, cles: Object.keys(c) });
+"""
+        )
+        self.assertIn("refaites au prochain scan", res["corps"])
+        self.assertIn("Aucun film", res["corps"])
+        self.assertTrue(res["titre"])
+        self.assertNotIn(
+            "body",
+            res["cles"],
+            "`body` n'est pas une option de dangerConfirmModal : ce qu'on y met est jete",
+        )
+
+    def test_une_action_NON_destructive_ne_demande_rien(self) -> None:
+        """Une confirmation sur tout devient un reflexe, donc plus une garde."""
+        res = self._run(
+            r"""
+const { btn } = fauxBouton("runtime/get_log_paths");
+globalThis.__reponses["runtime/get_log_paths"] = { ok: true, app_log: "C:/logs/app.txt" };
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+__emit({ confirmations: globalThis.__confirmations.length, appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(res["confirmations"], 0)
+        self.assertEqual(res["appels"], ["runtime/get_log_paths"])
+
+
+class LesRendusB3RestituentLInformationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+    def test_les_chemins_de_logs_sont_lisibles(self) -> None:
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "chemins" }, { ok: true, app_log: "C:/l/app.txt", ui_log: "C:/l/ui.txt" }) });
+"""
+        )
+        self.assertIn("C:/l/app.txt", res["texte"])
+        self.assertIn("C:/l/ui.txt", res["texte"])
+
+    def test_les_presets_sont_comptes_et_nommes(self) -> None:
+        """La forme d'un preset n'est pas supposee : chaine OU objet."""
+        res = self._run(
+            r"""
+__emit({
+  chaines: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: ["Simple", "Avec edition"] }),
+  objets: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: [{ name: "Simple" }, { template: "{title}" }] }),
+});
+"""
+        )
+        self.assertIn("2 modèle(s)", res["chaines"])
+        self.assertIn("Simple", res["objets"])
+
+    def test_une_taille_est_rendue_en_octets_lisibles(self) -> None:
+        res = self._run(
+            r"""
+__emit({ texte: M.__rendreReponse({ rendu: "taille" }, { ok: true, size_mb: 12.5, items: 3 }) });
+"""
+        )
+        self.assertIn("Mo", res["texte"])
+        self.assertIn("3 élément(s)", res["texte"])
+
+    def test_un_rendu_SANS_donnee_retombe_sur_le_message(self) -> None:
+        for rendu in ("chemins", "presets", "taille"):
+            with self.subTest(rendu=rendu):
+                res = self._run(
+                    f'__emit({{ texte: M.__rendreReponse({{ rendu: "{rendu}" }}, {{ ok: true, message: "Rien." }}) }});'
+                )
+                self.assertEqual(res["texte"], "Rien.")
 
 
 if __name__ == "__main__":
