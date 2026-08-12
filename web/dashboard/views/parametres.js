@@ -508,14 +508,31 @@ function _flushPendingScroll() {
 // grille 85/68/54/30 (pre-v1.5.5) etait ECRITE en base au save de profil et
 // divergeait des seuils reellement appliques par le scoring.
 const _DEFAULT_TIERS = { platinum: 70, gold: 66, silver: 55, bronze: 40 };
-const _DEFAULT_WEIGHTS = {
-  resolution: 0.25,
-  bitrate: 0.20,
-  codec: 0.15,
-  audio_bitrate: 0.20,
-  audio_channels: 0.10,
-  subtitles_fr: 0.10,
-};
+// LES POIDS QUE LE SCORING LIT REELLEMENT, dans SA forme (points de
+// pourcentage, somme 100). Mesure : `quality_score.py:1403-1407` n'additionne
+// que `video`, `audio` et `extras` — et `default_quality_profile()["weights"]`
+// vaut {video: 60, audio: 30, extras: 10}.
+//
+// L'ANCIENNE CONSTANTE DECRIVAIT UN AUTRE MODELE, que rien ne lisait :
+// {resolution: .25, bitrate: .20, codec: .15, audio_bitrate: .20,
+//  audio_channels: .10, subtitles_fr: .10}. L'editeur rendait un curseur par
+// cle de CETTE liste, et la sauvegarde renvoyait ces six cles. Mesure de bout
+// en bout, sur un profil regle a video 70 / audio 20 / extras 10 :
+//
+//     l'utilisateur bouge ses curseurs et sauvegarde  ->  ok: True
+//     poids APRES : video 60 / audio 30 / extras 10   <- LE DEFAUT
+//                   + les six cles mortes, portees sans etre lues
+//
+// Autrement dit : bouger les curseurs REMETTAIT les vrais poids aux valeurs
+// d'usine, et les curseurs eux-memes ne faisaient rien. Le commentaire de
+// `_DEFAULT_TIERS` ci-dessus documente la meme derive sur les seuils
+// (grille 85/68/54/30 ecrite en base et divergente du scoring) : c'est la meme
+// cause — une constante JS qui fait autorite a la place du backend.
+const _DEFAULT_WEIGHTS = { video: 60, audio: 30, extras: 10 };
+
+//: Somme attendue des poids, dans la forme canonique du backend.
+const _SOMME_POIDS = 100;
+const _TOLERANCE_POIDS = 5;
 
 // VP-B (Vague P) : hierarchie qualite multi-axes (TRaSH/Radarr 2026).
 // OPT-IN strict (toggle default OFF). Default sync avec
@@ -542,12 +559,9 @@ const _DEFAULT_TIER_HIERARCHY = {
   order: _DEFAULT_HIERARCHY_DIMENSIONS.slice(),
 };
 const _WEIGHT_LABELS = {
-  resolution: "Résolution",
-  bitrate: "Bitrate vidéo",
-  codec: "Codec",
-  audio_bitrate: "Bitrate audio",
-  audio_channels: "Canaux audio",
-  subtitles_fr: "Sous-titres FR",
+  video: "Vidéo (résolution, bitrate, codec, HDR)",
+  audio: "Audio (codec, canaux, bitrate)",
+  extras: "Extras (sous-titres, langues, bonus)",
 };
 
 /* =============================================================
@@ -1237,8 +1251,8 @@ function _renderProfilsQualite() {
     : _DEFAULT_HIERARCHY_DIMENSIONS.slice();
 
   const totalWeight = Object.values(weights).reduce((s, v) => s + (Number(v) || 0), 0);
-  const totalDisplay = totalWeight.toFixed(2);
-  const inRange = totalWeight >= 0.95 && totalWeight <= 1.05;
+  const totalDisplay = String(Math.round(totalWeight));
+  const inRange = Math.abs(totalWeight - _SOMME_POIDS) <= _TOLERANCE_POIDS;
   const totalCls = inRange ? "parametres-weight-total--ok" : "parametres-weight-total--warning";
   const totalIcon = inRange ? "✓" : "⚠";
 
@@ -1261,14 +1275,17 @@ function _renderProfilsQualite() {
     </div>`;
   }).join("");
 
-  const weightRows = Object.keys(_DEFAULT_WEIGHTS).map((key) => {
-    const v = Number(weights[key] ?? _DEFAULT_WEIGHTS[key]);
-    const pct = Math.round(v * 100);
+  // LES CLES VIENNENT DU PROFIL, pas d'une liste ecrite ici. Une liste figee
+  // dans le front finit toujours par decrire un autre modele que le scoring :
+  // c'est precisement ce qui rendait cet editeur inoperant.
+  const clesDePoids = Object.keys(weights).length ? Object.keys(weights) : Object.keys(_DEFAULT_WEIGHTS);
+  const weightRows = clesDePoids.map((key) => {
+    const v = Number(weights[key] ?? _DEFAULT_WEIGHTS[key] ?? 0);
     return `<div class="parametres-weight-row">
       <label for="weight-${key}">${_esc(_WEIGHT_LABELS[key] || key)}</label>
-      <input type="range" id="weight-${key}" min="0" max="100" step="1" value="${pct}"
+      <input type="range" id="weight-${key}" min="0" max="100" step="1" value="${Math.round(v)}"
              data-weight-input="${key}" class="parametres-input parametres-input--range">
-      <span class="parametres-weight-value" data-weight-value="${key}">×${v.toFixed(2)}</span>
+      <span class="parametres-weight-value" data-weight-value="${key}">${Math.round(v)} %</span>
     </div>`;
   }).join("");
 
@@ -1292,7 +1309,10 @@ function _renderProfilsQualite() {
 
     <h4 class="parametres-subheading">Poids des composantes</h4>
     <p class="parametres-section-intro">
-      La somme des poids doit faire ~1.00 (tolérance ± 5 %).
+      Ces trois poids sont ceux que le calcul du score applique réellement.
+    </p>
+    <p class="parametres-section-intro">
+      La somme des poids doit faire ~100 (tolérance ± 5).
     </p>
     <div class="parametres-weight-rows">
       ${weightRows}
@@ -1796,6 +1816,52 @@ function _renderError(message) {
  * 7) PROFILS QUALITE — LOAD / SAVE / RECOMPUTE
  * ============================================================= */
 
+/**
+ * Restaure le brouillon de profil aux valeurs par defaut — CELLES DU BACKEND.
+ *
+ * POURQUOI ON LES DEMANDE PLUTOT QUE DE LES RECOPIER. La version precedente
+ * repartait de `_DEFAULT_TIERS` et `_DEFAULT_WEIGHTS`, deux constantes ecrites
+ * ici. Le commentaire de `_DEFAULT_TIERS` garde la trace de ce que ca a coute :
+ * la grille 85/68/54/30 avait ete ECRITE EN BASE au save de profil, alors que
+ * le scoring en appliquait une autre. Une valeur par defaut recopiee dans le
+ * front est une verite en double, et une verite en double finit par diverger.
+ *
+ * `quality/reset_quality_profile` avec `dry_run` rend le profil canonique sans
+ * rien ecrire — seuils ET poids. C'est la seule source qui ne peut pas mentir.
+ *
+ * Si l'appel echoue, on le DIT et on ne touche a rien : restaurer des valeurs
+ * inventees serait exactement le defaut qu'on corrige.
+ */
+async function _reinitialiserLeBrouillonDeProfil() {
+  let canonique = null;
+  try {
+    const res = await apiPost("quality/reset_quality_profile", { dry_run: true });
+    const data = (res && res.data) || res || {};
+    if (data.ok !== false && data.profile && typeof data.profile === "object") canonique = data.profile;
+  } catch {
+    canonique = null;
+  }
+  if (!canonique) {
+    _showProfilMessage(
+      "Les valeurs par défaut n'ont pas pu être lues ; rien n'a été modifié. Réessayez.",
+      "error"
+    );
+    return;
+  }
+  _state.profileDraft = {
+    id: "",
+    label: "",
+    tiers: { ...(canonique.tiers || {}) },
+    weights: { ...(canonique.weights || {}) },
+    tier_hierarchy: _mergeTierHierarchy(canonique.tier_hierarchy),
+  };
+  _showProfilMessage(
+    "Seuils, poids et hiérarchie restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.",
+    "info"
+  );
+  _rerenderActiveCategory();
+}
+
 async function _loadProfiles() {
   try {
     const res = await apiPost("settings/get_profiles", {});
@@ -1880,10 +1946,13 @@ async function _saveProfileAsNew() {
     _showProfilMessage("Erreur : les seuils doivent être strictement décroissants (Platinum > Gold > Silver > Bronze).", "error");
     return;
   }
-  // Validation somme poids (±5%)
+  // Validation somme poids. La forme canonique du backend est en POINTS DE
+  // POURCENTAGE (somme 100) : `default_quality_profile()["weights"]` vaut
+  // {video: 60, audio: 30, extras: 10}. L'ancienne validation exigeait ~1.00 et
+  // aurait donc refuse tout profil reel.
   const total = Object.values(draft.weights).reduce((s, v) => s + (Number(v) || 0), 0);
-  if (total < 0.95 || total > 1.05) {
-    _showProfilMessage(`Erreur : somme des poids = ${total.toFixed(2)}, doit être ~1.00 (± 5 %).`, "error");
+  if (Math.abs(total - _SOMME_POIDS) > _TOLERANCE_POIDS) {
+    _showProfilMessage(`Erreur : somme des poids = ${Math.round(total)}, doit être ~${_SOMME_POIDS} (± ${_TOLERANCE_POIDS}).`, "error");
     return;
   }
   // Fix audit 2026-06-07 UX medium : window.prompt natif est interdit (memoire
@@ -3495,18 +3564,17 @@ function _bindProfilsQualite(container) {
     input.addEventListener("input", (ev) => {
       const key = ev.target.dataset.weightInput;
       if (!_state.profileDraft) _state.profileDraft = { tiers: { ..._DEFAULT_TIERS }, weights: { ..._DEFAULT_WEIGHTS } };
-      const pct = Math.max(0, Math.min(100, parseInt(ev.target.value, 10) || 0));
-      const v = pct / 100;
+      const v = Math.max(0, Math.min(100, parseInt(ev.target.value, 10) || 0));
       _state.profileDraft.weights[key] = v;
       // MAJ affichage
       const valEl = container.querySelector(`[data-weight-value="${key}"]`);
-      if (valEl) valEl.textContent = `×${v.toFixed(2)}`;
+      if (valEl) valEl.textContent = `${v} %`;
       // MAJ total
       const total = Object.values(_state.profileDraft.weights).reduce((s, x) => s + (Number(x) || 0), 0);
       const totalEl = container.querySelector("[data-weight-total]");
       if (totalEl) {
-        const inRange = total >= 0.95 && total <= 1.05;
-        totalEl.textContent = `Total = ${total.toFixed(2)} ${inRange ? "✓" : "⚠"}`;
+        const inRange = Math.abs(total - _SOMME_POIDS) <= _TOLERANCE_POIDS;
+        totalEl.textContent = `Total = ${Math.round(total)} ${inRange ? "✓" : "⚠"}`;
         totalEl.className = `parametres-weight-total ${inRange ? "parametres-weight-total--ok" : "parametres-weight-total--warning"}`;
       }
     });
@@ -3566,17 +3634,7 @@ function _bindProfilsQualite(container) {
       const action = btn.dataset.parametresProfilsAction;
       if (action === "save") _saveProfileAsNew();
       else if (action === "recompute") _recomputeScores();
-      else if (action === "reset") {
-        _state.profileDraft = {
-          id: "", label: "",
-          tiers: { ..._DEFAULT_TIERS },
-          weights: { ..._DEFAULT_WEIGHTS },
-          // VP-B : reset hierarchie au default OFF.
-          tier_hierarchy: { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() },
-        };
-        _showProfilMessage("Seuils, poids et hiérarchie restaurés aux valeurs par défaut. Cliquez sur Sauvegarder pour créer un profil.", "info");
-        _rerenderActiveCategory();
-      }
+      else if (action === "reset") _reinitialiserLeBrouillonDeProfil();
     });
   });
 
