@@ -1788,12 +1788,37 @@ def _save_section_quality_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
     sauvegarde ENTIERE des reglages : un profil malforme ne doit pas emporter
     avec lui les 118 autres cles.
     """
-    brut = payload.get("custom_quality_profiles")
-    profils = [copy.deepcopy(e) for e in brut if isinstance(e, dict)] if isinstance(brut, list) else []
-    return {
-        "custom_quality_profiles": profils,
-        "active_quality_profile_id": str(payload.get("active_quality_profile_id") or ""),
-    }
+    # CLE ABSENTE = SILENCE, PAS EFFACEMENT. Une premiere version de cette
+    # section ecrivait les deux cles inconditionnellement. Mesure, sur un
+    # state_dir reel, apres avoir cree un profil :
+    #
+    #     save_settings({"theme": "luxe"})  ->  ok: True
+    #     custom_quality_profiles           ->  []      <- EFFACEE
+    #     active_quality_profile_id         ->  ""      <- EFFACE
+    #
+    # C'etait grave : l'ecran Parametres fige les reglages a son ouverture, puis
+    # les re-POSTe EN BLOC a chaque champ modifie (sauvegarde differee). Un
+    # profil cree depuis cet ecran disparaissait donc a la frappe suivante, sous
+    # un « Sauvegarde a HH:MM:SS ». Et tout client REST qui poste une charge
+    # utile partielle detruisait la bibliotheque.
+    #
+    # L'ironie est instructive : le MEME lot ajoutait `_chemin_demande`
+    # (probe_support.py) pour corriger exactement cette forme de defaut sur les
+    # chemins d'outils. Corriger un motif a un endroit ne le corrige pas
+    # ailleurs — c'est l'idiome des sections voisines (`_save_section_naming`,
+    # `_save_section_sources`, `_save_section_advanced`) qu'il fallait suivre.
+    out: Dict[str, Any] = {}
+    if "custom_quality_profiles" in payload:
+        brut = payload.get("custom_quality_profiles")
+        # Les entrees non-dict sont ecartees plutot que de faire echouer la
+        # sauvegarde ENTIERE : un profil malforme ne doit pas emporter les
+        # ~118 autres cles de reglages.
+        out["custom_quality_profiles"] = (
+            [copy.deepcopy(e) for e in brut if isinstance(e, dict)] if isinstance(brut, list) else []
+        )
+    if "active_quality_profile_id" in payload:
+        out["active_quality_profile_id"] = str(payload.get("active_quality_profile_id") or "")
+    return out
 
 
 def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:

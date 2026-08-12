@@ -145,6 +145,64 @@ class UnRESETDeLaBASENeDetruitPasLeProfilTests(_BaseApi):
         self.assertEqual((durable or {}).get("weights"), _POIDS_PERSO)
 
 
+class UneSauvegardePARTIELLENEfaceRienTests(_BaseApi):
+    """LA CLE ABSENTE EST UN SILENCE, PAS UN EFFACEMENT.
+
+    CE QUE CETTE CLASSE A ATTRAPE, ET COMMENT. Une premiere version de
+    `_save_section_quality_profiles` ecrivait les deux cles INCONDITIONNELLEMENT.
+    Les 10 tests de ce fichier ne passaient alors que des charges utiles
+    COMPLETES : ils etaient tous verts. La revue adversariale du LOT fusionne a
+    nomme le trou, et la mesure l'a confirme :
+
+        save_settings({"theme": "luxe"})  ->  ok: True
+        custom_quality_profiles           ->  []      EFFACEE
+        active_quality_profile_id         ->  ""      EFFACE
+
+    LE SCENARIO N'ETAIT PAS THEORIQUE. L'ecran Parametres fige les reglages a son
+    ouverture, puis les re-POSTe EN BLOC a chaque champ modifie (sauvegarde
+    differee). Un profil cree depuis cet ecran disparaissait donc a la frappe
+    suivante, sous un « Sauvegarde a HH:MM:SS ». Et tout client REST postant une
+    charge utile partielle detruisait la bibliotheque.
+
+    L'ironie vaut d'etre gardee : le MEME lot ajoutait `_chemin_demande`
+    (probe_support.py) pour corriger exactement cette forme de defaut sur les
+    chemins d'outils. Corriger un motif a un endroit ne le corrige pas ailleurs.
+    """
+
+    def test_une_sauvegarde_qui_ne_parle_QUE_d_un_autre_reglage_ne_touche_a_rien(self) -> None:
+        self._installer_le_profil()
+        self.assertEqual(self._biblio(), (["MonProfil"], "MonProfil"))
+
+        r = self.api.settings.save_settings({"theme": "luxe"})
+
+        self.assertTrue(r.get("ok"))
+        self.assertEqual(
+            self._biblio(),
+            (["MonProfil"], "MonProfil"),
+            "une sauvegarde partielle a efface la bibliotheque de profils",
+        )
+
+    def test_le_profil_survit_a_plusieurs_sauvegardes_partielles_successives(self) -> None:
+        """Le cas reel : l'ecran Parametres sauvegarde a chaque champ touche."""
+        self._installer_le_profil()
+
+        for champ, valeur in (("theme", "luxe"), ("locale", "en"), ("expert_mode", True)):
+            self.api.settings.save_settings({champ: valeur})
+
+        self.assertEqual(self._biblio(), (["MonProfil"], "MonProfil"))
+
+    def test_un_effacement_EXPLICITE_efface_quand_meme(self) -> None:
+        """L'autre sens : la cle presente et vide reste une demande."""
+        self._installer_le_profil()
+        reglages = self.api.settings.get_settings() or {}
+        reglages["custom_quality_profiles"] = []
+        reglages["active_quality_profile_id"] = ""
+
+        self.api.settings.save_settings(reglages)
+
+        self.assertEqual(self._biblio(), ([], ""), "l'effacement demande n'a pas eu lieu")
+
+
 class LaREINITIALISATIONVOULUEMarcheTOUJOURSTests(_BaseApi):
     """L'AUTRE SENS, et c'est la moitie qu'on oublie.
 
