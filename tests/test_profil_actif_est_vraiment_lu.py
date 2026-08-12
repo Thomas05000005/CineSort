@@ -127,7 +127,47 @@ class LeProfilACTIFEstCELUIQuOnExporteTests(unittest.TestCase):
 
 class LaCALIBRATIONPorteSurLeProfilACTIFTests(unittest.TestCase):
     """Meme defaut, seconde fonction : les suggestions de poids se calculaient
-    sur un profil que l'utilisateur n'emploie pas."""
+    sur un profil que l'utilisateur n'emploie pas.
+
+    CE QUE CETTE CLASSE A DEJA CORRIGE CHEZ ELLE. Sa premiere version n'eprouvait
+    que le HELPER. La mutation du SITE D'APPEL — remplacer
+    `_profil_actif_ou_defaut(prof)` par `default_quality_profile()` dans
+    `_get_calibration_report_impl` — la laissait VERTE : 64 tests passaient sur
+    un code qui reproduisait exactement le defaut. Un helper juste ne prouve
+    rien tant que personne ne verifie qu'on l'APPELLE. Les tests portent donc
+    desormais sur le PAYLOAD rendu a l'interface.
+    """
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def _rapport(self, valeur_profile_json) -> dict:
+        store = mock.MagicMock()
+        store.quality.list_user_quality_feedback.return_value = []
+        store.quality.get_active_quality_profile.return_value = {"profile_json": valeur_profile_json}
+        with mock.patch.object(self.api, "_get_or_create_infra", return_value=(store, mock.MagicMock())):
+            return self.api.quality.get_calibration_report()
+
+    def test_les_poids_RENDUS_sont_ceux_de_l_utilisateur(self) -> None:
+        res = self._rapport(_PROFIL_PERSO)
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(
+            res["current_weights"],
+            {"resolution": 99.0, "codec": 1.0},
+            "le rapport de calibration porte sur un profil que l'utilisateur n'emploie pas",
+        )
+        self.assertNotEqual(
+            res["current_weights"],
+            default_quality_profile().get("weights"),
+            "ce sont les poids PAR DEFAUT qui ont ete rendus",
+        )
+
+    def test_sans_profil_actif_les_poids_par_defaut_sont_rendus(self) -> None:
+        res = self._rapport(None)
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["current_weights"], default_quality_profile().get("weights"))
 
     def test_le_helper_rend_les_poids_de_l_utilisateur(self) -> None:
         poids = _profil_actif_ou_defaut({"profile_json": _PROFIL_PERSO}).get("weights")
