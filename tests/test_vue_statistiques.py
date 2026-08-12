@@ -271,7 +271,7 @@ class UneABSENCENEstPasUnZEROTests(unittest.TestCase):
     def test_un_score_ABSENT_s_affiche_en_tiret_pas_en_zero(self) -> None:
         res = self._run(
             r"""
-__emit({ html: M.__t._rendreRollup({ ok: true, groups: [{ group: "Marvel", count: 3, avg_score: null }] }) });
+__emit({ html: M.__t._rendreRollup({ ok: true, groups: [{ group_name: "Marvel", count: 3, avg_score: null }] }) });
 """
         )
         self.assertIn("—", res["html"], "un score absent doit se lire comme absent")

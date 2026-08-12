@@ -266,7 +266,15 @@ function _rendreRollup(d) {
   const lignes = groupes
     .map((g) => {
       const score = g.avg_score == null ? null : Number(g.avg_score);
-      const nom = g.group || g.name || g.key || "—";
+      // `group_name` EST LA CLE REELLE — verifiee dans
+      // `library_support.py:_get_scoring_rollup_impl`, qui construit
+      // `{"group_name", "count", "avg_score", "tier_distribution", "top_film_ids"}`.
+      // La premiere version lisait `g.group || g.name || g.key` : AUCUNE de ces
+      // trois cles n'existe, donc chaque ligne du tableau se serait affichee
+      // « — ». Le test ne l'a pas vu parce qu'il INVENTAIT `group` dans son
+      // echantillon : une fixture qui ne vient pas de la production ne prouve
+      // que la coherence du test avec lui-meme.
+      const nom = g.group_name || "—";
       return `<tr>
         <td class="stats-nom" title="${escapeHtml(String(nom))}">${escapeHtml(String(nom))}</td>
         <td class="stats-num">${(Number(g.count) || 0).toLocaleString("fr-FR")}</td>
