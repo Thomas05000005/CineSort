@@ -226,30 +226,50 @@ const _TIER_LABELS = {
   unknown: "Non identifié",
 };
 
-/** Couleur de tier a partir d'un score : les memes seuils que la vue Qualité. */
-function _tierDuScore(score) {
-  if (score == null) return "unknown";
-  if (score >= 85) return "platinum";
-  if (score >= 70) return "gold";
-  if (score >= 55) return "silver";
-  if (score >= 40) return "bronze";
-  return "reject";
-}
+/** Ordre d'affichage, du meilleur au pire. `unknown` ferme la marche. */
+const _TIERS_ORDONNES = ["platinum", "gold", "silver", "bronze", "reject", "unknown"];
 
 /**
- * Cellule de niveau : le NOM du tier, puis sa barre.
+ * Repartition des tiers d'un groupe, telle que le BACKEND l'a comptee.
  *
- * LE NOM N'EST PAS DECORATIF. Sans lui, le tier ne se lit qu'a la couleur de la
- * barre — or `silver` (gris) et `platinum` (gris clair) sont deja proches a
- * l'oeil nu, et indistinguables pour un daltonien comme en impression noir et
- * blanc. WCAG 1.4.1 : aucune information ne doit passer par la seule couleur.
+ * POURQUOI CETTE VUE NE CALCULE PLUS LE TIER ELLE-MEME. Une premiere version
+ * derivait le tier du score moyen avec une grille ecrite en dur (85/70/55/40).
+ * Deux defauts, tous deux mesures :
+ *
+ *   1. LA GRILLE ETAIT FAUSSE. La grille canonique de l'application est
+ *      70/66/55/40 — `default_quality_profile()["tiers"]`, et `_DEFAULT_TIERS`
+ *      dans `parametres.js:510` la reprend a l'identique. Un film a 72 s'affichait
+ *      « Gold » ici et « Platinum » partout ailleurs.
+ *   2. SURTOUT, CES SEUILS SONT REGLABLES PAR L'UTILISATEUR. C'est l'objet meme
+ *      du profil de qualite. AUCUNE grille en dur ne peut etre juste : celle-ci
+ *      aurait menti pour tout utilisateur ayant touche a ses seuils.
+ *
+ * Le backend envoie DEJA `tier_distribution` — les tiers reels, comptes film par
+ * film avec le profil actif. Les afficher est a la fois plus juste et plus
+ * informatif : une moyenne de 60 ne dit pas si le groupe est homogene ou s'il
+ * melange des Platinum et des Reject.
+ *
+ * LE NOMBRE ACCOMPAGNE TOUJOURS LA COULEUR. `silver` et `platinum` sont proches
+ * a l'oeil nu, et indistinguables pour un daltonien comme en impression noir et
+ * blanc — WCAG 1.4.1 : aucune information ne passe par la seule couleur. Chaque
+ * segment porte donc son compte en infobulle, et la ligne son detail en texte.
  */
-function _celluleDeTier(score) {
-  if (score == null) return "";
-  const tier = _tierDuScore(score);
-  return `<span class="stats-tier stats-tier--${tier}">
-    <span class="stats-tier-nom">${escapeHtml(_TIER_LABELS[tier] || tier)}</span>
-    ${_barre(score, 100, 96)}
+function _celluleDeRepartition(groupe) {
+  const dist = groupe && typeof groupe.tier_distribution === "object" ? groupe.tier_distribution : null;
+  if (!dist) return `<span class="stats-vide-cellule">—</span>`;
+  const parts = _TIERS_ORDONNES.map((t) => ({ tier: t, n: Number(dist[t]) || 0 })).filter((p) => p.n > 0);
+  const total = parts.reduce((s, p) => s + p.n, 0);
+  if (!total) return `<span class="stats-vide-cellule">—</span>`;
+  const segments = parts
+    .map(
+      (p) => `<span class="stats-part stats-part--${p.tier}" style="--part: ${p.n / total}"
+        title="${escapeHtml(_TIER_LABELS[p.tier] || p.tier)} : ${p.n}"></span>`
+    )
+    .join("");
+  const texte = parts.map((p) => `${_TIER_LABELS[p.tier] || p.tier} ${p.n}`).join(" · ");
+  return `<span class="stats-repartition" role="img" aria-label="${escapeHtml(texte)}">
+    <span class="stats-parts">${segments}</span>
+    <span class="stats-repartition-texte">${escapeHtml(texte)}</span>
   </span>`;
 }
 
@@ -279,14 +299,14 @@ function _rendreRollup(d) {
         <td class="stats-nom" title="${escapeHtml(String(nom))}">${escapeHtml(String(nom))}</td>
         <td class="stats-num">${(Number(g.count) || 0).toLocaleString("fr-FR")}</td>
         <td class="stats-num">${score == null ? "—" : score.toFixed(1)}</td>
-        <td>${_celluleDeTier(score)}</td>
+        <td>${_celluleDeRepartition(g)}</td>
       </tr>`;
     })
     .join("");
   return `<div class="stats-corps">
     <div class="stats-choix-barre">${choix}</div>
     <table class="stats-table">
-      <thead><tr><th>Groupe</th><th class="stats-num">Films</th><th class="stats-num">Score</th><th>Niveau</th></tr></thead>
+      <thead><tr><th>Groupe</th><th class="stats-num">Films</th><th class="stats-num">Score</th><th>Répartition des niveaux</th></tr></thead>
       <tbody>${lignes}</tbody>
     </table>
     <p class="stats-note">Trié par nombre de films, puis par score.</p>
@@ -412,7 +432,7 @@ export const __test = {
   _rendreTimeline,
   _rendreRollup,
   _moisCourt,
-  _tierDuScore,
+  _celluleDeRepartition,
   _barre,
   _charger,
 };

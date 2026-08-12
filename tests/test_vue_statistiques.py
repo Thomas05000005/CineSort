@@ -332,21 +332,88 @@ __emit({
         self.assertIn("Jellyfin", res["jf"])
         self.assertIn("disque", res["fs"])
 
-    def test_le_tier_suit_le_score(self) -> None:
-        """Les couleurs de tier sont invariantes dans toute l'app : un score ne
-        change pas de couleur selon l'ecran qui l'affiche."""
+    def test_la_repartition_vient_du_BACKEND_pas_d_un_calcul_local(self) -> None:
+        """CE TEST REMPLACE UN TEST QUI VERROUILLAIT UNE GRILLE FAUSSE.
+
+        L'ancien `test_le_tier_suit_le_score` figeait 85/70/55/40 tout en
+        affirmant dans sa docstring que « les tiers sont invariants dans toute
+        l'app ». Ils l'etaient — mais a 70/66/55/40
+        (`default_quality_profile()["tiers"]`, repris a l'identique par
+        `_DEFAULT_TIERS` dans `parametres.js:510`). Un film a 72 s'affichait
+        « Gold » ici et « Platinum » partout ailleurs.
+
+        Et SURTOUT : ces seuils sont REGLABLES par l'utilisateur — c'est l'objet
+        meme du profil de qualite. Aucune grille en dur ne peut etre juste. Le
+        test verrouillait donc une erreur de conception, pas seulement des
+        chiffres.
+
+        La vue affiche desormais `tier_distribution`, que le backend compte film
+        par film avec le profil ACTIF. Il n'y a plus de seuil dans le front, donc
+        plus rien a faire diverger.
+        """
         res = self._run(
             r"""
-__emit({
-  p: M.__t._tierDuScore(92), g: M.__t._tierDuScore(75),
-  s: M.__t._tierDuScore(60), b: M.__t._tierDuScore(45),
-  r: M.__t._tierDuScore(12), n: M.__t._tierDuScore(null),
-});
+__emit({ html: M.__t._celluleDeRepartition({
+  tier_distribution: { platinum: 2, gold: 5, silver: 0, bronze: 1, reject: 0, unknown: 0 },
+}) });
 """
         )
-        self.assertEqual(
-            [res["p"], res["g"], res["s"], res["b"], res["r"], res["n"]],
-            ["platinum", "gold", "silver", "bronze", "reject", "unknown"],
+        html = res["html"]
+        self.assertIn("Platinum 2", html)
+        self.assertIn("Gold 5", html)
+        self.assertIn("Bronze 1", html)
+        self.assertNotIn("Silver", html, "un tier a ZERO film ne doit pas encombrer la ligne")
+        self.assertIn("stats-part--platinum", html)
+
+    def test_une_repartition_ABSENTE_ne_devient_pas_une_repartition_vide(self) -> None:
+        """Un groupe sans distribution n'est pas un groupe sans films."""
+        for charge in ("{}", "{ tier_distribution: {} }", "{ tier_distribution: null }"):
+            with self.subTest(charge=charge):
+                res = self._run(f"__emit({{ html: M.__t._celluleDeRepartition({charge}) }});")
+                self.assertIn("—", res["html"])
+                self.assertNotIn("stats-part--", res["html"])
+
+    def test_le_compte_accompagne_TOUJOURS_la_couleur(self) -> None:
+        """WCAG 1.4.1 : `silver` et `platinum` sont indistinguables pour un
+        daltonien comme en impression noir et blanc.
+
+        LE DETAIL DOIT ETRE VISIBLE, pas seulement dans un attribut. Une
+        premiere version n'assertait que `aria-label` et `title` : retirer le
+        texte affiche la laissait VERTE, alors que l'ecran ne montrait plus que
+        des couleurs.
+        """
+        res = self._run(
+            r"""
+__emit({ html: M.__t._celluleDeRepartition({ tier_distribution: { platinum: 3, silver: 4 } }) });
+"""
+        )
+        self.assertIn('aria-label="Platinum 3 · Silver 4"', res["html"])
+        self.assertIn('title="Platinum : 3"', res["html"])
+        self.assertIn(
+            '<span class="stats-repartition-texte">Platinum 3 · Silver 4</span>',
+            res["html"],
+            "le detail chiffre n'est plus AFFICHE : il ne reste que la couleur",
+        )
+
+    def test_le_NOM_du_groupe_est_affiche(self) -> None:
+        """La cle est `group_name` — verifiee cote backend par
+        `tests/test_contrat_payload_statistiques.py`. Une premiere version de la
+        vue lisait `g.group || g.name || g.key` : aucune de ces trois cles
+        n'existe, donc chaque ligne affichait « — ». Aucun test ne l'a vu, parce
+        qu'aucun n'assertait sur le NOM rendu.
+        """
+        res = self._run(
+            r"""
+__emit({ html: M.__t._rendreRollup({ ok: true, groups: [
+  { group_name: "Marvel Cinematic Universe", count: 12, avg_score: 71.5 },
+] }) });
+"""
+        )
+        self.assertIn("Marvel Cinematic Universe", res["html"], "le nom du groupe n'est pas rendu")
+        self.assertNotIn(
+            '<td class="stats-nom" title="—">',
+            res["html"],
+            "la ligne affiche « — » a la place du nom : la vue lit la mauvaise cle",
         )
 
     def test_les_mois_sont_lisibles_en_francais(self) -> None:

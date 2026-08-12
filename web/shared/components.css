@@ -10355,22 +10355,38 @@ body.v5-notif-lock {
   max-width: 120px;
 }
 
-/* Porteur de la couleur de tier : il QUALIFIE la barre qu'il contient
-   (`.stats-tier--*` plus bas) et porte le nom du niveau a cote d'elle. */
-.stats-tier {
+/* La repartition des tiers d'un groupe : une barre segmentee, plus son detail
+   CHIFFRE. Le chiffre n'est pas redondant — c'est lui qui porte l'information
+   quand la couleur ne passe pas (daltonisme, impression noir et blanc). */
+.stats-repartition {
   display: flex;
   align-items: center;
   gap: 0.6rem;
 }
 
-/* Le nom du niveau. Largeur fixe pour que les barres s'alignent d'une ligne a
-   l'autre : sans elle, « Platinum » et « Gold » decalent chacun la leur. */
-.stats-tier-nom {
-  flex: 0 0 4.75rem;
+.stats-parts {
+  display: flex;
+  flex: 0 0 96px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-3, #262626);
+}
+
+/* La part de chaque tier vient de la vue, qui seule connait le total. */
+.stats-part {
+  flex: var(--part, 0) 0 0;
+  min-width: 2px;
+}
+
+.stats-repartition-texte {
   color: var(--text-2, #bbb);
   font-size: var(--fs-2xs, 0.72rem);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.stats-vide-cellule {
+  color: var(--text-3, #888);
 }
 
 .stats-barre-fond { fill: var(--surface-3, #262626); }
