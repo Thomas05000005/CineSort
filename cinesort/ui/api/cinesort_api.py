@@ -206,6 +206,50 @@ def _cleanup_reason_label(reason: str) -> str:
     }.get(raw, raw or "inconnue")
 
 
+def _profil_actif_ou_defaut(actif: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Profil de qualite ACTIF de l'utilisateur, ou le profil par defaut a defaut.
+
+    LE DEFAUT QUE CECI CORRIGE. Deux fonctions testaient
+    `isinstance(actif.get("profile_json"), str)` avant de deserialiser. Or le
+    repository DECODE deja la colonne :
+
+        quality.py:67  "profile_json": self._decode_row_json(..., expected_type=dict)
+
+    La condition etait donc TOUJOURS fausse, et les deux retombaient
+    systematiquement sur `default_quality_profile()`. Mesure sur un store reel,
+    profil personnalise enregistre puis relu :
+
+        type rendu par le repository : dict
+        isinstance(pj, str)          : False
+        poids du profil par defaut   : resolution=None
+        poids du profil utilisateur  : resolution=99.0
+
+    Consequences, silencieuses toutes les deux : `export_shareable_profile`
+    partageait le profil PAR DEFAUT sous le nom de l'utilisateur, et
+    `get_calibration_report` calculait ses suggestions de poids sur un profil
+    que l'utilisateur n'emploie pas.
+
+    LES DEUX FORMES SONT ACCEPTEES ICI. Le dict est la forme de production ; la
+    chaine reste toleree parce qu'une base ancienne, ou un decodage qui echoue
+    et retombe sur la valeur brute, peut encore en produire une. Refuser la
+    chaine ferait perdre le profil dans ces cas-la, ce qui est precisement le
+    defaut qu'on corrige.
+    """
+    if not actif:
+        return default_quality_profile()
+    brut = actif.get("profile_json")
+    if isinstance(brut, dict) and brut:
+        return brut
+    if isinstance(brut, str) and brut:
+        try:
+            decode = json.loads(brut)
+        except (ValueError, TypeError):
+            return default_quality_profile()
+        if isinstance(decode, dict) and decode:
+            return decode
+    return default_quality_profile()
+
+
 class CineSortApi:
     """
     API exposee a JavaScript via pywebview.
@@ -2487,13 +2531,7 @@ class CineSortApi:
             active = store.quality.get_active_quality_profile() if store else None
         except (OSError, TypeError, ValueError):
             active = None
-        if active and isinstance(active.get("profile_json"), str):
-            try:
-                profile = json.loads(active["profile_json"])
-            except (ValueError, TypeError):
-                profile = default_quality_profile()
-        else:
-            profile = default_quality_profile()
+        profile = _profil_actif_ou_defaut(active)
 
         wrapped = wrap_profile_for_export(
             profile,
@@ -2677,14 +2715,7 @@ class CineSortApi:
             prof = store.quality.get_active_quality_profile()
         except (OSError, TypeError, ValueError):
             prof = None
-        if prof and isinstance(prof.get("profile_json"), str):
-            try:
-                payload = json.loads(prof["profile_json"])
-                current_weights = payload.get("weights") or {}
-            except (ValueError, TypeError):
-                current_weights = {}
-        else:
-            current_weights = default_quality_profile().get("weights", {})
+        current_weights = _profil_actif_ou_defaut(prof).get("weights") or {}
 
         suggestion = suggest_weight_adjustment(bias, current_weights) if current_weights else None
         return {

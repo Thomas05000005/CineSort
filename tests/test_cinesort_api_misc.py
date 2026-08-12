@@ -332,13 +332,19 @@ class TestExportShareableProfile(unittest.TestCase):
             self.assertIn("my_profile", result["filename_suggestion"])
 
     def test_export_with_active_profile(self) -> None:
-        from cinesort.domain.quality_score import default_quality_profile
+        """Le profil EXPORTE doit etre celui de l'utilisateur.
 
-        active_profile = default_quality_profile()
+        Ce test injectait `json.dumps(profil)` — une CHAINE, forme que le
+        repository ne produit jamais (il decode : `quality.py:67`) — et
+        n'assertait que sur `author` et `description`, deux valeurs venues des
+        ARGUMENTS du wrapper. Il restait donc vert alors que l'export renvoyait
+        le profil PAR DEFAUT. Voir `tests/test_profil_actif_est_vraiment_lu.py`.
+        """
+        active_profile = {"weights": {"resolution": 99.0}, "marqueur": "PROFIL_DE_L_UTILISATEUR"}
         with patch.object(self.api, "_get_or_create_infra") as mock_infra:
             store = MagicMock()
             store.quality.get_active_quality_profile.return_value = {
-                "profile_json": json.dumps(active_profile),
+                "profile_json": active_profile,  # forme REELLE : le repository decode deja
             }
             mock_infra.return_value = (store, MagicMock())
             result = self.api._export_shareable_profile_impl(name="x", author="me", description="d")
@@ -346,6 +352,11 @@ class TestExportShareableProfile(unittest.TestCase):
             payload = json.loads(result["content"])
             self.assertEqual(payload["author"], "me")
             self.assertEqual(payload["description"], "d")
+            self.assertIn(
+                "PROFIL_DE_L_UTILISATEUR",
+                json.dumps(payload),
+                "le profil exporte n'est pas celui de l'utilisateur",
+            )
 
     def test_export_store_init_failure(self) -> None:
         with patch.object(self.api, "_get_or_create_infra", side_effect=OSError("no disk")):
