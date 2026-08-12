@@ -224,7 +224,6 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/domain/perceptual/audio_perceptual.py", "analyze_clipping_segments"): 106,
     ("cinesort/infra/db/migration_manager.py", "_split_sql_statements"): 106,
     ("cinesort/infra/db/pragma_profile.py", "_record_pragma_history"): 106,
-    ("cinesort/ui/api/quality_audit_support.py", "get_history"): 106,
     ("cinesort/domain/quality_score.py", "_apply_custom_rules_helper"): 105,
     ("cinesort/infra/plex_client.py", "get_movies"): 105,
     ("cinesort/infra/probe/tools_manager.py", "_build_tool_status"): 105,

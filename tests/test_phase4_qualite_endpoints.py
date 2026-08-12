@@ -404,6 +404,43 @@ class GetHistoryTests(unittest.TestCase):
         # 0 = all -> traduit en 365j
         self.assertEqual(result["period_days"], 365)
 
+    def test_delta_films_nul_sur_activite_parfaitement_stable(self):
+        """Audit 2026-08-08 — les deux moities comparees doivent avoir la MEME taille.
+
+        `points` compte `period + 1` entrees (bornes incluses), donc un nombre
+        IMPAIR des que `period` est pair — c'est le cas des boutons « 30j » et
+        « 90j », dont le premier est le defaut. `points[half:]` prenait alors 16
+        jours contre 15 pour `points[:half]`, et `delta_films` est une SOMME, pas
+        une moyenne : sur une bibliotheque ou l'on ajoute exactement le meme
+        nombre de films chaque jour, l'ecart affiche valait un jour d'ajouts
+        entier. L'UI (`qualite.js`) le rend en 📈, donc une hausse permanente qui
+        ne mesurait que l'asymetrie de la coupe.
+
+        Le score, lui, est une MOYENNE : il ne portait pas ce biais. C'est
+        `count_films` qui revele le defaut, d'ou ce cas dedie.
+        """
+        today = time.time()
+        # 31 jours de donnees identiques : meme score, meme nombre de films.
+        trend_data = [
+            {
+                "date": time.strftime("%Y-%m-%d", time.localtime(today - day * 86400)),
+                "avg_score": 60.0,
+                "count": 10,
+            }
+            for day in range(31)
+        ]
+        api, _ = _build_mock_api(perceptual_trend=trend_data)
+        result = get_history(api, period_days=30)
+
+        self.assertEqual(len(result["points"]), 31, "le contrat de l'endpoint ne change pas")
+        self.assertEqual(
+            result["delta_films"],
+            0,
+            "activite strictement constante -> aucune tendance ; valait +10 (un jour d'ajouts) "
+            "quand la moitie recente comptait 16 jours contre 15",
+        )
+        self.assertEqual(result["delta_score"], 0.0)
+
 
 # ---------------------------------------------------------------------------
 # recompute_all_scores + get_recompute_job_status
