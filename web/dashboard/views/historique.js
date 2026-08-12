@@ -669,6 +669,7 @@ function _buildInspectorSections(selectedRun) {
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="resume" data-run-id="${escapeHtml(selectedRun.run_id)}">↻ Reprendre ce run</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="csv" title="Télécharge le rapport de ce run au format CSV (lisible par Excel)">⬇ Exporter en CSV</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="json" title="Télécharge le rapport de ce run au format JSON">⬇ Exporter en JSON</button>
+          <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-nfo" data-run-id="${escapeHtml(selectedRun.run_id)}" title="Écrit un fichier .nfo à côté de chaque film de ce run (lu par Kodi et Jellyfin)">🎬 Générer les .nfo</button>
           ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
           <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
         </div>
@@ -1478,6 +1479,96 @@ async function _exporterLeRapport(runId, format, btn) {
   }
 }
 
+/**
+ * Genere les fichiers .nfo d'un run — EN DEUX TEMPS.
+ *
+ * POURQUOI CETTE METHODE ETAIT DECLAREE NON CABLABLE, ET POURQUOI C'ETAIT FAUX.
+ * La vague B4 l'a refusee au motif « parametre inerte et rows sans les champs
+ * necessaires ». Le motif etait errone : le parametre inerte est
+ * `sample_row_id` de `preview_naming_template` (issue #460), une AUTRE methode.
+ * Mesure sur une ligne de rapport reelle, construite par `_build_row_payload` :
+ *
+ *     folder / video / proposed_title / proposed_year / decision_title
+ *     decision_year  -> tous presents
+ *     export_nfo_for_run(dry_run=True) -> written 1, skipped_no_data 0, errors 0
+ *
+ * CETTE ACTION ECRIT SUR LE DISQUE de l'utilisateur, a cote de ses films. Elle
+ * passe donc par la regle n3 du depot : liste, consequence, et delai au-dela de
+ * 50 elements. Le premier appel est un `dry_run` — c'est LUI qui fournit le
+ * compte et les chemins reels annonces dans la confirmation, plutot qu'une
+ * estimation. `dangerConfirmModal` derive son propre delai du nombre d'elements.
+ */
+async function _genererLesNfo(runId, btn) {
+  const etiquette = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "…";
+  }
+  let apercu = null;
+  try {
+    const res = await apiPost("run/export_run_nfo", { run_id: runId, dry_run: true });
+    apercu = (res && res.data) || res || {};
+  } catch {
+    apercu = null;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = etiquette;
+    }
+  }
+  if (!apercu || apercu.ok === false) {
+    showToast({
+      type: "error",
+      text: (apercu && (apercu.user_message || apercu.message)) || "L'aperçu des .nfo a échoué.",
+    });
+    return;
+  }
+  const aEcrire = Number(apercu.written) || 0;
+  const dejaLa = Number(apercu.skipped_existing) || 0;
+  const sansDonnees = Number(apercu.skipped_no_data) || 0;
+  if (aEcrire <= 0) {
+    // Ne pas ouvrir une confirmation pour une action qui ne ferait rien : la
+    // confirmation deviendrait un reflexe, donc plus une garde.
+    showToast({
+      type: "info",
+      text: dejaLa > 0 ? `Rien à écrire : ${dejaLa} fichier(s) .nfo existent déjà.` : "Aucun film de ce run ne porte les données nécessaires à un .nfo.",
+    });
+    return;
+  }
+  const chemins = (Array.isArray(apercu.details) ? apercu.details : [])
+    .filter((d) => d && d.status === "would_write")
+    .map((d) => String(d.path || ""));
+  const restes = [];
+  if (dejaLa > 0) restes.push(`${dejaLa} .nfo déjà présent(s) seront laissés intacts`);
+  if (sansDonnees > 0) restes.push(`${sansDonnees} film(s) seront ignorés faute de titre ou de fichier vidéo`);
+
+  dangerConfirmModal({
+    title: `Générer ${aEcrire} fichier(s) .nfo ?`,
+    items: chemins,
+    itemCount: aEcrire,
+    consequence:
+      `${aEcrire} fichier(s) .nfo seront ÉCRITS sur le disque, à côté de vos films. ` +
+      `Aucun film n'est déplacé ni renommé, et aucun .nfo existant n'est écrasé.` +
+      (restes.length ? ` ${restes.join(" ; ")}.` : ""),
+    confirmLabel: "Générer les .nfo",
+    onConfirm: async () => {
+      const res = await apiPost("run/export_run_nfo", { run_id: runId, dry_run: false });
+      const data = (res && res.data) || res || {};
+      if (data.ok === false) {
+        showToast({ type: "error", text: data.user_message || data.message || "La génération a échoué." });
+        return;
+      }
+      const erreurs = Number(data.errors) || 0;
+      showToast({
+        type: erreurs > 0 ? "warning" : "success",
+        text:
+          `${Number(data.written) || 0} fichier(s) .nfo écrit(s)` +
+          (erreurs > 0 ? `, ${erreurs} en erreur (voir les journaux).` : "."),
+      });
+    },
+  });
+}
+
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
   const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
@@ -1502,6 +1593,9 @@ function _onActionClick(ev) {
       break;
     case "export-report":
       if (runId) _exporterLeRapport(runId, target.dataset.format || "json", target);
+      break;
+    case "export-nfo":
+      if (runId) _genererLesNfo(runId, target);
       break;
     case "undo-apply":
       // Action dangereuse — dangerConfirmModal (P0 #233, cf feedback-cinesort-actions-dangereuses).

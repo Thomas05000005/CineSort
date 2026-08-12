@@ -61,7 +61,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
         # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
         "integrations.request_radarr_upgrade",
-        "run.export_run_nfo",  # B4 : NON cablable — parametre inerte et rows sans les champs necessaires — defaut a corriger d'abord
         "library.get_film_history",
         "quality.analyze_perceptual_batch",
         "quality.analyze_quality_batch",

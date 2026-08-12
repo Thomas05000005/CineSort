@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -833,6 +834,11 @@ def write_settings(state_dir: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 # Pour les listes : la valeur sera deep-copiee a chaque appel pour eviter le
 # partage de la default mutable entre payloads (piege classique).
 _LITERAL_DEFAULTS: Tuple[Tuple[str, Any], ...] = (
+    # --- Profils qualite personnalises (bibliotheque durable) ---
+    # Cf. `_save_section_quality_profiles` : ces deux cles n'etaient reclamees
+    # par aucune section d'ecriture, donc jamais persistees.
+    ("custom_quality_profiles", []),
+    ("active_quality_profile_id", ""),
     # --- TMDb ---
     ("tmdb_enabled", True),
     ("tmdb_timeout_s", 10.0),
@@ -1560,14 +1566,28 @@ def _save_section_probe(payload: Dict[str, Any], *, default_probe_backend: str) 
     # Utile pour les NAS SMB lents ou les gros fichiers 4K qui depassent 30s.
     # V5-04 : `probe_workers` int [0..16] (0=auto), `probe_parallelism_enabled` bool.
     workers_raw = to_int(payload.get("probe_workers"), 0)
-    return {
+    out: Dict[str, Any] = {
         "probe_backend": normalize_probe_backend(payload.get("probe_backend"), default_backend=default_probe_backend),
-        "mediainfo_path": str(payload.get("mediainfo_path") or "").strip(),
-        "ffprobe_path": str(payload.get("ffprobe_path") or "").strip(),
         "probe_timeout_s": max(5.0, min(300.0, to_float(payload.get("probe_timeout_s"), 30.0))),
         "probe_workers": max(0, min(16, workers_raw)),
         "probe_parallelism_enabled": to_bool(payload.get("probe_parallelism_enabled"), True),
     }
+    # LES DEUX CHEMINS D'OUTILS SUIVENT LA MEME REGLE QUE `set_probe_tool_paths` :
+    # cle ABSENTE = silence (on garde), cle presente et VIDE = demande (on efface).
+    #
+    # Le correctif de `set_probe_tool_paths` ne suffisait pas : cette section est
+    # la PORTE PRINCIPALE, et elle ecrivait les deux chemins inconditionnellement.
+    # Mesure, sur un state_dir reel, apres avoir enregistre les deux outils :
+    #
+    #     save_settings({"theme": "luxe"})  ->  ffprobe_path = ''  mediainfo_path = ''
+    #
+    # Un client REST postant une charge utile partielle effacait donc la
+    # configuration des outils par la grande porte, pendant que la petite etait
+    # gardee. Corriger un motif a un endroit ne le corrige pas ailleurs.
+    for cle in ("mediainfo_path", "ffprobe_path"):
+        if cle in payload:
+            out[cle] = str(payload.get(cle) or "").strip()
+    return out
 
 
 def _save_section_scan_max_workers(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1691,6 +1711,128 @@ def _save_section_plugins(payload: Dict[str, Any]) -> Dict[str, Any]:
         "plugins_enabled": to_bool(payload.get("plugins_enabled"), False),
         "plugins_timeout_s": max(5, min(120, _coerce_int_with_default(payload.get("plugins_timeout_s", _MISSING), 30))),
     }
+
+
+def _appliquer_les_sections(
+    to_save: Dict[str, Any],
+    settings: Dict[str, Any],
+    *,
+    default_collection_folder_name: str,
+    default_empty_folders_folder_name: str,
+    default_residual_cleanup_folder_name: str,
+    default_probe_backend: str,
+    debug_enabled: bool,
+) -> None:
+    """Recopie dans `to_save` tout ce que les sections savent lire.
+
+    C'EST ICI QUE SE DECIDE CE QUI EST PERSISTE, ET NULLE PART AILLEURS.
+    `to_save` part de l'existant ; une cle que AUCUNE section ci-dessous ne
+    reclame n'est jamais recopiee — elle disparait en silence, et
+    `save_settings` rend quand meme `ok: True`. C'est une liste blanche par
+    omission, et son oubli est un defaut recurrent : le commentaire de la
+    section `naming` en garde la trace (« 3 sections ajoutees pour persister
+    16 champs UI qui etaient silencieusement droppes »), et
+    `_save_section_quality_profiles` est le meme oubli, decouvert plus tard.
+
+    AJOUTER UNE CLE DE REGLAGE, C'EST AJOUTER SA SECTION ICI.
+    """
+    to_save.update(_save_section_tmdb(settings))
+    to_save.update(
+        _save_section_cleanup(
+            settings,
+            default_collection_folder_name=default_collection_folder_name,
+            default_empty_folders_folder_name=default_empty_folders_folder_name,
+            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+        )
+    )
+    to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
+    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
+    to_save.update(_save_section_scan_max_workers(settings))
+    to_save.update(_save_section_scan_flags(settings))
+    to_save.update(_save_section_jellyfin(settings))
+    to_save.update(_save_section_plex(settings))
+    to_save.update(_save_section_radarr(settings))
+    to_save.update(_save_section_omdb(settings))
+    # Fix audit 2026-05-24 (v1.5.0) : 3 sections ajoutees pour persister 16 champs UI
+    # qui etaient silencieusement droppes (meme bug pattern que OMDb).
+    to_save.update(_save_section_naming(settings))
+    to_save.update(_save_section_sources(settings))
+    to_save.update(_save_section_advanced(settings))
+    to_save.update(_save_section_notifications(settings))
+    to_save.update(_save_section_rest_api(settings))
+    to_save.update(_save_section_watch(settings))
+    to_save.update(_save_section_plugins(settings))
+    to_save.update(_save_section_quality_profiles(settings))
+    to_save.update(_save_section_email(settings))
+    to_save.update(_save_section_subtitles(settings))
+    to_save.update(_save_section_perceptual(settings))
+    to_save.update(_save_section_appearance(settings, debug_enabled=debug_enabled))
+
+
+def _save_section_quality_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Bibliotheque durable des profils qualite personnalises.
+
+    POURQUOI CETTE SECTION EXISTE. `to_save` part de l'existant puis chaque
+    `_save_section_*` reclame SES cles : c'est une liste blanche par omission.
+    Une cle qu'aucune section ne reclame n'est jamais recopiee — elle disparait
+    silencieusement, et `save_settings` rend quand meme `ok: True`.
+
+    Ces deux cles-la n'etaient reclamees par personne. Mesure, sur un state_dir
+    neuf, en relisant le settings.json ECRIT :
+
+        custom_quality_profiles   -> ABSENTE du fichier
+        active_quality_profile_id -> ABSENTE du fichier
+        locale (temoin)           -> "en", ecrite
+
+    Consequences en chaine, toutes silencieuses :
+
+      - `quality.save_profile` rendait `{"ok": true, "profile_id": ...}` et ne
+        persistait RIEN ;
+      - `quality.set_active_profile` repondait ensuite « Profil inconnu » pour le
+        profil qu'on venait de « sauvegarder » ;
+      - `settings.reset_database` detruisait le profil actif — seule copie, elle
+        vivait en base — sans rien restaurer ni avertir (mesure : poids video
+        70 -> 60, le defaut).
+
+    `profiles_support_crud.py` et `reset_support.py` lisent et ecrivent pourtant
+    ces deux cles depuis toujours : c'est la section d'ecriture qui manquait, pas
+    les lecteurs.
+
+    Les entrees non-dict sont ecartees plutot que de faire echouer la
+    sauvegarde ENTIERE des reglages : un profil malforme ne doit pas emporter
+    avec lui les 118 autres cles.
+    """
+    # CLE ABSENTE = SILENCE, PAS EFFACEMENT. Une premiere version de cette
+    # section ecrivait les deux cles inconditionnellement. Mesure, sur un
+    # state_dir reel, apres avoir cree un profil :
+    #
+    #     save_settings({"theme": "luxe"})  ->  ok: True
+    #     custom_quality_profiles           ->  []      <- EFFACEE
+    #     active_quality_profile_id         ->  ""      <- EFFACE
+    #
+    # C'etait grave : l'ecran Parametres fige les reglages a son ouverture, puis
+    # les re-POSTe EN BLOC a chaque champ modifie (sauvegarde differee). Un
+    # profil cree depuis cet ecran disparaissait donc a la frappe suivante, sous
+    # un « Sauvegarde a HH:MM:SS ». Et tout client REST qui poste une charge
+    # utile partielle detruisait la bibliotheque.
+    #
+    # L'ironie est instructive : le MEME lot ajoutait `_chemin_demande`
+    # (probe_support.py) pour corriger exactement cette forme de defaut sur les
+    # chemins d'outils. Corriger un motif a un endroit ne le corrige pas
+    # ailleurs — c'est l'idiome des sections voisines (`_save_section_naming`,
+    # `_save_section_sources`, `_save_section_advanced`) qu'il fallait suivre.
+    out: Dict[str, Any] = {}
+    if "custom_quality_profiles" in payload:
+        brut = payload.get("custom_quality_profiles")
+        # Les entrees non-dict sont ecartees plutot que de faire echouer la
+        # sauvegarde ENTIERE : un profil malforme ne doit pas emporter les
+        # ~118 autres cles de reglages.
+        out["custom_quality_profiles"] = (
+            [copy.deepcopy(e) for e in brut if isinstance(e, dict)] if isinstance(brut, list) else []
+        )
+    if "active_quality_profile_id" in payload:
+        out["active_quality_profile_id"] = str(payload.get("active_quality_profile_id") or "")
+    return out
 
 
 def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2162,36 +2304,15 @@ def _save_settings_payload_locked(
     to_save["root"] = str(root_path)
     to_save["roots"] = [str(r) for r in roots_paths]
     to_save["state_dir"] = str(state_dir)
-    to_save.update(_save_section_tmdb(settings))
-    to_save.update(
-        _save_section_cleanup(
-            settings,
-            default_collection_folder_name=default_collection_folder_name,
-            default_empty_folders_folder_name=default_empty_folders_folder_name,
-            default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
-        )
+    _appliquer_les_sections(
+        to_save,
+        settings,
+        default_collection_folder_name=default_collection_folder_name,
+        default_empty_folders_folder_name=default_empty_folders_folder_name,
+        default_residual_cleanup_folder_name=default_residual_cleanup_folder_name,
+        default_probe_backend=default_probe_backend,
+        debug_enabled=debug_enabled,
     )
-    to_save.update(_save_section_probe(settings, default_probe_backend=default_probe_backend))
-    # VO-B-CONFIG : scan_max_workers mode + value (tri-etat auto/manuel)
-    to_save.update(_save_section_scan_max_workers(settings))
-    to_save.update(_save_section_scan_flags(settings))
-    to_save.update(_save_section_jellyfin(settings))
-    to_save.update(_save_section_plex(settings))
-    to_save.update(_save_section_radarr(settings))
-    to_save.update(_save_section_omdb(settings))
-    # Fix audit 2026-05-24 (v1.5.0) : 3 sections ajoutees pour persister 16 champs UI
-    # qui etaient silencieusement droppes (meme bug pattern que OMDb).
-    to_save.update(_save_section_naming(settings))
-    to_save.update(_save_section_sources(settings))
-    to_save.update(_save_section_advanced(settings))
-    to_save.update(_save_section_notifications(settings))
-    to_save.update(_save_section_rest_api(settings))
-    to_save.update(_save_section_watch(settings))
-    to_save.update(_save_section_plugins(settings))
-    to_save.update(_save_section_email(settings))
-    to_save.update(_save_section_subtitles(settings))
-    to_save.update(_save_section_perceptual(settings))
-    to_save.update(_save_section_appearance(settings, debug_enabled=debug_enabled))
 
     # Profils de renommage : normaliser preset + templates
     _apply_naming_preset(to_save, settings)
