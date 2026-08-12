@@ -237,6 +237,24 @@ __emit({ branche: typeof boutons[0].rappel === "function" });
             "le bouton « Simuler un profil » n'a aucun gestionnaire : il est decoratif",
         )
 
+    def test_le_bouton_des_regles_est_branche(self) -> None:
+        """Sixieme fois : une capacite complete et inatteignable."""
+        res = self._run(
+            r"""
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-regles") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bind(conteneur);
+__emit({ branche: typeof boutons[0].rappel === "function" });
+"""
+        )
+        self.assertTrue(
+            res["branche"],
+            "le bouton « Règles personnalisées » n'a aucun gestionnaire : il est decoratif",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
