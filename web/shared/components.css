@@ -10209,3 +10209,233 @@ body.v5-notif-lock {
 }
 
 } /* end @layer v5 */
+/* ===========================================================================
+   Vue Statistiques — vague C.
+
+   Trois lectures de la meme bibliotheque, en trois onglets. Les graphiques sont
+   en SVG : ils se mettent a l'echelle, s'impriment, et portent un <title> par
+   barre — donc une infobulle native et un contenu accessible, ce qu'un
+   empilement de <div> ne donne pas.
+
+   Tout passe par les jetons du theme (surfaces, hierarchie de texte, accent) :
+   la vue suit donc les themes clair/sombre sans regle dediee.
+   =========================================================================== */
+
+.stats-vue {
+  padding: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.stats-entete {
+  margin-bottom: 1.5rem;
+}
+
+.stats-titre {
+  margin: 0 0 1rem;
+  font-size: var(--fs-2xl, 1.6rem);
+  font-weight: var(--fw-semibold, 600);
+  letter-spacing: -0.01em;
+}
+
+.stats-onglets {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-1, #333);
+}
+
+.stats-onglet {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0.6rem 1rem;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-md, 0.95rem);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.stats-onglet:hover {
+  color: var(--text-1, #eee);
+}
+
+.stats-onglet.is-active {
+  color: var(--accent, #6ea8fe);
+  border-bottom-color: var(--accent, #6ea8fe);
+  font-weight: var(--fw-semibold, 600);
+}
+
+.stats-corps {
+  animation: stats-apparition 160ms ease;
+}
+
+@keyframes stats-apparition {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.stats-resume {
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+  margin: 0 0 1rem;
+}
+
+.stats-grille {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.stats-carte {
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+}
+
+.stats-carte-titre {
+  margin: 0 0 0.75rem;
+  font-size: var(--fs-sm, 0.9rem);
+  font-weight: var(--fw-semibold, 600);
+  color: var(--text-2, #bbb);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stats-ligne {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.stats-rang {
+  color: var(--text-3, #888);
+  font-size: var(--fs-sm, 0.9rem);
+  text-align: center;
+}
+
+.stats-nom {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-valeur {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+  min-width: 3.5ch;
+  text-align: right;
+}
+
+.stats-barre-fond { fill: var(--surface-3, #262626); }
+.stats-barre-pleine { fill: var(--accent, #6ea8fe); }
+
+.stats-choix-barre {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+}
+
+.stats-choix {
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.stats-choix:hover { color: var(--text-1, #eee); }
+
+.stats-choix.is-active {
+  background: var(--accent-soft, rgba(110, 168, 254, 0.15));
+  border-color: var(--accent-border, var(--accent, #6ea8fe));
+  color: var(--accent, #6ea8fe);
+}
+
+/* Le graphe deborde plutot que de se comprimer : sur 24 mois, des barres de
+   3 px seraient illisibles. Le defilement horizontal reste dans SON conteneur —
+   la page, elle, ne defile jamais lateralement. */
+.stats-graphe-hote {
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.stats-graphe { display: block; }
+
+.stats-axe {
+  fill: var(--text-3, #888);
+  font-size: 10px;
+}
+
+.stats-valeur-barre {
+  fill: var(--text-2, #bbb);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-mois:hover .stats-barre-pleine { fill: var(--accent-hover, var(--accent, #6ea8fe)); }
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.stats-table th {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  color: var(--text-3, #888);
+  font-weight: var(--fw-regular, 400);
+  border-bottom: 1px solid var(--border-1, #333);
+  text-transform: uppercase;
+  font-size: var(--fs-2xs, 0.72rem);
+  letter-spacing: 0.04em;
+}
+
+.stats-table td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--border-1, #2a2a2a);
+}
+
+.stats-table tbody tr:hover { background: var(--surface-2, #1b1b1b); }
+
+.stats-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Les couleurs de tier restent INVARIANTES : ce sont les memes que partout
+   ailleurs dans l'app, et un score ne doit pas changer de couleur selon l'ecran
+   qui l'affiche. */
+.stats-tier--platinum .stats-barre-pleine { fill: var(--tier-platinum, #b9c4d4); }
+.stats-tier--gold     .stats-barre-pleine { fill: var(--tier-gold, #e0b64a); }
+.stats-tier--silver   .stats-barre-pleine { fill: var(--tier-silver, #9aa4ad); }
+.stats-tier--bronze   .stats-barre-pleine { fill: var(--tier-bronze, #b07a4a); }
+.stats-tier--reject   .stats-barre-pleine { fill: var(--tier-reject, #d05a52); }
+
+.stats-vide,
+.stats-note {
+  color: var(--text-3, #888);
+  font-size: var(--fs-sm, 0.9rem);
+  margin: 1rem 0 0;
+}
+
+.stats-erreur {
+  color: var(--danger, #e5534b);
+  font-size: var(--fs-sm, 0.9rem);
+}

@@ -61,13 +61,10 @@ KNOWN_ORPHAN_METHODS = frozenset(
         # purge a revele qu'elles etaient orphelines de facto. A cabler dans les
         # vues vivantes (integrations dans parametres.js) ou a elaguer = decision produit.
         "integrations.request_radarr_upgrade",
-        "library.get_library_podiums",
-        "library.get_library_timeline",
         "run.export_run_nfo",
         "run.export_run_report",
         "runtime.get_log_paths",
         "library.get_film_history",
-        "library.get_scoring_rollup",
         "quality.analyze_perceptual_batch",
         "quality.analyze_quality_batch",
         "quality.apply_quality_preset",
