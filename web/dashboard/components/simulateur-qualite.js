@@ -240,6 +240,22 @@ async function _simuler() {
   }
 }
 
+/** Profil REEL d'un preset, lu la ou il vit : `get_quality_presets`. */
+async function _profilDuPreset(presetId) {
+  try {
+    const res = await apiPost("quality/get_quality_presets", {});
+    const data = (res && res.data) || res || {};
+    const liste = Array.isArray(data.presets) ? data.presets : [];
+    const trouve = liste.find(
+      (p) => String(p.preset_id) === String(presetId) || String(p.profile_id) === String(presetId)
+    );
+    const profil = trouve && trouve.profile_json;
+    return profil && typeof profil === "object" ? profil : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Enregistre le preset simule comme profil personnalise.
  *
@@ -258,9 +274,20 @@ async function _enregistrer() {
     return;
   }
   try {
+    // LE PROFIL N'EST PAS DANS LA REPONSE DE SIMULATION. Sa charge utile porte
+    // `before`/`after`/`delta`/`top_winners`… mais AUCUNE cle `profile` (mesure
+    // sur `quality_simulator_support.py`). Une premiere version envoyait
+    // `_etat.resultat.profile || {}` : elle enregistrait donc un profil VIDE
+    // sous le nom du preset, sans jamais echouer. On le RESOUT ici, a la source
+    // qui le porte.
+    const profil = await _profilDuPreset(_etat.resultat.preset_id || _etat.preset);
+    if (!profil) {
+      showToast({ type: "error", text: "Le profil de ce preset n'a pas pu être lu ; rien n'a été enregistré." });
+      return;
+    }
     const res = await apiPost("quality/save_custom_quality_preset", {
       name: nom,
-      profile_json: _etat.resultat.profile || {},
+      profile_json: profil,
     });
     const data = (res && res.data) || res || {};
     if (data.ok === false) {
@@ -283,6 +310,11 @@ function _brancher() {
       const demande = cible.dataset.simuPreset;
       if (!PRESETS.some((p) => p.id === demande)) return;
       _etat.preset = demande;
+      // LE RESULTAT AFFICHE DEVIENT FAUX DES QU'ON CHANGE DE PRESET. Le garder
+      // laisserait des chiffres d'un preset sous le nom d'un autre — et
+      // « Enregistrer » porterait alors sur celui qu'on ne regarde plus.
+      _etat.resultat = null;
+      _etat.erreur = "";
       _reouvrir();
       return;
     }
@@ -290,6 +322,8 @@ function _brancher() {
       const demande = cible.dataset.simuPortee;
       if (!PORTEES.some((p) => p.id === demande)) return;
       _etat.portee = demande;
+      _etat.resultat = null;
+      _etat.erreur = "";
       _reouvrir();
       return;
     }
