@@ -103,9 +103,21 @@ class SettingsDispatcherSectionsTests(unittest.TestCase):
         # On concatene les deux sources pour que le contrat « la section est
         # appelee dans le flux de save » survive aux refactors wrapper/helper.
         src = inspect.getsource(settings_support.save_settings_payload)
-        locked = getattr(settings_support, "_save_settings_payload_locked", None)
-        if locked is not None:
-            src += inspect.getsource(locked)
+        # La chaine du flux de sauvegarde s'est allongee d'un maillon a chaque
+        # refactor : wrapper -> _save_settings_payload_locked -> _appliquer_les_sections
+        # (ou vivent desormais les appels _save_section_*). On concatene TOUS les
+        # maillons connus pour que le contrat survive.
+        #
+        # CETTE GARDE LIT UNE CHAINE DE SOURCE, ce que le depot proscrit : elle
+        # devient aveugle au prochain maillon que personne ne pensera a ajouter
+        # ici. C'est exactement ce qui vient d'arriver. Elle est donc DOUBLEE par
+        # `AucuneSectionNEstDroppeeTests` plus bas, qui eprouve l'EFFET — les
+        # cles arrivent-elles sur le disque — et ne depend d'aucun nom de
+        # fonction intermediaire.
+        for nom in ("_save_settings_payload_locked", "_appliquer_les_sections"):
+            maillon = getattr(settings_support, nom, None)
+            if maillon is not None:
+                src += inspect.getsource(maillon)
         return src
 
     def test_save_section_omdb_exists(self):
@@ -279,6 +291,103 @@ class AccueilUpdateCardTests(unittest.TestCase):
         """La carte n'est rendue que si update_available et latest_version."""
         self.assertIn("update_available", self.js)
         self.assertIn("data-accueil-update-url", self.js)
+
+
+class AucuneSectionNEstDroppeeTests(unittest.TestCase):
+    """AUCUNE cle connue d'une section ne doit disparaitre a la sauvegarde.
+
+    POURQUOI CETTE GARDE EXISTE, ET POURQUOI ELLE NE LIT PAS DE SOURCE.
+    `save_settings` construit ce qu'il ecrit : une cle qu'aucune section ne
+    reclame n'est jamais recopiee, et la sauvegarde rend quand meme `ok: True`.
+    Ce defaut s'est produit AU MOINS DEUX FOIS :
+
+      - 2026-05-24 : 16 champs UI silencieusement droppes (sections naming,
+        sources, advanced manquantes) ;
+      - plus tard : `custom_quality_profiles` et `active_quality_profile_id`,
+        dont la disparition rendait `save_profile` sans effet et faisait
+        detruire le profil de l'utilisateur par `reset_database`.
+
+    `SettingsDispatcherSectionsTests` ci-dessus cherche les noms de fonctions
+    dans une CHAINE DE SOURCE. Elle est devenue aveugle des qu'un maillon
+    intermediaire a ete ajoute a la chaine d'appel — c'est arrive, et elle a
+    rougi pour cette raison-la, pas parce qu'une section manquait.
+
+    Cette garde-ci ne cite aucun nom de fonction : elle DEMANDE a chaque section
+    quelles cles elle produit, puis verifie qu'elles arrivent bien dans le
+    fichier ecrit. Elle survit donc a n'importe quel refactor de la chaine, et
+    une section ajoutee sans etre branchee la fait rougir immediatement.
+    """
+
+    #: Les trois sections qui exigent un parametre en plus de la charge utile.
+    #: Elles sont couvertes par les MEMES assertions, avec leurs defauts.
+    _EXTRAS = {
+        "_save_section_cleanup": {
+            "default_collection_folder_name": "Collections",
+            "default_empty_folders_folder_name": "Vides",
+            "default_residual_cleanup_folder_name": "Residus",
+        },
+        "_save_section_probe": {"default_probe_backend": "ffprobe"},
+        "_save_section_appearance": {"debug_enabled": False},
+    }
+
+    def _sections(self) -> dict:
+        return {n: getattr(settings_support, n) for n in dir(settings_support) if n.startswith("_save_section_")}
+
+    def test_toutes_les_cles_de_toutes_les_sections_sont_ecrites(self) -> None:
+        import shutil
+        import tempfile
+
+        from cinesort.ui.api.cinesort_api import CineSortApi
+
+        sections = self._sections()
+        self.assertGreater(len(sections), 15, "l'introspection n'a trouve presque aucune section : elle est cassee")
+
+        attendues: dict[str, str] = {}
+        for nom, fonction in sections.items():
+            for cle in fonction({}, **self._EXTRAS.get(nom, {})):
+                attendues[cle] = nom
+
+        tmp = Path(tempfile.mkdtemp(prefix="cinesort_sections_"))
+        try:
+            api = CineSortApi()
+            api._state_dir = tmp / "state"  # type: ignore[attr-defined]
+            api._state_dir.mkdir(parents=True, exist_ok=True)
+            api.settings.save_settings(api.settings.get_settings() or {})
+            ecrites = set(api.settings.get_settings() or {})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        manquantes = sorted(k for k in attendues if k not in ecrites)
+        self.assertEqual(
+            manquantes,
+            [],
+            "des cles produites par une section n'arrivent pas dans les reglages sauvegardes — "
+            "la section n'est pas branchee dans le flux de save : "
+            + ", ".join(f"{k} ({attendues[k]})" for k in manquantes),
+        )
+
+    def test_la_section_des_profils_qualite_est_branchee(self) -> None:
+        """Le cas nomme, pour que l'echec soit lisible s'il revient."""
+        import shutil
+        import tempfile
+
+        from cinesort.ui.api.cinesort_api import CineSortApi
+
+        tmp = Path(tempfile.mkdtemp(prefix="cinesort_sections_qp_"))
+        try:
+            api = CineSortApi()
+            api._state_dir = tmp / "state"  # type: ignore[attr-defined]
+            api._state_dir.mkdir(parents=True, exist_ok=True)
+            reglages = api.settings.get_settings() or {}
+            reglages["custom_quality_profiles"] = [{"id": "temoin"}]
+            reglages["active_quality_profile_id"] = "temoin"
+            api.settings.save_settings(reglages)
+            relu = api.settings.get_settings() or {}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        self.assertEqual([e.get("id") for e in (relu.get("custom_quality_profiles") or [])], ["temoin"])
+        self.assertEqual(relu.get("active_quality_profile_id"), "temoin")
 
 
 if __name__ == "__main__":  # pragma: no cover
