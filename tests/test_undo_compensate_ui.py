@@ -15,6 +15,16 @@ que ce meme fichier a demontree : la mutation `if (false && condition)` laissait
 le test VERT, puisque `condition` etait toujours presente dans la source. Le
 harnais `_jsexec` charge `historique.js`, neutralise ses seuls imports (remplaces
 par des doublures) et fait tourner le code de production sous Node.
+
+LES ASSERTIONS DE DELAI PORTENT SUR LE DELAI EFFECTIF, PAS SUR LE PARAMETRE.
+Elles lisaient `countdownSeconds`, que `historique.js` calculait alors lui-meme
+en repliquant `gradedCountdownSeconds` — replique qui portait son echeance de
+retrait (« A RETIRER une fois les deux branches sur `main` »). Mesurer le
+parametre revenait a verrouiller un DETAIL D'IMPLEMENTATION : ces tests seraient
+passes au rouge le jour ou l'appelant delegue, c'est-a-dire exactement quand le
+depot s'ameliore. Ils mesurent desormais ce que l'utilisateur subit — `_graded`
+interroge le VRAI helper de `modal.js`, il ne recopie pas sa formule — et les
+valeurs attendues (0 / 1 / 3 s) n'ont pas bouge d'un chiffre.
 """
 
 from __future__ import annotations
@@ -24,6 +34,61 @@ import unittest
 from tests._jsexec import DASHBOARD, require_node, run_module_test
 
 _JS = DASHBOARD / "views" / "historique.js"
+_MODAL = DASHBOARD / "components" / "modal.js"
+
+# `modal.js` n'importe que deux helpers DOM ; ils ne sont pas sur le chemin de
+# `gradedCountdownSeconds`, qui est une fonction pure.
+_STUBS_MODAL = r"""
+const $ = () => null;
+const escapeHtml = (s) => String(s == null ? "" : s);
+globalThis.document = { getElementById: () => null, querySelector: () => null,
+                        querySelectorAll: () => [], addEventListener() {} };
+"""
+
+_EXTRA_MODAL = r"""
+export const __graded = gradedCountdownSeconds;
+"""
+
+_CACHE_GRADED: dict = {}
+
+
+def _graded(n: int) -> int:
+    """Delai que la MODALE derivera pour `n` elements — mesure, pas recopie.
+
+    Le depot proscrit les tests qui repliquent la formule de production : une
+    copie reste verte quand l'original change. On interroge donc le vrai
+    `gradedCountdownSeconds` de `modal.js`. Le resultat est memorise : chaque
+    appel coute un process Node.
+    """
+    if n not in _CACHE_GRADED:
+        res = run_module_test(
+            _MODAL,
+            stubs=_STUBS_MODAL,
+            extra=_EXTRA_MODAL,
+            driver=f"__emit({{ d: M.__graded({int(n)}) }});",
+        )
+        _CACHE_GRADED[n] = int(res["d"])
+    return _CACHE_GRADED[n]
+
+
+def _delai_effectif(modale: dict) -> int:
+    """Delai reellement applique a l'utilisateur pour cette modale.
+
+    Reproduit la SEULE regle d'arbitrage de `dangerConfirmModal` : une valeur
+    explicite l'emporte, sinon le delai est derive du nombre d'elements. Le
+    calcul du delai, lui, n'est pas reproduit — il vient de `_graded`.
+
+    Ce niveau d'observation est ce qui rend ces tests insensibles a l'endroit ou
+    vit le seuil : ils ont d'abord mesure un `countdownSeconds` repliqué dans
+    `historique.js`, ils mesurent maintenant la derivation par `itemCount`, et
+    l'assertion — « 45 restaurables valent 1 s pour l'utilisateur » — n'a pas
+    bouge d'un chiffre.
+    """
+    explicite = modale.get("countdown")
+    if explicite is not None:
+        return int(explicite)
+    return _graded(int(modale.get("itemCount") or 0))
+
 
 # Doublures des imports de `historique.js`. Seules `apiPost`,
 # `dangerConfirmModal` et `showToast` comptent ici ; les autres existent pour
@@ -136,10 +201,11 @@ class ReplPartielTests(unittest.TestCase):
               preverify: { safe_count: 200, hash_mismatch_count: 2, mismatch_details: [] },
             }});
             await M.__doUndoApply("r1");
-            __emit({ countdown: __modales[0].countdownSeconds, itemCount: __modales[0].itemCount });
+            __emit({ countdown: __modales[0].countdownSeconds ?? null,
+                     itemCount: __modales[0].itemCount ?? null });
             """
         )
-        self.assertEqual(res["countdown"], 3, "200 films deplaces sans delai de confirmation")
+        self.assertEqual(_delai_effectif(res), 3, "200 films deplaces sans delai de confirmation")
         self.assertEqual(res["itemCount"], 200, "le compte est calibre sur les fichiers NON deplaces")
 
     def test_la_bande_42_50_suit_la_regle_PARTAGEE(self) -> None:
@@ -147,9 +213,11 @@ class ReplPartielTests(unittest.TestCase):
 
         Une valeur explicite l'emporte sur la derivation automatique de la
         modale. Un `restaurables > 50 ? 3 : 0` aurait donc rendu 0 s la ou la
-        regle partagee (`gradedCountdownSeconds`, autre branche) rend 1 s — et
-        cet ecart aurait SURVECU a la fusion, en reintroduisant la convention
-        par appelant que l'autre branche supprime justement.
+        regle partagee (`gradedCountdownSeconds`) rend 1 s — et cet ecart aurait
+        SURVECU a la fusion, en reintroduisant la convention par appelant que
+        l'autre branche supprime justement. Les deux branches sont desormais sur
+        `main`, la replique locale a ete retiree, et cette assertion mesure le
+        delai EFFECTIF : elle n'a pas bouge d'un chiffre au passage.
 
         LA BANDE EXACTE, mesuree : l'interpolation `((n-30)/70)*3` ne franchit
         0,5 qu'a n=42. En dessous, les deux formules rendent 0 — une premiere
@@ -164,10 +232,11 @@ class ReplPartielTests(unittest.TestCase):
               preverify: { safe_count: 45, hash_mismatch_count: 1, mismatch_details: [] },
             }});
             await M.__doUndoApply("r1");
-            __emit({ countdown: __modales[0].countdownSeconds });
+            __emit({ countdown: __modales[0].countdownSeconds ?? null,
+                     itemCount: __modales[0].itemCount ?? null });
             """
         )
-        self.assertEqual(res["countdown"], 1, "45 restaurables : l'interpolation partagee impose 1 s")
+        self.assertEqual(_delai_effectif(res), 1, "45 restaurables : l'interpolation partagee impose 1 s")
 
     def test_les_BORNES_EXACTES_de_la_bande_valent_1s(self) -> None:
         """42 et 50 : les deux extremites, pas seulement un point au milieu.
@@ -186,10 +255,11 @@ class ReplPartielTests(unittest.TestCase):
                       preverify: {{ safe_count: {n}, hash_mismatch_count: 1, mismatch_details: [] }},
                     }}}});
                     await M.__doUndoApply("r1");
-                    __emit({{ countdown: __modales[0].countdownSeconds }});
+                    __emit({{ countdown: __modales[0].countdownSeconds ?? null,
+                             itemCount: __modales[0].itemCount ?? null }});
                     """
                 )
-                self.assertEqual(res["countdown"], 1, f"{n} restaurables : la regle partagee impose 1 s")
+                self.assertEqual(_delai_effectif(res), 1, f"{n} restaurables : la regle partagee impose 1 s")
 
     def test_JUSTE_au_dessus_de_la_bande_le_delai_est_PLEIN(self) -> None:
         """51 : contre-epreuve haute. Sans elle, une formule qui interpolerait
@@ -202,10 +272,11 @@ class ReplPartielTests(unittest.TestCase):
               preverify: { safe_count: 51, hash_mismatch_count: 1, mismatch_details: [] },
             }});
             await M.__doUndoApply("r1");
-            __emit({ countdown: __modales[0].countdownSeconds });
+            __emit({ countdown: __modales[0].countdownSeconds ?? null,
+                     itemCount: __modales[0].itemCount ?? null });
             """
         )
-        self.assertEqual(res["countdown"], 3, "51 restaurables : au-dela du seuil, delai plein")
+        self.assertEqual(_delai_effectif(res), 3, "51 restaurables : au-dela du seuil, delai plein")
 
     def test_sous_42_les_deux_formules_coincident(self) -> None:
         """Contre-epreuve de la bande : en dessous du basculement, 0 s."""
@@ -217,10 +288,11 @@ class ReplPartielTests(unittest.TestCase):
               preverify: { safe_count: 41, hash_mismatch_count: 1, mismatch_details: [] },
             }});
             await M.__doUndoApply("r1");
-            __emit({ countdown: __modales[0].countdownSeconds });
+            __emit({ countdown: __modales[0].countdownSeconds ?? null,
+                     itemCount: __modales[0].itemCount ?? null });
             """
         )
-        self.assertEqual(res["countdown"], 0)
+        self.assertEqual(_delai_effectif(res), 0)
 
     def test_sous_le_seuil_aucun_delai_n_est_impose(self) -> None:
         """Contre-epreuve : un delai systematique userait la confirmation."""
@@ -232,10 +304,11 @@ class ReplPartielTests(unittest.TestCase):
               preverify: { safe_count: 3, hash_mismatch_count: 1, mismatch_details: [] },
             }});
             await M.__doUndoApply("r1");
-            __emit({ countdown: __modales[0].countdownSeconds });
+            __emit({ countdown: __modales[0].countdownSeconds ?? null,
+                     itemCount: __modales[0].itemCount ?? null });
             """
         )
-        self.assertEqual(res["countdown"], 0)
+        self.assertEqual(_delai_effectif(res), 0)
 
     def test_ZERO_restaurable_ne_propose_RIEN(self) -> None:
         """Ouvrir une modale destructive dont la seule issue est « 0 restaure »

@@ -2642,11 +2642,14 @@ function _bindFields(container) {
         const sampleHtml = sample.length
           ? `<ul class="parametres-quarantine-sample">${sample.map((s) => `<li><code>${escapeHtml(String(s))}</code></li>`).join("")}</ul>`
           : "";
-        const countdown = total > 50 ? 3 : 0;
         dangerConfirmModal({
           title: `Vider le bucket _review (${total} fichier(s)) ?`,
           consequence: `Cette action va supprimer définitivement <strong>${total}</strong> fichier(s) en quarantaine (~${sizeMo} Mo). Les décisions de doublons (_duplicates_user_decided) sont préservées. ${sampleHtml}`,
-          countdownSeconds: countdown,
+          // Regle n3 : delai derive du nombre de fichiers reellement purgeables
+          // par la modale (`gradedCountdownSeconds`). La ternaire
+          // `total > 50 ? 3 : 0` qui vivait ici rendait 0 s entre 42 et 50
+          // fichiers, la ou la regle partagee rend 1 s.
+          itemCount: total,
           confirmLabel: "Vider maintenant",
           cancelLabel: "Annuler",
           onConfirm: async () => {
