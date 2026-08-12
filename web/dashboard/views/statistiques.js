@@ -22,7 +22,6 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
-import { showToast } from "../components/toast.js";
 
 const ONGLETS = [
   { id: "podiums", label: "Podiums", titre: "Les groupes, codecs et sources les plus presents" },
@@ -315,9 +314,18 @@ const _ROUTES = {
 };
 
 async function _charger(onglet, hote) {
-  const fab = _ROUTES[onglet];
-  if (!fab) return;
-  const [route, params] = fab();
+  // `onglet` vient du `dataset` d'un bouton, donc du DOM. Une recherche par cle
+  // NON STATIQUE sur un objet litteral traverse aussi son prototype :
+  // `_ROUTES["constructor"]` rend `Object`, qui est VRAI — le garde `if (!fab)`
+  // laisserait alors passer, et `fab()` s'executerait. Le scenario est
+  // improbable ici (les trois ids sont ecrits par cette vue), mais le garde
+  // coute une ligne et ne depend d'aucune supposition sur l'appelant.
+  if (!Object.prototype.hasOwnProperty.call(_ROUTES, onglet)) return;
+  // Pas de controle de type ici : toutes les valeurs PROPRES de `_ROUTES` sont
+  // des fonctions par construction, et les trois routes sont verrouillees par
+  // `tests/test_vue_statistiques.py`. Un `typeof` de plus serait une garde
+  // qu'aucune mutation ne peut faire rougir — donc pas une garde.
+  const [route, params] = _ROUTES[onglet]();
   _state.chargement[onglet] = true;
   _state.erreurs[onglet] = "";
   _rendre(hote);
@@ -350,14 +358,25 @@ export function initStatistiques(container) {
   _onClick = (ev) => {
     const cible = ev.target && ev.target.closest && ev.target.closest("[data-stats-onglet],[data-stats-dimension],[data-stats-mois]");
     if (!cible) return;
+    // LES IDS VIENNENT DU DOM, DONC ON LES VALIDE ICI — a l'entree, pas plus
+    // bas. Sans cette validation, `_state.onglet` prenait la valeur recue telle
+    // quelle : un id inconnu vidait l'ecran (aucune donnee pour cet onglet), et
+    // un nom herite du prototype comme `constructor` faisait rendre `Object` a
+    // la table `_ROUTES` — valeur VRAIE, donc appelee, puis destructuree en
+    // tableau, donc rejet de promesse non traite. Valider en amont supprime les
+    // deux d'un coup.
     if (cible.dataset.statsOnglet) {
-      _state.onglet = cible.dataset.statsOnglet;
+      const demande = cible.dataset.statsOnglet;
+      if (!ONGLETS.some((o) => o.id === demande)) return;
+      _state.onglet = demande;
       if (!_state.data[_state.onglet]) _charger(_state.onglet, _hote);
       else _rendre(_hote);
       return;
     }
     if (cible.dataset.statsDimension) {
-      _state.dimension = cible.dataset.statsDimension;
+      const dim = cible.dataset.statsDimension;
+      if (!DIMENSIONS.some((d) => d.id === dim)) return;
+      _state.dimension = dim;
       _charger("rollup", _hote);
       return;
     }
@@ -379,4 +398,17 @@ export function unmountStatistiques() {
   _onClick = null;
 }
 
-export const __test = { _state, _rendrePodiums, _rendreTimeline, _rendreRollup, _moisCourt, _tierDuScore, _barre };
+// `_charger` est expose parce que la SECONDE barriere (le garde de la table
+// `_ROUTES`) n'est pas atteignable depuis un clic : la validation d'entree la
+// couvre deja. Une garde qu'aucun test ne peut voir n'en est pas une — on
+// l'eprouve donc a son propre niveau.
+export const __test = {
+  _state,
+  _rendrePodiums,
+  _rendreTimeline,
+  _rendreRollup,
+  _moisCourt,
+  _tierDuScore,
+  _barre,
+  _charger,
+};

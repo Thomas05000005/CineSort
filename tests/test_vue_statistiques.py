@@ -148,6 +148,116 @@ __emit({ dernier: t.length ? t[t.length - 1].params : null });
         self.assertEqual(res["dernier"], {"by": "codec"})
 
 
+class UnOngletINCONNUNeDeclencheRienTests(unittest.TestCase):
+    """L'id d'onglet vient du `dataset` d'un bouton, donc du DOM.
+
+    Une recherche par cle NON STATIQUE sur un objet litteral traverse aussi son
+    prototype : `_ROUTES["constructor"]` rend `Object`, qui est VRAI. Le garde
+    `if (!fab) return;` laissait donc passer, et `fab()` s'executait. Le scenario
+    est improbable — les trois ids sont ecrits par cette vue — mais le garde ne
+    depend d'aucune supposition sur l'appelant, et c'est ce qui en fait un garde.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_un_onglet_inconnu_ne_change_NI_l_etat_NI_l_ecran(self) -> None:
+        """CE TEST A DEJA ETE UN FAUX VERT.
+
+        Sa premiere version n'assertait que « aucune requete emise ». Or aucune
+        requete n'etait emise NON PLUS sans le correctif : la vue partait en
+        rejet de promesse avant d'appeler `apiPost`. Les deux mutations
+        (retrait du garde, retrait du controle de type) la laissaient VERTE.
+
+        Les grandeurs qui distinguent vraiment les deux mondes sont l'ETAT — un
+        id inconnu ne doit pas devenir l'onglet courant, sinon l'ecran se vide —
+        et l'absence de REJET NON TRAITE.
+        """
+        res = run_module_test(
+            STATS_JS,
+            stubs=_STUBS,
+            extra=_EXTRA,
+            driver=_HOTE
+            + r"""
+globalThis.__rejets = [];
+process.on("unhandledRejection", (e) => { globalThis.__rejets.push(String((e && e.message) || e)); });
+globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
+const h = fauxHote();
+M.__init(h);
+await new Promise((r) => setTimeout(r, 0));
+globalThis.__appels.length = 0;
+for (const nom of ["constructor", "__proto__", "toString", "inconnu"]) {
+  cliquer(h, { statsOnglet: nom });
+  await new Promise((r) => setTimeout(r, 0));
+}
+// Laisser au moteur le temps de signaler un rejet non traite.
+await new Promise((r) => setTimeout(r, 20));
+__emit({ appels: globalThis.__appels.map((a) => a.route), onglet: M.__t._state.onglet, rejets: globalThis.__rejets });
+"""
+            + _EXIT,
+            timeout=90,
+        )
+        self.assertEqual(
+            res["onglet"],
+            "podiums",
+            "un id d'onglet inconnu est devenu l'onglet courant : l'ecran se vide",
+        )
+        self.assertEqual(res["rejets"], [], "un onglet herite du prototype a produit un rejet non traite")
+        self.assertEqual(res["appels"], [], "un onglet inconnu a declenche une requete")
+
+    def test_le_chargeur_lui_meme_refuse_une_cle_heritee(self) -> None:
+        """La SECONDE barriere, eprouvee a son propre niveau.
+
+        La validation d'entree rend ce garde inatteignable depuis un clic : les
+        mutations qui le retirent laissaient donc la suite verte. Une garde
+        qu'aucun test ne peut voir n'en est pas une. On appelle donc `_charger`
+        directement, comme le ferait un futur appelant qui oublierait de valider.
+        """
+        res = run_module_test(
+            STATS_JS,
+            stubs=_STUBS,
+            extra=_EXTRA,
+            driver=_HOTE
+            + r"""
+globalThis.__rejets = [];
+process.on("unhandledRejection", (e) => { globalThis.__rejets.push(String((e && e.message) || e)); });
+const h = fauxHote();
+globalThis.__appels.length = 0;
+for (const nom of ["constructor", "__proto__", "valueOf", "hasOwnProperty"]) {
+  await M.__t._charger(nom, h);
+}
+await new Promise((r) => setTimeout(r, 20));
+__emit({ appels: globalThis.__appels.map((a) => a.route), rejets: globalThis.__rejets });
+"""
+            + _EXIT,
+            timeout=90,
+        )
+        self.assertEqual(res["appels"], [], "une cle heritee du prototype a declenche une requete")
+        self.assertEqual(res["rejets"], [], "une cle heritee du prototype a fait lever le chargeur")
+
+    def test_une_dimension_inconnue_ne_change_pas_l_etat(self) -> None:
+        res = run_module_test(
+            STATS_JS,
+            stubs=_STUBS,
+            extra=_EXTRA,
+            driver=_HOTE
+            + r"""
+globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
+const h = fauxHote();
+M.__init(h);
+await new Promise((r) => setTimeout(r, 0));
+globalThis.__appels.length = 0;
+cliquer(h, { statsDimension: "constructor" });
+await new Promise((r) => setTimeout(r, 0));
+__emit({ dimension: M.__t._state.dimension, appels: globalThis.__appels.map((a) => a.route) });
+"""
+            + _EXIT,
+            timeout=90,
+        )
+        self.assertNotEqual(res["dimension"], "constructor")
+        self.assertEqual(res["appels"], [])
+
+
 class UneABSENCENEstPasUnZEROTests(unittest.TestCase):
     """LE piege de cet ecran : un graphique rend visible ce qu'on lui donne, y
     compris ce qu'on a invente."""
