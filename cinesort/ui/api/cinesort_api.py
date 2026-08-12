@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -204,6 +205,21 @@ def _cleanup_reason_label(reason: str) -> str:
         "none_eligible": "aucun dossier sidecar-only éligible trouvé",
         "no_families_enabled": "aucune famille résiduelle n'est activée",
     }.get(raw, raw or "inconnue")
+
+
+#: Erreurs attendues quand on interroge le store pour le profil actif.
+#:
+#: `sqlite3.Error` N'HERITE PAS DE `OSError` — regle inviolable n4 du depot. Sans
+#: elle dans le tuple, une base verrouillee ne declenchait pas le repli sur le
+#: profil par defaut : l'exception REMONTAIT. Mesure, en injectant
+#: `sqlite3.OperationalError("database is locked")` au niveau du STORE (couche de
+#: production, pas au niveau d'un callable) :
+#:
+#:     export_shareable_profile -> OperationalError remonte
+#:     get_calibration_report   -> OperationalError remonte
+#:
+#: Les deux ont desormais un repli propre.
+_ERREURS_DE_LECTURE_DU_PROFIL = (sqlite3.Error, OSError, TypeError, ValueError)
 
 
 def _profil_actif_ou_defaut(actif: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2525,11 +2541,11 @@ class CineSortApi:
 
         try:
             store, _runner = self._get_or_create_infra(self._get_state_dir())
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             store = None
         try:
             active = store.quality.get_active_quality_profile() if store else None
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             active = None
         profile = _profil_actif_ou_defaut(active)
 
@@ -2699,13 +2715,13 @@ class CineSortApi:
 
         try:
             store, _runner = self._get_or_create_infra(self._get_state_dir())
-        except (OSError, TypeError, ValueError) as exc:
+        except _ERREURS_DE_LECTURE_DU_PROFIL as exc:
             return _err_response(f"Store indisponible : {exc}", category="runtime", level="error", log_module=__name__)
         if store is None:
             return _err_response("Store indisponible.", category="state", level="info", log_module=__name__)
         try:
             feedbacks = store.quality.list_user_quality_feedback(limit=10_000)
-        except (OSError, TypeError, ValueError) as exc:
+        except _ERREURS_DE_LECTURE_DU_PROFIL as exc:
             self.log_api_exception("get_calibration_report", exc)
             return _err_response("Lecture feedbacks échouée.", category="runtime", level="error", log_module=__name__)
 
@@ -2713,9 +2729,16 @@ class CineSortApi:
         # Profil actif pour calculer la suggestion
         try:
             prof = store.quality.get_active_quality_profile()
-        except (OSError, TypeError, ValueError):
+        except _ERREURS_DE_LECTURE_DU_PROFIL:
             prof = None
-        current_weights = _profil_actif_ou_defaut(prof).get("weights") or {}
+        # UN PROFIL SANS POIDS RETOMBE SUR CEUX DU DEFAUT, et ce n'est pas une
+        # commodite : `validate_quality_profile` INJECTE les poids par defaut
+        # quand ils manquent (mesure : un profil ampute de sa cle `weights` en
+        # ressort avec video=60/audio=30/extras=10). Ce sont donc bien eux qui
+        # regissent le scoring de ce profil-la, et c'est sur eux que la
+        # suggestion doit porter. Rendre {} ferait taire la calibration sur un
+        # profil que l'utilisateur emploie pourtant.
+        current_weights = _profil_actif_ou_defaut(prof).get("weights") or default_quality_profile().get("weights", {})
 
         suggestion = suggest_weight_adjustment(bias, current_weights) if current_weights else None
         return {

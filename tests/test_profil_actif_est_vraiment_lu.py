@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -177,6 +178,68 @@ class LaCALIBRATIONPorteSurLeProfilACTIFTests(unittest.TestCase):
             poids,
             default_quality_profile().get("weights"),
             "les suggestions de calibration porteraient sur le mauvais profil",
+        )
+
+
+class UneERREURSQLITEDeclencheLeRepliTests(unittest.TestCase):
+    """`sqlite3.Error` N'HERITE PAS de `OSError` — regle inviolable n4.
+
+    Les deux fonctions gardaient leur lecture du profil par
+    `except (OSError, TypeError, ValueError)`. Mesure, en injectant
+    `sqlite3.OperationalError("database is locked")` au niveau du STORE :
+    l'exception REMONTAIT dans les deux cas. Une base verrouillee — un autre
+    processus CineSort, une sauvegarde en cours — faisait donc echouer l'export
+    et le rapport au lieu d'appliquer leur repli.
+    """
+
+    def setUp(self) -> None:
+        self.api = CineSortApi()
+
+    def _store_qui_leve(self) -> mock.MagicMock:
+        store = mock.MagicMock()
+        store.quality.get_active_quality_profile.side_effect = sqlite3.OperationalError("database is locked")
+        store.quality.list_user_quality_feedback.return_value = []
+        return store
+
+    def test_l_export_retombe_sur_le_defaut_au_lieu_de_lever(self) -> None:
+        with mock.patch.object(
+            self.api, "_get_or_create_infra", return_value=(self._store_qui_leve(), mock.MagicMock())
+        ):
+            res = self.api._export_shareable_profile_impl(name="x")
+
+        self.assertTrue(res["ok"], "une base verrouillee fait echouer l'export au lieu du repli")
+
+    def test_la_calibration_retombe_sur_le_defaut_au_lieu_de_lever(self) -> None:
+        with mock.patch.object(
+            self.api, "_get_or_create_infra", return_value=(self._store_qui_leve(), mock.MagicMock())
+        ):
+            res = self.api.quality.get_calibration_report()
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["current_weights"], default_quality_profile().get("weights"))
+
+
+class UnProfilSANSPoidsUtiliseCeuxDuDefautTests(unittest.TestCase):
+    """Parce que ce sont EUX qui regissent son scoring.
+
+    `validate_quality_profile` injecte les poids par defaut quand ils manquent
+    (mesure : un profil ampute de `weights` en ressort avec 60/30/10). Rendre
+    `{}` ferait taire la calibration sur un profil que l'utilisateur emploie.
+    """
+
+    def test_les_poids_du_defaut_sont_rendus(self) -> None:
+        api = CineSortApi()
+        store = mock.MagicMock()
+        store.quality.list_user_quality_feedback.return_value = []
+        store.quality.get_active_quality_profile.return_value = {"profile_json": {"id": "sans-poids"}}
+        with mock.patch.object(api, "_get_or_create_infra", return_value=(store, mock.MagicMock())):
+            res = api.quality.get_calibration_report()
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(
+            res["current_weights"],
+            default_quality_profile().get("weights"),
+            "la calibration reste muette sur un profil pourtant actif",
         )
 
 
