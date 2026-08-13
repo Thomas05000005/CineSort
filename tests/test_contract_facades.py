@@ -68,7 +68,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.compare_perceptual",
         "quality.export_quality_profile",
         "quality.get_profiles",
-        "quality.get_quality_presets",
         "quality.get_quality_report",
         "quality.import_quality_profile",
         "quality.save_profile",
