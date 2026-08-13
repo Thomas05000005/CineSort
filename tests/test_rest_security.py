@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -90,6 +91,32 @@ class RateLimiterUnitTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+#: Pannes de transport que les helpers REESSAIENT.
+#:
+#: `TimeoutError` Y MANQUAIT, ET C'EST ELLE QUI SURVIENT. Le retry a ete ecrit
+#: pour les « aborts transitoires sous charge socket » (WinError 10053/10054,
+#: AUDIT 2026-06-11) — mais sous cette meme charge, une reponse peut aussi ne
+#: PAS ARRIVER dans le delai, et `HTTPConnection(..., timeout=5)` leve alors
+#: `TimeoutError`, qui n'etait pas rattrapee.
+#:
+#: MESURE : `test_path_traversal_post_harmless` a echoue sur `TimeoutError: timed
+#: out` dans TROIS executions de CI le meme jour (runs 31683660488, 31685141294
+#: et 31688072603), sur trois PR aux diffs sans rapport — et la meme tete etait
+#: verte en local. Le garde nommait donc une partie de sa famille de pannes, et
+#: laissait passer celle qui frappait.
+#:
+#: Ce correctif ne pretend PAS connaitre la cause racine (cf. #924, ou la piste
+#: de l'epuisement de sockets est coherente et non demontree) : il rend le retry
+#: fidele a ce qu'il annonce couvrir. Un premier appel a `run/get_dashboard` sur
+#: une base neuve coute 88 ms au repos sur un poste de developpement — la piste
+#: « le cout des migrations depasse les 5 s » ne suffit pas a expliquer l'echec.
+_PANNES_DE_TRANSPORT_REESSAYABLES = (
+    ConnectionAbortedError,
+    ConnectionResetError,
+    TimeoutError,  # `socket.timeout` en est un alias depuis Python 3.10
+)
+
+
 class RestSecurityHttpTests(unittest.TestCase):
     """Serveur REST reel pour tester auth, rate limit HTTP, CORS, 404, 500."""
 
@@ -139,7 +166,7 @@ class RestSecurityHttpTests(unittest.TestCase):
                 status = resp.status
                 data_raw = resp.read()
                 headers_out = {k: v for k, v in resp.getheaders()}
-            except (ConnectionAbortedError, ConnectionResetError) as exc:
+            except _PANNES_DE_TRANSPORT_REESSAYABLES as exc:
                 last_exc = exc
                 conn.close()
                 time.sleep(0.05 * (attempt + 1))
@@ -152,7 +179,7 @@ class RestSecurityHttpTests(unittest.TestCase):
             except json.JSONDecodeError:
                 data = {"_raw": data_raw.decode("utf-8", errors="replace")}
             return status, data, headers_out
-        raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
+        raise RuntimeError(f"3 tentatives epuisees ({type(last_exc).__name__}): {last_exc}")
 
     def _request_with_origin(
         self,
@@ -183,7 +210,7 @@ class RestSecurityHttpTests(unittest.TestCase):
                 status = resp.status
                 data_raw = resp.read()
                 headers_out = {k: v for k, v in resp.getheaders()}
-            except (ConnectionAbortedError, ConnectionResetError) as exc:
+            except _PANNES_DE_TRANSPORT_REESSAYABLES as exc:
                 last_exc = exc
                 conn.close()
                 time.sleep(0.05 * (attempt + 1))
@@ -196,7 +223,7 @@ class RestSecurityHttpTests(unittest.TestCase):
             except json.JSONDecodeError:
                 data = {"_raw": data_raw.decode("utf-8", errors="replace")}
             return status, data, headers_out
-        raise RuntimeError(f"3 tentatives epuisees: {last_exc}")
+        raise RuntimeError(f"3 tentatives epuisees ({type(last_exc).__name__}): {last_exc}")
 
     def _assert_401_when_auth_enforced(self, token: str | None) -> None:
         """Verifie qu'un *token* invalide donne 401 sur un endpoint VIVANT.
@@ -251,6 +278,82 @@ class RestSecurityHttpTests(unittest.TestCase):
             self.assertEqual(msg, "Erreur interne")
 
     # 34
+    def test_le_retry_couvre_un_TIMEOUT_pas_seulement_un_abort(self) -> None:
+        """LA PANNE QUI SURVIENT DOIT ETRE CELLE QUE LE GARDE NOMME.
+
+        Le retry existait pour les aborts transitoires ; sous la meme charge, une
+        reponse peut aussi ne pas arriver dans le delai, et `TimeoutError`
+        s'echappait. Trois executions de CI le meme jour ont echoue ainsi, sur
+        trois PR aux diffs sans rapport.
+
+        On injecte la panne au NIVEAU DU TRANSPORT — la couche ou elle se
+        produit — et non en remplacant le helper : c'est le helper qu'on
+        eprouve.
+        """
+        # LE MODULE REELLEMENT EN COURS, pas un homonyme. Selon la racine que
+        # pytest insere, ce fichier est importe sous `test_rest_security` OU
+        # `tests.test_rest_security` : un `import tests.test_rest_security`
+        # fabriquerait un SECOND objet module, et le patch ne toucherait pas
+        # celui qui s'execute — le test etait alors vert sans rien eprouver.
+        module = sys.modules[type(self).__module__]
+
+        vraie_classe = module.HTTPConnection
+        tentatives = {"n": 0}
+
+        class _ConnexionQuiExpireUneFois:
+            def __init__(self, *args, **kwargs):
+                tentatives["n"] += 1
+                self._premiere = tentatives["n"] == 1
+                self._delegue = None if self._premiere else vraie_classe(*args, **kwargs)
+
+            def request(self, *args, **kwargs):
+                if self._premiere:
+                    raise TimeoutError("timed out")
+                return self._delegue.request(*args, **kwargs)
+
+            def getresponse(self):
+                return self._delegue.getresponse()
+
+            def close(self):
+                if self._delegue is not None:
+                    self._delegue.close()
+
+        module.HTTPConnection = _ConnexionQuiExpireUneFois
+        try:
+            status, _data, _h = self._request("POST", "/api/run/get_dashboard", body={}, token=self.token)
+        finally:
+            module.HTTPConnection = vraie_classe
+
+        self.assertEqual(tentatives["n"], 2, "le helper n'a pas REESSAYE apres l'expiration")
+        self.assertIn(status, (200, 400, 404, 410, 500), "la seconde tentative n'a pas abouti")
+
+    def test_trois_expirations_de_suite_LEVENT_en_nommant_la_panne(self) -> None:
+        """Reessayer indefiniment masquerait un serveur reellement mort. Au bout
+        de trois tentatives on leve — et le message NOMME le type de panne,
+        faute de quoi le prochain diagnostic repartirait de zero."""
+        module = sys.modules[type(self).__module__]
+
+        vraie_classe = module.HTTPConnection
+
+        class _ConnexionMorte:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def request(self, *args, **kwargs):
+                raise TimeoutError("timed out")
+
+            def close(self):
+                pass
+
+        module.HTTPConnection = _ConnexionMorte
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                self._request("POST", "/api/run/get_dashboard", body={}, token=self.token)
+        finally:
+            module.HTTPConnection = vraie_classe
+
+        self.assertIn("TimeoutError", str(ctx.exception), "le message ne nomme pas la panne rencontree")
+
     def test_path_traversal_post_harmless(self) -> None:
         """Path traversal dans le body : pas de crash et pas de reflexion.
 
