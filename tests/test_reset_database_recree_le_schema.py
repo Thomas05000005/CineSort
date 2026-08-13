@@ -101,6 +101,150 @@ class LeHookDeFermetureEXISTEVraimentTests(_Base):
         self.assertEqual(self.api._infra_by_state_dir, {})
 
 
+class LaBARRIEREEmpecheDeReconstruirePendantLeWipeTests(_Base):
+    """PURGER NE SUFFIT PAS, ET C'EST LE POINT LE PLUS SUBTIL DE CE CORRECTIF.
+
+    `get_or_create_infra` passe son `initialize()` — integrity_check,
+    sauvegarde, migrations, soit des SECONDES — HORS du verrou, et n'insere
+    qu'apres. Un batisseur parti avant la purge re-cache donc son store APRES
+    elle. Et la fenetre n'est pas etroite : `_close_infra()` est appele a
+    l'etape 1 du wipe, mais la copie de sauvegarde et le `unlink` viennent
+    APRES — sur une base de plusieurs Go, la copie dure plusieurs secondes,
+    pendant lesquelles le SPA interroge un serveur multi-thread.
+    """
+
+    def test_pendant_le_gel_toute_demande_d_infra_est_REFUSEE(self) -> None:
+        """Refuser franchement vaut mieux que rendre un handle sur un fichier en
+        train de disparaitre : sur un chemin destructif, l'erreur va dans le sens
+        restrictif."""
+        from cinesort.ui.api.runtime_support import InfraGeleeError
+
+        self.api._get_or_create_infra(self.state_dir)
+        with self.api._infra_gelee() as oubliees:
+            self.assertEqual(oubliees, 1, "le gel n'a pas commence par purger")
+            with self.assertRaises(InfraGeleeError):
+                self.api._get_or_create_infra(self.state_dir)
+
+        # Le gel leve : on peut de nouveau construire.
+        store, _ = self.api._get_or_create_infra(self.state_dir)
+        self.assertIsNotNone(store)
+
+    def test_ce_qu_un_batisseur_insere_PENDANT_le_gel_est_oublie_a_la_sortie(self) -> None:
+        """Un batisseur parti AVANT le gel n'a pas vu la barriere : il inserera
+        quand meme. La sortie du gel doit donc repurger, sinon le defaut revient
+        a l'identique une fois le fichier supprime."""
+        self.api._get_or_create_infra(self.state_dir)
+        with self.api._infra_gelee():
+            # On simule l'insertion tardive du batisseur, qui se fait sous verrou.
+            with self.api._runs_lock:
+                self.api._infra_by_state_dir["tardif"] = ("faux-store", "faux-runner")
+
+        self.assertEqual(
+            self.api._infra_by_state_dir,
+            {},
+            "l'entree inseree pendant le gel a survecu : le store condamne sera reservi",
+        )
+
+    def test_le_gel_est_REENTRANT(self) -> None:
+        """Deux routes destructives peuvent se suivre ; la premiere a sortir ne
+        doit pas lever la barriere de la seconde."""
+        from cinesort.ui.api.runtime_support import InfraGeleeError
+
+        with self.api._infra_gelee():
+            with self.api._infra_gelee():
+                with self.assertRaises(InfraGeleeError):
+                    self.api._get_or_create_infra(self.state_dir)
+            with self.assertRaises(InfraGeleeError):
+                self.api._get_or_create_infra(self.state_dir)
+        self.assertIsNotNone(self.api._get_or_create_infra(self.state_dir))
+
+
+class UnRunACTIFInterditLEffacementTests(_Base):
+    """Le `JobRunner` cache est le SEUL verrou d'exclusion mutuelle du depot :
+    `start_job` refuse un second run via `_active_run_locked()`, et rien au
+    niveau REST ne double cette garde. Oublier l'instance — ce que fait la
+    purge — remettrait ce verrou a zero, et deux workers pourraient ecrire en
+    parallele sur la meme base.
+
+    Plutot que d'inventer un mecanisme pour survivre a cela, on le refuse :
+    supprimer la base pendant qu'un scan tourne est destructeur avec ou sans ce
+    correctif."""
+
+    def _avec_un_run_actif(self) -> None:
+        class _RunEnCours:
+            running = True
+
+        self.api._runs["run-en-cours"] = _RunEnCours()
+
+    def test_reset_database_REFUSE_pendant_un_run(self) -> None:
+        self.api._get_or_create_infra(self.state_dir)
+        self._avec_un_run_actif()
+
+        res = reset_support.reset_database(self.api, dry_run=False)
+
+        self.assertFalse(res.get("ok"), "la base a ete supprimee pendant un traitement")
+        self.assertIn("run-en-cours", str(res.get("error", "")), "le refus ne nomme pas le run qui bloque")
+        self.assertTrue(
+            db_path_for_state_dir(self.state_dir).is_file(),
+            "le fichier de base a disparu malgre le refus",
+        )
+
+    def test_reset_all_user_data_REFUSE_aussi(self) -> None:
+        """La route jumelle supprime le `state_dir` ENTIER : elle a encore plus
+        besoin de ce garde."""
+        self.api._get_or_create_infra(self.state_dir)
+        self._avec_un_run_actif()
+
+        res = reset_support.reset_all_user_data(self.api, "RESET")
+
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(self.state_dir.exists(), "le dossier d'etat a ete vide pendant un traitement")
+
+    def test_l_APERCU_reste_possible_pendant_un_run(self) -> None:
+        """Un apercu ne touche a rien : le refuser priverait l'utilisateur de la
+        seule information qui l'aiderait a decider."""
+        self.api._get_or_create_infra(self.state_dir)
+        self._avec_un_run_actif()
+
+        res = reset_support.reset_database(self.api, dry_run=True)
+
+        self.assertTrue(res.get("ok"), f"l'apercu a ete refuse : {res}")
+
+
+class LesDOUBLURESNeDoiventPasDeriverDuVraiContratTests(unittest.TestCase):
+    """LA CAUSE RACINE DU FAUX VERT D'ORIGINE.
+
+    `test_phase4_parametres_endpoints.py` assertait `_close_infra_called` sur une
+    FAUSSE api qui definissait elle-meme la methode — pendant que `CineSortApi`,
+    elle, ne l'avait pas. Le test prouvait sa coherence avec lui-meme et serait
+    reste vert quoi qu'il arrive a l'application.
+
+    Ce test verrouille le lien : toute methode que `reset_support` appelle sur
+    `api` doit exister sur le VRAI objet.
+    """
+
+    #: Ce que `reset_support` attend de l'api, en plus des facades.
+    _CONTRAT = ("_close_infra", "_infra_gelee")
+
+    def test_le_vrai_CineSortApi_porte_tout_ce_que_reset_support_appelle(self) -> None:
+        for nom in self._CONTRAT:
+            self.assertTrue(
+                hasattr(backend.CineSortApi, nom),
+                f"CineSortApi n'a pas `{nom}` : le garde `hasattr` de reset_support sera toujours faux",
+            )
+
+    def test_la_doublure_de_phase4_porte_le_MEME_contrat(self) -> None:
+        """Une doublure qui derive du vrai objet cesse de prouver quoi que ce
+        soit — sans faire rougir personne."""
+        from tests.test_phase4_parametres_endpoints import _FakeApi
+
+        for nom in self._CONTRAT:
+            self.assertTrue(
+                hasattr(_FakeApi, nom),
+                f"la doublure n'a pas `{nom}` : elle n'eprouve plus le chemin reel",
+            )
+
+
 class UnRESETLaisseUneBaseUTILISABLETests(_Base):
     """LE scenario utilisateur : « ma base est cassee, je la reinitialise »."""
 

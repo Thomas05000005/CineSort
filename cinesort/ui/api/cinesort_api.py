@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import io
 import json
@@ -14,7 +15,7 @@ import traceback
 import webbrowser
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 import cinesort.app.email_report as _email_report_mod
 import cinesort.app.plugin_hooks as _plugin_hooks_mod
@@ -279,6 +280,9 @@ class CineSortApi:
         self._state_dir_lock = threading.Lock()
         self._app_version: str = _read_app_version()
         self._infra_by_state_dir: Dict[str, Tuple[SQLiteStore, JobRunner]] = {}
+        #: > 0 pendant qu'une route DETRUIT la base : aucune infra ne doit
+        #: etre reconstruite tant qu'elle n'a pas fini. Cf `_infra_gelee`.
+        self._infra_gel = 0
         self._apply_guard_lock = threading.Lock()
         self._apply_inflight_run_ids: set[str] = set()
         self._quality_batch_guard_lock = threading.Lock()
@@ -657,6 +661,39 @@ class CineSortApi:
     def _get_or_create_infra(self, state_dir: Path) -> Tuple[SQLiteStore, JobRunner]:
         return runtime_support.get_or_create_infra(self, state_dir, env_truthy_fn=_env_truthy)
 
+    @contextlib.contextmanager
+    def _infra_gelee(self) -> Iterator[int]:
+        """Interdit toute reconstruction d'infra pendant qu'on efface la base.
+
+        PURGER NE SUFFIT PAS. `get_or_create_infra` passe son `initialize()` —
+        integrity_check, sauvegarde, migrations, soit des SECONDES — HORS du
+        verrou, et n'insere qu'apres. Un batisseur parti avant la purge re-cache
+        donc son store APRES elle, sur le fichier qu'on s'apprete a supprimer :
+        le defaut revient a l'identique, et la purge n'aura servi a rien.
+
+        La fenetre n'est pas etroite. `_close_infra()` est appele a l'etape 1 du
+        wipe, mais la copie de sauvegarde et le `unlink` viennent APRES — sur une
+        base de plusieurs Go la copie dure plusieurs secondes, pendant lesquelles
+        le SPA continue d'interroger un serveur multi-thread.
+
+        Pendant le gel, `get_or_create_infra` LEVE plutot que de rendre un store
+        condamne : sur un chemin destructif l'erreur va dans le sens restrictif,
+        et un appel qui echoue franchement vaut mieux qu'un handle sur un fichier
+        en train de disparaitre.
+
+        Rend le nombre d'entrees oubliees a l'entree du gel.
+        """
+        with self._runs_lock:
+            self._infra_gel += 1
+        try:
+            yield self._close_infra()
+        finally:
+            with self._runs_lock:
+                self._infra_gel -= 1
+            # Une derniere purge retire ce qu'un batisseur parti AVANT le gel
+            # aurait insere pendant : lui n'a pas vu la barriere.
+            self._close_infra()
+
     def _close_infra(self) -> int:
         """Oublie les stores caches, apres leur avoir laisse fermer proprement.
 
@@ -698,13 +735,23 @@ class CineSortApi:
         # La fermeture se fait HORS du verrou : `SQLiteStore.close()` ouvre une
         # connexion pour son `PRAGMA optimize`, et la tenir sous `_runs_lock`
         # bloquerait tout autre appel de facade pendant ce temps.
-        for cle, (store, _runner) in entrees:
+        for cle, entree in entrees:
             try:
+                store = entree[0]
                 store.close()
-            except (sqlite3.Error, OSError) as exc:
-                # `sqlite3.Error` N'HERITE PAS DE `OSError` (regle n4) : les deux
-                # sont nommees. Une fermeture qui echoue ne doit pas empecher
-                # l'oubli — celui-ci est deja fait, et c'est lui qui compte.
+            except Exception as exc:  # noqa: BLE001 - voir ci-dessous
+                # RIEN NE DOIT ECHAPPER D'ICI. L'oubli est deja fait et c'est lui
+                # qui compte ; ce qui reste n'est qu'une politesse au moteur
+                # (`PRAGMA optimize`). Une exception qui sortirait ferait deux
+                # degats : elle avorterait la fermeture des entrees SUIVANTES, et,
+                # cette methode etant appelee depuis le `finally` de la barriere,
+                # elle MASQUERAIT l'erreur d'origine du wipe.
+                #
+                # Le filet est large a dessein, et il a deja servi : une entree
+                # malformee faisait echapper un `AttributeError`, que
+                # `(sqlite3.Error, OSError)` ne couvrait pas — `sqlite3.Error`
+                # n'heritant pas d'`OSError` (regle n4), les nommer toutes les
+                # deux ne suffisait pas a rendre ce chemin sur.
                 logger.warning("_close_infra: fermeture de %s en echec (%s), on continue.", cle, exc)
         return len(entrees)
 

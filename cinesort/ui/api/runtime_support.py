@@ -237,6 +237,16 @@ def _publish_integrity_notification_if_any(api: Any, store: SQLiteStore) -> None
         _logger.warning("V2-11: publication notification echouee: %s", exc)
 
 
+class InfraGeleeError(RuntimeError):
+    """Une infra a ete demandee pendant qu'une route detruisait la base.
+
+    TYPE DEDIE, PAS UN `RuntimeError` NU : les appelants doivent pouvoir
+    distinguer « la base disparait sous toi, reessaie » d'une panne quelconque,
+    et le depot a deja paye d'avoir leve un type generique sur un chemin ou un
+    rollback devait, lui, continuer (cf. le garde anti-echappement d'undo).
+    """
+
+
 def get_or_create_infra(
     api: Any,
     state_dir: Path,
@@ -265,6 +275,14 @@ def get_or_create_infra(
     we_are_the_builder = False
     while True:
         with api._runs_lock:
+            # LA BARRIERE DU WIPE. Pendant qu'une route DETRUIT la base, aucune
+            # infra ne doit naitre : le store construit porterait un chemin qui
+            # va disparaitre, et le cache le resservirait ensuite comme s'il
+            # etait valide — exactement le defaut que la purge corrige.
+            # On LEVE plutot que de rendre un handle condamne : sur un chemin
+            # destructif, l'erreur va dans le sens restrictif.
+            if getattr(api, "_infra_gel", 0) > 0:
+                raise InfraGeleeError("La base est en cours de reinitialisation : reessayez dans un instant.")
             existing = api._infra_by_state_dir.get(key)
             if existing:
                 # Fix audit 2026-05-24 : initialize() est idempotent + deja
