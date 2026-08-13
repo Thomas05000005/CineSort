@@ -30,7 +30,11 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, Set
 
-from cinesort.ui.api.library_support import SCORING_ROLLUP_DIMENSIONS, _extract_group_key
+from cinesort.ui.api.library_support import (
+    SCORING_ROLLUP_DIMENSIONS,
+    _classify_resolution,
+    _extract_group_key,
+)
 
 _VUE = Path(__file__).resolve().parents[1] / "web" / "dashboard" / "views" / "statistiques.js"
 
@@ -41,7 +45,12 @@ _ROW_COMPLETE: Dict[str, Any] = {
     "title": "Dune",
     "year": 2024,
     "codec": "x265",
-    "resolution": "2160p",
+    # DERIVEE DE LA PRODUCTION, PAS ECRITE A LA MAIN. Cette valeur etait
+    # « 2160p » — une chaine que `_classify_resolution` n'emet JAMAIS (elle rend
+    # 4k / 1080p / 720p / sd / unknown). La fixture eprouvait donc une row que la
+    # bibliotheque ne produit pas, et la « mesure » de la PR annoncait « 2160P »
+    # la ou la vraie sortie est « 4K ».
+    "resolution": _classify_resolution(3840, 2160),
     "grain_era_v2": "modern_digital",
     "tmdb_collection_name": "Dune (collection)",
     "score_v2": 88.0,
@@ -55,6 +64,44 @@ def _dimensions_de_la_vue() -> Set[str]:
     bloc = re.search(r"const DIMENSIONS\s*=\s*\[(.*?)\];", source, re.S)
     assert bloc is not None, "la vue Statistiques ne declare plus de liste DIMENSIONS"
     return set(re.findall(r'id:\s*"([a-z_]+)"', bloc.group(1)))
+
+
+class LesVALEURSDeLaFixtureViennentDeLaPRODUCTIONTests(unittest.TestCase):
+    """UNE FIXTURE ECRITE A LA MAIN NE PROUVE QUE SA COHERENCE AVEC ELLE-MEME.
+
+    Ce fichier a porte `resolution: "2160p"` — une chaine que
+    `_classify_resolution` n'emet JAMAIS (elle rend 4k / 1080p / 720p / sd /
+    unknown). La row eprouvee n'etait donc pas celle que la bibliotheque produit,
+    et la « mesure » annoncait « 2160P » la ou la vraie sortie est « 4K ».
+
+    Les valeurs classifiables sont desormais DERIVEES en appelant la fonction de
+    production.
+
+    CE QUI RESTE OUVERT, ET IL FAUT LE DIRE PLUTOT QUE DE LE MASQUER. Ce test
+    verifie les VALEURS, pas les CLES : une dimension qui lirait une cle absente
+    de `_build_library_rows` passerait encore, a condition qu'on ajoute cette cle
+    a la fixture. Fermer cela demanderait de construire une row par le vrai
+    constructeur, qui exige une `api` complete (`_build_library_rows(api, run_id)`)
+    — un harnais qui n'a pas sa place dans un test unitaire de dimensions. Le
+    garde reel contre cette famille reste le test de bout en bout de l'onglet.
+    """
+
+    def test_la_resolution_de_la_fixture_est_une_valeur_REELLE(self) -> None:
+        emises = {
+            _classify_resolution(3840, 2160),
+            _classify_resolution(1920, 1080),
+            _classify_resolution(1280, 720),
+            _classify_resolution(720, 480),
+        }
+        self.assertIn(
+            _ROW_COMPLETE["resolution"],
+            emises,
+            f"la fixture porte une resolution que la production n'emet jamais ; valeurs reelles : {sorted(emises)}",
+        )
+
+    def test_la_dimension_resolution_rend_bien_la_forme_ATTENDUE(self) -> None:
+        """Et pas « 2160P » : c'est la sortie que l'utilisateur verra."""
+        self.assertEqual(_extract_group_key(_ROW_COMPLETE, "resolution"), "4K")
 
 
 class ChaqueDimensionProposeeProduitUnGroupeTests(unittest.TestCase):
