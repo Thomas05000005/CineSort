@@ -39,6 +39,7 @@ from create_test_data import (  # noqa: E402
     write_plan_file,
 )
 
+from tests._diag_reseau import etat_reseau as _etat_reseau  # noqa: E402
 from tests._helpers import find_free_port as _find_free_port
 
 
@@ -606,9 +607,26 @@ _SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Capture un screenshot si le test echoue."""
+    """Capture un screenshot si le test echoue, et l'etat reseau si le SETUP echoue."""
     outcome = yield
     report = outcome.get_result()
+
+    # LES ECHECS DE #924 SONT DES `ERROR at setup`, PAS DES `failed` DE CALL.
+    # Cette capture ne s'etait donc JAMAIS declenchee pour eux : elle ne
+    # regardait que la phase `call`. Un hook qui ne couvre pas la phase ou le
+    # defaut vit ne documente rien — c'est la meme forme que le test qui saute
+    # par-dessus la couche ou vit le bug.
+    if report.when == "setup" and report.failed:
+        srv = item.funcargs.get("e2e_server") if hasattr(item, "funcargs") else None
+        port = (srv or {}).get("port") if isinstance(srv, dict) else None
+        if port:
+            texte = _etat_reseau(port)
+            report.sections.append(("Etat reseau a l'instant de l'echec (#924)", texte))
+            if allure:
+                with contextlib.suppress(Exception):
+                    allure.attach(texte, name="reseau-924", attachment_type=allure.attachment_type.TEXT)
+        return
+
     if report.when == "call" and report.failed:
         pg = item.funcargs.get("dashboard_page") or item.funcargs.get("authenticated_page") or item.funcargs.get("page")
         if pg:
