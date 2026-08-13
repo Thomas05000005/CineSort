@@ -1596,6 +1596,18 @@ const ACTIONS_DE_SECTION = {
           "Elles seront refaites au prochain scan, ce qui peut être long sur une grande bibliothèque. " +
           "Aucun film et aucun réglage n'est supprimé.",
         libelle: "Vider le cache",
+        // LE DELAI DE 3 s EST ECARTE ICI, ET C'EST UNE DECISION, PAS UN OUBLI.
+        // La regle n3 gradue le delai sur le NOMBRE d'elements detruits ; or
+        // `purge_probe_cache()` ne prend aucun parametre et ne rend son compte
+        // (`entries_deleted`) qu'APRES coup — le nombre est inconnaissable
+        // avant l'appel (mesure sur la facade runtime).
+        //
+        // Et il ne s'agit pas d'une destruction : le cache se REGENERE au
+        // prochain scan. Ce que l'utilisateur perd, c'est du temps, pas de la
+        // donnee — la consequence le dit, et c'est le bon instrument. Un delai
+        // graduable sur un compte invente serait pire que pas de delai.
+        delaiSecondes: 0,
+        motifSansDelai: "cache regenerable ; le nombre d'entrees n'est pas connu avant l'appel",
       },
     },
   ],
@@ -1755,6 +1767,12 @@ function _lancerActionDeSection(container, btn) {
       title: action.confirmation.titre,
       consequence: action.confirmation.corps,
       confirmLabel: action.confirmation.libelle,
+      // Le delai vient de la TABLE, jamais d'un defaut implicite : sans cette
+      // ligne, `dangerConfirmModal` le graduerait sur `items.length` — c'est-a-dire
+      // sur ZERO, faute de liste — et l'absence de delai passerait pour un choix
+      // alors que ce serait un silence. Cf. `motifSansDelai` a cote de chaque
+      // confirmation, et le garde `tests/test_actions_integration_parametres.py`.
+      countdownSeconds: action.confirmation.delaiSecondes,
       onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
     });
     return;

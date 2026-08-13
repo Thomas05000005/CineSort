@@ -364,6 +364,65 @@ __emit({ corps: c.consequence, titre: c.title, cles: Object.keys(c) });
             "`body` n'est pas une option de dangerConfirmModal : ce qu'on y met est jete",
         )
 
+    def test_le_DELAI_est_DECLARE_par_la_table_jamais_implicite(self) -> None:
+        """LA REGLE N3 GRADUE LE DELAI SUR LE NOMBRE D'ELEMENTS.
+
+        Sans `countdownSeconds` explicite, `dangerConfirmModal` le calcule sur
+        `items.length` — c'est-a-dire sur ZERO, faute de liste — et l'absence de
+        delai passe pour un choix alors que c'est un silence.
+
+        Ici le delai est ECARTE, et c'est une decision mesuree :
+        `purge_probe_cache()` ne prend aucun parametre et ne rend son compte
+        (`entries_deleted`) qu'APRES coup, donc le nombre est inconnaissable
+        avant l'appel ; et le cache se REGENERE au prochain scan, donc ce qui
+        est perdu est du temps, pas de la donnee.
+
+        Ce test verrouille le fait que la valeur soit TRANSMISE, pas sa valeur :
+        une action future qui detruirait vraiment devra passer la sienne.
+        """
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+const { btn } = fauxBouton("runtime/purge_probe_cache");
+await M.__lancer({ querySelectorAll: () => [] }, btn);
+const c = globalThis.__confirmations[0];
+__emit({ cles: Object.keys(c), delai: c.countdownSeconds });
+"""
+        )
+        self.assertIn(
+            "countdownSeconds",
+            res["cles"],
+            "le delai n'est pas transmis : son absence serait un silence, pas un choix",
+        )
+        self.assertEqual(res["delai"], 0)
+
+    def test_CHAQUE_confirmation_de_la_table_declare_son_delai(self) -> None:
+        """Le garde qui compte pour la SUITE.
+
+        Une action destructive ajoutee demain heritera du delai implicite — donc
+        de zero — si personne ne l'oblige a se prononcer. Chaque `confirmation`
+        doit porter `delaiSecondes`, et un delai nul doit porter son `motifSansDelai`.
+        """
+        res = self._run(
+            r"""
+const manquants = [];
+for (const [section, actions] of Object.entries(M.__ACTIONS || {})) {
+  for (const a of actions) {
+    if (!a.confirmation) continue;
+    const c = a.confirmation;
+    if (typeof c.delaiSecondes !== "number") manquants.push(`${a.route}: delaiSecondes absent`);
+    else if (c.delaiSecondes === 0 && !c.motifSansDelai) manquants.push(`${a.route}: delai nul sans motif`);
+  }
+}
+__emit({ manquants });
+"""
+        )
+        self.assertEqual(
+            res["manquants"],
+            [],
+            "une confirmation ne declare pas son delai : la regle n3 ne peut pas s'armer",
+        )
+
     def test_une_action_NON_destructive_ne_demande_rien(self) -> None:
         """Une confirmation sur tout devient un reflexe, donc plus une garde."""
         res = self._run(
@@ -395,17 +454,45 @@ __emit({ texte: M.__rendreReponse({ rendu: "chemins" }, { ok: true, app_log: "C:
         self.assertIn("C:/l/ui.txt", res["texte"])
 
     def test_les_presets_sont_comptes_et_nommes(self) -> None:
-        """La forme d'un preset n'est pas supposee : chaine OU objet."""
+        """LA FORME REELLE D'ABORD, les formes tolerees ensuite.
+
+        Ce test n'eprouvait que des chaines et `{name}` / `{template}` — deux
+        formes que le backend n'emet JAMAIS. Mesure de `get_naming_presets` sur
+        un state_dir neuf :
+
+            {"id": "default", "label": "Standard",
+             "movie_template": "{title} ({year})", "tv_template": "{series} ({year})"}
+
+        La cle qui fait fonctionner l'ecran est donc **`label`**, et aucune
+        assertion ne la couvrait. Le rendu la lit — verifie — mais c'est un
+        hasard heureux tant qu'aucun test ne l'exige : une simplification du
+        rendu l'aurait fait disparaitre en silence, comme la cle `group_name` de
+        la vague C.
+        """
         res = self._run(
             r"""
 __emit({
+  reel: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: [
+    { id: "default", label: "Standard", movie_template: "{title} ({year})", tv_template: "{series} ({year})" },
+    { id: "avec_edition", label: "Avec edition", movie_template: "{title} ({year}) [{edition}]", tv_template: "" },
+  ] }),
   chaines: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: ["Simple", "Avec edition"] }),
   objets: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: [{ name: "Simple" }, { template: "{title}" }] }),
+  vide: M.__rendreReponse({ rendu: "presets" }, { ok: true, presets: [] }),
 });
 """
         )
+        # La forme REELLE : c'est `label` qui doit s'afficher, pas l'id.
+        self.assertIn("2 modèle(s)", res["reel"])
+        self.assertIn("Standard", res["reel"], "le libelle du preset n'est pas rendu")
+        self.assertIn("Avec edition", res["reel"])
+        self.assertNotIn("avec_edition", res["reel"], "l'identifiant technique s'affiche a la place du libelle")
+        # Les formes TOLEREES restent supportees.
         self.assertIn("2 modèle(s)", res["chaines"])
         self.assertIn("Simple", res["objets"])
+        # Une liste vide ne compte pas « 0 modele(s) » : elle retombe sur le
+        # message generique du backend, qui sait quoi dire.
+        self.assertNotIn("0 modèle(s)", res["vide"])
 
     def test_une_taille_est_rendue_en_octets_lisibles(self) -> None:
         res = self._run(

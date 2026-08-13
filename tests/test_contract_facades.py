@@ -87,7 +87,15 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "runtime.get_tools_status",  # B3 : NON cablable — ALIAS STRICT de get_probe_tools_status, deja cable (app.js) ; le cabler creerait un doublon de requete ET sortirait la reponse de la liste blanche du cache hors-ligne
         "runtime.reset_incremental_cache",  # B3 : NON cablable — impossible de dresser la liste d'elements qu'exige la regle des actions destructives
         "runtime.run_nas_benchmark",  # B3 : NON cablable — aucun parametre de chemin : « tester mon NAS » est irrealisable en l'etat
-        "runtime.set_probe_tool_paths",  # B3 : NON cablable — perte de donnees sur payload partiel
+        # Le motif de refus de la vague B3 — « perte de donnees sur payload partiel »
+        # — a ete SUPPRIME depuis : #1041 a corrige les deux portes
+        # (`set_probe_tool_paths` ET `_save_section_probe`), avec 6 mutations rouges.
+        # Un motif de refus FAUX est pire que pas de motif : il arrete la personne
+        # suivante. Ce qui reste est un vrai travail d'interface, pas un defaut :
+        # les champs de chemin existent deja dans Parametres et passent par
+        # `save_settings` ; les faire passer par cette methode leur donnerait la
+        # VALIDATION (nom de binaire attendu, `-version` execute) qu'ils n'ont pas.
+        "runtime.set_probe_tool_paths",  # A CABLER : le blocage est leve, reste a brancher les champs de chemin sur la validation
         "settings.preview_naming_template",  # B3 : NON cablable — `sample_row_id` est INERTE : #460 documente que la branche chargeant un vrai film « etait morte depuis sa premiere ligne »
         "settings.reset_all_user_data",  # B3 : NON cablable — exige que l'utilisateur TAPE « RESET » (reset_support.py:266) ; dangerConfirmModal n'a aucune affordance de saisie
         "settings.set_locale",
