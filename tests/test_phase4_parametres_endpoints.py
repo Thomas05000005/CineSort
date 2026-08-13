@@ -10,6 +10,7 @@ Couvre les 5 endpoints :
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import sys
 import tempfile
@@ -70,8 +71,24 @@ class _FakeApi:
             "profile_json": copy.deepcopy(profile_json),
         }
 
-    def _close_infra(self) -> None:
+    def _close_infra(self) -> int:
         self._close_infra_called = True
+        return 0
+
+    @contextlib.contextmanager
+    def _infra_gelee(self):
+        """La doublure doit porter le MEME contrat que `CineSortApi`.
+
+        Sans cette methode, `reset_support` prenait sa branche « api sans
+        barriere » et n'appelait plus `_close_infra` du tout — ce test l'a vu
+        rougir, ce qui est exactement son role. Une doublure qui derive du vrai
+        objet ne prouve plus que sa coherence avec elle-meme.
+        """
+        self._gel_actif = True
+        try:
+            yield self._close_infra()
+        finally:
+            self._gel_actif = False
 
 
 # ---------------------------------------------------------------------------
