@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import time
 from contextlib import closing, contextmanager, suppress
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
@@ -175,6 +176,62 @@ def db_path_for_state_dir(state_dir: Path) -> Path:
     return Path(state_dir) / "db" / DEFAULT_DB_FILENAME
 
 
+#: Les connexions de la portee courante, par chemin de base.
+#:
+#: `ContextVar` ET NON `threading.local` : le serveur REST est un
+#: `ThreadingHTTPServer` qui cree un thread NEUF par requete — un cache par
+#: thread n'y sert donc a rien (mesure du depot). Un `ContextVar` suit le
+#: contexte d'execution, thread comme tache asynchrone, et se restaure
+#: proprement a la sortie du bloc.
+#:
+#: PARESSEUSE, ET C'EST ESSENTIEL. Ouvrir la connexion a l'ENTREE de la portee
+#: ferait payer une ouverture — et une construction d'infra — aux appels qui ne
+#: touchent jamais la base. Pire, cela se heurterait a la barriere qui gele la
+#: reconstruction pendant un effacement : une requete inoffensive echouerait
+#: pendant un wipe. Le dictionnaire est donc VIDE tant que personne n'a demande
+#: de connexion, et se remplit au premier `_managed_conn`.
+#:
+#: PAR CHEMIN DE BASE : plusieurs stores peuvent vivre dans la meme portee
+#: (state_dir differents). Partager un handle entre deux fichiers ecrirait dans
+#: la mauvaise base.
+_PORTEE_COURANTE: ContextVar[Optional[Dict[str, sqlite3.Connection]]] = ContextVar(
+    "cinesort_portee_courante", default=None
+)
+
+
+#: Les bases dont une connexion PARTAGEE est deja en cours d'utilisation dans ce
+#: contexte. Sert a detecter l'imbrication : un appel qui trouve sa base ici est
+#: imbrique, et doit ouvrir sa propre connexion pour ne pas commiter le travail
+#: partiel de l'appel qui l'englobe.
+_EN_COURS: ContextVar[frozenset] = ContextVar("cinesort_portee_en_cours", default=frozenset())
+
+
+@contextmanager
+def portee_de_requete() -> Iterator[None]:
+    """Une seule connexion par base pour toute la duree du bloc.
+
+    A poser autour d'un appel de facade ou d'une requete REST. Aucune connexion
+    n'est ouverte tant qu'aucun repository n'en demande ; celles qui l'ont ete
+    sont fermees a la sortie.
+
+    REENTRANTE : une portee imbriquee reutilise celle du dessus plutot que d'en
+    ouvrir une seconde — deux handles sur la meme base depuis le meme contexte,
+    et le second attendrait le verrou du premier.
+    """
+    if _PORTEE_COURANTE.get() is not None:
+        yield
+        return
+    ouvertes: Dict[str, sqlite3.Connection] = {}
+    jeton = _PORTEE_COURANTE.set(ouvertes)
+    try:
+        yield
+    finally:
+        _PORTEE_COURANTE.reset(jeton)
+        for conn in ouvertes.values():
+            with suppress(sqlite3.Error):
+                conn.close()
+
+
 class _StoreBase:
     """
     SQLite persistence base: connection management, schema lifecycle, and shared helpers.
@@ -275,6 +332,69 @@ class _StoreBase:
 
     @contextmanager
     def _managed_conn(self) -> Iterator[sqlite3.Connection]:
+        """Une connexion prete a l'emploi, partagee si une portee est ouverte.
+
+        LE COUT EST DANS L'OUVERTURE, PAS DANS LES PRAGMA. Mesure du depot :
+        les MEMES huit PRAGMA coutent x139 sur un handle neuf, et en retirer six
+        sur quatorze ne rend que 1,7 %. Un scan a froid de 10 000 films ouvre
+        60 003 connexions et passe 23 % de son temps a les ouvrir.
+
+        LES FRONTIERES DE COMMIT NE BOUGENT PAS, ET C'EST DELIBERE. Le
+        `with conn:` reste applique a CHAQUE appel : chacun commite son unite
+        exactement comme avant, et une panne tardive n'annule pas ce qui etait
+        deja acquis. Partager le handle SANS partager la transaction, c'est
+        gagner l'ouverture sans toucher a la durabilite d'une seule ecriture —
+        sur une application qui deplace des fichiers, ce n'etait pas negociable.
+
+        Cela ne tient QUE SI les appels ne s'imbriquent pas : sur un handle
+        partage, la sortie d'un appel INTERNE commiterait le travail partiel de
+        l'appel externe. Mesure sur le perimetre CI complet : profondeur
+        maximale 1 (cf. `tests/test_connexion_de_portee.py`, qui l'eprouve).
+        """
+        ouvertes = _PORTEE_COURANTE.get()
+        cle = str(self.db_path)
+        # UN APPEL IMBRIQUE NE PARTAGE PAS, ET C'EST LA MESURE QUI L'IMPOSE.
+        #
+        # Sonde sur le perimetre CI COMPLET : 20 049 ouvertures, profondeur
+        # maximale **2**. Une premiere mesure, limitee aux tests de
+        # repositories, donnait 1 — et je l'avais generalisee. Elle etait fausse.
+        #
+        # LA PROFONDEUR 2 A UNE SEULE SOURCE, ET ELLE EST NOMMEE :
+        # `repositories/quality.py:get_global_tier_distribution` appelle
+        # `_ensure_tables("perceptual_reports")` DEPUIS L'INTERIEUR de sa propre
+        # connexion, et cette verification de schema en rouvre une
+        # (`_missing_tables` -> `_existing_tables` -> `_managed_conn`). C'est le
+        # SEUL site du depot ou une verification de schema se fait sous une
+        # connexion deja ouverte (mesure : 1 sur tous les repositories).
+        #
+        # On ne le corrige pas ici : deplacer cette verification changerait le
+        # comportement d'une requete metier pour servir une optimisation, et
+        # cette vague s'est donnee pour regle de ne rien changer d'autre que le
+        # cout d'ouverture.
+        #
+        # Sur un handle partage, la sortie d'un appel INTERNE commiterait le
+        # travail partiel de l'appel EXTERNE. Les deux echappatoires changent la
+        # semantique : ne commiter qu'au niveau le plus externe repousse la
+        # durabilite de l'appel interne, et commiter a chaque niveau avance
+        # celle de l'externe. La seule option qui ne change RIEN est de rendre a
+        # l'appel imbrique ce qu'il avait deja : sa propre connexion.
+        #
+        # Le gain n'en souffre pas : l'imbrication est rare, et les appels de
+        # profondeur 1 — l'immense majorite — partagent toujours.
+        if ouvertes is not None and cle not in _EN_COURS.get():
+            partagee = ouvertes.get(cle)
+            if partagee is None:
+                partagee = self._connect()
+                ouvertes[cle] = partagee
+            jeton = _EN_COURS.set(_EN_COURS.get() | {cle})
+            try:
+                # Ni fermeture ici : la portee la detient. Le `with` est
+                # conserve, donc le commit reste par appel.
+                with partagee:
+                    yield partagee
+            finally:
+                _EN_COURS.reset(jeton)
+            return
         with closing(self._connect()) as conn, conn:
             yield conn
 
