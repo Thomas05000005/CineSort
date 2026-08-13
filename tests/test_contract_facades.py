@@ -70,7 +70,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.export_shareable_profile",
         "quality.get_calibration_report",
         "quality.get_profiles",
-        "quality.get_quality_presets",
         "quality.get_quality_report",
         "quality.import_quality_profile",
         "quality.import_shareable_profile",
