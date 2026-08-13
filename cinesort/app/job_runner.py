@@ -144,7 +144,32 @@ class JobRunner:
 
         On capture les TypeError signature pour fallback (defensif :
         inspect.signature peut echouer sur certains callables C/builtins).
+
+        UNE CONNEXION POUR TOUT LE RUN. C'est ici que vivent les 60 003
+        connexions d'un scan a froid de 10 000 films — le job ne passe PAS par le
+        dispatch REST, donc la portee posee la ne le couvrait pas.
+
+        La portee est ouverte ICI plutot qu'au site d'appel, et c'est un choix
+        contraint : `_run_worker` depasse deja son plafond de taille, et le
+        cliquet du depot refuse qu'une fonction trop longue GROSSISSE. Cette
+        methode n'a qu'UN appelant, celui-la meme ; le comportement est donc
+        identique, et `_run_worker` ne gagne aucune ligne.
+
+        Le raisonnement complet — duree de vie de la connexion, frontieres de
+        commit inchangees, et le garde « un run est actif » qui rend cette portee
+        sure — vit dans la docstring de `portee_de_requete` et dans
+        `tests/test_portee_du_run.py`.
         """
+        with portee_de_requete():
+            return self._appeler_le_job(job_fn, should_cancel, should_pause)
+
+    def _appeler_le_job(
+        self,
+        job_fn: JobFn,
+        should_cancel: Callable[[], bool],
+        should_pause: Callable[[], bool],
+    ) -> Optional[Dict[str, Any]]:
+        """L'injection de signature proprement dite, sans la portee."""
         try:
             sig = inspect.signature(job_fn)
         # except Exception : inspect peut lever sur builtins/C-callables
@@ -593,23 +618,7 @@ class JobRunner:
             # pour passer should_pause si le job_fn l'accepte (kwarg explicite
             # ou **kwargs). Sinon comportement actuel inchange (1 arg positionnel
             # should_cancel uniquement) pour ne pas casser les job_fn legacy.
-            # UNE CONNEXION POUR TOUT LE RUN, PAS UNE PAR REQUETE DE REPOSITORY.
-            #
-            # C'est ICI que vivent les 60 003 connexions d'un scan a froid de
-            # 10 000 films, dont l'ouverture pese 23 % du temps total : le job ne
-            # passe PAS par le dispatch REST, donc la portee posee la (#1057) ne
-            # le couvrait pas.
-            #
-            # LA CONNEXION VIT DES MINUTES, ET C'EST LE POINT DELICAT. Elle ne
-            # tient AUCUNE transaction entre deux appels — chaque `_managed_conn`
-            # garde son propre `with conn:` et commite son unite — donc elle ne
-            # bloque ni lecteur ni ecrivain. Ce qu'elle tient, c'est un HANDLE de
-            # fichier : sous Windows, cela empeche de SUPPRIMER la base. Les deux
-            # routes destructives refusent deja tant qu'un run tourne
-            # (`_refus_si_run_actif`), et c'est ce garde qui rend cette portee
-            # sure — pas une propriete de SQLite.
-            with portee_de_requete():
-                stats = self._safe_stats(self._invoke_job_fn(job_fn, should_cancel, should_pause))
+            stats = self._safe_stats(self._invoke_job_fn(job_fn, should_cancel, should_pause))
             self._debug(f"worker job_fn returned run_id={run_id} stats_keys={list((stats or {}).keys())}", run_debug)
 
             ended_ts = time.time()
