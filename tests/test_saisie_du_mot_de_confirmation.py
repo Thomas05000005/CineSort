@@ -121,7 +121,12 @@ globalThis.preparer = () => {
 };
 """
 
-_EXTRA = "export const __danger = dangerConfirmModal;\n"
+_EXTRA = (
+    "export const __danger = dangerConfirmModal;\n"
+    "export const __show = showModal;\n"
+    "export const __close = closeModal;\n"
+    "export const __courante = modaleCourante;\n"
+)
 _EXIT = "\nprocess.exit(0);\n"
 
 
@@ -341,6 +346,79 @@ __emit({ avec, sans: globalThis.__html });
             "le champ apparait sur des modales qui n'exigent aucun mot",
         )
 
+
+class LeCONTENEURSaitQuiIlPorteTests(_Base):
+    """LE VRAI `modal.js`, pas un stub. Les trois modales de contenu partagent un
+    conteneur unique ; c'est ici que vit la seule reponse possible a « suis-je
+    encore la modale a l'ecran ? ».
+
+    Les batteries des trois modules eprouvent leur JETON, mais avec un stub de
+    `showModal` : mutation faite, deux mutants de `modal.js` y survivaient — non
+    par faiblesse d'assertion, mais parce que ces tests-la n'executent pas ce
+    fichier. Ils sont donc eprouves ICI.
+    """
+
+    def test_ouvrir_annonce_le_proprietaire(self) -> None:
+        res = self._run(
+            r"""
+globalThis.preparer();
+M.__show({ title: "T", body: "", actions: [], proprietaire: "simulateur" });
+__emit({ courante: M.__courante() });
+"""
+        )
+        self.assertEqual(res["courante"], "simulateur")
+
+    def test_ouvrir_une_AUTRE_modale_change_le_proprietaire(self) -> None:
+        """C'est le cas qui detruisait une modale sous l'utilisateur : le module
+        precedent doit pouvoir constater qu'il n'est plus a l'ecran."""
+        res = self._run(
+            r"""
+globalThis.preparer();
+M.__show({ title: "A", body: "", actions: [], proprietaire: "simulateur" });
+M.__show({ title: "B", body: "", actions: [], proprietaire: "regles" });
+__emit({ courante: M.__courante() });
+"""
+        )
+        self.assertEqual(res["courante"], "regles", "le proprietaire n'a pas change : le jeton ne perimerait rien")
+
+    def test_FERMER_relache_le_proprietaire(self) -> None:
+        res = self._run(
+            r"""
+globalThis.preparer();
+M.__show({ title: "T", body: "", actions: [], proprietaire: "simulateur" });
+M.__close();
+__emit({ courante: M.__courante() });
+"""
+        )
+        self.assertEqual(res["courante"], "", "une modale FERMEE laisse encore son module se croire a l'ecran")
+
+    def test_fermer_SANS_modale_ouverte_relache_quand_meme(self) -> None:
+        """`closeModal` sort tot quand aucun overlay n'existe. Si le proprietaire
+        n'etait relache qu'apres cette sortie, une fermeture deja consommee
+        laisserait le module se croire courant."""
+        res = self._run(
+            r"""
+globalThis.preparer();
+M.__show({ title: "T", body: "", actions: [], proprietaire: "simulateur" });
+globalThis.document.getElementById = () => null;
+M.__close();
+__emit({ courante: M.__courante() });
+"""
+        )
+        self.assertEqual(res["courante"], "")
+
+    def test_une_modale_SANS_proprietaire_n_en_usurpe_aucun(self) -> None:
+        """Les autres appelants de `showModal` ne passent pas `proprietaire` : ils
+        doivent laisser le champ VIDE, pas heriter du precedent."""
+        res = self._run(
+            r"""
+globalThis.preparer();
+M.__show({ title: "A", body: "", actions: [], proprietaire: "simulateur" });
+M.__show({ title: "B", body: "", actions: [] });
+__emit({ courante: M.__courante() });
+"""
+        )
+        self.assertEqual(res["courante"], "", "une modale sans proprietaire a herite de celui d'avant")
 
 if __name__ == "__main__":
     unittest.main()
