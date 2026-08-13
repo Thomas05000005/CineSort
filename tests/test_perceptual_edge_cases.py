@@ -218,6 +218,17 @@ class SettingsExtremeTests(unittest.TestCase):
         )
         self.assertEqual(d["timeout_per_film_s"], 30)
         self.assertEqual(d["frames_count"], 5)
+        # Ce test posait `perceptual_skip_percent: 0` depuis toujours SANS jamais
+        # l'asserter — et c'est precisement la valeur que la lecture ecrasait
+        # (`0 or 5` -> 5). Un test « valeurs minimales » qui n'eprouve pas le
+        # minimum qu'il vient de poser passe a cote du seul reglage de ce dict
+        # dont le plancher soit 0. Le round-trip complet vit dans
+        # tests/test_perceptual_settings_roundtrip.py.
+        self.assertEqual(d["skip_percent"], 0)
+        self.assertEqual(d["dark_weight"], 1.0)
+        self.assertEqual(d["audio_segment_s"], 10)
+        self.assertEqual(d["comparison_frames"], 10)
+        self.assertEqual(d["comparison_timeout_s"], 120)
 
     def test_settings_max_values(self) -> None:
         """Tous les settings aux valeurs maximum → dict valide."""
@@ -235,6 +246,11 @@ class SettingsExtremeTests(unittest.TestCase):
         )
         self.assertEqual(d["timeout_per_film_s"], 600)
         self.assertEqual(d["comparison_timeout_s"], 1800)
+        self.assertEqual(d["frames_count"], 50)
+        self.assertEqual(d["skip_percent"], 20)
+        self.assertEqual(d["dark_weight"], 3.0)
+        self.assertEqual(d["audio_segment_s"], 120)
+        self.assertEqual(d["comparison_frames"], 100)
 
 
 class PersistenceRoundtripTests(unittest.TestCase):
