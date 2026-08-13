@@ -185,6 +185,66 @@ Deux contre-feux, tous deux payes ce jour-la :
   schema faite sous une connexion deja ouverte — **1 site sur tout le depot**),
   la ou « profondeur 2 » obligeait a tout remesurer.
 
+**CHERCHER LE GARDE AVANT D'EN ECRIRE UN.** Le 2026-08-13, deux classes CSS
+posees par le JS et definies nulle part (dont `.v5-help-fab`, le bouton flottant
+d'aide, sans style depuis la premiere release publique). Sonde, cliquet, liste
+d'exemptions et batterie de mutation ont ete ecrits pour les garder — et le
+commit **comme la PR** affirmaient qu'« aucun test du depot ne pouvait le voir ».
+
+**Faux.** `tests/test_contract_css.py` porte cet invariant depuis 2026-07, avec
+une extraction plus large (`class=`, `cls:`, `querySelector`, `closest`,
+`matches`) et une baseline de **197 entrees qui ne peut que RETRECIR**
+(`tests/contract_baselines/css_used_undefined.json`). Les deux classes y
+figuraient : pas invisibles, **inscrites comme dette acceptee**.
+
+Le cout n'est pas le travail perdu mais l'**affirmation fausse publiee**, et un
+second garde plus faible qui aurait dilue le vrai. Trois contre-feux : chercher
+dans `tests/contract_baselines/` et `ls tests/ | grep -i contract` avant d'ecrire
+un garde ; ne jamais ecrire « aucun test ne voit ca » sans l'avoir cherche ; et
+**lancer la suite COMPLETE sur la branche**, pas ses propres tests plus `ruff` —
+c'est ce qui avait ete saute, et le perimetre qu'on choisit soi-meme penche vers
+ce qu'on attend, exactement comme le filtre `-k`.
+
+**UNE COULEUR SE LIT AU RENDU, PAS DANS LE CSS.** `--surface-1` a `--surface-3`
+valent **0,035 a 0,12 d'alpha** sur TOUS les themes : une regle qui les emploie
+comme fond parait opaque a la lecture et rend un element translucide. Le fond
+d'une surface qui doit masquer ce qu'il y a dessous s'ecrit
+`var(--bg-base, #1a1a1a)` — c'est deja le correctif de `.duplicate-modal`, dont
+le commentaire dit meme « verifier en runtime via Playwright getComputedStyle ».
+Repris quand meme le 2026-08-13 (#1063). Et pour un etat de SURVOL, **superposer**
+un voile (`inset` box-shadow) plutot que REMPLACER le fond, sinon l'element
+devient plus transparent au survol qu'au repos.
+
+Deux pieges de la mesure elle-meme, payes dans la foulee :
+
+- **les themes s'appellent `studio` / `cinema` / `luxe`** (`[data-theme=...]`),
+  pas `light` / `dark` : basculer sur un nom inexistant ne selectionne RIEN et
+  rend quatre fois la meme valeur, ce qui ressemble a « stable sur tous les
+  themes » ;
+- **le cache du navigateur sert l'ancien CSS** et rend donc la mesure d'AVANT
+  apres le correctif. Suffixer les liens par l'empreinte du fichier sur disque.
+
+Enfin : **ne pas demarrer `app.py --api` pour une verification visuelle** — le
+cron de purge TTL demarre avec, et il agit sur la bibliotheque REELLE. Charger
+les feuilles declarees par `index.html` dans une page de controle suffit.
+
+**UNE SONDE DE MUTATION QUI REECRIT LES FINS DE LIGNE.** `read_text()` normalise
+`CRLF` -> `\n`, `write_text()` refait l'inverse : muter puis restaurer par ces
+deux appels **reecrit le fichier entier** tout en satisfaisant son propre
+`assert restaure == original` (comparaison sur du texte normalise). Signature :
+`git status` montre le fichier modifie alors que `git diff --stat` est **vide**.
+Consequences vecues : worktree « sale » qui fait abandonner la sonde suivante, et
+ancres en `\n` qui ne matchent plus rien — 0 occurrence, donc AUCUNE mesure.
+Travailler en **binaire**, avec la fin de ligne reelle du fichier :
+
+```python
+fin = b"\r\n" if brut.count(b"\r\n") > brut.count(b"\n") // 2 else b"\n"
+ancre = texte.encode().replace(b"\n", fin)
+```
+
+C'est le compteur d'occurrences AVANT mutation qui l'a revele — sans lui la sonde
+mutait zero ligne et rendait « 0 survivant », soit un faux vert.
+
 **`dry_run=True` EST LE DEFAUT des routes de reinitialisation.** `reset_database`
 et `reset_all_user_data` sont en apercu par defaut depuis le durcissement des
 purges. Une mesure qui oublie `dry_run=False` ne mesure **rien** : elle observe un
@@ -314,10 +374,11 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9036 tests collectes**
-(`--collect-only` sur le perimetre CI ci-dessus, mesure du 2026-08-13). Ce nombre
-se remesure, il ne se recopie pas — et il se remesure **par la meme commande**,
-sinon on compare un compte d'items a un compte de `passed`.
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9041 tests**
+(`passed`, suite complete sur `main` fusionne, mesure du 2026-08-13 ; s'y ajoutent
+20 skipped, 2 xfailed et 1619 subtests). Ce nombre se remesure, il ne se recopie
+pas — et il se remesure **par la meme commande**, sinon on compare un compte
+d'items (`--collect-only`) a un compte de `passed`.
 
 Le bot d'audit quotidien tourne en Opus 5 et est **borne par un budget
 d'ouverture** (`.github/audit-prompt.md`) : au plus 3 PR et 5 issues par
@@ -350,7 +411,7 @@ vague 3.1 ; le reste vit dans les PR. Ce qui compte pour une session suivante :
 - **#993** politique Compensate : un fichier modifie ne bloque plus la
   restauration des autres.
 
-### Campagne vagues B3 / C / D / E (2026-08-13) — 8 PR
+### Campagne vagues B3 / C / D / E (2026-08-13) — 10 PR, plan A→E SOLDE
 
 - **#1046-#1048** vague D : simulateur de profil, builder de regles custom,
   reglages fins. Sept defauts corriges AVANT fusion, dont trois trouves par revue
@@ -377,9 +438,46 @@ vague 3.1 ; le reste vit dans les PR. Ce qui compte pour une session suivante :
   tetes etaient vertes en local.
 - **#1057** vague E etape 1 : une connexion par requete REST. **50 -> 25
   connexions**, 35 a 47 % de gain selon la charge, frontieres de commit
-  **inchangees**. L'ETAPE 2 RESTE A FAIRE : le scan (ou vivent les 60 003
-  connexions et le x8,2 du plan) ne passe pas par le dispatch REST, et une
-  connexion y vivrait des MINUTES — autre classe de risque.
+  **inchangees**.
+- **#1060** vague E **etape 2, la derniere du plan** : la portee du RUN, la ou
+  vivent les 60 003 connexions du scan. A/B a bras alternes sur un job de
+  400 acces : **407 -> 8 connexions**, mediane 508,8 -> 18,2 ms. Le x28 est un
+  **MAJORANT** (job synthetique, lectures pures) ; la reference honnete reste le
+  x8,2 mesure sur un scan reel, et la grandeur robuste est le COMPTE.
+
+  Ce qui rend l'etape sure n'est PAS une propriete de SQLite : une connexion de
+  run vit des **minutes**, et sous Windows un handle ouvert empeche de SUPPRIMER
+  le fichier. C'est le refus « un traitement est en cours » des deux routes
+  destructives qui la rend acceptable — `tests/test_portee_du_run.py` eprouve
+  cette COMPOSITION, pas seulement le partage. Chaque `_managed_conn` garde son
+  `with conn:` : aucune transaction entre deux appels, frontieres de commit
+  inchangees. **4/4 mutants**, dont celui qui a montre qu'assertir « en cours »
+  ne distinguait PAS le refus du verrou de fichier (les deux messages le
+  contiennent).
+- **#1059** le mot a taper etendu a la purge du bucket `_review`, et le CRITERE
+  ecrit dans la docstring de `dangerConfirmModal` : perte irrecuperable par
+  l'application **et** portee non choisie par l'utilisateur.
+- **#1049** un bouton de dimension mort par construction (`director` : la branche
+  rendait `None` quoi qu'il arrive). Deux constats de revue retenus, **remedes
+  corriges** : la sortie immediate proposee amputait le payload de `ok` et `by`,
+  et « assouplir » l'extraction des DIMENSIONS l'aurait fait echouer plus
+  SILENCIEUSEMENT — elle est donc devenue plus stricte, avec un message qui nomme
+  la cause au lieu d'accuser la vue.
+- **#1062** `purge_review_bucket_all` pose `ok: true` a la CONSTRUCTION de son
+  payload et ne le rediscute jamais : ses echecs vivent dans `errors`. L'ecran ne
+  lisant que `deleted`, une purge dont TOUS les fichiers ont resiste affichait
+  « ✓ 0 fichier(s) supprimé(s) » en vert — juste apres avoir fait TAPER « VIDER ».
+  Corrige cote ECRAN : mettre `ok` a faux des qu'`errors > 0` ferait passer pour
+  un echec une purge ou 299 sur 300 sont partis. **4/4 mutants**, dont le
+  contre-test « une purge reussie reste verte » verifie comme non satisfait par
+  une autre source (l'inventaire ecrit lui aussi `--ok` dans une zone voisine).
+- **#1061** deux classes CSS posees par le JS et definies nulle part —
+  `.v5-help-fab`, monte a chaque demarrage du shell, et `.modal-open`. Baseline
+  du contrat CSS : **197 -> 195**. Voir le piege « chercher le garde avant d'en
+  ecrire un ».
+- **#1063** suivi immediat : la regle de #1061 etait opaque **en lecture** et
+  translucide **au rendu** (`--surface-2` -> `rgba(255,255,255,0.055)`). Cf. le
+  piege « une couleur se lit au RENDU ».
 
 **Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
 
