@@ -3676,9 +3676,13 @@ function _bindProfilsQualite(container) {
   });
 
   container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {
-    // Le builder lit ses regles lui-meme, a la source qu'il ecrit : lui passer
-    // `_state.profileDraft.custom_rules` revenait a passer `undefined`, cette
-    // cle n'etant jamais construite ici.
+    // Le builder lit ses regles LUI-MEME, a la source qu'il ecrit. Lui passer
+    // `_state.profileDraft.custom_rules` revenait a passer `undefined` : ce
+    // brouillon est construit en cinq endroits avec exactement
+    // {id, label, tiers, weights, tier_hierarchy}, et un `grep custom_rules` sur
+    // ce fichier ne rendait QUE ce site de lecture. L'ecran s'ouvrait donc
+    // toujours vide, puis « Enregistrer » DETRUISAIT les regles preexistantes
+    // avec un toast de succes.
     btn.addEventListener("click", () => ouvrirReglesQualite());
   });
 
