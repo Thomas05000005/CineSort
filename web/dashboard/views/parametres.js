@@ -2593,6 +2593,14 @@ function _openResetModal() {
         ${scopesHtml}
       </div>
       <div class="parametres-reset-modal-confirm">
+        <!-- DUPLICATION DELIBEREE de l'option requireTyped de modal.js, et il
+             faut le dire ici sinon quelqu'un corrigera l'une des deux.
+             Cette modale porte un SELECTEUR DE PORTEE (reglages / base / tout)
+             que dangerConfirmModal ne sait pas rendre : la consolider
+             demanderait de lui ajouter un formulaire arbitraire, donc d'en
+             faire autre chose qu'une confirmation. Les deux implementations
+             partagent la propriete qui compte : les deux verrous, mot tape et
+             decompte, sont INDEPENDANTS. -->
         <label for="parametres-reset-confirm-input">
           Tapez <strong>CONFIRMER</strong> pour valider :
         </label>
@@ -3189,6 +3197,12 @@ function _bindFields(container) {
           // `total > 50 ? 3 : 0` qui vivait ici rendait 0 s entre 42 et 50
           // fichiers, la ou la regle partagee rend 1 s.
           itemCount: total,
+          // MOT A TAPER : la perte est IRRECUPERABLE PAR L'APPLICATION
+          // (`_purge_dir_recursive` supprime definitivement — ni corbeille, ni
+          // sauvegarde) et la portee n'est PAS une selection de l'utilisateur :
+          // c'est « tous les fichiers en quarantaine ». Les deux conditions du
+          // critere sont remplies ; cf. la docstring de `dangerConfirmModal`.
+          requireTyped: "VIDER",
           confirmLabel: "Vider maintenant",
           cancelLabel: "Annuler",
           onConfirm: async () => {
