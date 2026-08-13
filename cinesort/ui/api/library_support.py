@@ -202,6 +202,22 @@ _CODEC_NORMALIZE = {
 CODEC_UNKNOWN = "unknown"
 
 
+# Les dimensions que `get_scoring_rollup` sait REELLEMENT grouper, c'est-a-dire
+# celles pour lesquelles `_extract_group_key` rend une cle sur une row complete.
+# C'est la SOURCE DE VERITE de l'onglet « Scores » : la vue derive ses boutons de
+# cette liste, et `tests/test_statistiques_dimensions.py` refuse qu'une entree ne
+# produise rien. « director » en a ete retire — aucune row de
+# `_build_library_rows` ne porte de realisateur, la branche rendait donc `None`
+# quelle que soit la bibliotheque.
+SCORING_ROLLUP_DIMENSIONS: Tuple[str, ...] = (
+    "franchise",
+    "decade",
+    "codec",
+    "era_grain",
+    "resolution",
+)
+
+
 def _normalize_codec(codec: Optional[str]) -> str:
     if not codec:
         return CODEC_UNKNOWN
@@ -1554,10 +1570,11 @@ def get_scoring_rollup(
     limit: int = 20,
     run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Aggregation scoring par dimension (director, franchise, decade, codec).
+    """Aggregation scoring par dimension (franchise, decade, codec, ...).
 
     Args:
-        by: "franchise" | "director" | "decade" | "codec" | "era_grain"
+        by: une valeur de `SCORING_ROLLUP_DIMENSIONS`. Toute autre valeur rend
+            `groups: []` (aucune cle de groupe extractible).
         limit: max groupes retournes (tries par count desc)
     Returns:
       {
@@ -1582,8 +1599,8 @@ def get_scoring_rollup(
 
     buckets: Dict[str, Dict[str, Any]] = {}
 
-    # Pour franchise/director, on doit les extraire des candidats TMDb (on simplifie avec titre)
-    # Ici on utilise soit la collection TMDb, soit le director, soit la decade, etc.
+    # La cle de groupe se lit directement sur la row enrichie (collection TMDb,
+    # decennie, codec, ere de grain, resolution) — cf `_extract_group_key`.
     for r in rows:
         group_key = _extract_group_key(r, dim)
         if not group_key:
@@ -2254,9 +2271,12 @@ def _extract_group_key(row: Dict[str, Any], dim: str) -> Optional[str]:
         # Pour le moment on utilise le champ tmdb_collection_name si present
         coll = row.get("tmdb_collection_name")
         return str(coll).strip() if coll else None
-    if dim == "director":
-        # Non dispo directement dans build_library_rows, retourne None
-        return None
+    # Pas de branche « director » : aucune row ne porte de realisateur (il
+    # faudrait les credits TMDb, que `_build_library_rows` ne va pas chercher).
+    # La branche existait et rendait `None` inconditionnellement, ce qui rendait
+    # le bouton « Realisateur » de l'ecran Statistiques mort par construction.
+    # Le `return None` final couvre desormais ce cas comme toute dimension
+    # inconnue. Cf `SCORING_ROLLUP_DIMENSIONS`.
     if dim == "decade":
         year = int(row.get("year") or 0)
         if year == 0:

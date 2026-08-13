@@ -26,16 +26,29 @@ import { apiPost } from "../core/api.js";
 const ONGLETS = [
   { id: "podiums", label: "Podiums", titre: "Les groupes, codecs et sources les plus presents" },
   { id: "timeline", label: "Chronologie", titre: "Films ajoutes mois par mois" },
-  { id: "rollup", label: "Scores", titre: "Score moyen par franchise, realisateur, decennie..." },
+  { id: "rollup", label: "Scores", titre: "Score moyen par franchise, decennie, codec..." },
 ];
 
-/** Dimensions REELLES de `get_scoring_rollup` (library_support.py:2253-2268). */
+/**
+ * Dimensions de `get_scoring_rollup`, MIROIR de `library_support.py:
+ * SCORING_ROLLUP_DIMENSIONS`. `tests/test_statistiques_dimensions.py` refuse
+ * que les deux listes divergent, ET qu'une entree ne produise aucun groupe.
+ *
+ * « Réalisateur » a ete retire : la branche backend rendait `None` pour TOUTE
+ * row (aucune ne porte de realisateur), donc le bouton repondait « Aucun groupe
+ * sur cette dimension » quoi que fasse l'utilisateur. Enumerer les branches
+ * `if dim == ...` — ce qu'avait fait la premiere version de ce commentaire — ne
+ * dit pas si elles rendent quelque chose.
+ *
+ * « Résolution » a ete ajoutee : le backend la groupait deja, l'ecran ne
+ * l'offrait pas.
+ */
 const DIMENSIONS = [
   { id: "franchise", label: "Franchise" },
-  { id: "director", label: "Réalisateur" },
   { id: "decade", label: "Décennie" },
   { id: "codec", label: "Codec" },
   { id: "era_grain", label: "Grain d'époque" },
+  { id: "resolution", label: "Résolution" },
 ];
 
 const FENETRES = [6, 12, 24];
