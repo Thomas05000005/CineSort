@@ -72,16 +72,13 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.get_custom_rules_catalog",
         "quality.get_custom_rules_templates",
         "quality.get_profiles",
-        "quality.get_quality_presets",
         "quality.get_quality_profile",
         "quality.get_quality_report",
         "quality.import_quality_profile",
         "quality.import_shareable_profile",
-        "quality.save_custom_quality_preset",
         "quality.save_profile",
         "quality.save_quality_profile",
         "quality.set_active_profile",
-        "quality.simulate_quality_preset",
         "quality.validate_custom_rules",
         "run.check_duplicates_fusion",  # B4 : NON cablable — gardee par la variable d'ENVIRONNEMENT serveur CINESORT_FUSION_DOUBLONS, qu'aucune ligne applicative ne positionne
         "run.cleanup_old_runs",  # B4 : NON cablable — doublon : la purge tourne DEJA seule via le cron de retention (24 h)

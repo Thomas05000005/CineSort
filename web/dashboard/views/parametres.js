@@ -32,6 +32,8 @@ import { formatBytes } from "../core/format.js";
 // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplacer window.confirm()
 // natifs par dangerConfirmModal (re-scoring bibliotheque + regen token = destructif).
 import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
+// Vague D2 : le simulateur que l'avertissement ci-dessous reclame depuis toujours.
+import { ouvrirSimulateurQualite } from "../components/simulateur-qualite.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1329,6 +1331,12 @@ function _renderProfilsQualite() {
       Bronze). <strong>Activer ce mode peut redistribuer 30-40&nbsp;% de votre
       bibliothèque actuelle — utilisez la simulation avant d'activer.</strong>
       Par défaut désactivé pour préserver vos scores existants.
+    </p>
+    <p class="parametres-section-intro">
+      <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-simulateur>
+        🧪 Simuler un profil
+      </button>
+      <span class="parametres-hint">Compare avant / après sur vos films, sans rien modifier.</span>
     </p>
     <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
       <label class="parametres-hierarchy-toggle">
@@ -3626,6 +3634,11 @@ function _bindProfilsQualite(container) {
       hier.order = order;
       _rerenderActiveCategory();
     });
+  });
+
+  // Le simulateur : une LECTURE, donc aucune confirmation.
+  container.querySelectorAll("[data-parametres-ouvrir-simulateur]").forEach((btn) => {
+    btn.addEventListener("click", () => ouvrirSimulateurQualite());
   });
 
   // Boutons d'action
