@@ -58,10 +58,32 @@ export function trapFocus(modalEl) {
  * @param {string} opts.body - contenu HTML de la modale
  * @param {Array<{label:string, cls?:string, onClick:Function}>} [opts.actions] - boutons
  */
+/**
+ * Qui possede la modale actuellement a l'ecran, ou `""`.
+ *
+ * POURQUOI CE N'EST PAS UN COMPTEUR PAR MODULE. Les modales de contenu
+ * partagent UN SEUL conteneur : `showModal` commence par `closeModal()`, donc
+ * ouvrir l'une detruit l'autre. Un jeton de generation declare DANS chaque
+ * module ne voit que ses propres requetes : ouvrir le simulateur puis les
+ * regles ne perime RIEN cote simulateur, et sa reponse en vol appelle
+ * `_reouvrir()` — qui detruit la modale des regles que l'utilisateur regarde,
+ * brouillon de saisie compris.
+ *
+ * La question qu'un module doit pouvoir poser n'est pas « ma requete est-elle la
+ * plus recente ? » mais « suis-je encore la modale a l'ecran ? ». Elle ne se
+ * repond qu'ICI, ou vit le conteneur partage.
+ */
+let _proprietaire = "";
+
+export function modaleCourante() {
+  return _proprietaire;
+}
+
 export function showModal(opts) {
   closeModal(); // Fermer une eventuelle modale precedente
 
-  const { title = "", body = "", actions = [] } = opts;
+  const { title = "", body = "", actions = [], proprietaire = "" } = opts;
+  _proprietaire = String(proprietaire || "");
 
   const overlay = document.createElement("div");
   overlay.id = MODAL_CONTAINER_ID;
@@ -143,6 +165,10 @@ export function showModal(opts) {
 
 /** Ferme la modale active. */
 export function closeModal() {
+  // LE PROPRIETAIRE TOMBE MEME SI AUCUNE MODALE N'EST OUVERTE. Sortir avant
+  // laisserait un module se croire « encore a l'ecran » apres une fermeture
+  // deja consommee — exactement le cas que le jeton doit detecter.
+  _proprietaire = "";
   const overlay = $(MODAL_CONTAINER_ID);
   if (!overlay) return;
   if (overlay._escHandler) {

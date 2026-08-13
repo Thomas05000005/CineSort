@@ -54,8 +54,23 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 globalThis.__modales = [];
-function showModal(o) { globalThis.__modales.push(o); }
-function closeModal() {}
+// FIDELE AU CONTENEUR PARTAGE. `showModal` retient QUI possede la modale et
+// `closeModal` le relache : c'est exactement ce que fait `modal.js`. Un stub qui
+// s'en ecarterait rendrait le jeton de peremption intestable — or c'est
+// precisement ce jeton qu'on eprouve ici.
+globalThis.__proprietaire = "";
+function showModal(o) {
+  globalThis.__modales.push(o);
+  globalThis.__proprietaire = String((o && o.proprietaire) || "");
+}
+function closeModal() { globalThis.__proprietaire = ""; }
+function modaleCourante() { return globalThis.__proprietaire; }
+// Exposees au PILOTE : les stubs vivent dans la portee du module, et un test qui
+// veut simuler « l'utilisateur ferme, puis ouvre une autre modale » doit pouvoir
+// les appeler de l'exterieur.
+globalThis.showModal = showModal;
+globalThis.closeModal = closeModal;
+globalThis.modaleCourante = modaleCourante;
 globalThis.__toasts = [];
 function showToast(o) { globalThis.__toasts.push(o); }
 """
@@ -88,6 +103,75 @@ class _Base(unittest.TestCase):
 
     def _run(self, driver: str) -> dict:
         return run_module_test(SIMU_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+
+class UneAUTREModaleMePERIMETests(_Base):
+    """LES TROIS MODALES PARTAGENT UN CONTENEUR UNIQUE, ET LE JETON L'IGNORAIT.
+
+    `showModal` commence par `closeModal()` : ouvrir les regles DETRUIT la modale
+    du simulateur. Mais le jeton de generation etait declare DANS chaque module
+    (`let _generation = 0`, trois fois) : pour le simulateur, sa propre reponse en
+    vol restait « courante », elle appelait `_reouvrir()` — donc `showModal` — et
+    detruisait la modale que l'utilisateur venait d'ouvrir, brouillon compris.
+
+    Le compteur ne detectait pas non plus la FERMETURE : ni `closeModal`, ni le
+    bouton « Fermer », ni Echap n'incrementaient quoi que ce soit, alors que le
+    commentaire de tete du jeton affirmait le contraire.
+
+    La question a poser n'est pas « ma requete est-elle la plus recente ? » mais
+    « suis-je encore la modale a l'ecran ? », et elle ne se repond que dans
+    `modal.js`, ou vit le conteneur partage.
+    """
+
+    def test_une_autre_modale_ouverte_PERIME_ma_reponse_en_vol(self) -> None:
+        res = self._run(
+            r"""
+let debloquer;
+globalThis.__reponses["quality/simulate_quality_preset"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._simuler();          // ma modale s'ouvre, ma requete part
+
+// L'utilisateur ferme et ouvre une AUTRE modale : le conteneur change de main.
+closeModal();
+showModal({ proprietaire: "regles", title: "Regles", body: "", actions: [] });
+const modalesAvant = globalThis.__modales.length;
+
+debloquer({ ok: true, preset_id: "A", films_count: 1,
+            before: { avg_score: 1, tiers: {} }, after: { avg_score: 2, tiers: {} },
+            delta: {}, top_winners: [], top_losers: [], warnings: [] });
+await enVol;
+__emit({
+  modalesEnPlus: globalThis.__modales.length - modalesAvant,
+  proprietaire: modaleCourante(),
+  resultat: !!M.__t._etat.resultat,
+});
+"""
+        )
+        self.assertEqual(
+            res["modalesEnPlus"],
+            0,
+            "ma reponse en vol a ROUVERT ma modale par-dessus celle de l'autre module",
+        )
+        self.assertEqual(res["proprietaire"], "regles", "la modale de l'autre module a ete detruite")
+        self.assertFalse(res["resultat"], "une reponse perimee a quand meme ecrit l'etat")
+
+    def test_une_FERMETURE_simple_perime_aussi(self) -> None:
+        """Echap ou « Fermer » : le compteur seul ne les voyait pas."""
+        res = self._run(
+            r"""
+let debloquer;
+globalThis.__reponses["quality/simulate_quality_preset"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._simuler();
+closeModal();                            // l'utilisateur ferme
+const modalesAvant = globalThis.__modales.length;
+debloquer({ ok: true, preset_id: "A", films_count: 1,
+            before: { avg_score: 1, tiers: {} }, after: { avg_score: 2, tiers: {} },
+            delta: {}, top_winners: [], top_losers: [], warnings: [] });
+await enVol;
+__emit({ modalesEnPlus: globalThis.__modales.length - modalesAvant, resultat: !!M.__t._etat.resultat });
+"""
+        )
+        self.assertEqual(res["modalesEnPlus"], 0, "une modale FERMEE s'est rouverte toute seule")
+        self.assertFalse(res["resultat"], "une reponse arrivee apres la fermeture a ecrit l'etat")
 
 
 class UneReponsePERIMEENEcritRienTests(_Base):
