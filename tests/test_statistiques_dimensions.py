@@ -60,11 +60,34 @@ _ROW_COMPLETE: Dict[str, Any] = {
 
 
 def _dimensions_de_la_vue() -> Set[str]:
-    """Les identifiants des boutons de dimension declares par la vue."""
+    """Les identifiants des boutons de dimension declares par la vue.
+
+    HYPOTHESES SUR LA FORME, ET CE QUI SE PASSE SI ELLE CHANGE. L'extraction
+    suppose `const DIMENSIONS = [ ... ];` et des entrees portant `id: "..."`.
+
+    Une revue a propose d'assouplir l'expression rationnelle (guillemets simples,
+    espacement libre). C'est l'inverse du besoin : une extraction plus tolerante
+    trouve *moins* souvent zero, donc echoue plus SILENCIEUSEMENT — elle rendrait
+    un sous-ensemble et le contrat passerait a moitie. Ce qu'il faut est qu'un
+    changement de forme se voie, pas qu'il se rattrape.
+
+    D'ou le controle ci-dessous : on compte les entrees du tableau et on exige
+    d'en avoir extrait AUTANT. Une entree qui change de forme fait echouer ce
+    fichier avec un message qui nomme la cause, au lieu de laisser le contrat
+    s'appliquer sur une liste amputee.
+    """
     source = _VUE.read_text(encoding="utf-8")
     bloc = re.search(r"const DIMENSIONS\s*=\s*\[(.*?)\];", source, re.S)
     assert bloc is not None, "la vue Statistiques ne declare plus de liste DIMENSIONS"
-    return set(re.findall(r'id:\s*"([a-z_]+)"', bloc.group(1)))
+    corps = bloc.group(1)
+    ids = set(re.findall(r'id:\s*"([a-z_]+)"', corps))
+    entrees = corps.count("{")
+    assert ids, "aucun `id:` extrait de DIMENSIONS : la forme de la liste a change"
+    assert len(ids) == entrees, (
+        f"{entrees} entree(s) dans DIMENSIONS mais {len(ids)} identifiant(s) extrait(s) : "
+        "la forme a change et le contrat s'appliquerait sur une liste amputee"
+    )
+    return ids
 
 
 class LesVALEURSDeLaFixtureViennentDeLaPRODUCTIONTests(unittest.TestCase):
