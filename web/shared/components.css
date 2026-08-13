@@ -10531,3 +10531,110 @@ body.v5-notif-lock {
   color: var(--danger, #e5534b);
   font-size: var(--fs-sm, 0.9rem);
 }
+
+/* ===========================================================================
+   SIMULATEUR DE PROFIL QUALITE — vague D2
+   ---------------------------------------------------------------------------
+   L'interface ordonnait deja de s'en servir sans l'offrir : « utilisez la
+   simulation avant d'activer » (parametres.js, avertissement de la hierarchie
+   qualite). Cet ecran compare AVANT / APRES sur les films reels, et n'ecrit
+   rien tant qu'on ne demande pas l'enregistrement.
+
+   Il reutilise les composants de la vue Statistiques (`stats-table`,
+   `stats-choix`, `stats-part`, `stats-num`) : ce sont les memes objets — un
+   tableau de chiffres, des puces de choix, une pastille de tier — et leur
+   donner deux apparences selon l'ecran serait une incoherence, pas une
+   personnalisation.
+   =========================================================================== */
+
+.simu-vue {
+  min-width: min(720px, 80vw);
+}
+
+.simu-resultat {
+  animation: stats-apparition 160ms ease;
+}
+
+.simu-table {
+  margin-top: 0.75rem;
+}
+
+/* La ligne du score moyen se detache : c'est le chiffre que l'on vient lire en
+   premier, et le seul qui resume les cinq autres. */
+.simu-ligne-score td {
+  font-weight: var(--fw-semibold, 600);
+  border-bottom: 2px solid var(--border-1, #333);
+}
+
+.simu-tier {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+/* Barre proportionnelle d'une ligne de tier. `--part` est pose par la vue, qui
+   seule connait le maximum de la colonne. */
+.simu-barre {
+  display: block;
+  height: 8px;
+  width: calc(var(--part, 0) * 100%);
+  min-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-3, #262626);
+}
+
+/* L'APRES porte l'accent, l'AVANT reste neutre : sans cette distinction, deux
+   barres de meme couleur laissent chercher laquelle est laquelle. */
+.simu-barre--apres {
+  background: var(--accent, #6ea8fe);
+}
+
+.simu-delta--haut { color: var(--success, #4caf7d); }
+.simu-delta--bas { color: var(--danger, #e5534b); }
+.simu-delta--nul { color: var(--text-3, #888); }
+
+.simu-colonnes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.simu-colonne h4 {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-sm, 0.9rem);
+  font-weight: var(--fw-semibold, 600);
+  color: var(--text-2, #bbb);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.simu-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.simu-liste li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.simu-scores {
+  color: var(--text-3, #888);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-2xs, 0.72rem);
+}
+
+.parametres-hint {
+  margin-left: 0.6rem;
+  color: var(--text-3, #888);
+  font-size: var(--fs-sm, 0.9rem);
+}
