@@ -15,8 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from cinesort.infra.db.sqlite_store import attendre_les_portees, portees_ouvertes
 from cinesort.domain.i18n_messages import t
+from cinesort.infra.db.sqlite_store import attendre_les_portees, portees_ouvertes
 from cinesort.ui.api import settings_support as _settings_support
 from cinesort.ui.api._responses import err as _err_response
 
