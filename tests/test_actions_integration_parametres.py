@@ -146,6 +146,7 @@ _EXTRA = (
     "export const __rendreReponse = _rendreReponseAction;\n"
     "export const __recharger = _rechargerApresReset;\n"
     "export const __etat = _state;\n"
+    "export const __bindChamps = _bindFields;\n"
 )
 
 _EXIT = "\nprocess.exit(0);\n"
@@ -785,6 +786,72 @@ __emit({ texte: M.__rendreReponse(action,
         )
         self.assertIn("cinesort_backup_before_reset_1.zip", res["texte"])
         self.assertIn("2", res["texte"], "le nombre d'elements supprimes n'est pas dit")
+
+
+class LaPurgeDuBucketEXIGELeMotEnCLIQUANTTests(unittest.TestCase):
+    """LE TEST QUE LES DEUX GARDES D'INVENTAIRE NE REMPLACENT PAS.
+
+    Les deux tests de critere lisent le SOURCE JS et comparent des fragments :
+    ce sont des CLIQUETS D'INVENTAIRE — « aucun mot n'apparait ailleurs sans
+    qu'on repasse par le critere » est bien une question de source, et le depot
+    en a d'autres du meme genre (KNOWN_ORPHAN_METHODS, PLAFONDS). Mais ils ne
+    declenchent rien : ils ne peuvent donc PAS voir une confirmation posee sur la
+    MAUVAISE action.
+
+    Celui-ci CLIQUE le vrai bouton et observe ce qui part. Constat de revue,
+    verifie et retenu.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+    def test_le_clic_demande_le_mot_VIDER(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__reponses["run/list_quarantine_bucket"] = {
+  data: { ok: true, purge_scope_files_count: 12, purge_scope_sample: ["a.mkv"], purge_scope_bytes: 1048576 },
+};
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("quarantine_purge_all") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bindChamps(conteneur);
+if (boutons[0].rappel) await boutons[0].rappel();
+await new Promise((r) => setTimeout(r, 0));
+const c = globalThis.__confirmations[globalThis.__confirmations.length - 1] || {};
+__emit({ mot: c.requireTyped || "", titre: String(c.title || "") });
+"""
+        )
+        self.assertEqual(
+            res["mot"],
+            "VIDER",
+            "le bouton « Vider maintenant » ne demande aucun mot : la suppression definitive part au premier clic",
+        )
+        self.assertIn("_review", res["titre"], "la confirmation ne nomme pas ce qu'elle vide")
+
+    def test_un_REFUS_ne_supprime_RIEN(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+globalThis.__reponses["run/list_quarantine_bucket"] = {
+  data: { ok: true, purge_scope_files_count: 12, purge_scope_sample: [], purge_scope_bytes: 0 },
+};
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("quarantine_purge_all") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bindChamps(conteneur);
+if (boutons[0].rappel) await boutons[0].rappel();
+await new Promise((r) => setTimeout(r, 0));
+__emit({ purges: globalThis.__appels.filter((a) => a.route === "run/purge_quarantine_bucket_all").length });
+"""
+        )
+        self.assertEqual(res["purges"], 0, "la purge est partie malgre l'annulation")
 
 
 if __name__ == "__main__":
