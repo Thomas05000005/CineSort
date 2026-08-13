@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Optional
 
 from cinesort.domain.run_models import RunSnapshot, RunStatus
 from cinesort.infra.db import SQLiteStore
+from cinesort.infra.db.sqlite_store import portee_de_requete
 from cinesort.infra.log_context import clear_run_id, set_run_id
 from cinesort.infra.run_id import RUN_ID_PATTERN, generate_run_id, normalize_or_generate_run_id
 
@@ -143,7 +144,32 @@ class JobRunner:
 
         On capture les TypeError signature pour fallback (defensif :
         inspect.signature peut echouer sur certains callables C/builtins).
+
+        UNE CONNEXION POUR TOUT LE RUN. C'est ici que vivent les 60 003
+        connexions d'un scan a froid de 10 000 films — le job ne passe PAS par le
+        dispatch REST, donc la portee posee la ne le couvrait pas.
+
+        La portee est ouverte ICI plutot qu'au site d'appel, et c'est un choix
+        contraint : `_run_worker` depasse deja son plafond de taille, et le
+        cliquet du depot refuse qu'une fonction trop longue GROSSISSE. Cette
+        methode n'a qu'UN appelant, celui-la meme ; le comportement est donc
+        identique, et `_run_worker` ne gagne aucune ligne.
+
+        Le raisonnement complet — duree de vie de la connexion, frontieres de
+        commit inchangees, et le garde « un run est actif » qui rend cette portee
+        sure — vit dans la docstring de `portee_de_requete` et dans
+        `tests/test_portee_du_run.py`.
         """
+        with portee_de_requete():
+            return self._appeler_le_job(job_fn, should_cancel, should_pause)
+
+    def _appeler_le_job(
+        self,
+        job_fn: JobFn,
+        should_cancel: Callable[[], bool],
+        should_pause: Callable[[], bool],
+    ) -> Optional[Dict[str, Any]]:
+        """L'injection de signature proprement dite, sans la portee."""
         try:
             sig = inspect.signature(job_fn)
         # except Exception : inspect peut lever sur builtins/C-callables
