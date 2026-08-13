@@ -87,11 +87,17 @@ globalThis.__reponses["quality/get_quality_profile"] = {
 _RAPPORT_RICHE = r"""
 globalThis.__reponses["quality/get_calibration_report"] = {
   ok: true,
+  // FORME REELLE, mesuree sur `domain/calibration.py` :
+  //   bias_direction : "underscore" | "overscore" | "neutral"  (JAMAIS up/down)
+  //   suggestion     : { from, to, rationale, focus_category }  (JAMAIS weights)
   bias: { total_feedbacks: 47, accord_pct: 62.0, mean_delta: 6.2,
-          bias_direction: "up", bias_strength: "strong",
+          bias_direction: "underscore", bias_strength: "strong",
           category_bias: { video: 8, audio: -1, extras: 0 } },
   current_weights: { video: 60, audio: 30, extras: 10 },
-  suggestion: { weights: { video: 66, audio: 26, extras: 8 } },
+  suggestion: { from: { video: 60, audio: 30, extras: 10 },
+                to: { video: 66, audio: 26, extras: 8 },
+                rationale: "Biais moderate detecte (underscore) sur la video.",
+                focus_category: "video" },
   sample_feedbacks: [],
 };
 """

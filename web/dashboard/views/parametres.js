@@ -3676,10 +3676,10 @@ function _bindProfilsQualite(container) {
   });
 
   container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const draft = _state.profileDraft || {};
-      ouvrirReglesQualite(draft.custom_rules || []);
-    });
+    // Le builder lit ses regles lui-meme, a la source qu'il ecrit : lui passer
+    // `_state.profileDraft.custom_rules` revenait a passer `undefined`, cette
+    // cle n'etant jamais construite ici.
+    btn.addEventListener("click", () => ouvrirReglesQualite());
   });
 
   // Boutons d'action

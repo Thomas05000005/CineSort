@@ -214,7 +214,31 @@ function _corps() {
   </div>`;
 }
 
+/**
+ * Generation de la modale : une reponse en vol n'a le droit d'ecrire que si SA
+ * modale est encore celle qui est ouverte.
+ *
+ * LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE : `showModal`
+ * commence par `closeModal()` (modal.js), donc ouvrir l'une detruit l'autre.
+ * Sans ce jeton, une reponse arrivee apres la fermeture rappelle `_reouvrir()`,
+ * qui ROUVRE une modale que l'utilisateur avait fermee — et detruit au passage
+ * celle qu'il venait d'ouvrir, brouillon de saisie compris.
+ *
+ * C'est le meme defaut que la reponse perimee de la vue Statistiques, garde
+ * la-bas par `_hote !== hote`. La protection avait ete ecrite pour la vague C
+ * et jamais portee aux modales de la vague D, ou le point de montage est
+ * pourtant PLUS etroit encore.
+ */
+let _generation = 0;
+
+/** Marque cette ouverture comme la courante, et rend le test de peremption. */
+function _prendreLaMain() {
+  const mienne = ++_generation;
+  return () => _generation !== mienne;
+}
+
 async function _simuler() {
+  const perimee = _prendreLaMain();
   _etat.chargement = true;
   _etat.erreur = "";
   _reouvrir();
@@ -236,7 +260,7 @@ async function _simuler() {
     _etat.erreur = "Le serveur n'a pas répondu.";
   } finally {
     _etat.chargement = false;
-    _reouvrir();
+    if (!perimee()) _reouvrir();
   }
 }
 

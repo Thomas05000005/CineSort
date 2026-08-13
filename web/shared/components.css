@@ -10862,6 +10862,15 @@ body.v5-notif-lock {
   letter-spacing: 0.04em;
 }
 
+/* La justification que le backend joint a sa suggestion (`rationale`). Elle
+   precede les chiffres : on lit POURQUOI avant de lire QUOI. */
+.calib-raison {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-sm, 0.9rem);
+  color: var(--text-2, #bbb);
+  line-height: 1.45;
+}
+
 .calib-ligne {
   margin: 0.2rem 0;
   font-variant-numeric: tabular-nums;

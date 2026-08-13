@@ -43,9 +43,15 @@ const LIBELLES_TOGGLES = {
   include_subtitles: "Sous-titres",
 };
 
+// CLES REELLES DE `bias_direction`, mesurees sur `domain/calibration.py:76-81` :
+// `underscore` (mean_delta > 0 : le systeme SOUS-evalue, donc vous notez plus
+// haut que lui), `overscore`, `neutral`. Cet ecran lisait `up`/`down`, deux
+// valeurs que le backend n'emet JAMAIS : la ligne de direction restait vide
+// pour tout utilisateur ayant un biais, c'est-a-dire pour le seul cas ou elle
+// avait quelque chose a dire.
 const LIBELLES_BIAIS = {
-  up: "Vous notez PLUS HAUT que le profil",
-  down: "Vous notez PLUS BAS que le profil",
+  underscore: "Vous notez PLUS HAUT que le profil",
+  overscore: "Vous notez PLUS BAS que le profil",
   neutral: "Vos notes suivent le profil",
 };
 
@@ -120,15 +126,24 @@ function _rendreCalibration() {
   const parCategorie = Object.keys(cat)
     .map((k) => `<span class="calib-cat">${escapeHtml(k)} <strong>${_signe(cat[k])}</strong></span>`)
     .join("");
+  // LA SUGGESTION EST `{from, to, rationale, focus_category}`. Cet ecran lisait
+  // `s.weights`, absent : `Object.keys(s.weights || s)` retombait sur la
+  // suggestion entiere et iterait `from`/`to`/`rationale`/`focus_category`, dont
+  // aucune n'est un nombre — toutes filtrees par `Number.isFinite`. Resultat : un
+  // cadre « Suggestion » VIDE, avec ses deux boutons, sur un rapport qui en
+  // contenait pourtant une.
   const s = r.suggestion;
-  const actuels = r.current_weights || {};
+  const actuels = (s && s.from) || r.current_weights || {};
+  const proposes = (s && s.to) || {};
+  const raison = s && s.rationale ? String(s.rationale) : "";
   const suggestion = s
     ? `<div class="calib-suggestion">
         <p class="calib-suggestion-titre">Suggestion</p>
-        ${Object.keys(s.weights || s)
+        ${raison ? `<p class="calib-raison">${escapeHtml(raison)}</p>` : ""}
+        ${Object.keys(proposes)
           .map((k) => {
             const avant = Number(actuels[k]);
-            const apres = Number((s.weights || s)[k]);
+            const apres = Number(proposes[k]);
             if (!Number.isFinite(avant) || !Number.isFinite(apres) || avant === apres) return "";
             return `<p class="calib-ligne">${escapeHtml(k)} <span class="calib-avant">${_nombre(avant)}</span> → <strong>${_nombre(apres)}</strong></p>`;
           })
@@ -233,7 +248,31 @@ function _corps() {
  * Actions
  * =========================================================== */
 
+/**
+ * Generation de la modale : une reponse en vol n'a le droit d'ecrire que si SA
+ * modale est encore celle qui est ouverte.
+ *
+ * LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE : `showModal`
+ * commence par `closeModal()` (modal.js), donc ouvrir l'une detruit l'autre.
+ * Sans ce jeton, une reponse arrivee apres la fermeture rappelle `_reouvrir()`,
+ * qui ROUVRE une modale que l'utilisateur avait fermee — et detruit au passage
+ * celle qu'il venait d'ouvrir, brouillon de saisie compris.
+ *
+ * C'est le meme defaut que la reponse perimee de la vue Statistiques, garde
+ * la-bas par `_hote !== hote`. La protection avait ete ecrite pour la vague C
+ * et jamais portee aux modales de la vague D, ou le point de montage est
+ * pourtant PLUS etroit encore.
+ */
+let _generation = 0;
+
+/** Marque cette ouverture comme la courante, et rend le test de peremption. */
+function _prendreLaMain() {
+  const mienne = ++_generation;
+  return () => _generation !== mienne;
+}
+
 async function _charger() {
+  const perimee = _prendreLaMain();
   _etat.chargement = true;
   _etat.erreur = "";
   _reouvrir();
@@ -257,7 +296,7 @@ async function _charger() {
     _etat.erreur = "Le serveur n'a pas répondu.";
   } finally {
     _etat.chargement = false;
-    _reouvrir();
+    if (!perimee()) _reouvrir();
   }
 }
 
@@ -283,8 +322,20 @@ async function _basculerToggle(cle, valeur) {
 async function _appliquerLaSuggestion() {
   const s = _etat.rapport && _etat.rapport.suggestion;
   if (!s || !_etat.profil) return;
-  const poids = s.weights || s;
-  const suivant = { ..._etat.profil, weights: { ...(_etat.profil.weights || {}), ...poids } };
+  // LES POIDS SUGGERES VIVENT DANS `to`, ET NULLE PART AILLEURS. Une premiere
+  // version faisait `s.weights || s` : `weights` n'existant pas, elle retombait
+  // sur la suggestion ENTIERE et fusionnait `from`, `to`, `rationale` et
+  // `focus_category` dans les poids du profil — quatre cles parasites persistees,
+  // aucun poids change, et un toast de succes. Un echec devenu succes silencieux.
+  const poids = s.to && typeof s.to === "object" ? s.to : null;
+  const chiffres = poids
+    ? Object.fromEntries(Object.entries(poids).filter(([, v]) => Number.isFinite(Number(v))))
+    : {};
+  if (!Object.keys(chiffres).length) {
+    showToast({ type: "error", text: "La suggestion ne contient aucun poids exploitable ; rien n'a été modifié." });
+    return;
+  }
+  const suivant = { ..._etat.profil, weights: { ...(_etat.profil.weights || {}), ...chiffres } };
   if (await _ecrireLeProfil(suivant, "Poids ajustés d'après vos corrections.")) {
     _etat.rapport = { ..._etat.rapport, suggestion: null };
   }

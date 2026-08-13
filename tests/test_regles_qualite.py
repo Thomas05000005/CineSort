@@ -107,8 +107,12 @@ class LeVocabulaireVientDuBACKENDTests(_Base):
 
         self.assertEqual(
             res["routes"],
-            ["quality/get_custom_rules_catalog", "quality/get_custom_rules_templates"],
-            "le builder n'interroge pas le catalogue : son vocabulaire vient d'ailleurs",
+            [
+                "quality/get_custom_rules_catalog",
+                "quality/get_custom_rules_templates",
+                "quality/get_quality_profile",
+            ],
+            "le builder n'interroge pas le catalogue, ou ne lit pas les regles DEJA dans le profil",
         )
 
     def test_les_champs_du_backend_apparaissent_dans_le_formulaire(self) -> None:
