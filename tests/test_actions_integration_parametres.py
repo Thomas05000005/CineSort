@@ -854,5 +854,119 @@ __emit({ purges: globalThis.__appels.filter((a) => a.route === "run/purge_quaran
         self.assertEqual(res["purges"], 0, "la purge est partie malgre l'annulation")
 
 
+_PURGE_CLIQUEE = r"""
+globalThis.__accepte = true;
+globalThis.__reponses["run/list_quarantine_bucket"] = {
+  data: { ok: true, purge_scope_files_count: 300, purge_scope_sample: [], purge_scope_bytes: 0 },
+};
+const sortie = { className: "", textContent: "", innerHTML: "" };
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("quarantine_purge_all") >= 0 ? boutons : []; },
+  querySelector(sel) { return sel.indexOf("quarantine_purge_all") >= 0 ? sortie : null; },
+};
+"""
+
+_PURGE_LANCEE = r"""
+M.__bindChamps(conteneur);
+if (boutons[0].rappel) await boutons[0].rappel();
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+__emit({ classe: sortie.className, texte: sortie.textContent });
+"""
+
+
+class LaPurgeNAnnoncePasUnSUCCESQuandRienNEstSupprimeTests(unittest.TestCase):
+    """UN ECHEC NE DOIT PAS S'AFFICHER EN VERT.
+
+    `purge_review_bucket_all` pose `ok: true` a la CONSTRUCTION de son payload et
+    ne le rediscute JAMAIS (`quarantine_ttl.py`) : ses echecs vivent dans
+    `errors`. L'ecran ne lisait que `deleted`, donc une purge dont TOUS les
+    fichiers ont resiste — verrouilles par un traitement en cours, droits
+    refuses — affichait « ✓ 0 fichier(s) supprimé(s) » avec la coche et la classe
+    `--ok`. L'utilisateur venait de TAPER « VIDER » pour une suppression
+    definitive : il repart en croyant le bucket vide alors que rien n'a bouge.
+
+    On ne corrige PAS `ok` cote backend : le mettre a faux des qu'`errors > 0`
+    ferait passer pour un echec une purge ou 299 fichiers sur 300 sont bien
+    partis, et changerait la semantique d'une valeur que d'autres appelants
+    lisent. C'est l'ECRAN qui doit dire la verite.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
+
+    def test_zero_supprime_et_des_echecs_n_est_PAS_un_succes(self) -> None:
+        res = self._run(
+            _PURGE_CLIQUEE
+            + r"""
+globalThis.__reponses["run/purge_quarantine_bucket_all"] = {
+  data: { ok: true, deleted: 0, errors: 300, bytes_freed: 0, considered: 300 },
+};
+"""
+            + _PURGE_LANCEE
+        )
+        self.assertIn(
+            "--error",
+            res["classe"],
+            f"une purge qui n'a RIEN supprime s'affiche en {res['classe']!r} : {res['texte']!r}",
+        )
+        self.assertNotIn("--ok", res["classe"])
+        # ASSERTER CE QUE SEUL LE CORRECTIF PRODUIT. « 300 » figure aussi dans le
+        # decompte de la modale ; c'est le mot « echec » qui distingue.
+        self.assertIn("échec", res["texte"].lower(), "le nombre d'echecs n'est pas dit")
+
+    def test_une_purge_PARTIELLE_est_annoncee_comme_partielle(self) -> None:
+        """Le cas ou le vert est le plus trompeur : 299 lignes supprimees, une
+        resiste, et l'ecran annoncait un succes franc — donc « le bucket est
+        vide », ce qui est faux."""
+        res = self._run(
+            _PURGE_CLIQUEE
+            + r"""
+globalThis.__reponses["run/purge_quarantine_bucket_all"] = {
+  data: { ok: true, deleted: 299, errors: 1, bytes_freed: 1048576, considered: 300 },
+};
+"""
+            + _PURGE_LANCEE
+        )
+        self.assertIn("--warn", res["classe"], f"purge partielle affichee en {res['classe']!r}")
+        self.assertNotIn("--ok", res["classe"])
+        self.assertIn("299", res["texte"], "le travail reellement fait n'est plus dit")
+        self.assertIn("1 échec", res["texte"], "l'echec residuel est passe sous silence")
+
+    def test_une_purge_REUSSIE_reste_verte(self) -> None:
+        """LE CONTRE-TEST. Sans lui, afficher une erreur en toute circonstance
+        satisferait les deux tests ci-dessus."""
+        res = self._run(
+            _PURGE_CLIQUEE
+            + r"""
+globalThis.__reponses["run/purge_quarantine_bucket_all"] = {
+  data: { ok: true, deleted: 300, errors: 0, bytes_freed: 1048576, considered: 300 },
+};
+"""
+            + _PURGE_LANCEE
+        )
+        self.assertIn("--ok", res["classe"])
+        self.assertNotIn("--error", res["classe"])
+        self.assertNotIn("--warn", res["classe"])
+
+
+# LE CLIQUET QUE J'AVAIS ECRIT ICI A ETE SUPPRIME, ET C'EST LA CI QUI L'A TRANCHE.
+# Ce correctif a d'abord ete ecrit avec `parametres-test-result--avertissement`,
+# qui n'existe pas : le message serait parti sans couleur, et les trois tests
+# ci-dessus seraient restes VERTS, puisqu'ils lisent le NOM de la classe et non
+# sa definition. J'en avais conclu qu'aucun test du depot ne voyait cette
+# famille, et j'avais ajoute un cliquet.
+#
+# C'etait faux. `tests/test_contract_css.py` garde cet invariant depuis la verif
+# totale de 2026-07, avec une extraction plus large (class=, cls:, querySelector,
+# closest, matches) et une baseline qui ne peut que RETRECIR. Verifie par
+# mutation sur ce fichier meme : remettre `--avertissement` le fait rougir en
+# nommant la classe. Un second cliquet, plus faible, n'aurait ajoute que du bruit.
+
+
 if __name__ == "__main__":
     unittest.main()
