@@ -65,6 +65,26 @@ class LaJOIGNABILITEDitLaVeriteTests(unittest.TestCase):
         self.assertIsNone(code)
         self.assertIn("OverflowError", phrase, "l'exception n'est pas rapportee : la mesure se tait")
 
+    def test_un_port_INCONNU_donne_quand_meme_les_COMPTES(self) -> None:
+        """MESURE SUR PYTEST (bac a sable dedie, deux fixtures) :
+
+            serveur OK + fixture de page qui echoue -> funcargs CONTIENT e2e_server
+                                                       et son port  (c'est le cas #924)
+            fixture serveur qui echoue elle-meme    -> e2e_server ABSENT de funcargs
+
+        Le second cas ne doit pas produire un silence : c'est justement quand le
+        serveur ne demarre pas qu'on veut savoir si la machine a encore des
+        sockets. Les comptes, eux, se mesurent sans port.
+        """
+        code, phrase = joignabilite(None)
+
+        self.assertIsNone(code)
+        self.assertIn("port inconnu", phrase)
+
+        texte = etat_reseau(None)
+        self.assertIn("port inconnu", texte)
+        self.assertIn("connexions TCP", texte, "sans port, la mesure des sockets a ete perdue elle aussi")
+
     def test_un_port_ILLISIBLE_ne_leve_pas_non_plus(self) -> None:
         code, phrase = joignabilite("pas-un-port")  # type: ignore[arg-type]
 

@@ -40,14 +40,22 @@ _TIMEOUT_NETSTAT_S = 10.0
 _PREFIXES_TCP = {"TCP", "TCP6"}
 
 
-def joignabilite(port: int) -> Tuple[Optional[int], str]:
+def joignabilite(port: Optional[int]) -> Tuple[Optional[int], str]:
     """Le port accepte-t-il encore une connexion ?
 
     Rend `(code, phrase)`. `code` vaut 0 si la connexion aboutit, l'errno sinon,
     et `None` si la tentative elle-meme a echoue — auquel cas la phrase porte
     l'exception, alors la donnee la plus interessante : un `WSAENOBUFS` ici
     vaudrait verdict.
+
+    `port=None` EST UN CAS REEL, ET IL A UNE PHRASE A LUI. Mesure sur pytest :
+    quand la fixture `e2e_server` echoue ELLE-MEME, `item.funcargs` ne la contient
+    pas, donc l'appelant n'a aucun port a fournir. Se taire alors serait perdre le
+    diagnostic au moment ou il vaudrait le plus cher — les COMPTES de sockets,
+    eux, restent mesurables sans port.
     """
+    if port is None:
+        return None, "port inconnu : la fixture du serveur a echoue avant de le publier"
     try:
         numero = int(port)
     except (TypeError, ValueError):
@@ -105,7 +113,7 @@ def comptes_tcp() -> Tuple[Optional[Dict[str, int]], str]:
     return comptes, f"connexions TCP locales : {total} ({detail})"
 
 
-def etat_reseau(port: int) -> str:
+def etat_reseau(port: Optional[int]) -> str:
     """Les deux mesures, assemblees en un texte lisible dans un rapport pytest.
 
     DERNIER FILET. Les deux mesures se gardent deja elles-memes, mais le contrat

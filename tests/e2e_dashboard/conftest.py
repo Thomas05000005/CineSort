@@ -617,14 +617,22 @@ def pytest_runtest_makereport(item, call):
     # defaut vit ne documente rien — c'est la meme forme que le test qui saute
     # par-dessus la couche ou vit le bug.
     if report.when == "setup" and report.failed:
+        # MESURE SUR PYTEST (bac a sable dedie, deux fixtures) :
+        #
+        #   serveur OK + fixture de page qui echoue -> funcargs CONTIENT e2e_server
+        #                                              et son port. C'est le cas #924.
+        #   fixture serveur qui echoue elle-meme    -> e2e_server ABSENT de funcargs.
+        #
+        # Le second cas ne doit PAS produire un silence : les COMPTES de sockets
+        # restent mesurables sans port, et c'est justement quand le serveur ne
+        # demarre pas qu'on veut savoir si la machine a encore des sockets.
         srv = item.funcargs.get("e2e_server") if hasattr(item, "funcargs") else None
         port = (srv or {}).get("port") if isinstance(srv, dict) else None
-        if port:
-            texte = _etat_reseau(port)
-            report.sections.append(("Etat reseau a l'instant de l'echec (#924)", texte))
-            if allure:
-                with contextlib.suppress(Exception):
-                    allure.attach(texte, name="reseau-924", attachment_type=allure.attachment_type.TEXT)
+        texte = _etat_reseau(port)
+        report.sections.append(("Etat reseau a l'instant de l'echec (#924)", texte))
+        if allure:
+            with contextlib.suppress(Exception):
+                allure.attach(texte, name="reseau-924", attachment_type=allure.attachment_type.TEXT)
         return
 
     if report.when == "call" and report.failed:
