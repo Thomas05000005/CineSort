@@ -167,6 +167,36 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    une MESURE, pas une ressemblance — c'est en s'en dispensant que ce fichier
    avait affirme une causalite que l'experience a ensuite refutee.
 
+**UNE SONDE PEUT ETRE JUSTE ET SON PERIMETRE FAUX.** Le 2026-08-13, une sonde
+d'imbrication des connexions SQLite lancee sur les seuls **tests de
+repositories** a rendu « profondeur maximale **1** ». Une conception de partage
+de connexion en a ete tiree, ecrite dans le code et dans un message de commit.
+La meme sonde sur le perimetre CI **complet** rend **2** (20 049 ouvertures) — et
+la profondeur 2 est exactement le cas ou partager un handle **deplacerait les
+frontieres de commit**, donc la durabilite d'une application qui deplace des
+fichiers.
+
+Deux contre-feux, tous deux payes ce jour-la :
+
+- mesurer sur le perimetre **ou le comportement peut vivre**, pas sur celui qui
+  est commode ;
+- **capturer la PILE**, pas seulement le chiffre. Elle a nomme la source unique
+  (`repositories/quality.py:get_global_tier_distribution`, une verification de
+  schema faite sous une connexion deja ouverte — **1 site sur tout le depot**),
+  la ou « profondeur 2 » obligeait a tout remesurer.
+
+**`dry_run=True` EST LE DEFAUT des routes de reinitialisation.** `reset_database`
+et `reset_all_user_data` sont en apercu par defaut depuis le durcissement des
+purges. Une mesure qui oublie `dry_run=False` ne mesure **rien** : elle observe un
+chemin qui ne touche a aucun fichier, et conclut que tout va bien.
+
+**LE CHECKOUT PRINCIPAL PEUT ETRE SUR UNE BRANCHE PERIMEE.** Une mesure du
+comportement de `reset_database` a tourne dans `C:/Users/blanc/projects/CineSort`,
+reste sur une branche **anterieure** a ce durcissement : elle portait sur du code
+qui n'etait plus celui de `main`. Un worktree dit quelle branche il porte ; le
+checkout porte la sienne — `git branch --show-current` avant toute mesure de
+comportement.
+
 **L'ESPACE DISQUE avant d'accuser son propre changement.** Le 2026-08-08, quatre
 tests de `test_apply_disk_check_recursive_v796.py` ont echoue sur une branche
 dont le diff ne touchait ni le disque ni l'apply. La cause etait dans le HELPER
@@ -233,8 +263,9 @@ restaurer, verifier le contenu restaure, revoir le vert. Proscrire les tests qui
 comparent une chaine de **code source** : ils tombent quand le code s'ameliore et
 ne detectent rien quand il casse.
 
-Trois pieges de cette famille, **mesures le 2026-08-06**, chacun ayant produit un
-faux vert dans une session qui appliquait pourtant la regle ci-dessus :
+Quatre pieges de cette famille, chacun ayant produit un faux vert dans une
+session qui appliquait pourtant la regle ci-dessus — les trois premiers mesures
+le 2026-08-06, le quatrieme le 2026-08-13 :
 
 1. **La panne doit etre injectee a la couche de PRODUCTION.** L'issue #901 avait
    ete fermee sur un test qui passait un `record_op` **qui leve** — forme absente
@@ -246,7 +277,25 @@ faux vert dans une session qui appliquait pourtant la regle ci-dessus :
    asserter sur la chaine ne prouve rien. Exiger que la garde soit
    **atteignable** (premier terme = la vraie variable), et qu'aucune garde
    desactivee par une constante ne subsiste.
-3. **Un correctif peut ETEINDRE une garde existante.** Rendre `op_index` honnete
+3. **UN MUTANT SURVIVANT N'EST PAS TOUJOURS UN TEST FAIBLE.** Trois survivants
+   le meme jour, trois causes differentes, et une seule etait une faiblesse :
+
+   - *argument supplementaire ignore par JS* — mutant EQUIVALENT par
+     construction (la fonction ne prend plus de parametre) : remplacer le mutant ;
+   - *ligne morte inseree AVANT la vraie* — mutant equivalent par erreur d'ancre :
+     viser la ligne qui AGIT ;
+   - *assertion satisfaite par une AUTRE source* — vraie faiblesse : « 2 » et
+     « cinesort.db » figuraient aussi dans le message du backend, donc
+     l'assertion ne prouvait pas le rendu qu'elle visait. **Asserter ce que SEUL
+     le correctif produit.**
+
+   Et une quatrieme cause, la plus retorse : **le HARNAIS ne reproduisait pas la
+   production**. Un faux DOM rendait eternellement le MEME noeud alors que
+   `_refreshAll()` fait `root.innerHTML = ...` et le DETRUIT : deux correctifs du
+   « message perdu » ont survecu a leur propre batterie tant que la racine
+   factice ne remplacait rien.
+
+4. **Un correctif peut ETEINDRE une garde existante.** Rendre `op_index` honnete
    (il comptait des tentatives) l'a mis a 0 sur un journal verrouille — or il
    servait de preuve « le disque a bouge » a l'alerte d'undo indisponible. Apres
    avoir change la semantique d'une valeur, **grep tous ses lecteurs** et
@@ -261,8 +310,10 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **8515 tests** (mesure du 2026-08-06 ; ce nombre
-se remesure, il ne se recopie pas).
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9036 tests collectes**
+(`--collect-only` sur le perimetre CI ci-dessus, mesure du 2026-08-13). Ce nombre
+se remesure, il ne se recopie pas — et il se remesure **par la meme commande**,
+sinon on compare un compte d'items a un compte de `passed`.
 
 Le bot d'audit quotidien tourne en Opus 5 et est **borne par un budget
 d'ouverture** (`.github/audit-prompt.md`) : au plus 3 PR et 5 issues par
@@ -294,6 +345,37 @@ vague 3.1 ; le reste vit dans les PR. Ce qui compte pour une session suivante :
   aveugle aux lecteurs reseau mappes, cliquet sur 68 `except OSError` a risque.
 - **#993** politique Compensate : un fichier modifie ne bloque plus la
   restauration des autres.
+
+### Campagne vagues B3 / C / D / E (2026-08-13) — 8 PR
+
+- **#1046-#1048** vague D : simulateur de profil, builder de regles custom,
+  reglages fins. Sept defauts corriges AVANT fusion, dont trois trouves par revue
+  adversaire et quatre par mutation ; **17/17 mutants tues**.
+- **#1053** derniere methode B3 : `settings.reset_all_user_data` etait
+  INATTEIGNABLE — le backend exige que l'utilisateur TAPE « RESET », et aucune
+  modale n'avait de champ de saisie. Trois defauts de la famille « un echec
+  devient un succes silencieux » corriges au passage : reset PARTIEL affiche en
+  VERT, cle `error` jetee, cache non invalide (la premiere autosave RECREAIT
+  `settings.json`). **23/23 mutants.**
+- **#1054** instrument de #924 : etat reseau capture a l'instant de l'echec. Le
+  hook ne regardait que la phase `call` alors que #924 echoue au **setup** ; et
+  `connect_ex` sur un socket a timeout etiquetait « REFUSE » un `WSAEWOULDBLOCK`
+  — les deux hypotheses que #924 doit justement separer.
+- **#1055** `_close_infra` etait APPELE mais N'EXISTAIT PAS (`hasattr` toujours
+  faux, et le test qui le « prouvait » definissait sa propre fausse api). A/B :
+  sans lui, un reset laissait `user_version 0` et **21 tables manquantes**, et
+  `get_dashboard` repondait quand meme `ok: True`. Purger ne suffisait pas : une
+  **barriere** gele la reconstruction pendant tout le wipe, et les deux routes
+  REFUSENT tant qu'un run tourne — le `JobRunner` cache est le SEUL verrou
+  d'exclusion du depot. **13/13 mutants.**
+- **#1056** le retry REST ne couvrait pas `TimeoutError` : trois executions de CI
+  rougies le meme jour, sur trois PR aux diffs sans rapport, alors que les memes
+  tetes etaient vertes en local.
+- **#1057** vague E etape 1 : une connexion par requete REST. **50 -> 25
+  connexions**, 35 a 47 % de gain selon la charge, frontieres de commit
+  **inchangees**. L'ETAPE 2 RESTE A FAIRE : le scan (ou vivent les 60 003
+  connexions et le x8,2 du plan) ne passe pas par le dispatch REST, et une
+  connexion y vivrait des MINUTES — autre classe de risque.
 
 **Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
 
