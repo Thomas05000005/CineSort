@@ -7955,6 +7955,14 @@ body.v5-notif-lock {
   color: var(--danger, #e5534b);
 }
 
+/* UN SUCCES PARTIEL N'EST NI VERT NI ROUGE. Le vert dirait que tout a ete fait,
+   le rouge que rien ne l'a ete : les deux seraient faux, et sur un reset c'est
+   la difference entre « c'est fini » et « fermez l'application et recommencez ». */
+.parametres-section-actions-out--avertissement {
+  color: var(--warning, #e0a030);
+  font-weight: var(--fw-semibold, 600);
+}
+
 .parametres-section-actions-out--info {
   color: var(--text-2, #bbb);
   font-style: italic;

@@ -80,7 +80,6 @@ function apiPost(route, params) {
   const r = globalThis.__reponses[route];
   return Promise.resolve(r === undefined ? { ok: true } : r);
 }
-function invalidateSettingsCache() {}
 function escapeHtml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -115,6 +114,9 @@ function formatBytes() { return ""; }
 function registerRoute() {}
 function navigate() {}
 const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
+// Le rechargement post-reset passe par le cache partage : on COMPTE ses appels.
+globalThis.__invalidations = 0;
+function invalidateSettingsCache() { globalThis.__invalidations += 1; }
 """
 
 _EXTRA = (
@@ -122,9 +124,18 @@ _EXTRA = (
     "export const __rendreSectionActions = _renderSectionActions;\n"
     "export const __lancer = _lancerActionDeSection;\n"
     "export const __rendreReponse = _rendreReponseAction;\n"
+    "export const __recharger = _rechargerApresReset;\n"
 )
 
 _EXIT = "\nprocess.exit(0);\n"
+
+#: Les reponses que le RECHARGEMENT post-reset ira chercher. `_loadSettings` lit
+#: `res.data` et LEVE si la forme n'y est pas (garde du BUG USER #1) : sans ces
+#: reponses, le test mesurerait l'echec du harnais, pas celui du code.
+_APRES_RESET = r"""
+globalThis.__reponses["settings/get_settings"] = { data: { root: "R", state_dir: "S" } };
+globalThis.__reponses["settings/get_profiles"] = { data: { profiles: [], active: "" } };
+"""
 
 #: Un bouton et sa section, tels que le DOM les porterait. Le `closest` remonte
 #: a la section, qui expose la zone de sortie : c'est ce chemin-la qui casse si
@@ -431,7 +442,7 @@ class LaREINITIALISATIONTOTALEEstAtteignableTests(unittest.TestCase):
     """LA SEULE DES DIX METHODES DE LA VAGUE B3 RESTEE NON CABLABLE.
 
     `settings.reset_all_user_data` refuse tout appel dont `confirmation` ne vaut
-    pas exactement « RESET » (`reset_support.py:196`), et `dangerConfirmModal`
+    pas exactement « RESET » (`reset_support.py:266`), et `dangerConfirmModal`
     n'avait aucune affordance de saisie : la capacite etait inatteignable depuis
     toute l'application. Le tri des routes orphelines la classait « NON cablable »
     pour cette raison.
@@ -464,7 +475,8 @@ __emit({ mot: c.requireTyped, elements: (c.items || []).length,
         """Envoyer la constante a la place rendrait le garde du backend
         decoratif : il relirait ce que ce fichier lui a souffle."""
         res = self._run(
-            r"""
+            _APRES_RESET
+            + r"""
 globalThis.__saisie = "RESET";
 const { btn } = fauxBouton("settings/reset_all_user_data");
 M.__lancer(null, btn);
@@ -505,6 +517,106 @@ __emit({ appels: globalThis.__appels.map((a) => a.route) });
 """
         )
         self.assertEqual(res["appels"], [], "l'action est partie malgre l'annulation")
+
+    def test_un_reset_PARTIEL_n_est_pas_annonce_comme_un_SUCCES(self) -> None:
+        """LE CAS NORMAL, PAS L'EXCEPTION. Le wipe s'execute pendant que
+        l'application TOURNE : ses threads de fond tiennent des fichiers ouverts,
+        et sous Windows un seul suffit a faire echouer la suppression de son
+        dossier parent (docstring de `_vider_state_dir_sauf_logs`). Le backend
+        rend alors `ok: True` AVEC `failed` et un message « Reinitialisation
+        PARTIELLE … fermez puis relancez ».
+
+        Une premiere version ne lisait que `removed` et `backup_path` : la base
+        et settings.json pouvaient SURVIVRE pendant que l'ecran annoncait
+        « 1 element(s) supprime(s) » en VERT.
+        """
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: true,
+  backup_path: "C:/data/backup.zip",
+  removed: ["runs"],
+  failed: ["cinesort.db", "settings.json"],
+  message: "Réinitialisation PARTIELLE : 1 élément(s) supprimé(s), 2 n'ont pas pu l'être (cinesort.db, settings.json). Fermez puis relancez l'application.",
+};
+const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ texte: sortie.textContent, classe: sortie.className });
+"""
+        )
+        self.assertIn("2", res["texte"], "le nombre d'elements qui ont RESISTE n'est pas dit")
+        self.assertIn("cinesort.db", res["texte"], "on ne sait pas CE QUI a survecu")
+        self.assertIn("relancez", res["texte"], "la consigne du backend est perdue")
+        self.assertNotIn("--ok", res["classe"], "un reset PARTIEL est affiche en vert")
+        self.assertIn("--avertissement", res["classe"])
+
+    def test_un_reset_COMPLET_reste_vert(self) -> None:
+        """La regle ne doit pas devenir alarmiste : sans `failed`, c'est un
+        succes, et le dire autrement userait l'attention de l'utilisateur."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: true, backup_path: "C:/data/backup.zip", removed: ["db", "runs"], failed: [],
+};
+const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ classe: sortie.className, texte: sortie.textContent });
+"""
+        )
+        self.assertIn("--ok", res["classe"])
+        self.assertNotIn("--avertissement", res["classe"])
+
+    def test_la_RAISON_de_l_echec_est_montree_meme_sous_la_cle_error(self) -> None:
+        """`reset_support` renvoie ses echecs sous `key="error"` (lignes 272, 278
+        et 326), contrat historique documente dans `_responses.py`. Sans cette
+        lecture, un disque plein pendant le ZIP affichait « L'action a echoue. »
+        et rien d'autre : l'utilisateur ignorait que la SAUVEGARDE n'avait pas
+        ete faite."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: false, error: "[Errno 28] No space left on device: 'C:/data/backup.zip'",
+};
+const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ texte: sortie.textContent, classe: sortie.className });
+"""
+        )
+        self.assertIn("No space left", res["texte"], "la raison de l'echec est jetee")
+        self.assertIn("--error", res["classe"])
+
+    def test_apres_le_reset_les_reglages_sont_RELUS_du_disque(self) -> None:
+        """SANS CELA LE RESET S'ANNULE TOUT SEUL. `_state.settings` garde en
+        memoire l'objet d'AVANT, et `_saveSettingsNow` POSTe `{settings}` en
+        ENTIER : la premiere modification d'un champ recreerait settings.json
+        avec exactement les reglages qu'on venait de supprimer."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = { ok: true, removed: ["db"], failed: [] };
+globalThis.__invalidations = 0;
+const { btn } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ invalidations: globalThis.__invalidations,
+         relu: globalThis.__appels.some((a) => a.route === "settings/get_settings") });
+"""
+        )
+        self.assertGreaterEqual(res["invalidations"], 1, "le cache partage des reglages n'est pas invalide")
 
     def test_la_reponse_NOMME_la_sauvegarde(self) -> None:
         """C'est le seul moyen de revenir en arriere : ne pas la nommer rendrait

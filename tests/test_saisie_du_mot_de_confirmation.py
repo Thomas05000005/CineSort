@@ -1,7 +1,7 @@
 """La modale de danger sait exiger un MOT TAPE — et « Tout réinitialiser » l'exige.
 
 LE DEFAUT. `settings.reset_all_user_data` refuse tout appel dont `confirmation`
-ne vaut pas exactement « RESET » (`reset_support.py:196`). Aucun ecran ne pouvait
+ne vaut pas exactement « RESET » (`reset_support.py:266`). Aucun ecran ne pouvait
 produire ce mot : `dangerConfirmModal` n'avait aucune affordance de saisie. La
 capacite — supprimer base, reglages, historique et caches, apres sauvegarde ZIP —
 etait donc INATTEIGNABLE depuis toute l'application. C'etait la seule des dix
@@ -238,6 +238,44 @@ __emit({ arme: !confirmer.disabled });
 """
         )
         self.assertTrue(res["arme"], "mot tape ET decompte fini : le bouton doit s'armer")
+
+
+class UneActionENGAGEEneSeReARMEPasTests(_Base):
+    """Le clic desarme le bouton pour empecher une double soumission, mais la
+    modale reste AFFICHEE tant que `onConfirm` n'a pas resolu — et un wipe dure.
+    Sans garde, retoucher le champ pendant ce temps re-armait le bouton : un
+    second « Tout reinitialiser » partait pendant le premier."""
+
+    def test_retoucher_le_champ_pendant_l_action_ne_rearme_PAS(self) -> None:
+        res = self._run(
+            r"""
+const { confirmer, saisie } = globalThis.preparer();
+let departs = 0;
+let debloquer;
+M.__danger({
+  title: "T", requireTyped: "RESET", countdownSeconds: 0,
+  onConfirm: () => { departs += 1; return new Promise((r) => { debloquer = r; }); },
+});
+saisie.value = "RESET";
+saisie.declencher("input");
+confirmer.declencher("click");          // l'action part et ne resout PAS
+const desarmeApresClic = confirmer.disabled;
+
+// L'utilisateur retouche le champ pendant que le wipe tourne.
+saisie.value = "RESE";
+saisie.declencher("input");
+saisie.value = "RESET";
+saisie.declencher("input");
+const rearme = !confirmer.disabled;
+
+confirmer.declencher("click");          // un second clic ne doit RIEN lancer
+debloquer && debloquer();
+__emit({ desarmeApresClic, rearme, departs });
+"""
+        )
+        self.assertTrue(res["desarmeApresClic"], "le clic ne desarme pas le bouton")
+        self.assertFalse(res["rearme"], "retoucher le champ a RE-ARME une action deja en vol")
+        self.assertEqual(res["departs"], 1, "l'action est partie DEUX fois")
 
 
 class LaSAISIEEstTRANSMISEAuRappelTests(_Base):

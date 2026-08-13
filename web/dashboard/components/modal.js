@@ -278,7 +278,7 @@ export function dangerConfirmModal(opts) {
     // Opt-in deliberement : les ~20 autres sites d'appel gardent la semantique
     // historique, aucun n'est modifie par ce correctif.
     // LE DERNIER CRAN AVANT L'IRREVERSIBLE. `settings.reset_all_user_data`
-    // exige `confirmation == "RESET"` (reset_support.py:196) : sans affordance
+    // exige `confirmation == "RESET"` (reset_support.py:266) : sans affordance
     // de saisie, cette capacite etait INATTEIGNABLE depuis toute l'application —
     // la seule des dix methodes de la vague B3 a l'etre restee.
     requireTyped = "",
@@ -459,6 +459,12 @@ export function dangerConfirmModal(opts) {
       // Comparaison EXACTE, espaces de bord retires : ni insensible a la casse,
       // ni tolerante. « reset » n'est pas « RESET », et le backend refuserait
       // de toute facon — l'ecran ne doit pas promettre l'inverse.
+      // UNE ACTION DEJA ENGAGEE NE SE RE-ARME PAS. Le clic pose
+      // `confirmBtn.disabled = true` pour empecher une double soumission, mais la
+      // modale reste affichee tant que `onConfirm` n'a pas resolu — et sans ce
+      // garde, retoucher le champ pendant ce temps RE-ARMAIT le bouton. Sur
+      // « Tout reinitialiser », cela lancait un second wipe pendant le premier.
+      if (overlay._confirmed) return;
       overlay._motTape = String(champ.value || "").trim() === motAttendu;
       confirmBtn.disabled = !overlay._motTape || !!overlay._countdownTimer;
     });
