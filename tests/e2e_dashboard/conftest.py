@@ -39,6 +39,7 @@ from create_test_data import (  # noqa: E402
     write_plan_file,
 )
 
+from tests._diag_reseau import etat_reseau as _etat_reseau  # noqa: E402
 from tests._helpers import find_free_port as _find_free_port
 
 
@@ -606,9 +607,46 @@ _SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Capture un screenshot si le test echoue."""
+    """Capture un screenshot si le test echoue, et l'etat reseau si le SETUP echoue."""
     outcome = yield
     report = outcome.get_result()
+
+    # LES ECHECS DE #924 SONT DES `ERROR at setup`, PAS DES `failed` DE CALL.
+    # Cette capture ne s'etait donc JAMAIS declenchee pour eux : elle ne
+    # regardait que la phase `call`. Un hook qui ne couvre pas la phase ou le
+    # defaut vit ne documente rien — c'est la meme forme que le test qui saute
+    # par-dessus la couche ou vit le bug.
+    if report.when == "setup" and report.failed:
+        # MESURE SUR PYTEST (bac a sable dedie, deux fixtures) :
+        #
+        #   serveur OK + fixture de page qui echoue -> funcargs CONTIENT e2e_server
+        #                                              et son port. C'est le cas #924.
+        #   fixture serveur qui echoue elle-meme    -> e2e_server ABSENT de funcargs.
+        #
+        # Le second cas ne doit PAS produire un silence : les COMPTES de sockets
+        # restent mesurables sans port, et c'est justement quand le serveur ne
+        # demarre pas qu'on veut savoir si la machine a encore des sockets.
+        # CE CONFTEST EST UN PLUGIN GLOBAL : douze fichiers `tests/test_*.py` du
+        # perimetre CI le declarent en `pytest_plugins`. Sans ce filtre, la sonde
+        # s'executerait a CHAQUE echec de setup de CHAQUE test de la session —
+        # y compris des tests unitaires sans le moindre rapport avec le reseau —
+        # en payant un `netstat` et une sonde TCP a chaque fois, et en agrafant
+        # une section « Etat reseau » a des rapports qu'elle n'explique pas.
+        #
+        # `fixturenames` est renseigne MEME quand la fixture serveur a echoue
+        # elle-meme (mesure sur pytest) : on garde donc l'absence de silence sur
+        # le perimetre vise, sans rien faire payer aux autres.
+        if "e2e_server" not in set(getattr(item, "fixturenames", ()) or ()):
+            return
+        srv = item.funcargs.get("e2e_server") if hasattr(item, "funcargs") else None
+        port = (srv or {}).get("port") if isinstance(srv, dict) else None
+        texte = _etat_reseau(port)
+        report.sections.append(("Etat reseau a l'instant de l'echec (#924)", texte))
+        if allure:
+            with contextlib.suppress(Exception):
+                allure.attach(texte, name="reseau-924", attachment_type=allure.attachment_type.TEXT)
+        return
+
     if report.when == "call" and report.failed:
         pg = item.funcargs.get("dashboard_page") or item.funcargs.get("authenticated_page") or item.funcargs.get("page")
         if pg:

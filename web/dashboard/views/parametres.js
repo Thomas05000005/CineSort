@@ -34,6 +34,8 @@ import { formatBytes } from "../core/format.js";
 import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js";
 // Vague D2 : le simulateur que l'avertissement ci-dessous reclame depuis toujours.
 import { ouvrirSimulateurQualite } from "../components/simulateur-qualite.js";
+// Vague D3 : les regles custom modifient score et tier, et etaient increables.
+import { ouvrirReglesQualite } from "../components/regles-qualite.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1336,7 +1338,10 @@ function _renderProfilsQualite() {
       <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-simulateur>
         🧪 Simuler un profil
       </button>
-      <span class="parametres-hint">Compare avant / après sur vos films, sans rien modifier.</span>
+      <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-regles>
+        ⚙ Règles personnalisées
+      </button>
+      <span class="parametres-hint">Comparez avant / après, ou affinez le score avec vos propres règles.</span>
     </p>
     <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
       <label class="parametres-hierarchy-toggle">
@@ -3639,6 +3644,17 @@ function _bindProfilsQualite(container) {
   // Le simulateur : une LECTURE, donc aucune confirmation.
   container.querySelectorAll("[data-parametres-ouvrir-simulateur]").forEach((btn) => {
     btn.addEventListener("click", () => ouvrirSimulateurQualite());
+  });
+
+  container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {
+    // Le builder lit ses regles LUI-MEME, a la source qu'il ecrit. Lui passer
+    // `_state.profileDraft.custom_rules` revenait a passer `undefined` : ce
+    // brouillon est construit en cinq endroits avec exactement
+    // {id, label, tiers, weights, tier_hierarchy}, et un `grep custom_rules` sur
+    // ce fichier ne rendait QUE ce site de lecture. L'ecran s'ouvrait donc
+    // toujours vide, puis « Enregistrer » DETRUISAIT les regles preexistantes
+    // avec un toast de succes.
+    btn.addEventListener("click", () => ouvrirReglesQualite());
   });
 
   // Boutons d'action
