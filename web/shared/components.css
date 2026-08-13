@@ -10834,3 +10834,117 @@ body.v5-notif-lock {
   color: var(--danger, #e5534b);
   font-size: var(--fs-sm, 0.9rem);
 }
+
+/* ===========================================================================
+   REGLAGES FINS DU PROFIL : options, calibration, partage — vague D4
+   ---------------------------------------------------------------------------
+   `film-detail.js` promet a l'utilisateur que « votre feedback alimente le
+   rapport de calibration » ; ce rapport n'etait affiche nulle part. Le feedback
+   partait donc dans un rapport que personne ne pouvait lire.
+
+   Trois blocs, du plus quotidien au plus rare : les options qu'on coche, la
+   calibration qu'on consulte, le partage qu'on fait une fois.
+   =========================================================================== */
+
+.calib-vue {
+  min-width: min(660px, 78vw);
+}
+
+.calib-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.5rem;
+}
+
+.calib-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.calib-bloc {
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: 10px;
+  padding: 0.9rem;
+}
+
+.calib-direction {
+  margin: 0.35rem 0 0;
+  font-weight: var(--fw-semibold, 600);
+}
+
+.calib-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin: 0.5rem 0 0;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.calib-cat {
+  font-variant-numeric: tabular-nums;
+}
+
+.calib-suggestion {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-1, #333);
+}
+
+.calib-suggestion-titre {
+  margin: 0 0 0.45rem;
+  font-size: var(--fs-sm, 0.9rem);
+  font-weight: var(--fw-semibold, 600);
+  color: var(--text-2, #bbb);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* La justification que le backend joint a sa suggestion (`rationale`). Elle
+   precede les chiffres : on lit POURQUOI avant de lire QUOI. */
+.calib-raison {
+  margin: 0 0 0.5rem;
+  font-size: var(--fs-sm, 0.9rem);
+  color: var(--text-2, #bbb);
+  line-height: 1.45;
+}
+
+.calib-ligne {
+  margin: 0.2rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La valeur AVANT s'efface au profit de l'apres : c'est la nouvelle qui compte,
+   l'ancienne n'est la que pour donner l'echelle du changement. */
+.calib-avant {
+  color: var(--text-3, #888);
+}
+
+.calib-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.calib-actions--gauche {
+  justify-content: flex-start;
+}
+
+/* Le champ fichier natif est illisible et non stylable : le <label> porte
+   l'apparence, l'<input> reste accessible au clavier via le label. */
+.calib-import {
+  cursor: pointer;
+}
+
+.calib-diff {
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border-radius: 10px;
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--accent-border, var(--accent, #6ea8fe));
+}
