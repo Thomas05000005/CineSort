@@ -3215,9 +3215,27 @@ function _bindFields(container) {
               }
               const deleted = Number(data.deleted || 0);
               const freedMo = Number(data.bytes_freed || 0) / 1024 / 1024;
+              // UN ECHEC NE DOIT PAS S'AFFICHER EN VERT. Le backend pose
+              // `ok: true` a la CONSTRUCTION du payload et ne le rediscute
+              // jamais : il compte ses echecs dans `errors` (un fichier
+              // verrouille, un droit refuse). Ne lire que `deleted` faisait
+              // donc annoncer « ✓ 0 fichier(s) supprimé(s) » — coche verte,
+              // classe --ok — a un utilisateur dont AUCUN fichier n'a ete
+              // supprime. On ne touche pas a `ok` cote backend : le mettre a
+              // faux ferait passer pour un echec une purge partielle ou 299
+              // fichiers sur 300 sont bien partis.
+              const echecs = Number(data.errors || 0);
               if (resultEl) {
-                resultEl.textContent = `✓ ${deleted} fichier(s) supprimé(s) (${freedMo.toFixed(1)} Mo libérés).`;
-                resultEl.className = "parametres-test-result parametres-test-result--ok";
+                if (echecs > 0 && deleted === 0) {
+                  resultEl.textContent = `✗ Aucun fichier supprimé : ${echecs} échec(s). Les fichiers sont peut-être verrouillés par un traitement en cours.`;
+                  resultEl.className = "parametres-test-result parametres-test-result--error";
+                } else if (echecs > 0) {
+                  resultEl.textContent = `⚠ ${deleted} fichier(s) supprimé(s) (${freedMo.toFixed(1)} Mo libérés), mais ${echecs} échec(s) : le bucket n'est pas vide.`;
+                  resultEl.className = "parametres-test-result parametres-test-result--warn";
+                } else {
+                  resultEl.textContent = `✓ ${deleted} fichier(s) supprimé(s) (${freedMo.toFixed(1)} Mo libérés).`;
+                  resultEl.className = "parametres-test-result parametres-test-result--ok";
+                }
               }
             } catch (err) {
               if (resultEl) { resultEl.textContent = `✗ Erreur : ${err?.message || err}`; resultEl.className = "parametres-test-result parametres-test-result--error"; }
