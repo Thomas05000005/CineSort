@@ -53,7 +53,11 @@ from cinesort.infra.probe import ProbeService
 from cinesort.infra.probe.tooling import safe_tool_path
 from cinesort.infra.subprocess_safety import tracked_run
 from cinesort.ui.api._responses import err as _err_response
-from cinesort.ui.api.settings_support import _normalize_composite_score_version, normalize_user_path
+from cinesort.ui.api.settings_support import (
+    _coerce_int_with_default,
+    _normalize_composite_score_version,
+    normalize_user_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1728,7 +1732,15 @@ def _build_settings_dict(settings: Dict[str, Any]) -> Dict[str, Any]:
         "auto_on_quality": bool(settings.get("perceptual_auto_on_quality")),
         "timeout_per_film_s": int(settings.get("perceptual_timeout_per_film_s") or 120),
         "frames_count": int(settings.get("perceptual_frames_count") or 10),
-        "skip_percent": int(settings.get("perceptual_skip_percent") or 5),
+        # `or 5` ecrasait un 0 LEGAL : la sauvegarde borne ce reglage a [0, 20],
+        # et 0 veut dire « n'ignore ni le debut ni la fin du film ». Le piege est
+        # nomme dans settings_support.py avec ce reglage precis en exemple, mais
+        # le correctif d'alors n'avait ete pose que sur le chemin d'ECRITURE.
+        # C'est le seul reglage de ce dict dont le plancher soit 0 — les six
+        # autres ont un minimum > 0, donc leur `or` ne peut rien ecraser
+        # (verrouille par tests/test_perceptual_settings_roundtrip.py).
+        # Un reglage absent rend `None`, que le helper ramene au defaut.
+        "skip_percent": _coerce_int_with_default(settings.get("perceptual_skip_percent"), 5),
         "dark_weight": float(settings.get("perceptual_dark_weight") or 1.5),
         "audio_deep": bool(settings.get("perceptual_audio_deep", True)),
         "audio_segment_s": int(settings.get("perceptual_audio_segment_s") or 30),
