@@ -472,6 +472,29 @@ class _RateLimiter:
             del self._failures[ip]
 
 
+def _statut_metier(result: Any) -> int:
+    """Le code HTTP qu'un handler a demande, ou 200.
+
+    Phase 11 v7.8.0 : convention OPT-IN `http_status`, qui permet a un handler
+    de signaler un code metier (404/403/409...) sans casser les clients qui
+    lisent `data.ok`. Absent, le defaut reste 200 — compatibilite ascendante
+    totale. Le champ est RETIRE du payload au passage, pour ne pas polluer la
+    reponse.
+
+    Fonction separee, et pas quelques lignes en place : `_handle_post` depasse
+    deja son plafond de taille, et le cliquet du depot refuse qu'une fonction
+    trop longue GROSSISSE. Monter son plafond pour y loger une portee de
+    connexion serait la dette silencieuse que ce cliquet existe pour empecher.
+    """
+    if not isinstance(result, dict) or "http_status" not in result:
+        return 200
+    try:
+        candidat = int(result.pop("http_status"))
+    except (TypeError, ValueError):
+        return 200
+    return candidat if 200 <= candidat < 600 else 200
+
+
 class _CineSortHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the CineSort REST API."""
 
@@ -1383,36 +1406,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
         # Dispatch
         try:
-            # UNE CONNEXION PAR REQUETE, PAS UNE PAR REPOSITORY. Le cout du
-            # stockage est dans l'OUVERTURE : les memes huit PRAGMA coutent x139
-            # sur un handle neuf, et un scan a froid de 10 000 films ouvre
-            # 60 003 connexions dont l'ouverture pese 23 % du temps total.
-            #
-            # C'est l'endroit le plus haut ou une requete est encore UNE unite
-            # de travail, et le plus bas ou l'on n'a besoin d'aucun `state_dir`.
-            # La portee est PARESSEUSE : une requete qui ne touche pas la base
-            # n'ouvre rien — donc elle ne construit pas d'infra, et ne se heurte
-            # pas a la barriere qui gele la reconstruction pendant un effacement.
-            #
-            # Les frontieres de commit ne bougent pas : chaque `_managed_conn`
-            # garde son propre `with conn:` et commite son unite comme avant.
+            # UNE CONNEXION PAR REQUETE, PAS UNE PAR REPOSITORY : c'est le point
+            # le plus haut ou une requete est encore UNE unite de travail, et le
+            # plus bas ou aucun `state_dir` n'est necessaire. Le raisonnement
+            # complet — paresse, frontieres de commit inchangees, imbrication —
+            # vit dans la docstring de `portee_de_requete`, pas en double ici.
             with portee_de_requete():
                 result = method(**params)
-            # Phase 11 v7.8.0 : convention opt-in `http_status` permettant aux
-            # handlers de signaler un code HTTP metier (404/403/409/...) sans
-            # casser les clients existants qui lisent `data.ok`. Si le champ
-            # n'est pas fourni, le defaut reste 200 (backwards compat totale).
-            # Le champ est retire avant serialisation pour ne pas polluer le
-            # payload retourne.
-            status = 200
-            if isinstance(result, dict) and "http_status" in result:
-                try:
-                    candidate = int(result.pop("http_status"))
-                    if 200 <= candidate < 600:
-                        status = candidate
-                except (TypeError, ValueError):
-                    pass
-            self._respond_json(status, result)
+            self._respond_json(_statut_metier(result), result)
             logger.info("REST POST /api/%s -> %d (%.0fms)", method_name, status, (time.monotonic() - _t0) * 1000)
         except TypeError as exc:
             self._respond_json(400, {"ok": False, "message": f"Parametres invalides: {exc}"})
