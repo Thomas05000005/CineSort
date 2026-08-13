@@ -90,6 +90,45 @@ class _Base(unittest.TestCase):
         return run_module_test(SIMU_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
 
 
+class UneReponsePERIMEENEcritRienTests(_Base):
+    def test_une_reponse_PERIMEE_n_ecrit_ni_l_etat_ni_l_ecran(self) -> None:
+        """LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE :
+        `showModal` commence par `closeModal()`. Une reponse arrivee apres qu'une
+        autre generation a pris la main ne doit RIEN ecrire — ni l'etat, sur
+        lequel agissent les boutons, ni la modale, qu'elle rouvrirait par-dessus
+        celle que l'utilisateur regarde."""
+        res = self._run(
+            r"""
+let debloquer;
+globalThis.__reponses["quality/simulate_quality_preset"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._simuler();          // generation 1 : preset A, reste en vol
+
+globalThis.__reponses["quality/simulate_quality_preset"] = {
+  ok: true, preset_id: "B", films_count: 222,
+  before: { avg_score: 1, tiers: {} }, after: { avg_score: 2, tiers: {} },
+  delta: {}, top_winners: [], top_losers: [], warnings: [],
+};
+await M.__t._simuler();                  // generation 2 : preset B, terminee
+const modalesApresG2 = globalThis.__modales.length;
+
+debloquer({                              // le preset A arrive TROP TARD
+  ok: true, preset_id: "A", films_count: 999,
+  before: { avg_score: 9, tiers: {} }, after: { avg_score: 9, tiers: {} },
+  delta: {}, top_winners: [], top_losers: [], warnings: [],
+});
+await enVol;
+__emit({
+  preset: M.__t._etat.resultat && M.__t._etat.resultat.preset_id,
+  films: M.__t._etat.resultat && M.__t._etat.resultat.films_count,
+  modalesEnPlus: globalThis.__modales.length - modalesApresG2,
+});
+"""
+        )
+        self.assertEqual(res["preset"], "B", "l'ecran garde le resultat d'une simulation ABANDONNEE")
+        self.assertEqual(res["films"], 222, "« Enregistrer ce preset » figerait des chiffres perimes")
+        self.assertEqual(res["modalesEnPlus"], 0, "une reponse perimee a ROUVERT une modale")
+
+
 class LesTiersCAPITALISESSontNormalisesTests(_Base):
     """LE piege de cet ecran, et il n'echoue pas tout seul."""
 
@@ -244,20 +283,80 @@ __emit({ ecritures: globalThis.__appels.filter((a) => a.route === "quality/save_
 
     def test_changer_de_preset_PERIME_le_resultat_affiche(self) -> None:
         """Sinon l'ecran montre les chiffres d'un preset sous le nom d'un autre,
-        et « Enregistrer » porte sur celui qu'on ne regarde plus."""
+        et « Enregistrer » porte sur celui qu'on ne regarde plus.
+
+        CE TEST A ETE FAUX-VERT. Il REJOUAIT le gestionnaire (`_etat.preset = ...;
+        _etat.resultat = null;`) au lieu de le declencher — son propre commentaire
+        le disait : « on rejoue exactement ce que fait le gestionnaire de clic ».
+        Il eprouvait donc la main du testeur, et serait reste vert si la
+        delegation cessait de perimer le resultat. On passe par le VRAI ecouteur
+        pose par `_brancher()`.
+        """
         res = self._run(
             _REPONSE
             + r"""
+let ecouteur = null;
+const hote = { addEventListener(_type, fn) { ecouteur = fn; } };
+globalThis.document.querySelector = (sel) => (sel === ".simu-vue" ? hote : null);
+
 await M.__t._simuler();
 const avant = !!M.__t._etat.resultat;
-// On rejoue exactement ce que fait le gestionnaire de clic.
-M.__t._etat.preset = "compact";
-M.__t._etat.resultat = null;
-__emit({ avant, apres: !!M.__t._etat.resultat });
+M.__t._brancher();
+
+// Un clic REEL sur le choix de preset, tel que le DOM le livrerait.
+const choix = { dataset: { simuPreset: "compact" }, closest() { return this; } };
+ecouteur({ target: choix });
+
+__emit({ avant, apres: !!M.__t._etat.resultat, preset: M.__t._etat.preset });
+"""
+        )
+        self.assertTrue(res["avant"], "la simulation n'a rien produit : le test ne prouverait rien")
+        self.assertEqual(res["preset"], "compact", "le clic n'a pas change de preset")
+        self.assertFalse(res["apres"], "le resultat du preset PRECEDENT reste affiche sous le nouveau nom")
+
+    def test_changer_de_PORTEE_perime_aussi_le_resultat(self) -> None:
+        """Meme cause, meme consequence : « Ce run » et « Toute la bibliotheque »
+        ne donnent pas les memes chiffres."""
+        res = self._run(
+            _REPONSE
+            + r"""
+let ecouteur = null;
+const hote = { addEventListener(_type, fn) { ecouteur = fn; } };
+globalThis.document.querySelector = (sel) => (sel === ".simu-vue" ? hote : null);
+
+await M.__t._simuler();
+const avant = !!M.__t._etat.resultat;
+M.__t._brancher();
+const choix = { dataset: { simuPortee: "library" }, closest() { return this; } };
+ecouteur({ target: choix });
+
+__emit({ avant, apres: !!M.__t._etat.resultat, portee: M.__t._etat.portee });
 """
         )
         self.assertTrue(res["avant"])
-        self.assertFalse(res["apres"])
+        self.assertEqual(res["portee"], "library", "le clic n'a pas change de portee")
+        self.assertFalse(res["apres"], "les chiffres d'une autre portee restent affiches")
+
+    def test_un_preset_INCONNU_ne_change_rien(self) -> None:
+        """Le garde `PRESETS.some(...)` doit etre ATTEIGNABLE : sans lui, un
+        attribut falsifie enverrait un `preset_id` que le backend ne connait pas."""
+        res = self._run(
+            _REPONSE
+            + r"""
+let ecouteur = null;
+const hote = { addEventListener(_type, fn) { ecouteur = fn; } };
+globalThis.document.querySelector = (sel) => (sel === ".simu-vue" ? hote : null);
+
+await M.__t._simuler();
+M.__t._brancher();
+const choix = { dataset: { simuPreset: "n_existe_pas" }, closest() { return this; } };
+ecouteur({ target: choix });
+
+__emit({ preset: M.__t._etat.preset, resultat: !!M.__t._etat.resultat });
+"""
+        )
+        self.assertNotEqual(res["preset"], "n_existe_pas", "un preset inconnu a ete accepte")
+        self.assertTrue(res["resultat"], "un clic REFUSE a quand meme jete le resultat affiche")
 
     def test_enregistrer_SANS_simulation_n_ecrit_rien(self) -> None:
         """Un profil qu'on n'a pas vu a l'oeuvre est exactement ce que
