@@ -27,7 +27,7 @@
 
 import { apiPost } from "../core/api.js";
 import { escapeHtml } from "../core/dom.js";
-import { showModal, closeModal, dangerConfirmModal } from "./modal.js";
+import { showModal, closeModal, dangerConfirmModal, modaleCourante } from "./modal.js";
 import { showToast } from "./toast.js";
 
 /**
@@ -213,10 +213,18 @@ function _corps() {
  */
 let _generation = 0;
 
+/** Identifie ce module aupres du conteneur de modales PARTAGE. */
+const _MOI = "regles";
+
 /** Marque cette ouverture comme la courante, et rend le test de peremption. */
 function _prendreLaMain() {
   const mienne = ++_generation;
-  return () => _generation !== mienne;
+  // DEUX FACONS D'ETRE PERIME, ET IL FAUT LES DEUX. Une requete plus recente DU
+  // MEME module (`_generation`), et la modale qui n'est plus a l'ecran
+  // (`modaleCourante`). Le compteur seul ne voyait pas la FERMETURE — ni celle
+  // par Echap, ni celle qu'un AUTRE module provoque en ouvrant la sienne, alors
+  // que les trois partagent un conteneur unique.
+  return () => _generation !== mienne || modaleCourante() !== _MOI;
 }
 
 async function _charger() {
@@ -447,6 +455,7 @@ function _brancher() {
 
 function _reouvrir() {
   showModal({
+    proprietaire: _MOI,
     title: "Règles personnalisées",
     body: _corps(),
     actions: [

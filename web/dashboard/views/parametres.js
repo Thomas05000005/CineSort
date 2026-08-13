@@ -2739,7 +2739,18 @@ function _openResetModal() {
         if (ind) ind.innerHTML = `<span class="parametres-saved-indicator--ok">✓ ${_esc(msg)}</span>`;
       } else {
         const ind = _state.containerRef?.querySelector("[data-parametres-saved-indicator]");
-        if (ind) ind.innerHTML = `<span class="parametres-saved-indicator--error">⚠ ${_esc(res?.data?.message || "Reset impossible")}</span>`;
+        // `error` EST LA CLE DE CETTE ROUTE, ET C'EST LA SEULE QU'ELLE EMET.
+        // `reset_support` renvoie tous ses refus sous `key="error"` — dont
+        // « Un traitement est en cours (<run>) : arretez-le avant de … », qui
+        // est la seule chose utile a dire a cet instant. Sans cette lecture,
+        // l'ecran affichait « Reset impossible » et rien d'autre : l'utilisateur
+        // ne pouvait pas savoir qu'il lui suffisait d'arreter son scan.
+        //
+        // Le meme defaut a ete corrige dans `_executerActionDeSection` ; ce
+        // site-ci, voisin, avait ete oublie — les deux lisent desormais la meme
+        // famille de cles.
+        const raison = res?.data?.user_message || res?.data?.message || res?.data?.error || "Reset impossible";
+        if (ind) ind.innerHTML = `<span class="parametres-saved-indicator--error">⚠ ${_esc(raison)}</span>`;
       }
     } catch (err) {
       close();

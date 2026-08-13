@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from cinesort.domain.i18n_messages import t
+from cinesort.infra.db.sqlite_store import attendre_les_portees, portees_ouvertes
 from cinesort.ui.api import settings_support as _settings_support
 from cinesort.ui.api._responses import err as _err_response
 
@@ -589,6 +590,34 @@ def _gel_de_l_infra(api: Any) -> Iterator[None]:
         return
     with gel() as oubliees:
         logger.info("reset: %d infra(s) oubliee(s), reconstruction gelee.", oubliees)
+        # GELER NE SUFFIT PAS : IL FAUT ATTENDRE CE QUI EST DEJA OUVERT.
+        #
+        # La barriere empeche de RECONSTRUIRE une infra, mais les requetes REST
+        # deja en vol tiennent chacune une connexion de portee — et sous Windows,
+        # `unlink` refuse tant qu'un seul handle reste ouvert. Mesure, A/B a bras
+        # alternes, deux tours chacun :
+        #
+        #     voisin sans connexion -> ok=True   base supprimee
+        #     voisin qui en tient une -> ok=False base TOUJOURS LA (WinError 32)
+        #
+        # Et le SPA sonde `run/get_dashboard` toutes les 5 s : la configuration
+        # n'a rien d'exotique, c'est le cas NORMAL.
+        #
+        # On ATTEND plutot que de fermer de force : une connexion de portee
+        # appartient a une requete en cours, et la lui arracher couperait une
+        # lecture ou une ecriture au milieu. Les requetes durent des
+        # millisecondes ; l'effacement peut attendre.
+        chemin = _resolve_db_path(api)
+        if chemin is not None:
+            reste = attendre_les_portees(chemin)
+            if reste:
+                # On n'echoue pas ici — le wipe dira lui-meme pourquoi, avec un
+                # message lisible plutot qu'un `WinError 32` brut.
+                logger.warning(
+                    "reset: %d connexion(s) de requete tiennent encore %s apres l'attente.",
+                    reste,
+                    chemin,
+                )
         yield
 
 
@@ -716,6 +745,20 @@ def _executer_le_wipe(api: Any, db_path: Path, state_path: Path) -> Dict[str, An
         }
     except (OSError, shutil.Error) as exc:
         logger.exception("reset_database: echec")
+        # UN VERROU DE FICHIER SE DIT AUTREMENT QU'UNE PANNE. Rendre le
+        # `WinError 32` brut laissait l'utilisateur devant « Le processus ne peut
+        # pas acceder au fichier », sans savoir que la cause est une requete en
+        # cours ni que reessayer suffit.
+        reste = portees_ouvertes(db_path)
+        if reste:
+            return _err_response(
+                f"La base est encore utilisee par {reste} requete(s) en cours. "
+                "Fermez les autres onglets du tableau de bord, puis reessayez.",
+                category="state",
+                level="warning",
+                log_module=__name__,
+                key="error",
+            )
         return _err_response(
             f"Echec reset DB : {exc}",
             category="runtime",

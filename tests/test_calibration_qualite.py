@@ -55,8 +55,23 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 globalThis.__modales = [];
-function showModal(o) { globalThis.__modales.push(o); }
-function closeModal() {}
+// FIDELE AU CONTENEUR PARTAGE. `showModal` retient QUI possede la modale et
+// `closeModal` le relache : c'est exactement ce que fait `modal.js`. Un stub qui
+// s'en ecarterait rendrait le jeton de peremption intestable — or c'est
+// precisement ce jeton qu'on eprouve ici.
+globalThis.__proprietaire = "";
+function showModal(o) {
+  globalThis.__modales.push(o);
+  globalThis.__proprietaire = String((o && o.proprietaire) || "");
+}
+function closeModal() { globalThis.__proprietaire = ""; }
+function modaleCourante() { return globalThis.__proprietaire; }
+// Exposees au PILOTE : les stubs vivent dans la portee du module, et un test qui
+// veut simuler « l'utilisateur ferme, puis ouvre une autre modale » doit pouvoir
+// les appeler de l'exterieur.
+globalThis.showModal = showModal;
+globalThis.closeModal = closeModal;
+globalThis.modaleCourante = modaleCourante;
 globalThis.__confirmations = [];
 globalThis.__accepte = true;
 function dangerConfirmModal(o) {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from contextlib import closing, contextmanager, suppress
 from contextvars import ContextVar
@@ -206,6 +207,47 @@ _PORTEE_COURANTE: ContextVar[Optional[Dict[str, sqlite3.Connection]]] = ContextV
 _EN_COURS: ContextVar[frozenset] = ContextVar("cinesort_portee_en_cours", default=frozenset())
 
 
+#: Les connexions de portee VIVANTES, tous contextes confondus, par chemin de
+#: base. Un `ContextVar` ne se lit que depuis SON contexte : sans ce registre, le
+#: thread qui efface la base ne peut ni voir ni attendre les handles tenus par
+#: les requetes voisines — et sous Windows, `unlink` refuse tant qu'un seul reste
+#: ouvert.
+_PORTEES_VIVANTES: Dict[str, int] = {}
+_VERROU_PORTEES = threading.Lock()
+
+
+def _compter_portee(cle: str, delta: int) -> None:
+    with _VERROU_PORTEES:
+        reste = _PORTEES_VIVANTES.get(cle, 0) + delta
+        if reste > 0:
+            _PORTEES_VIVANTES[cle] = reste
+        else:
+            _PORTEES_VIVANTES.pop(cle, None)
+
+
+def portees_ouvertes(db_path: Any) -> int:
+    """Combien de connexions de portee tiennent CETTE base, ici et maintenant."""
+    with _VERROU_PORTEES:
+        return _PORTEES_VIVANTES.get(str(db_path), 0)
+
+
+def attendre_les_portees(db_path: Any, *, secondes: float = 5.0) -> int:
+    """Attend que les portees relachent la base. Rend combien il en reste.
+
+    POURQUOI ATTENDRE PLUTOT QUE FERMER DE FORCE. Une connexion de portee
+    appartient a une requete EN COURS : la lui arracher couperait une lecture ou
+    une ecriture au milieu. Les requetes durent des millisecondes ; l'effacement,
+    lui, peut attendre. Et si elles ne relachent pas, l'appelant doit le DIRE
+    plutot que de rendre un `WinError 32` brut a l'utilisateur.
+    """
+    fin = time.monotonic() + max(0.0, secondes)
+    reste = portees_ouvertes(db_path)
+    while reste and time.monotonic() < fin:
+        time.sleep(0.05)
+        reste = portees_ouvertes(db_path)
+    return reste
+
+
 @contextmanager
 def portee_de_requete() -> Iterator[None]:
     """Une seule connexion par base pour toute la duree du bloc.
@@ -227,9 +269,10 @@ def portee_de_requete() -> Iterator[None]:
         yield
     finally:
         _PORTEE_COURANTE.reset(jeton)
-        for conn in ouvertes.values():
+        for cle, conn in ouvertes.items():
             with suppress(sqlite3.Error):
                 conn.close()
+            _compter_portee(cle, -1)
 
 
 class _StoreBase:
@@ -346,10 +389,12 @@ class _StoreBase:
         gagner l'ouverture sans toucher a la durabilite d'une seule ecriture —
         sur une application qui deplace des fichiers, ce n'etait pas negociable.
 
-        Cela ne tient QUE SI les appels ne s'imbriquent pas : sur un handle
-        partage, la sortie d'un appel INTERNE commiterait le travail partiel de
-        l'appel externe. Mesure sur le perimetre CI complet : profondeur
-        maximale 1 (cf. `tests/test_connexion_de_portee.py`, qui l'eprouve).
+        Cela ne tiendrait QUE SI les appels ne s'imbriquaient pas : sur un
+        handle partage, la sortie d'un appel INTERNE commiterait le travail
+        partiel de l'appel externe. OR ILS S'IMBRIQUENT — profondeur maximale
+        **2** sur le perimetre CI complet — et c'est pour cela qu'un appel
+        imbrique recoit sa PROPRE connexion (cf. le commentaire du corps, et
+        `tests/test_connexion_de_portee.py`).
         """
         ouvertes = _PORTEE_COURANTE.get()
         cle = str(self.db_path)
@@ -386,6 +431,9 @@ class _StoreBase:
             if partagee is None:
                 partagee = self._connect()
                 ouvertes[cle] = partagee
+                # Compte GLOBAL, pour que le thread qui efface la base puisse
+                # attendre : un `ContextVar` ne se lit que depuis son contexte.
+                _compter_portee(cle, +1)
             jeton = _EN_COURS.set(_EN_COURS.get() | {cle})
             try:
                 # Ni fermeture ici : la portee la detient. Le `with` est
