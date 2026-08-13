@@ -626,6 +626,18 @@ def pytest_runtest_makereport(item, call):
         # Le second cas ne doit PAS produire un silence : les COMPTES de sockets
         # restent mesurables sans port, et c'est justement quand le serveur ne
         # demarre pas qu'on veut savoir si la machine a encore des sockets.
+        # CE CONFTEST EST UN PLUGIN GLOBAL : douze fichiers `tests/test_*.py` du
+        # perimetre CI le declarent en `pytest_plugins`. Sans ce filtre, la sonde
+        # s'executerait a CHAQUE echec de setup de CHAQUE test de la session —
+        # y compris des tests unitaires sans le moindre rapport avec le reseau —
+        # en payant un `netstat` et une sonde TCP a chaque fois, et en agrafant
+        # une section « Etat reseau » a des rapports qu'elle n'explique pas.
+        #
+        # `fixturenames` est renseigne MEME quand la fixture serveur a echoue
+        # elle-meme (mesure sur pytest) : on garde donc l'absence de silence sur
+        # le perimetre vise, sans rien faire payer aux autres.
+        if "e2e_server" not in set(getattr(item, "fixturenames", ()) or ()):
+            return
         srv = item.funcargs.get("e2e_server") if hasattr(item, "funcargs") else None
         port = (srv or {}).get("port") if isinstance(srv, dict) else None
         texte = _etat_reseau(port)

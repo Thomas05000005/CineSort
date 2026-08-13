@@ -29,6 +29,8 @@ TROIS CHOIX DE CONCEPTION, tous les trois payes ici meme :
 
 from __future__ import annotations
 
+import errno
+import re
 import socket
 import subprocess
 from typing import Dict, Optional, Tuple
@@ -36,8 +38,22 @@ from typing import Dict, Optional, Tuple
 #: Au-dela, `netstat` a rencontre autre chose qu'un reseau local.
 _TIMEOUT_NETSTAT_S = 10.0
 
+#: Borne de la sonde de joignabilite. Elle n'est payee que dans le cas ou le
+#: port ne repond pas — c'est-a-dire le seul ou la sonde a quelque chose a dire.
+_TIMEOUT_SONDE_S = 1.5
+
 #: Les deux premiers mots d'une ligne TCP, selon l'OS.
 _PREFIXES_TCP = {"TCP", "TCP6"}
+
+#: Un etat TCP : une lettre, puis lettres/chiffres/souligne.
+#:
+#: `FIN_WAIT_1` ET `FIN_WAIT_2` PORTENT UN CHIFFRE. Le filtre precedent
+#: (`etat.replace("_", "").isalpha()`) les REJETAIT en silence — eux et leurs
+#: variantes Linux `FIN_WAIT1`/`FIN_WAIT2`. Ils disparaissaient du detail ET du
+#: total, sans un mot. Or `FIN_WAIT_*` est l'une des familles qui s'accumulent
+#: quand une table de sockets deborde : l'instrument pouvait donc rendre un
+#: chiffre rassurant a l'instant precis ou il fallait s'alarmer.
+_ETAT_TCP = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def joignabilite(port: Optional[int]) -> Tuple[Optional[int], str]:
@@ -60,14 +76,36 @@ def joignabilite(port: Optional[int]) -> Tuple[Optional[int], str]:
         numero = int(port)
     except (TypeError, ValueError):
         return None, f"port illisible ({port!r}) : aucune mesure possible"
+    # UN PORT HORS PLAGE EST UNE ERREUR DE PROGRAMMATION, PAS UNE PANNE RESEAU.
+    # Mesure : `create_connection(("127.0.0.1", 999999))` ne leve pas — elle
+    # EXPIRE, et l'instrument aurait donc rapporte « aucune reponse » (en payant
+    # le delai complet) pour un appelant qui s'est trompe de valeur.
+    if not 0 <= numero <= 65535:
+        return None, f"port hors plage ({numero}) : 0-65535 attendu, aucune mesure faite"
+
+    # `connect_ex` SUR UN SOCKET A TIMEOUT NE MESURE PAS CE QU'ON CROIT. Poser
+    # `settimeout()` rend le socket NON BLOQUANT : `connect_ex` rend alors
+    # `WSAEWOULDBLOCK` (10035) — « je ne sais pas encore » — pour tout ce qui
+    # n'aboutit pas instantanement. La version precedente etiquetait ce code
+    # « REFUSE », c'est-a-dire qu'elle AFFIRMAIT un mecanisme (le serveur a
+    # repondu RST, il est mort) la ou elle n'avait aucune reponse. Mesure sur ce
+    # poste : un port ferme rendait 10035, exactement comme un port lent.
+    #
+    # Or « refuse » et « aucune reponse » sont PRECISEMENT les deux hypotheses
+    # que #924 doit separer : un port qui refuse dit que le serveur est tombe ;
+    # un port muet dit que la pile reseau ne repond plus.
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(2.0)
-            code = s.connect_ex(("127.0.0.1", numero))
+        with socket.create_connection(("127.0.0.1", numero), timeout=_TIMEOUT_SONDE_S):
+            return 0, f"127.0.0.1:{numero} : joignable"
+    except ConnectionRefusedError as exc:
+        nom = errno.errorcode.get(exc.errno or 0, str(exc.errno))
+        return exc.errno, f"127.0.0.1:{numero} : REFUSE ({nom}) — le serveur ne tient plus le port"
+    except (TimeoutError, socket.timeout):
+        return None, f"127.0.0.1:{numero} : AUCUNE REPONSE en {_TIMEOUT_SONDE_S:g} s (ni refus, ni acceptation)"
     except (OSError, OverflowError, ValueError) as exc:
-        return None, f"connect_ex(127.0.0.1:{numero}) a leve {type(exc).__name__}: {exc}"
-    etat = "joignable" if code == 0 else "REFUSE"
-    return code, f"connect_ex(127.0.0.1:{numero}) = {code} ({etat})"
+        # C'est ICI qu'un `WSAENOBUFS` apparaitrait, et il vaudrait verdict.
+        nom = errno.errorcode.get(getattr(exc, "errno", 0) or 0, "")
+        return None, f"127.0.0.1:{numero} : {type(exc).__name__} {nom} ({exc})"
 
 
 def comptes_tcp() -> Tuple[Optional[Dict[str, int]], str]:
@@ -95,6 +133,7 @@ def comptes_tcp() -> Tuple[Optional[Dict[str, int]], str]:
         return None, "connexions TCP : netstat n'a rien ecrit sur sa sortie"
 
     comptes: Dict[str, int] = {}
+    ignorees = 0
     for ligne in proc.stdout.splitlines():
         morceaux = ligne.split()
         if not morceaux or morceaux[0].upper() not in _PREFIXES_TCP:
@@ -102,7 +141,8 @@ def comptes_tcp() -> Tuple[Optional[Dict[str, int]], str]:
         etat = morceaux[-1].upper()
         # Sans etat lisible (ligne tronquee, ou UDP mal prefixe) on ne compte
         # rien plutot que d'inventer une categorie qui fausserait le total.
-        if not etat.replace("_", "").isalpha():
+        if not _ETAT_TCP.match(etat):
+            ignorees += 1
             continue
         comptes[etat] = comptes.get(etat, 0) + 1
 
@@ -110,7 +150,10 @@ def comptes_tcp() -> Tuple[Optional[Dict[str, int]], str]:
         return None, "connexions TCP : netstat n'a rendu aucune ligne exploitable"
     total = sum(comptes.values())
     detail = ", ".join(f"{k}={v}" for k, v in sorted(comptes.items()))
-    return comptes, f"connexions TCP locales : {total} ({detail})"
+    # CE QUI EST IGNORE EST DIT. Un total silencieusement ampute est pire qu'une
+    # absence de total : il se lit comme un fait.
+    reste = f", {ignorees} ligne(s) TCP non classee(s)" if ignorees else ""
+    return comptes, f"connexions TCP de cette machine : {total} ({detail}){reste}"
 
 
 def etat_reseau(port: Optional[int]) -> str:

@@ -28,6 +28,7 @@ exactement celle que #924 reclame.
 from __future__ import annotations
 
 import socket
+import time
 import unittest
 
 from tests import _diag_reseau
@@ -46,10 +47,17 @@ class LaJOIGNABILITEDitLaVeriteTests(unittest.TestCase):
         self.assertIn("joignable", phrase)
         self.assertIn(str(port), phrase, "la phrase ne nomme pas le port mesure")
 
-    def test_un_port_FERME_est_dit_refuse(self) -> None:
-        """C'est CE cas qui trancherait #924 : un port qui n'accepte plus
-        expliquerait un shell qui n'apparait jamais, la ou « lent » ne
-        l'expliquerait pas."""
+    def test_un_port_FERME_n_est_PAS_dit_joignable(self) -> None:
+        """C'est CE cas qui trancherait #924. Deux issues sont legitimes selon la
+        pile locale — un REFUS explicite, ou AUCUNE REPONSE (un pare-feu qui
+        jette en silence) — et l'instrument doit dire LAQUELLE. Ce test n'en
+        impose donc pas une : il exige que le port ne soit pas annonce joignable,
+        et que la phrase nomme le mecanisme observe.
+
+        Ce test a deja VERROUILLE une etiquette FAUSSE : il exigeait « REFUSE »
+        sur un code 10035 (`WSAEWOULDBLOCK`), qui ne veut pas dire « refuse »
+        mais « je ne sais pas encore ».
+        """
         with socket.socket() as srv:
             srv.bind(("127.0.0.1", 0))
             srv.listen(1)
@@ -57,13 +65,24 @@ class LaJOIGNABILITEDitLaVeriteTests(unittest.TestCase):
         code, phrase = joignabilite(port)
 
         self.assertNotEqual(code, 0, "un port ferme est annonce joignable")
-        self.assertIn("REFUSE", phrase)
+        self.assertNotIn("joignable", phrase)
+        self.assertTrue(
+            "REFUSE" in phrase or "AUCUNE REPONSE" in phrase,
+            f"la phrase ne nomme pas le mecanisme observe : {phrase}",
+        )
 
-    def test_un_port_ABSURDE_ne_leve_pas_et_le_DIT(self) -> None:
+    def test_un_port_HORS_PLAGE_est_refuse_SANS_attendre(self) -> None:
+        """MESURE : `create_connection(("127.0.0.1", 999999))` ne leve pas, elle
+        EXPIRE. Sans borne explicite, l'instrument rapportait donc « aucune
+        reponse » — une panne reseau — pour une erreur de programmation, apres
+        avoir paye le delai complet."""
+        debut = time.monotonic()
         code, phrase = joignabilite(999999)
+        duree = time.monotonic() - debut
 
         self.assertIsNone(code)
-        self.assertIn("OverflowError", phrase, "l'exception n'est pas rapportee : la mesure se tait")
+        self.assertIn("hors plage", phrase)
+        self.assertLess(duree, 0.5, f"la borne n'a pas court-circuite la sonde ({duree:.2f} s)")
 
     def test_un_port_INCONNU_donne_quand_meme_les_COMPTES(self) -> None:
         """MESURE SUR PYTEST (bac a sable dedie, deux fixtures) :
@@ -117,24 +136,69 @@ class LeCOMPTEDesSocketsEstLaGrandeurQueCherche924Tests(unittest.TestCase):
             "un etat est compte a zero : la categorie a ete inventee",
         )
 
-    def test_l_etat_d_une_connexion_OUVERTE_est_visible(self) -> None:
-        """Le compte doit bouger avec la realite, sinon il pourrait etre une
-        constante et personne ne s'en apercevrait."""
+    #: Sockets ouverts d'un coup, et marge toleree. Le compteur est celui de la
+    #: MACHINE ENTIERE : exiger « +1 » exactement rendait le test dependant du
+    #: bruit — n'importe quel autre processus fermant un port d'ecoute dans la
+    #: fenetre de mesure le faisait rougir, et le runner de CI demarre justement
+    #: des serveurs REST et des navigateurs Playwright. On en ouvre assez pour
+    #: que le signal domine le bruit, et on tolere qu'il s'en ferme quelques-uns.
+    _SOCKETS_TEMOINS = 25
+    _MARGE_BRUIT = 5
+
+    def test_le_compte_BOUGE_avec_la_realite(self) -> None:
+        """Sans cela le compteur pourrait etre une constante, et personne ne
+        s'en apercevrait."""
         avant, _ = comptes_tcp()
         if avant is None:
             self.skipTest("netstat indisponible sur ce poste")
-        with socket.socket() as srv:
-            srv.bind(("127.0.0.1", 0))
-            srv.listen(1)
+        ouverts = []
+        try:
+            for _ in range(self._SOCKETS_TEMOINS):
+                s = socket.socket()
+                s.bind(("127.0.0.1", 0))
+                s.listen(1)
+                ouverts.append(s)
             apres, _ = comptes_tcp()
+        finally:
+            for s in ouverts:
+                s.close()
 
         self.assertIsNotNone(apres)
         assert apres is not None  # pour l'analyse statique
+        gagnes = apres.get("LISTENING", 0) - avant.get("LISTENING", 0)
         self.assertGreaterEqual(
-            apres.get("LISTENING", 0),
-            avant.get("LISTENING", 0) + 1,
-            "ouvrir un port en ecoute n'a pas fait bouger le compte : la mesure est figee",
+            gagnes,
+            self._SOCKETS_TEMOINS - self._MARGE_BRUIT,
+            f"{self._SOCKETS_TEMOINS} ports d'ecoute ouverts, {gagnes} vu(s) : la mesure est figee",
         )
+
+
+class LesETATSAvecUnCHIFFRESontComptesTests(unittest.TestCase):
+    """`FIN_WAIT_1` ET `FIN_WAIT_2` PORTENT UN CHIFFRE.
+
+    Le premier filtre (`etat.replace("_", "").isalpha()`) les rejetait en
+    silence — eux et leurs variantes Linux `FIN_WAIT1`/`FIN_WAIT2`. Ils
+    disparaissaient du detail ET du total, sans un mot. Or `FIN_WAIT_*` est une
+    des familles qui s'accumulent quand une table de sockets deborde :
+    l'instrument pouvait rendre un chiffre rassurant a l'instant precis ou il
+    fallait s'alarmer.
+
+    Mesure apres correction, sur ce poste : `FIN_WAIT_2=1` apparait.
+    """
+
+    def test_le_motif_d_etat_accepte_les_chiffres(self) -> None:
+        from tests._diag_reseau import _ETAT_TCP
+
+        for etat in ("FIN_WAIT_1", "FIN_WAIT_2", "FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "SYN_RECV"):
+            self.assertTrue(_ETAT_TCP.match(etat), f"{etat} serait silencieusement ecarte du total")
+
+    def test_il_REJETTE_ce_qui_n_est_pas_un_etat(self) -> None:
+        """Le filtre ne doit pas devenir permissif au point d'inventer des
+        categories a partir d'adresses ou de ports tronques."""
+        from tests._diag_reseau import _ETAT_TCP
+
+        for pas_un_etat in ("0.0.0.0:135", "80", "*:*", "[::]:445", "_PRIVE"):
+            self.assertFalse(_ETAT_TCP.match(pas_un_etat), f"{pas_un_etat} serait compte comme un etat")
 
 
 class LInstrumentNeCASSEJamaisSonRapportTests(unittest.TestCase):
@@ -154,7 +218,7 @@ class LInstrumentNeCASSEJamaisSonRapportTests(unittest.TestCase):
 
         self.assertIn("le compteur a explose", texte, "l'echec de la mesure n'est pas rapporte")
         self.assertIn("RuntimeError", texte)
-        self.assertIn("connect_ex", texte, "l'autre mesure a ete emportee par la premiere")
+        self.assertIn("127.0.0.1:80", texte, "l'autre mesure a ete emportee par la premiere")
 
     def test_les_DEUX_mesures_peuvent_exploser_sans_lever(self) -> None:
         def boum() -> None:
@@ -173,7 +237,7 @@ class LInstrumentNeCASSEJamaisSonRapportTests(unittest.TestCase):
     def test_le_texte_assemble_porte_les_DEUX_mesures(self) -> None:
         texte = etat_reseau(80)
 
-        self.assertIn("connect_ex", texte)
+        self.assertIn("127.0.0.1:80", texte)
         self.assertIn("connexions TCP", texte)
         self.assertEqual(len(texte.splitlines()), 2, "le rapport n'a pas la forme attendue")
 
