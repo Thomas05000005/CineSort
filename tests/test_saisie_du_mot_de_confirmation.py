@@ -420,5 +420,6 @@ __emit({ courante: M.__courante() });
         )
         self.assertEqual(res["courante"], "", "une modale sans proprietaire a herite de celui d'avant")
 
+
 if __name__ == "__main__":
     unittest.main()
