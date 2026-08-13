@@ -63,6 +63,11 @@ function formatBytes() { return ""; }
 function registerRoute() {}
 function navigate() {}
 const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
+
+// LE SIMULATEUR, stubbe pour COMPTER ses ouvertures. Sans lui, cliquer le bouton
+// levait un ReferenceError — ce qu'aucun test ne faisait, faute de cliquer.
+globalThis.__ouvertures = [];
+function ouvrirSimulateurQualite(...a) { globalThis.__ouvertures.push(["simulateur", a]); }
 """
 
 _EXTRA = (
@@ -216,26 +221,35 @@ class LeBoutonDuSIMULATEUREstBRANCHETests(_Base):
     Le simulateur vit dans son propre module ; ses tests l'eprouvent chez lui.
     Rien ne garantit pour autant que le bouton de l'ecran Parametres l'ouvre —
     c'est exactement le defaut que toute cette vague corrige.
+
+    CE TEST A ETE FAUX-VERT. Il assertait `typeof rappel === "function"`, vrai
+    d'un gestionnaire au corps VIDE : remplacer `() => ouvrirSimulateurQualite()`
+    par `() => {}` le laissait au vert alors que le simulateur devenait
+    inatteignable depuis l'application. C'est le piege n2 du CLAUDE.md
+    (« verifier la PRESENCE d'une garde ne prouve rien ») applique a un CABLAGE.
+    On CLIQUE donc, et on observe l'ouverture.
     """
 
-    def test_le_clic_ouvre_le_simulateur(self) -> None:
+    def test_le_clic_OUVRE_le_simulateur(self) -> None:
         res = self._run(
             r"""
-globalThis.__ouvertures = 0;
-// Le module du simulateur est stubbe : on n'eprouve ICI que le CABLAGE.
 const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
 const conteneur = {
   querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-simulateur") >= 0 ? boutons : []; },
   querySelector() { return null; },
 };
 M.__bind(conteneur);
-__emit({ branche: typeof boutons[0].rappel === "function" });
+const branche = typeof boutons[0].rappel === "function";
+globalThis.__ouvertures.length = 0;
+if (branche) boutons[0].rappel();
+__emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]) });
 """
         )
         self.assertTrue(
             res["branche"],
             "le bouton « Simuler un profil » n'a aucun gestionnaire : il est decoratif",
         )
+        self.assertEqual(res["ouvertures"], ["simulateur"], "le clic n'ouvre pas le simulateur")
 
 
 if __name__ == "__main__":
