@@ -10948,3 +10948,66 @@ body.v5-notif-lock {
   background: var(--surface-2, #1b1b1b);
   border: 1px solid var(--accent-border, var(--accent, #6ea8fe));
 }
+
+/* ============================================================
+   DEUX CROCHETS QUE LE JS POSAIT SANS QU'AUCUNE REGLE NE LES LISE
+   ------------------------------------------------------------
+   Mesure : sur 80 classes ecrites en dur dans le JS du dashboard,
+   13 n'avaient aucune regle. Onze sont des faux positifs — sept
+   portent tout leur style en `cssText` inline (le tiroir
+   inspecteur de processing.js), `is-expert` est bien lue via
+   `:not(.is-expert)`, `v5-sidebar-item--disabled` est un crochet
+   lu par `closest()` dans app.js, et deux crochets « natif » ne
+   sont lus par personne. Les DEUX ci-dessous etaient reels.
+
+   `.v5-help-fab` : `mountHelpFab()` est appele a CHAQUE demarrage
+   du shell (app.js) et fait `document.body.appendChild(btn)`. Sans
+   regle, ce « ? » — dont le commentaire d'origine dit « bouton
+   flottant » — se rendait comme un bouton ordinaire, en fin de
+   page, sur tous les ecrans. Absent depuis la premiere release
+   publique (`git log -S`).
+
+   `.modal-open` : pose sur `<body>` a l'ouverture du comparateur
+   de doublons et retire a sa fermeture. Sans regle, le fond
+   continuait de defiler derriere la modale.
+
+   z-index : sous `.duplicate-modal-overlay` (9100) et sous les
+   tiroirs (1000), pour ne recouvrir aucune surface modale.
+   ============================================================ */
+.v5-help-fab {
+  position: fixed;
+  right: var(--sp-4, 16px);
+  bottom: var(--sp-4, 16px);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.12));
+  border-radius: 50%;
+  background: var(--surface-2, #1a1f2e);
+  color: var(--text-1, #e6e6e6);
+  font-size: var(--fs-lg, 1.125rem);
+  font-weight: var(--fw-semibold, 600);
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-2, 0 4px 12px rgba(0, 0, 0, 0.35));
+  transition: background 160ms ease, transform 160ms ease;
+}
+.v5-help-fab:hover {
+  background: var(--surface-3, #232a3a);
+  transform: translateY(-1px);
+}
+.v5-help-fab:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
+body.modal-open {
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v5-help-fab { transition: none; }
+  .v5-help-fab:hover { transform: none; }
+}
