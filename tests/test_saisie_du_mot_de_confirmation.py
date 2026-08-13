@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import unittest
 
-from tests._jsexec import DASHBOARD, require_node, run_module_test
+from tests._jsexec import DASHBOARD, ROOT, require_node, run_module_test
 
 _MODAL = DASHBOARD / "components" / "modal.js"
 
@@ -419,6 +419,58 @@ __emit({ courante: M.__courante() });
 """
         )
         self.assertEqual(res["courante"], "", "une modale sans proprietaire a herite de celui d'avant")
+
+
+class LeMotTAPEEstRAREEtCEstVouluTests(unittest.TestCase):
+    """LE CRITERE, VERROUILLE — sinon la saisie s'etend par habitude et cesse de
+    proteger.
+
+    Le depot compte une vingtaine de confirmations dangereuses ; TROIS seulement
+    portent un mot a taper. Deux conditions, ENSEMBLE :
+
+      1. la perte est IRRECUPERABLE PAR L'APPLICATION (ni undo, ni corbeille, ni
+         restauration depuis l'interface) ;
+      2. la portee n'est PAS une selection que l'utilisateur vient de faire.
+
+    Ce que cela EXCLUT, et pourquoi — verifie dans le code, pas suppose :
+    « supprimer N films » appelle `mark_for_deletion_bulk` et ne fait que
+    MARQUER ; « lancer l'apply » a un undo ; « regenerer le token » se refait ;
+    « re-calculer les scores » se recalcule. Aucune ne remplit les DEUX
+    conditions.
+
+    Ce test echoue si un mot apparait ailleurs sans que la liste soit mise a
+    jour — c'est-a-dire sans que quelqu'un ait repasse par le critere.
+    """
+
+    #: Les seules formes autorisees a exiger un mot, et pourquoi.
+    _AUTORISES = (
+        "requireTyped: conf.motAConfirmer",  # table des actions : porte reset_all_user_data
+        'requireTyped: "VIDER"',  # purge integrale du bucket _review
+    )
+
+    def test_aucun_mot_n_a_ete_ajoute_sans_repasser_par_le_critere(self) -> None:
+        vue = (ROOT / "web" / "dashboard" / "views" / "parametres.js").read_text(encoding="utf-8")
+        lignes = [
+            ligne.strip()
+            for ligne in vue.splitlines()
+            if "requireTyped" in ligne and not ligne.strip().startswith(("//", "*", "<!--"))
+        ]
+        inconnues = [l for l in lignes if not any(a in l for a in self._AUTORISES)]
+        self.assertEqual(
+            inconnues,
+            [],
+            "un mot a taper est apparu sur un site non recense. Repasser par le critere "
+            "(irrecuperable ET portee non choisie), puis mettre a jour _AUTORISES.",
+        )
+
+    def test_le_RESTE_du_dashboard_n_en_porte_aucun(self) -> None:
+        """Les autres ecrans n'ont que des actions reversibles ou scopees."""
+        ailleurs = sorted(
+            f.name
+            for f in (ROOT / "web" / "dashboard").rglob("*.js")
+            if f.name not in {"parametres.js", "modal.js"} and "requireTyped" in f.read_text(encoding="utf-8")
+        )
+        self.assertEqual(ailleurs, [], f"un mot a taper est apparu hors du perimetre recense : {ailleurs}")
 
 
 if __name__ == "__main__":

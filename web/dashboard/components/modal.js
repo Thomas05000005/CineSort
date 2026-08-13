@@ -234,6 +234,22 @@ const DANGER_MODAL_ID = "dashDangerModal";
  * @param {string} [opts.confirmLabel="Confirmer"] - libelle du bouton dangereux
  * @param {string} [opts.cancelLabel="Annuler"] - libelle du bouton d'annulation
  * @param {Function} opts.onConfirm - callback (peut etre async), execute apres confirmation
+ * QUAND EXIGER UN MOT TAPE — le critere, pour qu'il ne s'etende pas par habitude.
+ * Le depot compte une vingtaine de confirmations dangereuses ; trois seulement
+ * portent un mot a taper, et c'est deliberé : **la saisie ne protege que parce
+ * qu'elle est rare**. L'imposer partout la transformerait en reflexe, donc en
+ * rien.
+ *
+ * Deux conditions, ensemble :
+ *   1. la perte est IRRECUPERABLE PAR L'APPLICATION (ni undo, ni corbeille, ni
+ *      restauration depuis l'interface) ;
+ *   2. la portee n'est PAS une selection que l'utilisateur vient de faire.
+ *
+ * Ce que cela EXCLUT, et pourquoi : « supprimer N films » ne fait que les
+ * MARQUER ; « lancer l'apply » a un undo ; « regenerer le token » se refait ;
+ * « re-calculer les scores » se recalcule. Aucune ne remplit les deux
+ * conditions.
+ *
  * @param {string} [opts.requireTyped=""] - mot que l'utilisateur doit TAPER
  *   pour armer le bouton de confirmation. Le texte saisi est transmis a
  *   `onConfirm(saisie)` : l'appelant envoie ce que l'utilisateur a ecrit, et non
