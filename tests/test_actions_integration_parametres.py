@@ -64,12 +64,32 @@ ROUTES_ATTENDUES = (
 
 _STUBS = r"""
 globalThis.window = { addEventListener() {}, removeEventListener() {}, location: { hash: "" } };
+
+/** Un noeud DOM assez complet pour survivre a un rendu, et rien de plus. */
+function noeudFactice() {
+  return {
+    dataset: {},
+    style: { setProperty() {}, removeProperty() {} },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, removeAttribute() {}, getAttribute: () => null,
+    appendChild() {}, removeChild() {},
+    addEventListener() {}, removeEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [],
+    focus() {}, remove() {},
+    textContent: "", className: "", innerHTML: "",
+  };
+}
 globalThis.document = {
   addEventListener() {}, removeEventListener() {},
   getElementById() { return null; }, querySelector() { return null; },
   querySelectorAll() { return []; },
   createElement() { return { style: {}, classList: { add() {}, remove() {} }, appendChild() {} }; },
-  body: { appendChild() {}, classList: { add() {}, remove() {} } },
+  body: noeudFactice(),
+  // `_applyLivePreview` ecrit sur la racine du document ET sur le body (theme,
+  // animations, vitesse d'effet). Sans eux, tout test qui declenche un
+  // RECHARGEMENT echouait sur un `setAttribute` d'undefined — un echec de
+  // HARNAIS, qu'il aurait ete facile de prendre pour un defaut du code.
+  documentElement: noeudFactice(),
 };
 
 globalThis.__appels = [];
@@ -125,6 +145,7 @@ _EXTRA = (
     "export const __lancer = _lancerActionDeSection;\n"
     "export const __rendreReponse = _rendreReponseAction;\n"
     "export const __recharger = _rechargerApresReset;\n"
+    "export const __etat = _state;\n"
 )
 
 _EXIT = "\nprocess.exit(0);\n"
@@ -141,15 +162,32 @@ globalThis.__reponses["settings/get_profiles"] = { data: { profiles: [], active:
 #: a la section, qui expose la zone de sortie : c'est ce chemin-la qui casse si
 #: le rendu et le gestionnaire divergent.
 _FAUX_DOM = r"""
-function fauxBouton(route) {
-  const sortie = { textContent: "", className: "" };
-  const section = { querySelector: () => sortie, dataset: { sectionId: "stockage-sqlite" } };
+function fauxBouton(route, idSection) {
+  // LA RACINE REMPLACE SON CONTENU, COMME LA VRAIE. `_refreshAll()` fait
+  // `root.innerHTML = _renderParametres()` : il DETRUIT le noeud de sortie. Un
+  // faux DOM qui rendrait eternellement le MEME objet ne pourrait jamais perdre
+  // le message — et un test « le resultat survit au rechargement » serait vert
+  // quoi qu'il arrive. La mutation l'a montre : deux correctifs de cette famille
+  // ont SURVECU a leur propre batterie tant que ce faux DOM ne remplacait rien.
+  const id = idSection || "stockage-sqlite";
+  let vivant = { textContent: "", className: "" };
+  const sortie = vivant;
+  const section = { querySelector: () => vivant, dataset: { sectionId: id } };
   const btn = {
     dataset: { sectionAction: route },
     disabled: false,
     closest: () => section,
   };
-  return { btn, sortie };
+  const racine = {
+    set innerHTML(_v) { vivant = { textContent: "", className: "" }; },
+    get innerHTML() { return ""; },
+    classList: { toggle() {}, add() {}, remove() {} },
+    querySelector(sel) { return sel === `[data-section-actions-out="${id}"]` ? vivant : null; },
+    querySelectorAll: () => [],
+  };
+  // `sortie` est le noeud INITIAL — celui qu'un rechargement detacherait.
+  // `courante()` rend celui qui est vivant apres un rendu.
+  return { btn, sortie, racine, courante: () => vivant };
 }
 """
 
@@ -546,7 +584,8 @@ class LaREINITIALISATIONTOTALEEstAtteignableTests(unittest.TestCase):
         tape s'y ajoute — c'est l'action la plus destructive de l'application."""
         res = self._run(
             r"""
-const { btn } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
 M.__lancer(null, btn);
 const c = globalThis.__confirmations[0] || {};
 __emit({ mot: c.requireTyped, elements: (c.items || []).length,
@@ -565,7 +604,8 @@ __emit({ mot: c.requireTyped, elements: (c.items || []).length,
             _APRES_RESET
             + r"""
 globalThis.__saisie = "RESET";
-const { btn } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
 M.__lancer(null, btn);
 await globalThis.__enCours;
 const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
@@ -584,7 +624,8 @@ __emit({ params: appel ? appel.params : null });
         res = self._run(
             r"""
 globalThis.__saisie = "reset";
-const { btn } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
 M.__lancer(null, btn);
 await globalThis.__enCours;
 const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
@@ -597,7 +638,8 @@ __emit({ params: appel ? appel.params : null });
         res = self._run(
             r"""
 globalThis.__accepte = false;
-const { btn } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
 M.__lancer(null, btn);
 await new Promise((r) => setTimeout(r, 0));
 __emit({ appels: globalThis.__appels.map((a) => a.route) });
@@ -628,11 +670,12 @@ globalThis.__reponses["settings/reset_all_user_data"] = {
   failed: ["cinesort.db", "settings.json"],
   message: "Réinitialisation PARTIELLE : 1 élément(s) supprimé(s), 2 n'ont pas pu l'être (cinesort.db, settings.json). Fermez puis relancez l'application.",
 };
-const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
 M.__lancer(null, btn);
 await globalThis.__enCours;
 await new Promise((r) => setTimeout(r, 0));
-__emit({ texte: sortie.textContent, classe: sortie.className });
+__emit({ texte: courante().textContent, classe: courante().className });
 """
         )
         # LES DEUX SOURCES SONT ASSERTEES SEPAREMENT. « 2 » et « cinesort.db »
@@ -660,11 +703,12 @@ globalThis.__saisie = "RESET";
 globalThis.__reponses["settings/reset_all_user_data"] = {
   ok: true, backup_path: "C:/data/backup.zip", removed: ["db", "runs"], failed: [],
 };
-const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
 M.__lancer(null, btn);
 await globalThis.__enCours;
 await new Promise((r) => setTimeout(r, 0));
-__emit({ classe: sortie.className, texte: sortie.textContent });
+__emit({ classe: courante().className, texte: courante().textContent });
 """
         )
         self.assertIn("--ok", res["classe"])
@@ -683,11 +727,12 @@ globalThis.__saisie = "RESET";
 globalThis.__reponses["settings/reset_all_user_data"] = {
   ok: false, error: "[Errno 28] No space left on device: 'C:/data/backup.zip'",
 };
-const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
 M.__lancer(null, btn);
 await globalThis.__enCours;
 await new Promise((r) => setTimeout(r, 0));
-__emit({ texte: sortie.textContent, classe: sortie.className });
+__emit({ texte: courante().textContent, classe: courante().className });
 """
         )
         self.assertIn("No space left", res["texte"], "la raison de l'echec est jetee")
@@ -704,13 +749,14 @@ __emit({ texte: sortie.textContent, classe: sortie.className });
 globalThis.__saisie = "RESET";
 globalThis.__reponses["settings/reset_all_user_data"] = { ok: true, removed: ["db"], failed: [] };
 globalThis.__invalidations = 0;
-const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
 M.__lancer(null, btn);
 await globalThis.__enCours;
 await new Promise((r) => setTimeout(r, 0));
 __emit({ invalidations: globalThis.__invalidations,
          relu: globalThis.__appels.some((a) => a.route === "settings/get_settings"),
-         texte: sortie.textContent });
+         texte: courante().textContent });
 """
         )
         self.assertGreaterEqual(res["invalidations"], 1, "le cache partage des reglages n'est pas invalide")
