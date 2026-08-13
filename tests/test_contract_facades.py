@@ -72,7 +72,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "quality.get_custom_rules_catalog",
         "quality.get_custom_rules_templates",
         "quality.get_profiles",
-        "quality.get_quality_presets",
         "quality.get_quality_profile",
         "quality.get_quality_report",
         "quality.import_quality_profile",
