@@ -191,11 +191,15 @@ purges. Une mesure qui oublie `dry_run=False` ne mesure **rien** : elle observe 
 chemin qui ne touche a aucun fichier, et conclut que tout va bien.
 
 **LE CHECKOUT PRINCIPAL PEUT ETRE SUR UNE BRANCHE PERIMEE.** Une mesure du
-comportement de `reset_database` a tourne dans `C:/Users/blanc/projects/CineSort`,
+comportement de `reset_database` a tourne dans le checkout principal du depot,
 reste sur une branche **anterieure** a ce durcissement : elle portait sur du code
 qui n'etait plus celui de `main`. Un worktree dit quelle branche il porte ; le
 checkout porte la sienne — `git branch --show-current` avant toute mesure de
 comportement.
+
+(Et ce paragraphe a lui-meme rougi `test_release_hygiene.py` en nommant le chemin
+absolu : **aucun chemin personnel dans le depot**, le garde l'interdit et son
+jeton est code en dur, donc il rougit aussi sur le runner.)
 
 **L'ESPACE DISQUE avant d'accuser son propre changement.** Le 2026-08-08, quatre
 tests de `test_apply_disk_check_recursive_v796.py` ont echoue sur une branche
