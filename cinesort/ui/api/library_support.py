@@ -1586,6 +1586,14 @@ def get_scoring_rollup(
       }
     """
     dim = str(by or "franchise").lower()
+    # SORTIE IMMEDIATE SUR DIMENSION INCONNUE. Le resultat etait DEJA correct
+    # (`_extract_group_key` rend `None`, donc aucun bucket), mais on payait
+    # d'abord `_build_library_rows` — la reconstruction complete de la
+    # bibliotheque — pour n'en tirer aucun groupe. La forme de la reponse est
+    # celle des autres sorties : `ok` et `by` compris. Les omettre casserait le
+    # front, qui lit `data.ok`.
+    if dim not in SCORING_ROLLUP_DIMENSIONS:
+        return {"ok": True, "by": dim, "groups": []}
     resolved_rid = _resolve_run_id(api, run_id)
     if not resolved_rid:
         return {"ok": True, "by": dim, "groups": []}

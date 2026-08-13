@@ -30,6 +30,7 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, Set
 
+from cinesort.ui.api import library_support
 from cinesort.ui.api.library_support import (
     SCORING_ROLLUP_DIMENSIONS,
     _classify_resolution,
@@ -139,6 +140,81 @@ class ChaqueDimensionProposeeProduitUnGroupeTests(unittest.TestCase):
             oubliees,
             [],
             f"le backend sait grouper par {oubliees}, la vue ne le propose pas",
+        )
+
+
+class UneDimensionInconnueNeReconstruitPasLaBibliothequeTests(unittest.TestCase):
+    """Constat de revue, verifie et retenu — mais pas le correctif propose.
+
+    Le RESULTAT etait deja juste : `_extract_group_key` rend `None` pour toute
+    dimension inconnue, donc aucun bucket, donc `groups: []`. Ce qui n'allait pas
+    est le CHEMIN : on payait d'abord `_build_library_rows`, la reconstruction
+    complete de la bibliotheque, pour n'en tirer aucun groupe.
+
+    La sortie immediate suggeree rendait `{"groups": []}` — SANS `ok` ni `by`,
+    que portent toutes les autres sorties de la fonction et que le front lit. La
+    prendre telle quelle aurait echange un gaspillage contre une regression.
+    """
+
+    def setUp(self) -> None:
+        self.appels: list[str] = []
+
+    def test_une_dimension_inconnue_sort_AVANT_de_construire_les_rows(self) -> None:
+        appels = self.appels
+        vrai_build = library_support._build_library_rows
+        vrai_resolve = library_support._resolve_run_id
+
+        def _build(*_a, **_k):
+            appels.append("_build_library_rows")
+            return []
+
+        def _resolve(*_a, **_k):
+            appels.append("_resolve_run_id")
+            return "run-1"
+
+        library_support._build_library_rows = _build
+        library_support._resolve_run_id = _resolve
+        try:
+            res = library_support.get_scoring_rollup(object(), by="director")
+        finally:
+            library_support._build_library_rows = vrai_build
+            library_support._resolve_run_id = vrai_resolve
+
+        self.assertNotIn(
+            "_build_library_rows",
+            appels,
+            "la bibliotheque entiere est reconstruite pour une dimension qui ne peut rien grouper",
+        )
+        # ASSERTER LA FORME, PAS SEULEMENT LE RACCOURCI. C'est ce que le
+        # correctif suggere cassait.
+        self.assertEqual(res, {"ok": True, "by": "director", "groups": []})
+
+    def test_une_dimension_SUPPORTEE_passe_toujours_par_les_rows(self) -> None:
+        """LE CONTRE-TEST. Sans lui, une sortie immediate posee trop haut —
+        avant toute dimension — satisferait le test precedent en cassant tout."""
+        appels = self.appels
+        vrai_build = library_support._build_library_rows
+        vrai_resolve = library_support._resolve_run_id
+
+        def _build(*_a, **_k):
+            appels.append("_build_library_rows")
+            return []
+
+        def _resolve(*_a, **_k):
+            return "run-1"
+
+        library_support._build_library_rows = _build
+        library_support._resolve_run_id = _resolve
+        try:
+            library_support.get_scoring_rollup(object(), by="decade")
+        finally:
+            library_support._build_library_rows = vrai_build
+            library_support._resolve_run_id = vrai_resolve
+
+        self.assertIn(
+            "_build_library_rows",
+            appels,
+            "une dimension supportee ne construit plus les rows : la sortie immediate est trop large",
         )
 
 
