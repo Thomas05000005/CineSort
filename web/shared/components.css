@@ -10680,3 +10680,157 @@ body.v5-notif-lock {
   color: var(--text-3, #888);
   font-size: var(--fs-sm, 0.9rem);
 }
+
+/* ===========================================================================
+   BUILDER DE REGLES QUALITE — vague D3
+   ---------------------------------------------------------------------------
+   Les regles modifient reellement score et tier, et elles etaient INCREABLES
+   depuis l'application. Tout le vocabulaire de cet ecran (champs, operateurs,
+   actions) vient du backend : aucune liste n'est ecrite dans le front, lecon
+   de la vague D1 ou six poids ecrits ici decrivaient un modele que le scoring
+   ne lisait pas.
+
+   UNE REGLE SE LIT COMME UNE PHRASE. « SI (toutes) : video_codec in xvid, divx
+   ALORS score_delta -15 » — la mise en forme sert cette lecture, pas l'inverse :
+   les conditions sont indentees sous leur SI, l'action detachee sous son ALORS.
+   =========================================================================== */
+
+.regles-vue {
+  min-width: min(760px, 82vw);
+}
+
+.regles-modeles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.regles-modeles-libelle {
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.regles-liste {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.regle {
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+
+/* Une regle DESACTIVEE reste lisible : elle n'est pas supprimee, et l'utilisateur
+   doit pouvoir la relire avant de decider de la rallumer. On baisse le contraste
+   sans le faire tomber sous le seuil de lecture. */
+.regle--inactive {
+  opacity: 0.62;
+}
+
+.regle-entete {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.regle-actif {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.regle-nom {
+  font-weight: var(--fw-semibold, 600);
+}
+
+.regle-priorite {
+  margin-left: auto;
+  color: var(--text-3, #888);
+  font-size: var(--fs-2xs, 0.72rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.regle-supprimer {
+  padding: 0.15rem 0.45rem;
+}
+
+.regle-si,
+.regle-alors {
+  margin: 0.5rem 0 0;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+/* Les conditions s'indentent sous leur SI : c'est ce qui fait lire la regle
+   comme une phrase plutot que comme une liste de champs. */
+.regle-conditions {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+  border-left: 2px solid var(--border-1, #333);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-2xs, 0.72rem);
+}
+
+.regle-formulaire {
+  background: var(--surface-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: 10px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.regle-ligne,
+.regle-condition-saisie {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.regle-conditions-saisie {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.regle-liaison {
+  display: flex;
+  gap: 0.9rem;
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+}
+
+.regle-alors-libelle {
+  color: var(--text-2, #bbb);
+  font-size: var(--fs-sm, 0.9rem);
+  font-weight: var(--fw-semibold, 600);
+}
+
+.parametres-input--court {
+  max-width: 7rem;
+}
+
+/* Les erreurs viennent du BACKEND, numerotees par regle. Elles s'affichent
+   telles quelles : il sait mieux que le front ce qui cloche. */
+.regles-erreurs {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: var(--danger-soft, rgba(229, 83, 75, 0.12));
+  border: 1px solid var(--danger, #e5534b);
+  color: var(--danger, #e5534b);
+  font-size: var(--fs-sm, 0.9rem);
+}
