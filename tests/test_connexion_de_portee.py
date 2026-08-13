@@ -261,8 +261,7 @@ class UnAppelIMBRIQUENePartagePasTests(_Base):
         self.assertEqual(
             avec,
             sans,
-            "la portee a change le comportement de l'imbrication : "
-            f"sans={sans[0]} vs avec={avec[0]}",
+            f"la portee a change le comportement de l'imbrication : sans={sans[0]} vs avec={avec[0]}",
         )
 
     def _scenario_imbrique(self, avec_portee: bool) -> tuple:
