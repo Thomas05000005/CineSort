@@ -10987,7 +10987,13 @@ body.v5-notif-lock {
   padding: 0;
   border: 1px solid var(--border-1, rgba(255, 255, 255, 0.12));
   border-radius: 50%;
-  background: var(--surface-2, #1a1f2e);
+  /* FOND OPAQUE, ET C'EST LE NAVIGATEUR QUI L'A IMPOSE. Ecrite d'abord avec
+   * `--surface-2`, la regle rendait `rgba(255,255,255,0.055)` : un bouton
+   * translucide, qui laisse voir le contenu par-dessous. Meme piege que
+   * `.duplicate-modal` plus haut dans ce fichier — `--surface-1` et
+   * `--surface-2` valent 0.035 a 0.12 d'alpha sur TOUS les themes. La lecture
+   * du CSS ne le montre pas ; `getComputedStyle` si. */
+  background: var(--bg-base, #1a1a1a);
   color: var(--text-1, #e6e6e6);
   font-size: var(--fs-lg, 1.125rem);
   font-weight: var(--fw-semibold, 600);
@@ -10997,7 +11003,10 @@ body.v5-notif-lock {
   transition: background 160ms ease, transform 160ms ease;
 }
 .v5-help-fab:hover {
-  background: var(--surface-3, #232a3a);
+  /* On SUPERPOSE un voile clair au lieu de REMPLACER le fond : `--surface-3`
+   * est lui aussi en rgba faible, donc l'echanger rendrait le bouton
+   * translucide au survol — plus transparent que hors survol. */
+  box-shadow: var(--shadow-2, 0 4px 12px rgba(0, 0, 0, 0.35)), inset 0 0 0 999px rgba(255, 255, 255, 0.07);
   transform: translateY(-1px);
 }
 .v5-help-fab:focus-visible {
