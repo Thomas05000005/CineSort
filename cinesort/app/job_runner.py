@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Optional
 
 from cinesort.domain.run_models import RunSnapshot, RunStatus
 from cinesort.infra.db import SQLiteStore
+from cinesort.infra.db.sqlite_store import portee_de_requete
 from cinesort.infra.log_context import clear_run_id, set_run_id
 from cinesort.infra.run_id import RUN_ID_PATTERN, generate_run_id, normalize_or_generate_run_id
 
@@ -592,7 +593,23 @@ class JobRunner:
             # pour passer should_pause si le job_fn l'accepte (kwarg explicite
             # ou **kwargs). Sinon comportement actuel inchange (1 arg positionnel
             # should_cancel uniquement) pour ne pas casser les job_fn legacy.
-            stats = self._safe_stats(self._invoke_job_fn(job_fn, should_cancel, should_pause))
+            # UNE CONNEXION POUR TOUT LE RUN, PAS UNE PAR REQUETE DE REPOSITORY.
+            #
+            # C'est ICI que vivent les 60 003 connexions d'un scan a froid de
+            # 10 000 films, dont l'ouverture pese 23 % du temps total : le job ne
+            # passe PAS par le dispatch REST, donc la portee posee la (#1057) ne
+            # le couvrait pas.
+            #
+            # LA CONNEXION VIT DES MINUTES, ET C'EST LE POINT DELICAT. Elle ne
+            # tient AUCUNE transaction entre deux appels — chaque `_managed_conn`
+            # garde son propre `with conn:` et commite son unite — donc elle ne
+            # bloque ni lecteur ni ecrivain. Ce qu'elle tient, c'est un HANDLE de
+            # fichier : sous Windows, cela empeche de SUPPRIMER la base. Les deux
+            # routes destructives refusent deja tant qu'un run tourne
+            # (`_refus_si_run_actif`), et c'est ce garde qui rend cette portee
+            # sure — pas une propriete de SQLite.
+            with portee_de_requete():
+                stats = self._safe_stats(self._invoke_job_fn(job_fn, should_cancel, should_pause))
             self._debug(f"worker job_fn returned run_id={run_id} stats_keys={list((stats or {}).keys())}", run_debug)
 
             ended_ts = time.time()
