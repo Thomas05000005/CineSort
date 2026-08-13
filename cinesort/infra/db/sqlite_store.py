@@ -199,6 +199,13 @@ _PORTEE_COURANTE: ContextVar[Optional[Dict[str, sqlite3.Connection]]] = ContextV
 )
 
 
+#: Les bases dont une connexion PARTAGEE est deja en cours d'utilisation dans ce
+#: contexte. Sert a detecter l'imbrication : un appel qui trouve sa base ici est
+#: imbrique, et doit ouvrir sa propre connexion pour ne pas commiter le travail
+#: partiel de l'appel qui l'englobe.
+_EN_COURS: ContextVar[frozenset] = ContextVar("cinesort_portee_en_cours", default=frozenset())
+
+
 @contextmanager
 def portee_de_requete() -> Iterator[None]:
     """Une seule connexion par base pour toute la duree du bloc.
@@ -345,16 +352,36 @@ class _StoreBase:
         maximale 1 (cf. `tests/test_connexion_de_portee.py`, qui l'eprouve).
         """
         ouvertes = _PORTEE_COURANTE.get()
-        if ouvertes is not None:
-            cle = str(self.db_path)
+        cle = str(self.db_path)
+        # UN APPEL IMBRIQUE NE PARTAGE PAS, ET C'EST LA MESURE QUI L'IMPOSE.
+        #
+        # Sonde sur le perimetre CI COMPLET : 20 052 ouvertures, profondeur
+        # maximale **2**. Une premiere mesure, limitee aux tests de
+        # repositories, donnait 1 — et je l'avais generalisee. Elle etait
+        # fausse.
+        #
+        # Sur un handle partage, la sortie d'un appel INTERNE commiterait le
+        # travail partiel de l'appel EXTERNE. Les deux echappatoires changent la
+        # semantique : ne commiter qu'au niveau le plus externe repousse la
+        # durabilite de l'appel interne, et commiter a chaque niveau avance
+        # celle de l'externe. La seule option qui ne change RIEN est de rendre a
+        # l'appel imbrique ce qu'il avait deja : sa propre connexion.
+        #
+        # Le gain n'en souffre pas : l'imbrication est rare, et les appels de
+        # profondeur 1 — l'immense majorite — partagent toujours.
+        if ouvertes is not None and cle not in _EN_COURS.get():
             partagee = ouvertes.get(cle)
             if partagee is None:
                 partagee = self._connect()
                 ouvertes[cle] = partagee
-            # Ni fermeture ici : la portee la detient. Le `with` est conserve,
-            # donc le commit reste par appel.
-            with partagee:
-                yield partagee
+            jeton = _EN_COURS.set(_EN_COURS.get() | {cle})
+            try:
+                # Ni fermeture ici : la portee la detient. Le `with` est
+                # conserve, donc le commit reste par appel.
+                with partagee:
+                    yield partagee
+            finally:
+                _EN_COURS.reset(jeton)
             return
         with closing(self._connect()) as conn, conn:
             yield conn

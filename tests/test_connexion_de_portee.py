@@ -18,11 +18,13 @@ La profondeur maximale est donc MESUREE ici, pas supposee.
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir, portee_de_requete
@@ -129,7 +131,11 @@ class LesFRONTIERESDeCommitNeBougentPASTests(_Base):
     def _lire(self, chemin: Path) -> list:
         """Relit la base par une connexion INDEPENDANTE : seule une ecriture
         reellement COMMITEE y est visible."""
-        with sqlite3.connect(str(chemin)) as autre:
+        # `closing` EN PLUS du `with` : le context manager de sqlite3 COMMITE
+        # mais ne FERME PAS. Sans lui, le fichier restait verrouille, `rmtree`
+        # echouait en silence, et le garde-fou de fuite `%TEMP%` du depot
+        # rougissait — sur une connexion ouverte par le test lui-meme.
+        with closing(sqlite3.connect(str(chemin))) as autre:
             return autre.execute("SELECT valeur FROM t_portee ORDER BY valeur").fetchall()
 
     def test_chaque_appel_commite_son_unite_MEME_dans_une_portee(self) -> None:
@@ -187,6 +193,109 @@ class LesFRONTIERESDeCommitNeBougentPASTests(_Base):
                 conn.execute("INSERT INTO t_portee VALUES (9)")
 
         self.assertEqual(self._lire(chemin), [(9,)], "le rollback de l'appel en echec n'a pas eu lieu")
+
+
+class UnAppelIMBRIQUENePartagePasTests(_Base):
+    """LA MESURE A CONTREDIT L'HYPOTHESE, ET LA CONCEPTION A SUIVI.
+
+    Une premiere sonde, limitee aux tests de repositories, donnait une
+    profondeur maximale de 1 — et j'en avais conclu que l'imbrication n'existait
+    pas. La sonde sur le perimetre CI **complet** rend 20 052 ouvertures et une
+    profondeur maximale de **2**.
+
+    Sur un handle partage, la sortie d'un appel INTERNE commiterait le travail
+    partiel de l'appel EXTERNE. Les deux echappatoires changent la semantique :
+    ne commiter qu'au niveau le plus externe repousse la durabilite de l'appel
+    interne ; commiter a chaque niveau avance celle de l'externe. La seule
+    option qui ne change RIEN est de rendre a l'appel imbrique ce qu'il avait
+    deja : sa propre connexion.
+    """
+
+    def test_un_appel_imbrique_ouvre_SA_propre_connexion(self) -> None:
+        vues = self._ouvertures()
+        handles = []
+        with portee_de_requete():
+            with self.store._managed_conn() as externe:
+                handles.append(externe)
+                with self.store._managed_conn() as interne:
+                    handles.append(interne)
+
+        self.assertEqual(len(vues), 2, "l'appel imbrique a reutilise le handle de l'appel qui l'englobe")
+        self.assertIsNot(handles[0], handles[1])
+
+    def test_apres_l_imbrication_le_partage_REPREND(self) -> None:
+        """Le refus de partager ne doit valoir que pour la duree de
+        l'imbrication : sinon un seul appel imbrique ferait perdre le benefice
+        de toute la portee."""
+        vues = self._ouvertures()
+        handles = []
+        with portee_de_requete():
+            with self.store._managed_conn() as a:
+                handles.append(a)
+                with self.store._managed_conn() as interne:
+                    interne.execute("SELECT 1").fetchone()
+            with self.store._managed_conn() as b:
+                handles.append(b)
+
+        self.assertEqual(len(vues), 2, "le partage n'a pas repris apres l'imbrication")
+        self.assertIs(handles[0], handles[1])
+
+    def test_l_imbrication_se_comporte_EXACTEMENT_comme_avant(self) -> None:
+        """LE contrat de cette vague : gagner l'ouverture sans rien changer
+        d'autre. On ne postule donc pas un comportement « correct » pour
+        l'imbrication — on exige qu'il soit LE MEME qu'aujourd'hui.
+
+        Mesure a bras alternes, deux tours chacun : les deux bras rendent le
+        meme etat de base ET les memes erreurs, `database is locked` comprise.
+        Cette erreur est un defaut PREEXISTANT — un ecrivain imbrique sur une
+        seconde connexion se heurte au verrou de celui qui l'englobe — et ce
+        n'est pas cette vague qui l'introduit ni ne le corrige.
+        """
+        observations = []
+        for avec_portee in (False, True, False, True):
+            observations.append(self._scenario_imbrique(avec_portee))
+
+        sans = [o for i, o in enumerate(observations) if i % 2 == 0]
+        avec = [o for i, o in enumerate(observations) if i % 2 == 1]
+        self.assertEqual(sans[0], sans[1], "le bras de reference n'est pas reproductible")
+        self.assertEqual(
+            avec,
+            sans,
+            "la portee a change le comportement de l'imbrication : "
+            f"sans={sans[0]} vs avec={avec[0]}",
+        )
+
+    def _scenario_imbrique(self, avec_portee: bool) -> tuple:
+        """Un ecrivain imbrique dans un ecrivain, puis l'externe echoue.
+
+        Rend `(etat de la base, erreurs vues)` — deux grandeurs observables,
+        comparables entre les deux bras.
+        """
+        dossier = Path(tempfile.mkdtemp(prefix="cinesort_imb_"))
+        self.addCleanup(shutil.rmtree, dossier, ignore_errors=True)
+        store = SQLiteStore(db_path_for_state_dir(dossier))
+        store.initialize()
+        with store._managed_conn() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS t_portee (valeur INTEGER)")
+
+        erreurs = []
+        portee = portee_de_requete() if avec_portee else contextlib.nullcontext()
+        try:
+            with portee:
+                with store._managed_conn() as externe:
+                    externe.execute("INSERT INTO t_portee VALUES (1)")
+                    try:
+                        with store._managed_conn() as interne:
+                            interne.execute("INSERT INTO t_portee VALUES (2)")
+                    except sqlite3.Error as exc:
+                        erreurs.append(f"interne:{type(exc).__name__}")
+                    externe.execute("INSERT INTO table_qui_n_existe_pas VALUES (3)")
+        except sqlite3.Error as exc:
+            erreurs.append(f"externe:{type(exc).__name__}")
+
+        with closing(sqlite3.connect(str(store.db_path))) as autre:
+            base = autre.execute("SELECT valeur FROM t_portee ORDER BY valeur").fetchall()
+        return base, tuple(erreurs)
 
 
 class LaPorteeNeFUITEPasEntreThreadsTests(_Base):
