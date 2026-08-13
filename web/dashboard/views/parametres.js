@@ -3669,8 +3669,8 @@ function _bindProfilsQualite(container) {
     btn.addEventListener("click", () => ouvrirSimulateurQualite());
   });
 
-  // Les regles courantes du profil sont passees telles quelles : le builder ne
-  // les redecouvre pas, il les EDITE.
+  // Les reglages fins : options, calibration et partage. Une LECTURE aussi —
+  // l'ecran montre le diff d'un import AVANT d'ecrire quoi que ce soit.
   container.querySelectorAll("[data-parametres-ouvrir-calibration]").forEach((btn) => {
     btn.addEventListener("click", () => ouvrirCalibrationQualite());
   });
