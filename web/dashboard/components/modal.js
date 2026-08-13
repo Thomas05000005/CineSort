@@ -208,6 +208,10 @@ const DANGER_MODAL_ID = "dashDangerModal";
  * @param {string} [opts.confirmLabel="Confirmer"] - libelle du bouton dangereux
  * @param {string} [opts.cancelLabel="Annuler"] - libelle du bouton d'annulation
  * @param {Function} opts.onConfirm - callback (peut etre async), execute apres confirmation
+ * @param {string} [opts.requireTyped=""] - mot que l'utilisateur doit TAPER
+ *   pour armer le bouton de confirmation. Le texte saisi est transmis a
+ *   `onConfirm(saisie)` : l'appelant envoie ce que l'utilisateur a ecrit, et non
+ *   une constante — sinon le garde du backend ne verifierait plus rien.
  * @param {boolean} [opts.closeBeforeConfirm=false] - fermer la modale AVANT de
  *        lancer onConfirm au lieu d'attendre sa resolution (cf plus bas).
  * @returns {Promise<void>} resolue apres affichage (pas attente de l'utilisateur)
@@ -273,6 +277,11 @@ export function dangerConfirmModal(opts) {
     // et doivent porter leur PROPRE garde de re-entrance (cf _handleApplyNow).
     // Opt-in deliberement : les ~20 autres sites d'appel gardent la semantique
     // historique, aucun n'est modifie par ce correctif.
+    // LE DERNIER CRAN AVANT L'IRREVERSIBLE. `settings.reset_all_user_data`
+    // exige `confirmation == "RESET"` (reset_support.py:196) : sans affordance
+    // de saisie, cette capacite etait INATTEIGNABLE depuis toute l'application —
+    // la seule des dix methodes de la vague B3 a l'etre restee.
+    requireTyped = "",
     closeBeforeConfirm = false,
   } = opts || {};
 
@@ -303,13 +312,24 @@ export function dangerConfirmModal(opts) {
     ? `<p id="${DANGER_MODAL_ID}Consequence" class="danger-modal-consequence">${escapeHtml(consequence)}</p>`
     : "";
 
+  const motAttendu = String(requireTyped || "");
+  const saisieHtml = motAttendu
+    ? `<label class="danger-modal-saisie">
+        <span>Pour confirmer, tapez <strong>${escapeHtml(motAttendu)}</strong></span>
+        <input type="text" data-danger-saisie autocomplete="off" spellcheck="false"
+               aria-label="Tapez ${escapeHtml(motAttendu)} pour confirmer">
+      </label>`
+    : "";
+
   const nbElements = itemCount === null || itemCount === undefined
     ? (Array.isArray(items) ? items.length : 0)
     : (Number(itemCount) || 0);
   const countdown = countdownSeconds === null || countdownSeconds === undefined
     ? gradedCountdownSeconds(nbElements)
     : Math.max(0, parseInt(countdownSeconds, 10) || 0);
-  const confirmDisabled = countdown > 0 ? "disabled" : "";
+  // Les deux verrous sont INDEPENDANTS : le decompte n'arme rien si le mot
+  // manque, et le mot n'arme rien tant que le decompte court.
+  const confirmDisabled = countdown > 0 || motAttendu ? "disabled" : "";
   const countdownSuffix = countdown > 0
     ? ` <span class="danger-modal-confirm-countdown" data-danger-countdown>(${countdown}s)</span>`
     : "";
@@ -319,6 +339,7 @@ export function dangerConfirmModal(opts) {
       <h3 id="${DANGER_MODAL_ID}Title" class="danger-modal-title">${escapeHtml(title)}</h3>
       ${itemsHtml}
       ${consequenceHtml}
+      ${saisieHtml}
       <div class="danger-modal-actions">
         <button type="button" class="v5-btn" data-danger-cancel>${escapeHtml(cancelLabel)}</button>
         <button type="button" class="v5-btn v5-btn--danger" data-danger-confirm ${confirmDisabled}>${escapeHtml(confirmLabel)}${countdownSuffix}</button>
@@ -332,6 +353,7 @@ export function dangerConfirmModal(opts) {
 
   const cancelBtn = overlay.querySelector("[data-danger-cancel]");
   const confirmBtn = overlay.querySelector("[data-danger-confirm]");
+  const champ = overlay.querySelector("[data-danger-saisie]");
 
   // Fix audit 2026-06-07 UX high : drapeau pour distinguer fermeture-apres-confirm
   // de fermeture-via-cancel (clic Annuler, Esc, backdrop). onCancel n'est appele
@@ -387,6 +409,9 @@ export function dangerConfirmModal(opts) {
   if (confirmBtn) {
     confirmBtn.addEventListener("click", async () => {
       if (confirmBtn.disabled) return;
+      // CE QUE L'UTILISATEUR A TAPE, et non le mot attendu : l'appelant le
+      // transmet au backend, dont le garde reste ainsi une verification reelle.
+      const saisie = champ ? String(champ.value || "").trim() : "";
       // Eviter double-clic pendant l'execution
       confirmBtn.disabled = true;
       // Fix audit 2026-06-07 UX high : marquer _confirmed avant close() pour
@@ -398,11 +423,11 @@ export function dangerConfirmModal(opts) {
         // qu'elle declenche soit reellement visible. `_confirmed` etant deja
         // pose, close() n'appelle pas onCancel.
         close();
-        await Promise.resolve(onConfirm());
+        await Promise.resolve(onConfirm(saisie));
         return;
       }
       try {
-        await Promise.resolve(onConfirm());
+        await Promise.resolve(onConfirm(saisie));
       } finally {
         close();
       }
@@ -418,12 +443,25 @@ export function dangerConfirmModal(opts) {
       if (remaining <= 0) {
         clearInterval(overlay._countdownTimer);
         overlay._countdownTimer = null;
-        confirmBtn.disabled = false;
+        // La fin du decompte ne leve QUE son propre verrou : si un mot est
+        // exige et n'est pas encore tape, le bouton reste desarme.
+        confirmBtn.disabled = !!(motAttendu && !overlay._motTape);
         if (span) span.remove();
       } else if (span) {
         span.textContent = `(${remaining}s)`;
       }
     }, 1000);
+  }
+
+  // Le champ de saisie arme le bouton ; le decompte ne le fait jamais seul.
+  if (champ && confirmBtn) {
+    champ.addEventListener("input", () => {
+      // Comparaison EXACTE, espaces de bord retires : ni insensible a la casse,
+      // ni tolerante. « reset » n'est pas « RESET », et le backend refuserait
+      // de toute facon — l'ecran ne doit pas promettre l'inverse.
+      overlay._motTape = String(champ.value || "").trim() === motAttendu;
+      confirmBtn.disabled = !overlay._motTape || !!overlay._countdownTimer;
+    });
   }
 
   // Focus initial : Annuler (anti-clic-reflexe sur Confirmer)

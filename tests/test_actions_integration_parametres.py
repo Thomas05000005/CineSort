@@ -44,9 +44,6 @@ PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
 #:   settings.preview_naming_template `sample_row_id` est INERTE (#460 : la branche
 #:                                   qui chargeait un vrai film « etait morte
 #:                                   depuis sa premiere ligne »)
-#:   settings.reset_all_user_data    exige que l'utilisateur TAPE « RESET » ;
-#:                                   `dangerConfirmModal` n'a pas d'affordance de
-#:                                   saisie
 #:   runtime.set_probe_tool_paths    perte de donnees sur payload partiel
 #:   runtime.reset_incremental_cache impossible de dresser la liste d'elements
 #:                                   qu'exige la regle des actions destructives
@@ -62,6 +59,7 @@ ROUTES_ATTENDUES = (
     "runtime/purge_probe_cache",
     "settings/get_naming_presets",
     "settings/get_user_data_size",
+    "settings/reset_all_user_data",
 )
 
 _STUBS = r"""
@@ -104,9 +102,13 @@ function dangerConfirmModal(o) {
     if (o.onCancel) o.onCancel();
     return;
   }
-  // La vraie modale attend la resolution de `onConfirm` avant de se fermer ; on
-  // expose la promesse pour que le test puisse en faire autant.
-  globalThis.__enCours = o.onConfirm ? o.onConfirm() : null;
+  // La vraie modale transmet a `onConfirm` CE QUE L'UTILISATEUR A TAPE quand
+  // `requireTyped` est demande (modal.js). Un stub qui n'appellerait `onConfirm()`
+  // sans argument laisserait passer un appelant qui ignore la saisie et envoie
+  // la constante — precisement le defaut qui rendrait le garde du backend
+  // decoratif. `__saisie` est ce que le test fait taper.
+  const saisie = o.requireTyped ? String(globalThis.__saisie ?? o.requireTyped) : undefined;
+  globalThis.__enCours = o.onConfirm ? o.onConfirm(saisie) : null;
 }
 function t(k) { return String(k); }
 function formatBytes() { return ""; }
@@ -423,6 +425,99 @@ __emit({ texte: M.__rendreReponse({ rendu: "taille" }, { ok: true, size_mb: 12.5
                     f'__emit({{ texte: M.__rendreReponse({{ rendu: "{rendu}" }}, {{ ok: true, message: "Rien." }}) }});'
                 )
                 self.assertEqual(res["texte"], "Rien.")
+
+
+class LaREINITIALISATIONTOTALEEstAtteignableTests(unittest.TestCase):
+    """LA SEULE DES DIX METHODES DE LA VAGUE B3 RESTEE NON CABLABLE.
+
+    `settings.reset_all_user_data` refuse tout appel dont `confirmation` ne vaut
+    pas exactement « RESET » (`reset_support.py:196`), et `dangerConfirmModal`
+    n'avait aucune affordance de saisie : la capacite etait inatteignable depuis
+    toute l'application. Le tri des routes orphelines la classait « NON cablable »
+    pour cette raison.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=_FAUX_DOM + driver + _EXIT, timeout=90)
+
+    def test_elle_exige_un_mot_TAPE_une_liste_et_un_delai(self) -> None:
+        """La regle n3 du depot : liste des elements, consequence, delai. Le mot
+        tape s'y ajoute — c'est l'action la plus destructive de l'application."""
+        res = self._run(
+            r"""
+const { btn } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+const c = globalThis.__confirmations[0] || {};
+__emit({ mot: c.requireTyped, elements: (c.items || []).length,
+         delai: c.countdownSeconds, consequence: String(c.consequence || "") });
+"""
+        )
+        self.assertEqual(res["mot"], "RESET", "aucun mot n'est exige : le backend refusera toujours")
+        self.assertGreaterEqual(res["elements"], 3, "la liste de ce qui sera detruit n'est pas montree")
+        self.assertEqual(res["delai"], 3, "l'action irreversible part sans delai de reflexion")
+        self.assertIn("sauvegarde", res["consequence"].lower(), "la sauvegarde ZIP n'est pas annoncee")
+
+    def test_la_SAISIE_de_l_utilisateur_part_au_backend(self) -> None:
+        """Envoyer la constante a la place rendrait le garde du backend
+        decoratif : il relirait ce que ce fichier lui a souffle."""
+        res = self._run(
+            r"""
+globalThis.__saisie = "RESET";
+const { btn } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
+__emit({ params: appel ? appel.params : null });
+"""
+        )
+        self.assertEqual(
+            res["params"],
+            {"confirmation": "RESET"},
+            "le mot tape n'est pas transmis : l'action partirait avec un corps vide",
+        )
+
+    def test_un_mot_DIFFERENT_part_tel_quel_et_le_backend_tranche(self) -> None:
+        """Le front ne corrige pas la saisie : c'est le backend qui refuse. Sinon
+        deux verites coexisteraient sur ce qui vaut confirmation."""
+        res = self._run(
+            r"""
+globalThis.__saisie = "reset";
+const { btn } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await globalThis.__enCours;
+const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
+__emit({ params: appel ? appel.params : null });
+"""
+        )
+        self.assertEqual(res["params"], {"confirmation": "reset"})
+
+    def test_un_REFUS_n_appelle_RIEN(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+const { btn } = fauxBouton("settings/reset_all_user_data");
+M.__lancer(null, btn);
+await new Promise((r) => setTimeout(r, 0));
+__emit({ appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(res["appels"], [], "l'action est partie malgre l'annulation")
+
+    def test_la_reponse_NOMME_la_sauvegarde(self) -> None:
+        """C'est le seul moyen de revenir en arriere : ne pas la nommer rendrait
+        la sauvegarde inutilisable."""
+        res = self._run(
+            r"""
+const action = { rendu: "reset" };
+__emit({ texte: M.__rendreReponse(action,
+  { ok: true, backup_path: "C:/data/cinesort_backup_before_reset_1.zip", removed: ["db", "settings"] }) });
+"""
+        )
+        self.assertIn("cinesort_backup_before_reset_1.zip", res["texte"])
+        self.assertIn("2", res["texte"], "le nombre d'elements supprimes n'est pas dit")
 
 
 if __name__ == "__main__":

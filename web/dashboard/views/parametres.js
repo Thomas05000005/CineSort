@@ -1596,6 +1596,34 @@ const ACTIONS_DE_SECTION = {
       titre: "Mesure la place occupée par la base et les données de runs",
       rendu: "taille",
     },
+    {
+      route: "settings/reset_all_user_data",
+      label: "Tout réinitialiser…",
+      titre: "Supprime la base, les réglages et l'historique — après une sauvegarde ZIP complète",
+      rendu: "reset",
+      // LA PLUS DESTRUCTIVE DES ACTIONS DE L'APPLICATION, et la seule des dix
+      // methodes de la vague B3 restee non cablable : le backend exige que
+      // l'utilisateur TAPE « RESET » (reset_support.py:196), et la modale de
+      // danger n'avait aucune affordance de saisie. Elle en a une desormais.
+      confirmation: {
+        titre: "Réinitialiser toutes les données ?",
+        elements: [
+          "la base SQLite : scans, scores, doublons, décisions",
+          "settings.json : tous vos réglages",
+          "l'historique des runs et le cache TMDb",
+          "les rapports de similarité perceptuelle",
+        ],
+        corps:
+          "Une sauvegarde ZIP complète est créée AVANT toute suppression, à côté du dossier " +
+          "de données. Vos journaux (logs/) sont conservés. Aucun fichier de votre " +
+          "bibliothèque de films n'est touché : seules les données de l'application le sont.",
+        libelle: "Tout réinitialiser",
+        delaiSecondes: 3,
+        // Le mot est transmis TEL QUE TAPE ; c'est le backend qui le verifie.
+        motAConfirmer: "RESET",
+        parametre: "confirmation",
+      },
+    },
   ],
 };
 
@@ -1671,6 +1699,17 @@ function _rendreReponseAction(action, data) {
     const noms = liste.map((p) => (typeof p === "string" ? p : p && (p.name || p.label || p.template))).filter(Boolean);
     if (noms.length) return `${noms.length} modèle(s) : ${noms.join(" · ")}`;
   }
+  if (action.rendu === "reset") {
+    // `reset_all_user_data` rend `{backup_path, removed}`. Nommer la sauvegarde
+    // est la seule chose qui compte a cet instant : c'est le seul moyen de
+    // revenir en arriere.
+    const parts = [];
+    if (Array.isArray(data.removed) && data.removed.length) {
+      parts.push(`${data.removed.length} élément(s) supprimé(s)`);
+    }
+    if (data.backup_path) parts.push(`sauvegarde : ${data.backup_path}`);
+    if (parts.length) return parts.join(" · ");
+  }
   if (action.rendu === "taille") {
     // `get_user_data_size` rend `{size_mb, items}` -- des MEGAOCTETS et un
     // COMPTE, pas des octets. Une premiere version passait toute valeur
@@ -1685,11 +1724,11 @@ function _rendreReponseAction(action, data) {
 }
 
 /** Appelle la route et rend sa reponse dans la zone de sortie de la section. */
-async function _executerActionDeSection(action, route, btn, ecrire) {
+async function _executerActionDeSection(action, route, btn, ecrire, params = {}) {
   ecrire("En cours…", "info");
   btn.disabled = true;
   try {
-    const res = await apiPost(route, {});
+    const res = await apiPost(route, params);
     const data = (res && res.data) || res || {};
     if (data.ok === false) {
       // Le message du backend passe AVANT tout libelle generique : c'est lui qui
@@ -1733,11 +1772,28 @@ function _lancerActionDeSection(container, btn) {
   // Les 12 autres sites d'appel du depot utilisent tous `consequence` +
   // `onConfirm` ; celui-ci etait le seul a s'en ecarter.
   if (action.confirmation) {
+    const conf = action.confirmation;
     dangerConfirmModal({
-      title: action.confirmation.titre,
-      consequence: action.confirmation.corps,
-      confirmLabel: action.confirmation.libelle,
-      onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
+      title: conf.titre,
+      items: conf.elements || [],
+      consequence: conf.corps,
+      confirmLabel: conf.libelle,
+      // `countdownSeconds` non transmis valait `undefined`, donc le decompte
+      // GRADUE par le nombre d'elements — soit 0 ici, ou la liste est courte.
+      // Une action irreversible merite son delai quoi qu'il arrive.
+      countdownSeconds: conf.delaiSecondes,
+      requireTyped: conf.motAConfirmer || "",
+      // LA SAISIE PART TELLE QUELLE. Envoyer `conf.motAConfirmer` a la place
+      // rendrait le garde du backend decoratif : il verifierait une constante
+      // que ce fichier lui aurait fournie, quoi que l'utilisateur ait tape.
+      onConfirm: (saisie) =>
+        _executerActionDeSection(
+          action,
+          route,
+          btn,
+          ecrire,
+          conf.parametre ? { [conf.parametre]: saisie } : {}
+        ),
     });
     return;
   }

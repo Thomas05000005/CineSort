@@ -100,7 +100,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         "runtime.run_nas_benchmark",  # B3 : NON cablable — aucun parametre de chemin : « tester mon NAS » est irrealisable en l'etat
         "runtime.set_probe_tool_paths",  # B3 : NON cablable — perte de donnees sur payload partiel
         "settings.preview_naming_template",  # B3 : NON cablable — `sample_row_id` est INERTE : #460 documente que la branche chargeant un vrai film « etait morte depuis sa premiere ligne »
-        "settings.reset_all_user_data",  # B3 : NON cablable — exige que l'utilisateur TAPE « RESET » (reset_support.py:266) ; dangerConfirmModal n'a aucune affordance de saisie
         "settings.set_locale",
     }
 )
