@@ -143,7 +143,7 @@ globalThis.__reponses["settings/get_profiles"] = { data: { profiles: [], active:
 _FAUX_DOM = r"""
 function fauxBouton(route) {
   const sortie = { textContent: "", className: "" };
-  const section = { querySelector: () => sortie };
+  const section = { querySelector: () => sortie, dataset: { sectionId: "stockage-sqlite" } };
   const btn = {
     dataset: { sectionAction: route },
     disabled: false,
@@ -704,15 +704,28 @@ __emit({ texte: sortie.textContent, classe: sortie.className });
 globalThis.__saisie = "RESET";
 globalThis.__reponses["settings/reset_all_user_data"] = { ok: true, removed: ["db"], failed: [] };
 globalThis.__invalidations = 0;
-const { btn } = fauxBouton("settings/reset_all_user_data");
+const { btn, sortie } = fauxBouton("settings/reset_all_user_data");
 M.__lancer(null, btn);
 await globalThis.__enCours;
 await new Promise((r) => setTimeout(r, 0));
 __emit({ invalidations: globalThis.__invalidations,
-         relu: globalThis.__appels.some((a) => a.route === "settings/get_settings") });
+         relu: globalThis.__appels.some((a) => a.route === "settings/get_settings"),
+         texte: sortie.textContent });
 """
         )
         self.assertGreaterEqual(res["invalidations"], 1, "le cache partage des reglages n'est pas invalide")
+        # INVALIDER NE SUFFIT PAS : sans cette assertion, un rechargement qui
+        # viderait le cache SANS relire le disque resterait vert, et l'ecran
+        # continuerait de servir les reglages d'avant.
+        self.assertTrue(res["relu"], "le cache est vide mais les reglages ne sont pas RELUS du disque")
+        # LE RESULTAT DOIT SURVIVRE AU RECHARGEMENT. `_refreshAll` fait
+        # `root.innerHTML = ...` : il DETRUIT le noeud de sortie. Sans reecriture,
+        # l'utilisateur ne voyait RIEN — et sur cette action-la, cela emportait le
+        # chemin de sauvegarde, seul moyen de revenir en arriere.
+        self.assertTrue(
+            res["texte"].strip(),
+            "le message de resultat a disparu avec le rechargement du DOM",
+        )
 
     def test_la_reponse_NOMME_la_sauvegarde(self) -> None:
         """C'est le seul moyen de revenir en arriere : ne pas la nommer rendrait

@@ -1815,6 +1815,8 @@ async function _executerActionDeSection(action, route, btn, ecrire, params = {})
   ecrire("En cours…", "info");
   btn.disabled = true;
   let aboutie = false;
+  let derniereClasse = "ok";
+  let dernierTexte = "";
   try {
     const res = await apiPost(route, params);
     const data = (res && res.data) || res || {};
@@ -1834,7 +1836,9 @@ async function _executerActionDeSection(action, route, btn, ecrire, params = {})
     // reset : toute reponse qui porte un `failed` non vide decrit un travail
     // inacheve, et l'ecrire en vert serait mentir sur son resultat.
     const inacheve = Array.isArray(data.failed) && data.failed.length > 0;
-    ecrire(_rendreReponseAction(action, data), inacheve ? "avertissement" : "ok");
+    derniereClasse = inacheve ? "avertissement" : "ok";
+    dernierTexte = _rendreReponseAction(action, data);
+    ecrire(dernierTexte, derniereClasse);
     aboutie = true;
   } catch {
     ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
@@ -1849,6 +1853,11 @@ async function _executerActionDeSection(action, route, btn, ecrire, params = {})
   if (aboutie && action.rechargeTout) {
     try {
       await _rechargerApresReset();
+      // LE RECHARGEMENT A REMPLACE LE DOM. On RECRIT le resultat, sinon il
+      // disparaitrait avec le noeud qui le portait — chemin de sauvegarde
+      // compris, c'est-a-dire le seul moyen de revenir en arriere. `ecrire`
+      // retrouve le noeud NEUF de lui-meme.
+      if (dernierTexte) ecrire(dernierTexte, derniereClasse);
     } catch {
       ecrire(
         "L'action a abouti, mais les réglages n'ont pas pu être relus : rouvrez l'écran avant de rien modifier.",
@@ -1864,13 +1873,33 @@ function _lancerActionDeSection(container, btn) {
   if (!action) return;
   const sectionEl = btn.closest("[data-section-id]");
   const sortie = sectionEl && sectionEl.querySelector("[data-section-actions-out]");
+  const idSection = sectionEl && sectionEl.dataset ? sectionEl.dataset.sectionId : "";
+
+  // LE NOEUD DE SORTIE EST RETROUVE A CHAQUE ECRITURE, PAS CAPTURE UNE FOIS.
+  //
+  // `_refreshAll()` fait `root.innerHTML = _renderParametres()` : il DETRUIT le
+  // noeud. Une action qui recharge les reglages apres coup — « Tout
+  // reinitialiser » le fait — ecrivait donc son resultat dans un noeud detache,
+  // et l'utilisateur ne voyait RIEN. Sur la plus destructive des actions, cela
+  // emportait le CHEMIN DE SAUVEGARDE, c'est-a-dire le seul moyen de revenir en
+  // arriere.
+  const noeudDeSortie = () => {
+    const racine = _state.containerRef;
+    if (racine && idSection) {
+      const frais = racine.querySelector(`[data-section-actions-out="${idSection}"]`);
+      if (frais) return frais;
+    }
+    return sortie;
+  };
+
   // `textContent` et non `innerHTML` : la reponse du backend n'est PAS de la
   // mise en forme, et l'echapper serait a la fois inutile et visible
   // (`&amp;` a l'ecran). Le rendu ci-dessus ne produit donc aucune balise.
   const ecrire = (texte, classe) => {
-    if (!sortie) return;
-    sortie.textContent = texte;
-    sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
+    const cible = noeudDeSortie();
+    if (!cible) return;
+    cible.textContent = texte;
+    cible.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
   };
   // Une action destructive DOIT nommer sa consequence avant de partir. La regle
   // du depot l'exige, et c'est le seul endroit ou l'utilisateur peut encore dire
