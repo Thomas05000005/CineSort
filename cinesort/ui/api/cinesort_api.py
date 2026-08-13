@@ -677,6 +677,17 @@ class CineSortApi:
         `run.get_dashboard()` repondait quand meme **`ok: True`** sur une base
         vide — un echec devenu succes silencieux, jusqu'au redemarrage.
 
+        OUBLIE TOUS LES `state_dir`, PAS SEULEMENT CELUI QU'ON REINITIALISE.
+        C'est delibere : reconstruire une infra coute une ouverture de base et un
+        `initialize()` idempotent, alors que se tromper de cle laisserait vivre
+        l'instance exacte qu'on voulait retirer. Sur un chemin destructif,
+        l'erreur va dans le sens RESTRICTIF.
+
+        Les onze lecteurs de `_infra_by_state_dir` ont ete relus : tous prennent
+        `_runs_lock` et traitent le cas vide — trois sont explicitement defensifs
+        (« pas de creation d'infra si elle n'existe pas ») et deux retombent sur
+        `_get_or_create_infra`, qui reconstruit.
+
         Rend le nombre d'entrees oubliees, pour que l'appelant puisse le
         journaliser plutot que de supposer.
         """
