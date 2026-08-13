@@ -485,6 +485,60 @@ __emit({ compte: M.__t._state.data.timeline.months[0].count });
         )
 
 
+class UneREPONSEArrivantAPRESLeDemontageNEcritRienTests(unittest.TestCase):
+    """LE point de montage EST partage — c'est la convention du routeur.
+
+    `/statistiques` est enregistree sur `view-qij`, comme `/qij`, `/quality`,
+    `/logs`, `/jellyfin` et `/plex` (app.js). Quitter la vue pendant qu'une
+    requete est en vol ferait donc ecrire sa reponse DANS L'ECRAN SUIVANT, qui
+    occupe le meme element.
+
+    Le jeton d'invalidation couvre ce cas (`_hote !== hote`), mais aucun test ne
+    l'eprouvait au DEMONTAGE — seulement sur deux appels concurrents. Une garde
+    qu'aucun test ne couvre a la moitie de sa surface n'est garantie qu'a moitie.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def test_quitter_la_vue_pendant_un_chargement_n_ecrit_rien(self) -> None:
+        res = run_module_test(
+            STATS_JS,
+            stubs=_STUBS,
+            extra=_EXTRA,
+            driver=_HOTE
+            + r"""
+globalThis.__rejets = [];
+process.on("unhandledRejection", (e) => { globalThis.__rejets.push(String((e && e.message) || e)); });
+globalThis.__reponses["library/get_library_podiums"] = { ok: true, release_groups: [] };
+let libererLeLent = null;
+globalThis.__reponses["library/get_library_timeline"] = new Promise((r) => { libererLeLent = r; });
+
+const h = fauxHote();
+M.__init(h);
+await new Promise((r) => setTimeout(r, 0));
+M.__t._state.onglet = "timeline";
+M.__t._charger("timeline", h);        // requete EN VOL
+
+M.__unmount();                         // l'utilisateur quitte l'ecran
+h.innerHTML = "ECRAN SUIVANT";         // le routeur reutilise le meme element
+
+libererLeLent({ ok: true, months: [{ month: "2026-01", count: 42 }] });
+await new Promise((r) => setTimeout(r, 20));
+__emit({ contenu: h.innerHTML, rejets: globalThis.__rejets, ecouteurs: h.ecouteurs });
+"""
+            + _EXIT,
+            timeout=90,
+        )
+        self.assertEqual(
+            res["contenu"],
+            "ECRAN SUIVANT",
+            "la reponse en vol a ecrit par-dessus l'ecran suivant : les deux partagent le meme point de montage",
+        )
+        self.assertEqual(res["rejets"], [])
+        self.assertEqual(res["ecouteurs"], 0)
+
+
 class LeDEMONTAGERetireSonEcouteurTests(unittest.TestCase):
     """Sans cela, chaque retour sur la vue empile un ecouteur, et un clic finit
     par declencher N chargements."""
