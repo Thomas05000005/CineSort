@@ -1413,7 +1413,12 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             # vit dans la docstring de `portee_de_requete`, pas en double ici.
             with portee_de_requete():
                 result = method(**params)
-            self._respond_json(_statut_metier(result), result)
+            # La variable est CONSERVEE : la ligne de journalisation qui suit la
+            # relit. Extraire le calcul sans regarder ses lecteurs l'avait
+            # laissee sur un nom disparu — le piege « un correctif peut ETEINDRE
+            # une garde existante », applique a une valeur plutot qu'a une garde.
+            status = _statut_metier(result)
+            self._respond_json(status, result)
             logger.info("REST POST /api/%s -> %d (%.0fms)", method_name, status, (time.monotonic() - _t0) * 1000)
         except TypeError as exc:
             self._respond_json(400, {"ok": False, "message": f"Parametres invalides: {exc}"})
