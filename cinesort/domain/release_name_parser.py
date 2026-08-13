@@ -52,10 +52,24 @@ class ReleaseNameInfo:
 
 
 # Ordre important : motifs plus specifiques en premier.
+#
+# Le `HD` du motif 720p exige des separateurs NON-tiret des deux cotes.
+# `\bHD\b(?!R)` ne suffisait pas : un tiret est une frontiere de mot, donc le
+# `HD` de `DTS-HD.MA` etait encadre de deux `\b`, et le lookahead ne le rejetait
+# pas (le caractere suivant est un point). Toute release sans token de
+# resolution mais avec une piste `DTS-HD*` — ou un `HD-DVD` — ressortait alors en
+# 720p / 1280x720, valeurs inventees. Mesure :
+#
+#     Heat.1995.REMUX.BluRay.DTS-HD.MA.5.1-FraMeSToR.mkv  ->  720p  1280x720
+#
+# `TrueHD`, `HDR` et `HDTV` etaient deja exclus (pas de frontiere, ou lookahead).
+# La classe `[\w-]` ajoute le seul cas qui manquait : le tiret. Un `Movie-HD-GRP`
+# perd son indice, ce qui est le sens SUR — ne rien deduire plutot que deduire
+# faux, d'autant que ce `HD`-la est indiscernable d'un nom de groupe.
 _PATTERNS_RESOLUTION = [
     (r"\b2160p\b|\b4[Kk]\b|\bUHD\b", "2160p", 3840, 2160),
     (r"\b1080[pi]\b|\bFHD\b", "1080p", 1920, 1080),
-    (r"\b720[pi]\b|\bHD\b(?!R)", "720p", 1280, 720),
+    (r"\b720[pi]\b|(?<![\w-])HD(?![\w-])", "720p", 1280, 720),
     (r"\b576[pi]\b", "576p", 720, 576),
     (r"\b480[pi]\b", "480p", 720, 480),
 ]
