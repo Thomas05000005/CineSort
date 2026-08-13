@@ -392,6 +392,7 @@ export const __test = {
   _corps,
   _simuler,
   _enregistrer,
+  _brancher,
   PRESETS,
   PORTEES,
 };
