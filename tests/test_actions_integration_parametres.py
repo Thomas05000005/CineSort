@@ -548,7 +548,16 @@ await new Promise((r) => setTimeout(r, 0));
 __emit({ texte: sortie.textContent, classe: sortie.className });
 """
         )
-        self.assertIn("2", res["texte"], "le nombre d'elements qui ont RESISTE n'est pas dit")
+        # LES DEUX SOURCES SONT ASSERTEES SEPAREMENT. « 2 » et « cinesort.db »
+        # figurent AUSSI dans la phrase du backend : les chercher nus laissait le
+        # rendu de `failed` non prouve — la mutation l'a montre en survivant.
+        # On exige donc la formule que SEUL ce rendu produit, puis la consigne
+        # que seul le backend produit.
+        self.assertIn(
+            "N'ONT PAS PU L'ÊTRE",
+            res["texte"],
+            "le rendu ne dit pas, de lui-meme, que des elements ont resiste",
+        )
         self.assertIn("cinesort.db", res["texte"], "on ne sait pas CE QUI a survecu")
         self.assertIn("relancez", res["texte"], "la consigne du backend est perdue")
         self.assertNotIn("--ok", res["classe"], "un reset PARTIEL est affiche en vert")
