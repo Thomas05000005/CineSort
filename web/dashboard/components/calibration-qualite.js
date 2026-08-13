@@ -281,6 +281,13 @@ async function _charger() {
       apiPost("quality/get_quality_profile", {}),
       apiPost("quality/get_calibration_report", {}),
     ]);
+    // UNE REPONSE PERIMEE N'ECRIT RIEN — NI L'ETAT, NI L'ECRAN. Garder sous
+    // jeton le seul repeint ne suffit pas : l'etat, lui, restait ecrasable.
+    // L'ecran affichait alors la generation courante pendant que `_etat.rapport`
+    // portait celle d'avant, et « Appliquer » ecrivait dans le profil les poids
+    // que l'utilisateur ne voyait PAS. Une garde au mauvais endroit ne protege
+    // que ce qu'elle touche.
+    if (perimee()) return;
     const dp = (p && p.data) || p || {};
     const dc = (c && c.data) || c || {};
     const profil = dp.profile_json || dp.profile;
@@ -295,8 +302,12 @@ async function _charger() {
   } catch {
     _etat.erreur = "Le serveur n'a pas répondu.";
   } finally {
-    _etat.chargement = false;
-    if (!perimee()) _reouvrir();
+    // Une generation perimee ne touche plus a rien : c'est la generation
+    // COURANTE qui detient `chargement` et l'ecran.
+    if (!perimee()) {
+      _etat.chargement = false;
+      _reouvrir();
+    }
   }
 }
 

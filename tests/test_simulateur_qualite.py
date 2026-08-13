@@ -90,6 +90,45 @@ class _Base(unittest.TestCase):
         return run_module_test(SIMU_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
 
 
+class UneReponsePERIMEENEcritRienTests(_Base):
+    def test_une_reponse_PERIMEE_n_ecrit_ni_l_etat_ni_l_ecran(self) -> None:
+        """LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE :
+        `showModal` commence par `closeModal()`. Une reponse arrivee apres qu'une
+        autre generation a pris la main ne doit RIEN ecrire — ni l'etat, sur
+        lequel agissent les boutons, ni la modale, qu'elle rouvrirait par-dessus
+        celle que l'utilisateur regarde."""
+        res = self._run(
+            r"""
+let debloquer;
+globalThis.__reponses["quality/simulate_quality_preset"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._simuler();          // generation 1 : preset A, reste en vol
+
+globalThis.__reponses["quality/simulate_quality_preset"] = {
+  ok: true, preset_id: "B", films_count: 222,
+  before: { avg_score: 1, tiers: {} }, after: { avg_score: 2, tiers: {} },
+  delta: {}, top_winners: [], top_losers: [], warnings: [],
+};
+await M.__t._simuler();                  // generation 2 : preset B, terminee
+const modalesApresG2 = globalThis.__modales.length;
+
+debloquer({                              // le preset A arrive TROP TARD
+  ok: true, preset_id: "A", films_count: 999,
+  before: { avg_score: 9, tiers: {} }, after: { avg_score: 9, tiers: {} },
+  delta: {}, top_winners: [], top_losers: [], warnings: [],
+});
+await enVol;
+__emit({
+  preset: M.__t._etat.resultat && M.__t._etat.resultat.preset_id,
+  films: M.__t._etat.resultat && M.__t._etat.resultat.films_count,
+  modalesEnPlus: globalThis.__modales.length - modalesApresG2,
+});
+"""
+        )
+        self.assertEqual(res["preset"], "B", "l'ecran garde le resultat d'une simulation ABANDONNEE")
+        self.assertEqual(res["films"], 222, "« Enregistrer ce preset » figerait des chiffres perimes")
+        self.assertEqual(res["modalesEnPlus"], 0, "une reponse perimee a ROUVERT une modale")
+
+
 class LesTiersCAPITALISESSontNormalisesTests(_Base):
     """LE piege de cet ecran, et il n'echoue pas tout seul."""
 

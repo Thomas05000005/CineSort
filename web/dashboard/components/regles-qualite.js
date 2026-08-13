@@ -243,6 +243,12 @@ async function _charger() {
       apiPost("quality/get_custom_rules_templates", {}),
       apiPost("quality/get_quality_profile", {}),
     ]);
+    // Une reponse perimee n'ecrit RIEN. Ici l'enjeu n'est pas le repeint :
+    // c'est `_etat.regles` et `_etat.brouillon`. Une reponse tardive les
+    // reinitialisait SOUS l'utilisateur, effacant les regles qu'il venait
+    // d'ajouter et sa saisie en cours, sans meme repeindre — l'ecran cessait
+    // alors de decrire ce qui serait enregistre.
+    if (perimee()) return;
     const c = (cat && cat.data) || cat || {};
     const m = (mod && mod.data) || mod || {};
     const dp = (prof && prof.data) || prof || {};
@@ -260,8 +266,12 @@ async function _charger() {
   } catch {
     _etat.erreurChargement = "Le serveur n'a pas répondu.";
   } finally {
-    _etat.chargement = false;
-    if (!perimee()) _reouvrir();
+    // Une generation perimee ne touche plus a rien : c'est la generation
+    // COURANTE qui detient `chargement` et l'ecran.
+    if (!perimee()) {
+      _etat.chargement = false;
+      _reouvrir();
+    }
   }
 }
 

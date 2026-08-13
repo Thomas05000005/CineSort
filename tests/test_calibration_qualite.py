@@ -188,6 +188,79 @@ __emit({ envoye: e ? e.params.profile_json : null });
         self.assertEqual(env["tiers"]["platinum"], 70, "les seuils ont ete perdus")
         self.assertIn("toggles", env, "les options ont ete perdues")
 
+    def test_l_AVANT_vient_de_la_suggestion_pas_des_poids_bruts(self) -> None:
+        """`from` est la version ASSAINIE de `current_weights` : une categorie
+        absente y est completee au defaut (`domain/calibration.py:159-173`).
+
+        Afficher `current_weights` a la place donnerait `Number(undefined)` =
+        NaN sur cette categorie, et la ligne serait silencieusement retiree par
+        le filtre `Number.isFinite`. L'utilisateur ne verrait donc PAS qu'un de
+        ses poids change, tout en cliquant « Appliquer » qui, lui, le change.
+        Un profil partiel n'a rien d'exotique : `current_weights` sort d'un
+        `profile_json` arbitraire (`cinesort_api.py:2761`), y compris importe.
+        """
+        res = self._run(
+            _PROFIL
+            + r"""
+globalThis.__reponses["quality/get_calibration_report"] = {
+  ok: true,
+  bias: { total_feedbacks: 47, accord_pct: 62, mean_delta: 6.2,
+          bias_direction: "underscore", bias_strength: "strong", category_bias: {} },
+  // Poids PARTIELS : ni `audio`, ni `extras` (profil importe, main humaine...).
+  current_weights: { video: 60 },
+  suggestion: { from: { video: 60, audio: 30, extras: 10 },
+                to: { video: 66, audio: 26, extras: 8 },
+                rationale: "Biais fort sur la video.", focus_category: "video" },
+  sample_feedbacks: [],
+};
+await M.__t._charger();
+__emit({ html: M.__t._corps() });
+"""
+        )
+        html = res["html"]
+        for categorie, avant, apres in (("video", "60", "66"), ("audio", "30", "26"), ("extras", "10", "8")):
+            self.assertRegex(
+                html,
+                rf'calib-ligne">{categorie} <span class="calib-avant">{avant}</span> → <strong>{apres}</strong>',
+                f"la ligne « {categorie} » manque : un changement de poids est cache a l'utilisateur",
+            )
+
+    def test_une_reponse_PERIMEE_n_ecrit_ni_l_etat_ni_l_ecran(self) -> None:
+        """Les trois modales de la vague D partagent un conteneur unique
+        (`showModal` commence par `closeModal()`). Une reponse arrivee apres
+        qu'une autre generation a pris la main ne doit RIEN ecrire : ni
+        `_etat.rapport` — sinon « Appliquer » agit sur des chiffres que l'ecran
+        n'affiche pas — ni la modale, qu'elle rouvrirait par-dessus."""
+        res = self._run(
+            _PROFIL
+            + r"""
+let debloquer;
+globalThis.__reponses["quality/get_calibration_report"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._charger();          // generation 1 : reste en vol
+
+globalThis.__reponses["quality/get_calibration_report"] = {
+  ok: true, bias: { total_feedbacks: 47, accord_pct: 62, mean_delta: 6.2,
+                    bias_direction: "underscore", bias_strength: "strong", category_bias: {} },
+  current_weights: { video: 60, audio: 30, extras: 10 }, suggestion: null, sample_feedbacks: [],
+};
+await M.__t._charger();                  // generation 2 : terminee, c'est elle qui compte
+const modalesApresG2 = globalThis.__modales.length;
+
+debloquer({                              // la generation 1 arrive TROP TARD
+  ok: true, bias: { total_feedbacks: 999, accord_pct: 1, mean_delta: -9,
+                    bias_direction: "overscore", bias_strength: "strong", category_bias: {} },
+  current_weights: { video: 1 }, suggestion: null, sample_feedbacks: [],
+});
+await enVol;
+__emit({
+  retours: M.__t._etat.rapport && M.__t._etat.rapport.bias.total_feedbacks,
+  modalesEnPlus: globalThis.__modales.length - modalesApresG2,
+});
+"""
+        )
+        self.assertEqual(res["retours"], 47, "une reponse perimee a ecrase l'etat de la generation courante")
+        self.assertEqual(res["modalesEnPlus"], 0, "une reponse perimee a ROUVERT une modale")
+
     def test_un_rapport_INDISPONIBLE_n_emporte_pas_les_options(self) -> None:
         """Deux lectures independantes : l'une qui echoue ne doit pas vider
         l'autre."""

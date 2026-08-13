@@ -248,6 +248,10 @@ async function _simuler() {
       scope: _etat.portee,
       run_id: "latest",
     });
+    // Une reponse perimee n'ecrit RIEN : sans cette garde, l'ecran montre la
+    // simulation du preset COURANT pendant que `_etat.resultat` porte celle du
+    // precedent — et « Enregistrer ce preset » fige les mauvais chiffres.
+    if (perimee()) return;
     const data = (res && res.data) || res || {};
     if (data.ok === false) {
       _etat.resultat = null;
@@ -259,8 +263,12 @@ async function _simuler() {
     _etat.resultat = null;
     _etat.erreur = "Le serveur n'a pas répondu.";
   } finally {
-    _etat.chargement = false;
-    if (!perimee()) _reouvrir();
+    // Une generation perimee ne touche plus a rien : c'est la generation
+    // COURANTE qui detient `chargement` et l'ecran.
+    if (!perimee()) {
+      _etat.chargement = false;
+      _reouvrir();
+    }
   }
 }
 
