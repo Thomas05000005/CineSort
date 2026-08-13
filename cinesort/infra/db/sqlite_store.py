@@ -355,10 +355,22 @@ class _StoreBase:
         cle = str(self.db_path)
         # UN APPEL IMBRIQUE NE PARTAGE PAS, ET C'EST LA MESURE QUI L'IMPOSE.
         #
-        # Sonde sur le perimetre CI COMPLET : 20 052 ouvertures, profondeur
+        # Sonde sur le perimetre CI COMPLET : 20 049 ouvertures, profondeur
         # maximale **2**. Une premiere mesure, limitee aux tests de
-        # repositories, donnait 1 — et je l'avais generalisee. Elle etait
-        # fausse.
+        # repositories, donnait 1 — et je l'avais generalisee. Elle etait fausse.
+        #
+        # LA PROFONDEUR 2 A UNE SEULE SOURCE, ET ELLE EST NOMMEE :
+        # `repositories/quality.py:get_global_tier_distribution` appelle
+        # `_ensure_tables("perceptual_reports")` DEPUIS L'INTERIEUR de sa propre
+        # connexion, et cette verification de schema en rouvre une
+        # (`_missing_tables` -> `_existing_tables` -> `_managed_conn`). C'est le
+        # SEUL site du depot ou une verification de schema se fait sous une
+        # connexion deja ouverte (mesure : 1 sur tous les repositories).
+        #
+        # On ne le corrige pas ici : deplacer cette verification changerait le
+        # comportement d'une requete metier pour servir une optimisation, et
+        # cette vague s'est donnee pour regle de ne rien changer d'autre que le
+        # cout d'ouverture.
         #
         # Sur un handle partage, la sortie d'un appel INTERNE commiterait le
         # travail partiel de l'appel EXTERNE. Les deux echappatoires changent la
