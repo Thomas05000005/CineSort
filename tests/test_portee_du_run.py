@@ -54,9 +54,7 @@ class _Base(unittest.TestCase):
 
     def _lancer(self, job_fn) -> tuple:
         runner = JobRunner(self.store)
-        rid = runner.start_job(
-            job_fn=job_fn, root=str(self.root), state_dir=str(self.state_dir), config={}
-        )
+        rid = runner.start_job(job_fn=job_fn, root=str(self.root), state_dir=str(self.state_dir), config={})
         return runner, rid
 
     def _attendre(self, runner, rid, secondes: float = 20.0) -> None:
@@ -152,13 +150,9 @@ class LaPorteeDuRunCOMPOSEAvecLesGardesDuWipeTests(_Base):
             return {}
 
         api = backend.CineSortApi()
-        api.settings.save_settings(
-            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
-        )
+        api.settings.save_settings({"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False})
         store_api, runner = api._get_or_create_infra(self.state_dir)
-        rid = runner.start_job(
-            job_fn=job, root=str(self.root), state_dir=str(self.state_dir), config={}
-        )
+        rid = runner.start_job(job_fn=job, root=str(self.root), state_dir=str(self.state_dir), config={})
         api._runs[rid] = type("R", (), {"running": True})()
         demarre.wait(10)
         try:
@@ -171,7 +165,18 @@ class LaPorteeDuRunCOMPOSEAvecLesGardesDuWipeTests(_Base):
         self.assertTrue(db_path_for_state_dir(self.state_dir).is_file(), "la base a disparu")
         message = str(res.get("error") or res.get("message") or "")
         self.assertNotIn("WinError", message, "un verrou de fichier est remonte au lieu du refus explicite")
-        self.assertIn("cours", message.lower(), f"le refus ne nomme pas sa cause : {message}")
+        # ASSERTER CE QUE SEUL LE REFUS PRODUIT. Les deux messages possibles
+        # contiennent « en cours » — celui du refus (« un traitement est en
+        # cours ») et celui du repli sur le verrou de fichier (« utilisee par N
+        # requete(s) en cours »). Chercher « cours » ne distinguait donc PAS quel
+        # garde a joue, et la mutation l'a montre : retirer le refus laissait le
+        # test vert, l'echec venant alors du verrou.
+        self.assertIn(
+            "arretez-le",
+            message.lower().replace("ê", "e").replace("é", "e"),
+            f"ce n'est pas le refus « run actif » qui a joue, mais le verrou de fichier : {message}",
+        )
+        self.assertIn(rid, message, "le refus ne nomme pas le run qui bloque")
 
 
 if __name__ == "__main__":
