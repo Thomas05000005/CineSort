@@ -44,9 +44,6 @@ PARAMETRES_JS = ROOT / "web" / "dashboard" / "views" / "parametres.js"
 #:   settings.preview_naming_template `sample_row_id` est INERTE (#460 : la branche
 #:                                   qui chargeait un vrai film « etait morte
 #:                                   depuis sa premiere ligne »)
-#:   settings.reset_all_user_data    exige que l'utilisateur TAPE « RESET » ;
-#:                                   `dangerConfirmModal` n'a pas d'affordance de
-#:                                   saisie
 #:   runtime.set_probe_tool_paths    perte de donnees sur payload partiel
 #:   runtime.reset_incremental_cache impossible de dresser la liste d'elements
 #:                                   qu'exige la regle des actions destructives
@@ -62,16 +59,37 @@ ROUTES_ATTENDUES = (
     "runtime/purge_probe_cache",
     "settings/get_naming_presets",
     "settings/get_user_data_size",
+    "settings/reset_all_user_data",
 )
 
 _STUBS = r"""
 globalThis.window = { addEventListener() {}, removeEventListener() {}, location: { hash: "" } };
+
+/** Un noeud DOM assez complet pour survivre a un rendu, et rien de plus. */
+function noeudFactice() {
+  return {
+    dataset: {},
+    style: { setProperty() {}, removeProperty() {} },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, removeAttribute() {}, getAttribute: () => null,
+    appendChild() {}, removeChild() {},
+    addEventListener() {}, removeEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [],
+    focus() {}, remove() {},
+    textContent: "", className: "", innerHTML: "",
+  };
+}
 globalThis.document = {
   addEventListener() {}, removeEventListener() {},
   getElementById() { return null; }, querySelector() { return null; },
   querySelectorAll() { return []; },
   createElement() { return { style: {}, classList: { add() {}, remove() {} }, appendChild() {} }; },
-  body: { appendChild() {}, classList: { add() {}, remove() {} } },
+  body: noeudFactice(),
+  // `_applyLivePreview` ecrit sur la racine du document ET sur le body (theme,
+  // animations, vitesse d'effet). Sans eux, tout test qui declenche un
+  // RECHARGEMENT echouait sur un `setAttribute` d'undefined — un echec de
+  // HARNAIS, qu'il aurait ete facile de prendre pour un defaut du code.
+  documentElement: noeudFactice(),
 };
 
 globalThis.__appels = [];
@@ -82,7 +100,6 @@ function apiPost(route, params) {
   const r = globalThis.__reponses[route];
   return Promise.resolve(r === undefined ? { ok: true } : r);
 }
-function invalidateSettingsCache() {}
 function escapeHtml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -104,15 +121,22 @@ function dangerConfirmModal(o) {
     if (o.onCancel) o.onCancel();
     return;
   }
-  // La vraie modale attend la resolution de `onConfirm` avant de se fermer ; on
-  // expose la promesse pour que le test puisse en faire autant.
-  globalThis.__enCours = o.onConfirm ? o.onConfirm() : null;
+  // La vraie modale transmet a `onConfirm` CE QUE L'UTILISATEUR A TAPE quand
+  // `requireTyped` est demande (modal.js). Un stub qui n'appellerait `onConfirm()`
+  // sans argument laisserait passer un appelant qui ignore la saisie et envoie
+  // la constante — precisement le defaut qui rendrait le garde du backend
+  // decoratif. `__saisie` est ce que le test fait taper.
+  const saisie = o.requireTyped ? String(globalThis.__saisie ?? o.requireTyped) : undefined;
+  globalThis.__enCours = o.onConfirm ? o.onConfirm(saisie) : null;
 }
 function t(k) { return String(k); }
 function formatBytes() { return ""; }
 function registerRoute() {}
 function navigate() {}
 const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
+// Le rechargement post-reset passe par le cache partage : on COMPTE ses appels.
+globalThis.__invalidations = 0;
+function invalidateSettingsCache() { globalThis.__invalidations += 1; }
 """
 
 _EXTRA = (
@@ -120,23 +144,50 @@ _EXTRA = (
     "export const __rendreSectionActions = _renderSectionActions;\n"
     "export const __lancer = _lancerActionDeSection;\n"
     "export const __rendreReponse = _rendreReponseAction;\n"
+    "export const __recharger = _rechargerApresReset;\n"
+    "export const __etat = _state;\n"
 )
 
 _EXIT = "\nprocess.exit(0);\n"
+
+#: Les reponses que le RECHARGEMENT post-reset ira chercher. `_loadSettings` lit
+#: `res.data` et LEVE si la forme n'y est pas (garde du BUG USER #1) : sans ces
+#: reponses, le test mesurerait l'echec du harnais, pas celui du code.
+_APRES_RESET = r"""
+globalThis.__reponses["settings/get_settings"] = { data: { root: "R", state_dir: "S" } };
+globalThis.__reponses["settings/get_profiles"] = { data: { profiles: [], active: "" } };
+"""
 
 #: Un bouton et sa section, tels que le DOM les porterait. Le `closest` remonte
 #: a la section, qui expose la zone de sortie : c'est ce chemin-la qui casse si
 #: le rendu et le gestionnaire divergent.
 _FAUX_DOM = r"""
-function fauxBouton(route) {
-  const sortie = { textContent: "", className: "" };
-  const section = { querySelector: () => sortie };
+function fauxBouton(route, idSection) {
+  // LA RACINE REMPLACE SON CONTENU, COMME LA VRAIE. `_refreshAll()` fait
+  // `root.innerHTML = _renderParametres()` : il DETRUIT le noeud de sortie. Un
+  // faux DOM qui rendrait eternellement le MEME objet ne pourrait jamais perdre
+  // le message — et un test « le resultat survit au rechargement » serait vert
+  // quoi qu'il arrive. La mutation l'a montre : deux correctifs de cette famille
+  // ont SURVECU a leur propre batterie tant que ce faux DOM ne remplacait rien.
+  const id = idSection || "stockage-sqlite";
+  let vivant = { textContent: "", className: "" };
+  const sortie = vivant;
+  const section = { querySelector: () => vivant, dataset: { sectionId: id } };
   const btn = {
     dataset: { sectionAction: route },
     disabled: false,
     closest: () => section,
   };
-  return { btn, sortie };
+  const racine = {
+    set innerHTML(_v) { vivant = { textContent: "", className: "" }; },
+    get innerHTML() { return ""; },
+    classList: { toggle() {}, add() {}, remove() {} },
+    querySelector(sel) { return sel === `[data-section-actions-out="${id}"]` ? vivant : null; },
+    querySelectorAll: () => [],
+  };
+  // `sortie` est le noeud INITIAL — celui qu'un rechargement detacherait.
+  // `courante()` rend celui qui est vivant apres un rendu.
+  return { btn, sortie, racine, courante: () => vivant };
 }
 """
 
@@ -510,6 +561,230 @@ __emit({ texte: M.__rendreReponse({ rendu: "taille" }, { ok: true, size_mb: 12.5
                     f'__emit({{ texte: M.__rendreReponse({{ rendu: "{rendu}" }}, {{ ok: true, message: "Rien." }}) }});'
                 )
                 self.assertEqual(res["texte"], "Rien.")
+
+
+class LaREINITIALISATIONTOTALEEstAtteignableTests(unittest.TestCase):
+    """LA SEULE DES DIX METHODES DE LA VAGUE B3 RESTEE NON CABLABLE.
+
+    `settings.reset_all_user_data` refuse tout appel dont `confirmation` ne vaut
+    pas exactement « RESET » (`reset_support.py:266`), et `dangerConfirmModal`
+    n'avait aucune affordance de saisie : la capacite etait inatteignable depuis
+    toute l'application. Le tri des routes orphelines la classait « NON cablable »
+    pour cette raison.
+    """
+
+    def setUp(self) -> None:
+        require_node(self)
+
+    def _run(self, driver: str) -> dict:
+        return run_module_test(PARAMETRES_JS, stubs=_STUBS, extra=_EXTRA, driver=_FAUX_DOM + driver + _EXIT, timeout=90)
+
+    def test_elle_exige_un_mot_TAPE_une_liste_et_un_delai(self) -> None:
+        """La regle n3 du depot : liste des elements, consequence, delai. Le mot
+        tape s'y ajoute — c'est l'action la plus destructive de l'application."""
+        res = self._run(
+            r"""
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
+M.__lancer(null, btn);
+const c = globalThis.__confirmations[0] || {};
+__emit({ mot: c.requireTyped, elements: (c.items || []).length,
+         delai: c.countdownSeconds, consequence: String(c.consequence || "") });
+"""
+        )
+        self.assertEqual(res["mot"], "RESET", "aucun mot n'est exige : le backend refusera toujours")
+        self.assertGreaterEqual(res["elements"], 3, "la liste de ce qui sera detruit n'est pas montree")
+        self.assertEqual(res["delai"], 3, "l'action irreversible part sans delai de reflexion")
+        self.assertIn("sauvegarde", res["consequence"].lower(), "la sauvegarde ZIP n'est pas annoncee")
+
+    def test_la_SAISIE_de_l_utilisateur_part_au_backend(self) -> None:
+        """Envoyer la constante a la place rendrait le garde du backend
+        decoratif : il relirait ce que ce fichier lui a souffle."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
+M.__lancer(null, btn);
+await globalThis.__enCours;
+const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
+__emit({ params: appel ? appel.params : null });
+"""
+        )
+        self.assertEqual(
+            res["params"],
+            {"confirmation": "RESET"},
+            "le mot tape n'est pas transmis : l'action partirait avec un corps vide",
+        )
+
+    def test_un_mot_DIFFERENT_part_tel_quel_et_le_backend_tranche(self) -> None:
+        """Le front ne corrige pas la saisie : c'est le backend qui refuse. Sinon
+        deux verites coexisteraient sur ce qui vaut confirmation."""
+        res = self._run(
+            r"""
+globalThis.__saisie = "reset";
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
+M.__lancer(null, btn);
+await globalThis.__enCours;
+const appel = globalThis.__appels.find((a) => a.route === "settings/reset_all_user_data");
+__emit({ params: appel ? appel.params : null });
+"""
+        )
+        self.assertEqual(res["params"], {"confirmation": "reset"})
+
+    def test_un_REFUS_n_appelle_RIEN(self) -> None:
+        res = self._run(
+            r"""
+globalThis.__accepte = false;
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;
+M.__lancer(null, btn);
+await new Promise((r) => setTimeout(r, 0));
+__emit({ appels: globalThis.__appels.map((a) => a.route) });
+"""
+        )
+        self.assertEqual(res["appels"], [], "l'action est partie malgre l'annulation")
+
+    def test_un_reset_PARTIEL_n_est_pas_annonce_comme_un_SUCCES(self) -> None:
+        """LE CAS NORMAL, PAS L'EXCEPTION. Le wipe s'execute pendant que
+        l'application TOURNE : ses threads de fond tiennent des fichiers ouverts,
+        et sous Windows un seul suffit a faire echouer la suppression de son
+        dossier parent (docstring de `_vider_state_dir_sauf_logs`). Le backend
+        rend alors `ok: True` AVEC `failed` et un message « Reinitialisation
+        PARTIELLE … fermez puis relancez ».
+
+        Une premiere version ne lisait que `removed` et `backup_path` : la base
+        et settings.json pouvaient SURVIVRE pendant que l'ecran annoncait
+        « 1 element(s) supprime(s) » en VERT.
+        """
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: true,
+  backup_path: "C:/data/backup.zip",
+  removed: ["runs"],
+  failed: ["cinesort.db", "settings.json"],
+  message: "Réinitialisation PARTIELLE : 1 élément(s) supprimé(s), 2 n'ont pas pu l'être (cinesort.db, settings.json). Fermez puis relancez l'application.",
+};
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ texte: courante().textContent, classe: courante().className });
+"""
+        )
+        # LES DEUX SOURCES SONT ASSERTEES SEPAREMENT. « 2 » et « cinesort.db »
+        # figurent AUSSI dans la phrase du backend : les chercher nus laissait le
+        # rendu de `failed` non prouve — la mutation l'a montre en survivant.
+        # On exige donc la formule que SEUL ce rendu produit, puis la consigne
+        # que seul le backend produit.
+        self.assertIn(
+            "N'ONT PAS PU L'ÊTRE",
+            res["texte"],
+            "le rendu ne dit pas, de lui-meme, que des elements ont resiste",
+        )
+        self.assertIn("cinesort.db", res["texte"], "on ne sait pas CE QUI a survecu")
+        self.assertIn("relancez", res["texte"], "la consigne du backend est perdue")
+        self.assertNotIn("--ok", res["classe"], "un reset PARTIEL est affiche en vert")
+        self.assertIn("--avertissement", res["classe"])
+
+    def test_un_reset_COMPLET_reste_vert(self) -> None:
+        """La regle ne doit pas devenir alarmiste : sans `failed`, c'est un
+        succes, et le dire autrement userait l'attention de l'utilisateur."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: true, backup_path: "C:/data/backup.zip", removed: ["db", "runs"], failed: [],
+};
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ classe: courante().className, texte: courante().textContent });
+"""
+        )
+        self.assertIn("--ok", res["classe"])
+        self.assertNotIn("--avertissement", res["classe"])
+
+    def test_la_RAISON_de_l_echec_est_montree_meme_sous_la_cle_error(self) -> None:
+        """`reset_support` renvoie ses echecs sous `key="error"` (lignes 272, 278
+        et 326), contrat historique documente dans `_responses.py`. Sans cette
+        lecture, un disque plein pendant le ZIP affichait « L'action a echoue. »
+        et rien d'autre : l'utilisateur ignorait que la SAUVEGARDE n'avait pas
+        ete faite."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = {
+  ok: false, error: "[Errno 28] No space left on device: 'C:/data/backup.zip'",
+};
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ texte: courante().textContent, classe: courante().className });
+"""
+        )
+        self.assertIn("No space left", res["texte"], "la raison de l'echec est jetee")
+        self.assertIn("--error", res["classe"])
+
+    def test_apres_le_reset_les_reglages_sont_RELUS_du_disque(self) -> None:
+        """SANS CELA LE RESET S'ANNULE TOUT SEUL. `_state.settings` garde en
+        memoire l'objet d'AVANT, et `_saveSettingsNow` POSTe `{settings}` en
+        ENTIER : la premiere modification d'un champ recreerait settings.json
+        avec exactement les reglages qu'on venait de supprimer."""
+        res = self._run(
+            _APRES_RESET
+            + r"""
+globalThis.__saisie = "RESET";
+globalThis.__reponses["settings/reset_all_user_data"] = { ok: true, removed: ["db"], failed: [] };
+globalThis.__invalidations = 0;
+const { btn, racine, courante } = fauxBouton("settings/reset_all_user_data");
+M.__etat.containerRef = racine;   // le rechargement REMPLACERA le noeud
+M.__lancer(null, btn);
+await globalThis.__enCours;
+await new Promise((r) => setTimeout(r, 0));
+__emit({ invalidations: globalThis.__invalidations,
+         relu: globalThis.__appels.some((a) => a.route === "settings/get_settings"),
+         texte: courante().textContent });
+"""
+        )
+        self.assertGreaterEqual(res["invalidations"], 1, "le cache partage des reglages n'est pas invalide")
+        # INVALIDER NE SUFFIT PAS : sans cette assertion, un rechargement qui
+        # viderait le cache SANS relire le disque resterait vert, et l'ecran
+        # continuerait de servir les reglages d'avant.
+        self.assertTrue(res["relu"], "le cache est vide mais les reglages ne sont pas RELUS du disque")
+        # LE RESULTAT DOIT SURVIVRE AU RECHARGEMENT. `_refreshAll` fait
+        # `root.innerHTML = ...` : il DETRUIT le noeud de sortie. Sans reecriture,
+        # l'utilisateur ne voyait RIEN — et sur cette action-la, cela emportait le
+        # chemin de sauvegarde, seul moyen de revenir en arriere.
+        self.assertTrue(
+            res["texte"].strip(),
+            "le message de resultat a disparu avec le rechargement du DOM",
+        )
+
+    def test_la_reponse_NOMME_la_sauvegarde(self) -> None:
+        """C'est le seul moyen de revenir en arriere : ne pas la nommer rendrait
+        la sauvegarde inutilisable."""
+        res = self._run(
+            r"""
+const action = { rendu: "reset" };
+__emit({ texte: M.__rendreReponse(action,
+  { ok: true, backup_path: "C:/data/cinesort_backup_before_reset_1.zip", removed: ["db", "settings"] }) });
+"""
+        )
+        self.assertIn("cinesort_backup_before_reset_1.zip", res["texte"])
+        self.assertIn("2", res["texte"], "le nombre d'elements supprimes n'est pas dit")
 
 
 if __name__ == "__main__":

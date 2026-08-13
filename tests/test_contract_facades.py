@@ -97,7 +97,6 @@ KNOWN_ORPHAN_METHODS = frozenset(
         # VALIDATION (nom de binaire attendu, `-version` execute) qu'ils n'ont pas.
         "runtime.set_probe_tool_paths",  # A CABLER : le blocage est leve, reste a brancher les champs de chemin sur la validation
         "settings.preview_naming_template",  # B3 : NON cablable — `sample_row_id` est INERTE : #460 documente que la branche chargeant un vrai film « etait morte depuis sa premiere ligne »
-        "settings.reset_all_user_data",  # B3 : NON cablable — exige que l'utilisateur TAPE « RESET » (reset_support.py:266) ; dangerConfirmModal n'a aucune affordance de saisie
         "settings.set_locale",
     }
 )

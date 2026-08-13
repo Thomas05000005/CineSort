@@ -1626,6 +1626,37 @@ const ACTIONS_DE_SECTION = {
       titre: "Mesure la place occupée par la base et les données de runs",
       rendu: "taille",
     },
+    {
+      route: "settings/reset_all_user_data",
+      label: "Tout réinitialiser…",
+      titre: "Supprime la base, les réglages et l'historique — après une sauvegarde ZIP complète",
+      rendu: "reset",
+      // LA PLUS DESTRUCTIVE DES ACTIONS DE L'APPLICATION, et la seule des dix
+      // methodes de la vague B3 restee non cablable : le backend exige que
+      // l'utilisateur TAPE « RESET » (reset_support.py:266), et la modale de
+      // danger n'avait aucune affordance de saisie. Elle en a une desormais.
+      confirmation: {
+        titre: "Réinitialiser toutes les données ?",
+        elements: [
+          "la base SQLite : scans, scores, doublons, décisions",
+          "settings.json : tous vos réglages",
+          "l'historique des runs et le cache TMDb",
+          "les rapports de similarité perceptuelle",
+        ],
+        corps:
+          "Une sauvegarde ZIP complète est créée AVANT toute suppression, à côté du dossier " +
+          "de données. Vos journaux (logs/) sont conservés. Aucun fichier de votre " +
+          "bibliothèque de films n'est touché : seules les données de l'application le sont.",
+        libelle: "Tout réinitialiser",
+        delaiSecondes: 3,
+        // Le mot est transmis TEL QUE TAPE ; c'est le backend qui le verifie.
+        motAConfirmer: "RESET",
+        parametre: "confirmation",
+      },
+      // Cette action REECRIT l'etat sous l'application : tout ce qui en derive
+      // doit repartir du disque, sinon la premiere autosave la defait.
+      rechargeTout: true,
+    },
   ],
 };
 
@@ -1701,6 +1732,36 @@ function _rendreReponseAction(action, data) {
     const noms = liste.map((p) => (typeof p === "string" ? p : p && (p.name || p.label || p.template))).filter(Boolean);
     if (noms.length) return `${noms.length} modèle(s) : ${noms.join(" · ")}`;
   }
+  if (action.rendu === "reset") {
+    // `reset_all_user_data` rend `{backup_path, removed, failed, message}`.
+    //
+    // UN RESET PARTIEL EST LE CAS NORMAL, PAS L'EXCEPTION. Le wipe s'execute
+    // pendant que l'application TOURNE : ses threads de fond tiennent des
+    // fichiers ouverts, et sous Windows un seul suffit a faire echouer la
+    // suppression de son dossier parent (docstring de `_vider_state_dir_sauf_logs`).
+    // Le backend le sait et rend `failed` + un message « Reinitialisation
+    // PARTIELLE … ferme puis relance l'application ».
+    //
+    // Une premiere version ne lisait que `removed` et `backup_path` et
+    // retournait AVANT le repli sur `data.message` : la base et settings.json
+    // pouvaient SURVIVRE pendant que l'ecran annoncait « 1 element(s)
+    // supprime(s) » en vert. Un echec devenu succes silencieux, sur la plus
+    // destructive des actions.
+    const parts = [];
+    if (Array.isArray(data.removed) && data.removed.length) {
+      parts.push(`${data.removed.length} élément(s) supprimé(s)`);
+    }
+    const echecs = Array.isArray(data.failed) ? data.failed : [];
+    if (echecs.length) {
+      parts.push(`${echecs.length} N'ONT PAS PU L'ÊTRE (${echecs.slice(0, 3).join(", ")})`);
+    }
+    if (data.backup_path) parts.push(`sauvegarde : ${data.backup_path}`);
+    // Le message du backend porte la CONSIGNE (« fermez puis relancez ») : il
+    // vient en dernier, mais il vient.
+    const consigne = String(data.user_message || data.message || "");
+    if (consigne) parts.push(consigne);
+    if (parts.length) return parts.join(" · ");
+  }
   if (action.rendu === "taille") {
     // `get_user_data_size` rend `{size_mb, items}` -- des MEGAOCTETS et un
     // COMPTE, pas des octets. Une premiere version passait toute valeur
@@ -1714,24 +1775,95 @@ function _rendreReponseAction(action, data) {
   return String(data.user_message || data.message || "Terminé.");
 }
 
+/**
+ * Apres une action qui a REECRIT l'etat sous l'application, tout ce qui en
+ * derive doit repartir du disque.
+ *
+ * SANS CELA, LE RESET S'ANNULE TOUT SEUL. `_state.settings` garde en memoire
+ * l'objet d'AVANT, et `_saveSettingsNow` POSTe `{settings: _state.settings}` en
+ * ENTIER : la premiere modification d'un champ — ou le simple `_flushPendingSave`
+ * d'une sortie de vue — recree `settings.json` avec exactement les reglages que
+ * l'utilisateur venait de demander a supprimer. Les autres vues, elles,
+ * continueraient de servir le cache partage.
+ *
+ * Le reset FRERE de ce fichier (`settings/reset_settings`) fait deja ces appels.
+ * L'action strictement plus destructive etait la seule a ne pas les faire.
+ */
+async function _rechargerApresReset() {
+  // Une ecriture en vol reposerait l'ancien contenu : on la neutralise AVANT
+  // de relire, et on attend qu'elle soit retombee.
+  if (_state.saveTimer) {
+    clearTimeout(_state.saveTimer);
+    _state.saveTimer = null;
+  }
+  if (_state.saveInFlight) {
+    try {
+      await _state.saveInFlight;
+    } catch {
+      /* une sauvegarde d'avant-reset qui echoue est sans consequence ici */
+    }
+    _state.saveInFlight = null;
+  }
+  invalidateSettingsCache();
+  await _loadSettings();
+  await _loadProfiles();
+  _refreshAll();
+}
+
 /** Appelle la route et rend sa reponse dans la zone de sortie de la section. */
-async function _executerActionDeSection(action, route, btn, ecrire) {
+async function _executerActionDeSection(action, route, btn, ecrire, params = {}) {
   ecrire("En cours…", "info");
   btn.disabled = true;
+  let aboutie = false;
+  let derniereClasse = "ok";
+  let dernierTexte = "";
   try {
-    const res = await apiPost(route, {});
+    const res = await apiPost(route, params);
     const data = (res && res.data) || res || {};
     if (data.ok === false) {
       // Le message du backend passe AVANT tout libelle generique : c'est lui qui
       // dit pourquoi (URL absente, jeton invalide, serveur injoignable).
-      ecrire(String(data.user_message || data.message || "L'action a échoué."), "error");
+      //
+      // `error` EST UNE CLE REELLE, PAS UNE PRECAUTION. `reset_support` renvoie
+      // ses echecs sous `key="error"` (lignes 272, 278 et 326) — contrat
+      // historique documente dans `_responses.py`. Sans elle, un disque plein
+      // pendant le ZIP de sauvegarde s'affichait « L'action a échoué. » et rien
+      // d'autre : l'utilisateur ignorait que la SAUVEGARDE n'avait pas ete faite.
+      ecrire(String(data.user_message || data.message || data.error || "L'action a échoué."), "error");
       return;
     }
-    ecrire(_rendreReponseAction(action, data), "ok");
+    // UN SUCCES PARTIEL N'EST PAS UN SUCCES. Regle generale, pas propre au
+    // reset : toute reponse qui porte un `failed` non vide decrit un travail
+    // inacheve, et l'ecrire en vert serait mentir sur son resultat.
+    const inacheve = Array.isArray(data.failed) && data.failed.length > 0;
+    derniereClasse = inacheve ? "avertissement" : "ok";
+    dernierTexte = _rendreReponseAction(action, data);
+    ecrire(dernierTexte, derniereClasse);
+    aboutie = true;
   } catch {
     ecrire("L'action a échoué : le serveur n'a pas répondu.", "error");
   } finally {
     btn.disabled = false;
+  }
+
+  // LE RECHARGEMENT VIENT APRES, ET DEHORS. Le laisser dans le `try` faisait
+  // rapporter son echec comme celui de l'ACTION — « le serveur n'a pas répondu »
+  // sur un wipe qui venait pourtant d'aboutir. Deux evenements distincts
+  // meritent deux phrases distinctes.
+  if (aboutie && action.rechargeTout) {
+    try {
+      await _rechargerApresReset();
+      // LE RECHARGEMENT A REMPLACE LE DOM. On RECRIT le resultat, sinon il
+      // disparaitrait avec le noeud qui le portait — chemin de sauvegarde
+      // compris, c'est-a-dire le seul moyen de revenir en arriere. `ecrire`
+      // retrouve le noeud NEUF de lui-meme.
+      if (dernierTexte) ecrire(dernierTexte, derniereClasse);
+    } catch {
+      ecrire(
+        "L'action a abouti, mais les réglages n'ont pas pu être relus : rouvrez l'écran avant de rien modifier.",
+        "avertissement"
+      );
+    }
   }
 }
 
@@ -1741,13 +1873,33 @@ function _lancerActionDeSection(container, btn) {
   if (!action) return;
   const sectionEl = btn.closest("[data-section-id]");
   const sortie = sectionEl && sectionEl.querySelector("[data-section-actions-out]");
+  const idSection = sectionEl && sectionEl.dataset ? sectionEl.dataset.sectionId : "";
+
+  // LE NOEUD DE SORTIE EST RETROUVE A CHAQUE ECRITURE, PAS CAPTURE UNE FOIS.
+  //
+  // `_refreshAll()` fait `root.innerHTML = _renderParametres()` : il DETRUIT le
+  // noeud. Une action qui recharge les reglages apres coup — « Tout
+  // reinitialiser » le fait — ecrivait donc son resultat dans un noeud detache,
+  // et l'utilisateur ne voyait RIEN. Sur la plus destructive des actions, cela
+  // emportait le CHEMIN DE SAUVEGARDE, c'est-a-dire le seul moyen de revenir en
+  // arriere.
+  const noeudDeSortie = () => {
+    const racine = _state.containerRef;
+    if (racine && idSection) {
+      const frais = racine.querySelector(`[data-section-actions-out="${idSection}"]`);
+      if (frais) return frais;
+    }
+    return sortie;
+  };
+
   // `textContent` et non `innerHTML` : la reponse du backend n'est PAS de la
   // mise en forme, et l'echapper serait a la fois inutile et visible
   // (`&amp;` a l'ecran). Le rendu ci-dessus ne produit donc aucune balise.
   const ecrire = (texte, classe) => {
-    if (!sortie) return;
-    sortie.textContent = texte;
-    sortie.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
+    const cible = noeudDeSortie();
+    if (!cible) return;
+    cible.textContent = texte;
+    cible.className = `parametres-section-actions-out parametres-section-actions-out--${classe}`;
   };
   // Une action destructive DOIT nommer sa consequence avant de partir. La regle
   // du depot l'exige, et c'est le seul endroit ou l'utilisateur peut encore dire
@@ -1763,17 +1915,30 @@ function _lancerActionDeSection(container, btn) {
   // Les 12 autres sites d'appel du depot utilisent tous `consequence` +
   // `onConfirm` ; celui-ci etait le seul a s'en ecarter.
   if (action.confirmation) {
+    const conf = action.confirmation;
     dangerConfirmModal({
-      title: action.confirmation.titre,
-      consequence: action.confirmation.corps,
-      confirmLabel: action.confirmation.libelle,
+      title: conf.titre,
+      items: conf.elements || [],
+      consequence: conf.corps,
+      confirmLabel: conf.libelle,
       // Le delai vient de la TABLE, jamais d'un defaut implicite : sans cette
-      // ligne, `dangerConfirmModal` le graduerait sur `items.length` — c'est-a-dire
-      // sur ZERO, faute de liste — et l'absence de delai passerait pour un choix
-      // alors que ce serait un silence. Cf. `motifSansDelai` a cote de chaque
-      // confirmation, et le garde `tests/test_actions_integration_parametres.py`.
-      countdownSeconds: action.confirmation.delaiSecondes,
-      onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
+      // ligne, `dangerConfirmModal` le graduerait sur `items.length` — et
+      // l'absence de delai passerait pour un choix alors que ce serait un
+      // silence. Cf. `motifSansDelai` a cote de chaque confirmation, et le garde
+      // `tests/test_actions_integration_parametres.py`.
+      countdownSeconds: conf.delaiSecondes,
+      requireTyped: conf.motAConfirmer || "",
+      // LA SAISIE PART TELLE QUELLE. Envoyer `conf.motAConfirmer` a la place
+      // rendrait le garde du backend decoratif : il verifierait une constante
+      // que ce fichier lui aurait fournie, quoi que l'utilisateur ait tape.
+      onConfirm: (saisie) =>
+        _executerActionDeSection(
+          action,
+          route,
+          btn,
+          ecrire,
+          conf.parametre ? { [conf.parametre]: saisie } : {}
+        ),
     });
     return;
   }

@@ -7800,6 +7800,40 @@ body.v5-notif-lock {
   color: var(--text-2, #ddd);
 }
 
+/* Le mot a taper pour armer la confirmation. Le champ est LARGE et isole : il
+   doit se lire comme un geste delibere, pas comme un detail de formulaire. */
+.danger-modal-saisie {
+  display: block;
+  margin: 0 0 var(--sp-4) 0;
+  font-size: var(--fs-sm, 0.9rem);
+  color: var(--text-2, #ddd);
+}
+
+.danger-modal-saisie strong {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.06em;
+  color: var(--danger, #e25555);
+}
+
+.danger-modal-saisie input {
+  display: block;
+  width: 100%;
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-base, 1rem);
+  letter-spacing: 0.06em;
+  color: var(--text-1, #fff);
+  background: var(--bg-2, #1b1b1b);
+  border: 1px solid var(--border-1, #333);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.danger-modal-saisie input:focus {
+  outline: 2px solid var(--danger, #e25555);
+  outline-offset: 1px;
+}
+
 .danger-modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -7919,6 +7953,14 @@ body.v5-notif-lock {
 
 .parametres-section-actions-out--error {
   color: var(--danger, #e5534b);
+}
+
+/* UN SUCCES PARTIEL N'EST NI VERT NI ROUGE. Le vert dirait que tout a ete fait,
+   le rouge que rien ne l'a ete : les deux seraient faux, et sur un reset c'est
+   la difference entre « c'est fini » et « fermez l'application et recommencez ». */
+.parametres-section-actions-out--avertissement {
+  color: var(--warning, #e0a030);
+  font-weight: var(--fw-semibold, 600);
 }
 
 .parametres-section-actions-out--info {
