@@ -259,6 +259,26 @@ __emit({ recu });
         )
         self.assertEqual(res["recu"], "RESET", "la saisie de l'utilisateur n'est pas transmise")
 
+    def test_la_saisie_part_AUSSI_par_la_branche_closeBeforeConfirm(self) -> None:
+        """`dangerConfirmModal` a DEUX chemins de confirmation : celui qui ferme
+        la modale avant de lancer l'action (pour que la progression soit visible)
+        et celui qui attend. Les deux doivent transmettre la saisie — sinon la
+        capacite se perdrait au premier appelant qui demande le premier chemin,
+        et le backend recevrait une confirmation vide."""
+        res = self._run(
+            r"""
+const { confirmer, saisie } = globalThis.preparer();
+let recu = "PAS APPELE";
+M.__danger({ title: "T", requireTyped: "RESET", countdownSeconds: 0,
+             closeBeforeConfirm: true, onConfirm: (mot) => { recu = mot; } });
+saisie.value = "RESET";
+saisie.declencher("input");
+await confirmer.declencher("click");
+__emit({ recu });
+"""
+        )
+        self.assertEqual(res["recu"], "RESET", "la branche closeBeforeConfirm perd la saisie")
+
 
 class LeChampEstREELLEMENTRenduTests(_Base):
     def test_le_HTML_produit_porte_le_champ_et_le_mot(self) -> None:
