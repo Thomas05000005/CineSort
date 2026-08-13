@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import parse_qs, urlsplit
 
+from cinesort.infra.db.sqlite_store import portee_de_requete
 from cinesort.infra.log_context import (
     clear_request_id,
     get_request_id,
@@ -1382,7 +1383,21 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
         # Dispatch
         try:
-            result = method(**params)
+            # UNE CONNEXION PAR REQUETE, PAS UNE PAR REPOSITORY. Le cout du
+            # stockage est dans l'OUVERTURE : les memes huit PRAGMA coutent x139
+            # sur un handle neuf, et un scan a froid de 10 000 films ouvre
+            # 60 003 connexions dont l'ouverture pese 23 % du temps total.
+            #
+            # C'est l'endroit le plus haut ou une requete est encore UNE unite
+            # de travail, et le plus bas ou l'on n'a besoin d'aucun `state_dir`.
+            # La portee est PARESSEUSE : une requete qui ne touche pas la base
+            # n'ouvre rien — donc elle ne construit pas d'infra, et ne se heurte
+            # pas a la barriere qui gele la reconstruction pendant un effacement.
+            #
+            # Les frontieres de commit ne bougent pas : chaque `_managed_conn`
+            # garde son propre `with conn:` et commite son unite comme avant.
+            with portee_de_requete():
+                result = method(**params)
             # Phase 11 v7.8.0 : convention opt-in `http_status` permettant aux
             # handlers de signaler un code HTTP metier (404/403/409/...) sans
             # casser les clients existants qui lisent `data.ok`. Si le champ
