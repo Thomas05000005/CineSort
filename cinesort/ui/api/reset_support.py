@@ -13,7 +13,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from cinesort.domain.i18n_messages import t
 from cinesort.ui.api import settings_support as _settings_support
@@ -263,6 +263,10 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
         `shutil.rmtree(ignore_errors=True)`, qui ne signale aucun echec : sans
         controle a posteriori, les deux listes etaient confondues.
     """
+    refus = _refus_si_run_actif(api, "tout réinitialiser")
+    if refus:
+        return refus
+
     if confirmation_text != "RESET":
         return _err_response(
             "Confirmation invalide (attendu 'RESET')",
@@ -288,7 +292,13 @@ def reset_all_user_data(api: Any, confirmation_text: str) -> dict:
 
         # 2. Suppression selective (preserve logs/). `removed` decrit ce qui a
         #    REELLEMENT disparu, `failed` ce qui a resiste — cf le helper.
-        removed, failed = _vider_state_dir_sauf_logs(state_path)
+        # LA ROUTE JUMELLE AVAIT LE MEME DEFAUT, EN PIRE. Elle supprime tout le
+        # `state_dir` — donc le dossier `db/` ENTIER — et n'appelait ni
+        # `_close_infra` ni aucune barriere : le store cache etait resservi
+        # ensuite alors qu'il ne pouvait meme plus ouvrir de connexion, son
+        # dossier ayant disparu. C'est pourtant LE bouton de la zone de danger.
+        with _gel_de_l_infra(api):
+            removed, failed = _vider_state_dir_sauf_logs(state_path)
 
         if failed:
             logger.error(
@@ -520,6 +530,68 @@ def _resolve_db_path(api: Any) -> Optional[Path]:
     return db_path_for_state_dir(state_path)
 
 
+def _un_run_est_actif(api: Any) -> Optional[str]:
+    """L'id d'un run en cours, s'il y en a un.
+
+    POURQUOI CE GARDE EXISTE. Le `JobRunner` cache est le SEUL verrou
+    d'exclusion mutuelle du depot : `start_job` refuse un second run via
+    `_active_run_locked()` (job_runner.py:424-428), et rien au niveau REST ne
+    double cette garde. Oublier l'instance — ce que fait la purge — remet ce
+    verrou a zero : deux workers pourraient alors ecrire en parallele sur la
+    meme base, precisement ce que le correctif H15 interdit.
+
+    Plutot que d'inventer un mecanisme pour survivre a cette situation, on la
+    refuse : supprimer la base pendant qu'un scan tourne est destructeur avec ou
+    sans ce correctif. Sur un chemin destructif, l'erreur va dans le sens
+    RESTRICTIF.
+    """
+    runs = getattr(api, "_runs", None)
+    if not isinstance(runs, dict):
+        return None
+    for rid, rs in list(runs.items()):
+        if getattr(rs, "running", False):
+            return str(rid)
+    return None
+
+
+def _refus_si_run_actif(api: Any, quoi: str) -> Optional[Dict[str, Any]]:
+    """Reponse d'erreur si un run tourne, `None` sinon."""
+    actif = _un_run_est_actif(api)
+    if not actif:
+        return None
+    return _err_response(
+        f"Un traitement est en cours ({actif}) : arretez-le avant de {quoi}.",
+        category="state",
+        level="warning",
+        log_module=__name__,
+        key="error",
+    )
+
+
+@contextlib.contextmanager
+def _gel_de_l_infra(api: Any) -> Iterator[None]:
+    """Gele la reconstruction d'infra pendant un effacement, si l'api sait le faire.
+
+    `hasattr` PLUTOT QU'UN APPEL DIRECT, et c'est un choix, pas une precaution :
+    ce module est appele avec des doublures d'api dans les tests, et une
+    doublure sans barriere doit pouvoir tourner. Mais l'ABSENCE est desormais
+    JOURNALISEE — c'est precisement en restant muet qu'un `hasattr` a couvert
+    pendant des mois un `_close_infra` qui n'existait pas.
+    """
+    gel = getattr(api, "_infra_gelee", None)
+    if gel is None:
+        logger.warning(
+            "reset: cette api n'a pas de barriere `_infra_gelee` — "
+            "une reconstruction concurrente ne sera pas empechee (%s).",
+            type(api).__name__,
+        )
+        yield
+        return
+    with gel() as oubliees:
+        logger.info("reset: %d infra(s) oubliee(s), reconstruction gelee.", oubliees)
+        yield
+
+
 def reset_database(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
     """Wipe complet de la DB SQLite (films, runs, perceptual, scores, etc.).
 
@@ -564,6 +636,10 @@ def reset_database(api: Any, *, dry_run: bool = True) -> Dict[str, Any]:
             "removed_db_path": str(db_path),
             "message": t("danger_zone.no_database_to_delete"),
         }
+
+    refus = _refus_si_run_actif(api, "réinitialiser la base")
+    if refus and not dry_run:
+        return refus
 
     if dry_run:
         # Apercu STRICT : on ne cree meme pas le dossier de sauvegarde. La seule
@@ -610,24 +686,22 @@ def _executer_le_wipe(api: Any, db_path: Path, state_path: Path) -> Dict[str, An
     # On essaie d'utiliser sqlite3 backup API (cf cinesort/infra/db) si on peut,
     # sinon copy2 (la DB est rarement ecrite pendant un reset, c'est suffisant).
     try:
-        # 1) Tentative : fermer les connexions de l'API si disponibles
-        if hasattr(api, "_close_infra"):
-            try:
-                api._close_infra()
-            except (AttributeError, OSError, TypeError) as exc:
-                logger.warning("reset_database: _close_infra a echoue (%s), continue.", exc)
+        # 1) LE GEL ENTOURE TOUT LE WIPE, pas seulement son debut. Fermer les
+        # connexions puis passer plusieurs secondes a copier une base de
+        # plusieurs Go laissait grande ouverte la fenetre ou n'importe quel
+        # appel de facade re-cachait un store sur le fichier condamne.
+        with _gel_de_l_infra(api):
+            # 2) Backup par copie
+            shutil.copy2(str(db_path), str(backup_path))
+            logger.info("reset_database: backup cree -> %s", backup_path)
 
-        # 2) Backup par copie
-        shutil.copy2(str(db_path), str(backup_path))
-        logger.info("reset_database: backup cree -> %s", backup_path)
-
-        # 3) Suppression
-        db_path.unlink()
-        # Supprime aussi les fichiers WAL/SHM associes
-        for suffix in ("-wal", "-shm"):
-            ancillary = db_path.with_name(db_path.name + suffix)
-            with contextlib.suppress(OSError):
-                ancillary.unlink(missing_ok=True)
+            # 3) Suppression
+            db_path.unlink()
+            # Supprime aussi les fichiers WAL/SHM associes
+            for suffix in ("-wal", "-shm"):
+                ancillary = db_path.with_name(db_path.name + suffix)
+                with contextlib.suppress(OSError):
+                    ancillary.unlink(missing_ok=True)
 
         logger.warning(
             "reset_database: DB supprimee %s, backup conserve : %s",
