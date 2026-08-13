@@ -97,6 +97,60 @@ class _Base(unittest.TestCase):
         return run_module_test(REGLES_JS, stubs=_STUBS, extra=_EXTRA, driver=driver + _EXIT, timeout=90)
 
 
+class UneReponsePERIMEENEcritRienTests(_Base):
+    def test_une_reponse_PERIMEE_n_ecrit_ni_l_etat_ni_l_ecran(self) -> None:
+        """LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE :
+        `showModal` commence par `closeModal()`. Une reponse arrivee apres qu'une
+        autre generation a pris la main ne doit RIEN ecrire — ni l'etat, sur
+        lequel agissent les boutons, ni la modale, qu'elle rouvrirait par-dessus
+        celle que l'utilisateur regarde.
+
+        ICI L'ENJEU N'EST PAS LE REPEINT : `_etat.regles` et `_etat.brouillon`
+        portent le travail EN COURS de l'utilisateur. Une reponse tardive les
+        reinitialisait sous lui — sans meme repeindre, donc sans qu'il le voie —
+        et « Enregistrer » ecrivait alors ce qu'il n'avait pas saisi.
+        """
+        res = self._run(
+            _CATALOGUE
+            + r"""
+globalThis.__reponses["quality/get_quality_profile"] = {
+  ok: true, profile_json: { id: "P", weights: {}, tiers: {}, custom_rules: [] },
+};
+let debloquer;
+const catalogue = globalThis.__reponses["quality/get_custom_rules_catalog"];
+globalThis.__reponses["quality/get_custom_rules_catalog"] = new Promise((r) => { debloquer = r; });
+const enVol = M.__t._charger();          // generation 1 : reste en vol
+
+globalThis.__reponses["quality/get_custom_rules_catalog"] = catalogue;
+globalThis.__reponses["quality/get_quality_profile"] = {
+  ok: true,
+  profile_json: { id: "P", weights: {}, tiers: {},
+                  custom_rules: [{ id: "deja", name: "Regle deja la", enabled: true, priority: 1,
+                                   conditions: [], match: "all",
+                                   action: { type: "score_delta", value: -5 } }] },
+};
+await M.__t._charger();                  // generation 2 : terminee
+// L'utilisateur ajoute une regle et commence a en saisir une autre.
+M.__t._etat.regles.push({ id: "sienne", name: "Sa regle a lui", enabled: true, priority: 2,
+                          conditions: [], match: "all", action: { type: "score_delta", value: 3 } });
+M.__t._etat.brouillon.name = "saisie en cours";
+
+debloquer(catalogue);                    // la generation 1 arrive TROP TARD
+await enVol;
+__emit({
+  regles: M.__t._etat.regles.map((r) => r.id),
+  brouillon: M.__t._etat.brouillon.name,
+});
+"""
+        )
+        self.assertEqual(
+            res["regles"],
+            ["deja", "sienne"],
+            "une reponse perimee a reinitialise les regles : le travail de l'utilisateur est perdu",
+        )
+        self.assertEqual(res["brouillon"], "saisie en cours", "la saisie en cours a ete effacee")
+
+
 class LeVocabulaireVientDuBACKENDTests(_Base):
     """Aucun champ, aucun operateur, aucune action n'est ecrit dans le front."""
 
@@ -107,8 +161,12 @@ class LeVocabulaireVientDuBACKENDTests(_Base):
 
         self.assertEqual(
             res["routes"],
-            ["quality/get_custom_rules_catalog", "quality/get_custom_rules_templates"],
-            "le builder n'interroge pas le catalogue : son vocabulaire vient d'ailleurs",
+            [
+                "quality/get_custom_rules_catalog",
+                "quality/get_custom_rules_templates",
+                "quality/get_quality_profile",
+            ],
+            "le builder n'interroge pas le catalogue, ou ne lit pas les regles DEJA dans le profil",
         )
 
     def test_les_champs_du_backend_apparaissent_dans_le_formulaire(self) -> None:

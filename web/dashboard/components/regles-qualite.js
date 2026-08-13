@@ -196,30 +196,82 @@ function _corps() {
  * Actions
  * =========================================================== */
 
+/**
+ * Generation de la modale : une reponse en vol n'a le droit d'ecrire que si SA
+ * modale est encore celle qui est ouverte.
+ *
+ * LES TROIS MODALES DE LA VAGUE D PARTAGENT UN CONTENEUR UNIQUE : `showModal`
+ * commence par `closeModal()` (modal.js), donc ouvrir l'une detruit l'autre.
+ * Sans ce jeton, une reponse arrivee apres la fermeture rappelle `_reouvrir()`,
+ * qui ROUVRE une modale que l'utilisateur avait fermee — et detruit au passage
+ * celle qu'il venait d'ouvrir, brouillon de saisie compris.
+ *
+ * C'est le meme defaut que la reponse perimee de la vue Statistiques, garde
+ * la-bas par `_hote !== hote`. La protection avait ete ecrite pour la vague C
+ * et jamais portee aux modales de la vague D, ou le point de montage est
+ * pourtant PLUS etroit encore.
+ */
+let _generation = 0;
+
+/** Marque cette ouverture comme la courante, et rend le test de peremption. */
+function _prendreLaMain() {
+  const mienne = ++_generation;
+  return () => _generation !== mienne;
+}
+
 async function _charger() {
+  const perimee = _prendreLaMain();
   _etat.chargement = true;
   _etat.erreurChargement = "";
   _reouvrir();
   try {
-    const [cat, mod] = await Promise.all([
+    // LE BUILDER LIT SES REGLES A LA MEME SOURCE QU'IL ECRIT. Une premiere
+    // version les recevait en parametre depuis `parametres.js`, qui les prenait
+    // dans `_state.profileDraft.custom_rules` — une cle que ce brouillon ne
+    // porte JAMAIS : il est construit en cinq endroits avec exactement
+    // {id, label, tiers, weights, tier_hierarchy}, et `grep custom_rules` sur
+    // parametres.js ne rendait QUE le site de lecture.
+    //
+    // Consequence : l'ecran s'ouvrait TOUJOURS vide. Ajouter une regle puis
+    // « Enregistrer » relisait le vrai profil et y ecrivait `custom_rules: [la
+    // seule regle]` — DETRUISANT les regles preexistantes, avec un toast de
+    // succes. Et le `dangerConfirmModal` d'application d'un modele etait
+    // INATTEIGNABLE, sa condition de saut `if (!_etat.regles.length)` etant
+    // toujours vraie a l'ouverture.
+    const [cat, mod, prof] = await Promise.all([
       apiPost("quality/get_custom_rules_catalog", {}),
       apiPost("quality/get_custom_rules_templates", {}),
+      apiPost("quality/get_quality_profile", {}),
     ]);
+    // Une reponse perimee n'ecrit RIEN. Ici l'enjeu n'est pas le repeint :
+    // c'est `_etat.regles` et `_etat.brouillon`. Une reponse tardive les
+    // reinitialisait SOUS l'utilisateur, effacant les regles qu'il venait
+    // d'ajouter et sa saisie en cours, sans meme repeindre — l'ecran cessait
+    // alors de decrire ce qui serait enregistre.
+    if (perimee()) return;
     const c = (cat && cat.data) || cat || {};
     const m = (mod && mod.data) || mod || {};
+    const dp = (prof && prof.data) || prof || {};
+    const profil = dp.profile_json || dp.profile;
     if (c.ok === false || !Array.isArray(c.fields) || !c.fields.length) {
       _etat.erreurChargement =
         c.user_message || c.message || "Le catalogue des règles n'a pas pu être lu ; rien ne peut être édité.";
     } else {
       _etat.catalogue = { fields: c.fields, operators: c.operators || [], actions: c.actions || [] };
       _etat.modeles = Array.isArray(m.templates) ? m.templates : [];
+      const regles = profil && Array.isArray(profil.custom_rules) ? profil.custom_rules : [];
+      _etat.regles = regles.map((r) => ({ ...r }));
       _etat.brouillon = _brouillonVierge();
     }
   } catch {
     _etat.erreurChargement = "Le serveur n'a pas répondu.";
   } finally {
-    _etat.chargement = false;
-    _reouvrir();
+    // Une generation perimee ne touche plus a rien : c'est la generation
+    // COURANTE qui detient `chargement` et l'ecran.
+    if (!perimee()) {
+      _etat.chargement = false;
+      _reouvrir();
+    }
   }
 }
 
@@ -405,9 +457,17 @@ function _reouvrir() {
   _brancher();
 }
 
-/** Point d'entree : ouvre le builder et charge le catalogue du BACKEND. */
-export function ouvrirReglesQualite(reglesExistantes) {
-  _etat.regles = Array.isArray(reglesExistantes) ? reglesExistantes.map((r) => ({ ...r })) : [];
+/**
+ * Point d'entree : ouvre le builder.
+ *
+ * IL NE PREND AUCUN PARAMETRE, ET C'EST DELIBERE. Recevoir les regles de
+ * l'appelant l'obligeait a les connaitre — or `parametres.js` ne les avait pas,
+ * et passait silencieusement une liste vide. Le builder les lit lui-meme, a la
+ * MEME source qu'il ecrit (`quality/get_quality_profile`) : lecture et ecriture
+ * ne peuvent plus diverger.
+ */
+export function ouvrirReglesQualite() {
+  _etat.regles = [];
   _etat.erreurs = [];
   _etat.catalogue = null;
   _etat.brouillon = null;
