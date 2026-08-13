@@ -657,6 +657,46 @@ class CineSortApi:
     def _get_or_create_infra(self, state_dir: Path) -> Tuple[SQLiteStore, JobRunner]:
         return runtime_support.get_or_create_infra(self, state_dir, env_truthy_fn=_env_truthy)
 
+    def _close_infra(self) -> int:
+        """Oublie les stores caches, apres leur avoir laisse fermer proprement.
+
+        CE HOOK ETAIT APPELE MAIS N'EXISTAIT PAS. `reset_support.reset_database`
+        fait `if hasattr(api, "_close_infra")` avant de supprimer la base — et
+        `CineSortApi` ne definissait pas la methode : le garde etait TOUJOURS
+        faux. Le test qui « prouvait » l'appel definissait sa propre fausse API
+        portant la methode ; il n'eprouvait donc que sa coherence avec lui-meme.
+
+        CE QUE CA COUTAIT, MESURE (A/B a bras alternes, une seule variable) :
+
+            SANS purge (etat livre) -> user_version= 0, 20 tables requises MANQUANTES
+            AVEC purge              -> user_version=31,  0 table manquante
+
+        `get_or_create_infra` rend le cache SANS rappeler `initialize()` (« deja
+        appele au premier create »). Apres un `reset_database`, l'instance cachee
+        pointait donc sur un fichier supprime, le schema n'etait jamais recree, et
+        `run.get_dashboard()` repondait quand meme **`ok: True`** sur une base
+        vide — un echec devenu succes silencieux, jusqu'au redemarrage.
+
+        Rend le nombre d'entrees oubliees, pour que l'appelant puisse le
+        journaliser plutot que de supposer.
+        """
+        with self._runs_lock:
+            entrees = list(self._infra_by_state_dir.items())
+            self._infra_by_state_dir.clear()
+
+        # La fermeture se fait HORS du verrou : `SQLiteStore.close()` ouvre une
+        # connexion pour son `PRAGMA optimize`, et la tenir sous `_runs_lock`
+        # bloquerait tout autre appel de facade pendant ce temps.
+        for cle, (store, _runner) in entrees:
+            try:
+                store.close()
+            except (sqlite3.Error, OSError) as exc:
+                # `sqlite3.Error` N'HERITE PAS DE `OSError` (regle n4) : les deux
+                # sont nommees. Une fermeture qui echoue ne doit pas empecher
+                # l'oubli — celui-ci est deja fait, et c'est lui qui compte.
+                logger.warning("_close_infra: fermeture de %s en echec (%s), on continue.", cle, exc)
+        return len(entrees)
+
     def _get_run(self, run_id: str) -> Optional[RunState]:
         return runtime_support.get_run(self, run_id)
 
