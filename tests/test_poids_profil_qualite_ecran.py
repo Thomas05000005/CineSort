@@ -68,6 +68,7 @@ const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
 // levait un ReferenceError — ce qu'aucun test ne faisait, faute de cliquer.
 globalThis.__ouvertures = [];
 function ouvrirSimulateurQualite(...a) { globalThis.__ouvertures.push(["simulateur", a]); }
+function ouvrirReglesQualite(...a) { globalThis.__ouvertures.push(["regles", a]); }
 """
 
 _EXTRA = (
@@ -250,6 +251,35 @@ __emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]) });
             "le bouton « Simuler un profil » n'a aucun gestionnaire : il est decoratif",
         )
         self.assertEqual(res["ouvertures"], ["simulateur"], "le clic n'ouvre pas le simulateur")
+
+    def test_le_clic_OUVRE_le_builder_de_regles(self) -> None:
+        """Sixieme fois : une capacite complete et inatteignable."""
+        res = self._run(
+            r"""
+const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
+const conteneur = {
+  querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-regles") >= 0 ? boutons : []; },
+  querySelector() { return null; },
+};
+M.__bind(conteneur);
+const branche = typeof boutons[0].rappel === "function";
+globalThis.__ouvertures.length = 0;
+if (branche) boutons[0].rappel();
+__emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]),
+         arguments: globalThis.__ouvertures.map((o) => o[1].length) });
+"""
+        )
+        self.assertTrue(
+            res["branche"],
+            "le bouton « Règles personnalisées » n'a aucun gestionnaire : il est decoratif",
+        )
+        self.assertEqual(res["ouvertures"], ["regles"], "le clic n'ouvre pas le builder de regles")
+        self.assertEqual(
+            res["arguments"],
+            [0],
+            "le builder recoit un argument : il lit ses regles LUI-MEME, a la source qu'il ecrit "
+            "(lui passer `_state.profileDraft.custom_rules` revenait a passer `undefined`)",
+        )
 
 
 if __name__ == "__main__":
