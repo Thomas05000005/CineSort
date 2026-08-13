@@ -200,6 +200,23 @@ class UnRunACTIFInterditLEffacementTests(_Base):
         self.assertFalse(res.get("ok"))
         self.assertTrue(self.state_dir.exists(), "le dossier d'etat a ete vide pendant un traitement")
 
+    def test_la_route_JUMELLE_efface_sous_BARRIERE(self) -> None:
+        """`reset_all_user_data` supprime le `state_dir` ENTIER — donc le dossier
+        `db/`. Sans barriere, le store cache etait resservi ensuite alors qu'il ne
+        pouvait meme plus ouvrir de connexion, son dossier ayant disparu. On
+        observe l'effet visible du gel : a la sortie, plus rien en cache."""
+        self.api._get_or_create_infra(self.state_dir)
+        self.assertEqual(len(self.api._infra_by_state_dir), 1, "rien en cache : le test ne prouverait rien")
+
+        res = reset_support.reset_all_user_data(self.api, "RESET")
+
+        self.assertTrue(res.get("ok"), f"le reset a echoue : {res}")
+        self.assertEqual(
+            self.api._infra_by_state_dir,
+            {},
+            "le store d'avant survit au wipe : il sera reservi sur un dossier disparu",
+        )
+
     def test_l_APERCU_reste_possible_pendant_un_run(self) -> None:
         """Un apercu ne touche a rien : le refuser priverait l'utilisateur de la
         seule information qui l'aiderait a decider."""
