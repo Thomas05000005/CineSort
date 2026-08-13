@@ -247,6 +247,31 @@ class InfraGeleeError(RuntimeError):
     """
 
 
+def _infra_en_cache_ou_refus(api: Any, key: str) -> Optional[Tuple[SQLiteStore, JobRunner]]:
+    """L'infra deja en cache — sauf si une route est en train d'effacer la base.
+
+    LA GARDE ET L'ACCES QU'ELLE PROTEGE VONT ENSEMBLE. Les separer laisserait un
+    appelant lire le cache sans avoir consulte la barriere ; les reunir rend
+    l'oubli impossible. A appeler sous `api._runs_lock`.
+
+    Pendant qu'une route DETRUIT la base, aucune infra ne doit naitre : le store
+    construit porterait un chemin qui va disparaitre, et le cache le resservirait
+    ensuite comme s'il etait valide — exactement le defaut que la purge corrige.
+
+    On LEVE plutot que de rendre un handle condamne : sur un chemin destructif,
+    l'erreur va dans le sens RESTRICTIF.
+
+    FONCTION SEPAREE, ET PAS QUELQUES LIGNES EN PLACE. `get_or_create_infra`
+    depasse deja son plafond de taille, et le cliquet du depot refuse qu'une
+    fonction trop longue GROSSISSE (246 > 238 : la CI l'a vu). Monter son plafond
+    pour y loger huit lignes serait exactement la dette silencieuse que ce
+    cliquet existe pour empecher.
+    """
+    if getattr(api, "_infra_gel", 0) > 0:
+        raise InfraGeleeError("La base est en cours de reinitialisation : reessayez dans un instant.")
+    return api._infra_by_state_dir.get(key)
+
+
 def get_or_create_infra(
     api: Any,
     state_dir: Path,
@@ -275,15 +300,7 @@ def get_or_create_infra(
     we_are_the_builder = False
     while True:
         with api._runs_lock:
-            # LA BARRIERE DU WIPE. Pendant qu'une route DETRUIT la base, aucune
-            # infra ne doit naitre : le store construit porterait un chemin qui
-            # va disparaitre, et le cache le resservirait ensuite comme s'il
-            # etait valide — exactement le defaut que la purge corrige.
-            # On LEVE plutot que de rendre un handle condamne : sur un chemin
-            # destructif, l'erreur va dans le sens restrictif.
-            if getattr(api, "_infra_gel", 0) > 0:
-                raise InfraGeleeError("La base est en cours de reinitialisation : reessayez dans un instant.")
-            existing = api._infra_by_state_dir.get(key)
+            existing = _infra_en_cache_ou_refus(api, key)
             if existing:
                 # Fix audit 2026-05-24 : initialize() est idempotent + deja
                 # appele au premier create. On retourne directement le cache.
