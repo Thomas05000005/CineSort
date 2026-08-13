@@ -11000,7 +11000,11 @@ body.v5-notif-lock {
   line-height: 1;
   cursor: pointer;
   box-shadow: var(--shadow-2, 0 4px 12px rgba(0, 0, 0, 0.35));
-  transition: background 160ms ease, transform 160ms ease;
+  /* La transition portait sur `background`, que le survol ne change PLUS : il
+   * superpose un voile via `box-shadow`. La declaration etait donc morte, et
+   * le voile apparaissait d'un coup pendant que la translation, elle,
+   * s'animait. */
+  transition: box-shadow 160ms ease, transform 160ms ease;
 }
 .v5-help-fab:hover {
   /* On SUPERPOSE un voile clair au lieu de REMPLACER le fond : `--surface-3`
