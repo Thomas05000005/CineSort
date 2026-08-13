@@ -36,6 +36,8 @@ import { dangerConfirmModal, showModal, trapFocus } from "../components/modal.js
 import { ouvrirSimulateurQualite } from "../components/simulateur-qualite.js";
 // Vague D3 : les regles custom modifient score et tier, et etaient increables.
 import { ouvrirReglesQualite } from "../components/regles-qualite.js";
+// Vague D4 : le rapport de calibration que l'interface promet depuis toujours.
+import { ouvrirCalibrationQualite } from "../components/calibration-qualite.js";
 
 /* =============================================================
  * 1) SCHEMA DECLARATIF DES 10 CATEGORIES
@@ -1341,6 +1343,9 @@ function _renderProfilsQualite() {
       <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-regles>
         ⚙ Règles personnalisées
       </button>
+      <button type="button" class="v5-btn v5-btn--secondary" data-parametres-ouvrir-calibration>
+        🎚 Réglages fins
+      </button>
       <span class="parametres-hint">Comparez avant / après, ou affinez le score avec vos propres règles.</span>
     </p>
     <div class="parametres-hierarchy-section" data-parametres-hierarchy-host>
@@ -1591,6 +1596,18 @@ const ACTIONS_DE_SECTION = {
           "Elles seront refaites au prochain scan, ce qui peut être long sur une grande bibliothèque. " +
           "Aucun film et aucun réglage n'est supprimé.",
         libelle: "Vider le cache",
+        // LE DELAI DE 3 s EST ECARTE ICI, ET C'EST UNE DECISION, PAS UN OUBLI.
+        // La regle n3 gradue le delai sur le NOMBRE d'elements detruits ; or
+        // `purge_probe_cache()` ne prend aucun parametre et ne rend son compte
+        // (`entries_deleted`) qu'APRES coup — le nombre est inconnaissable
+        // avant l'appel (mesure sur la facade runtime).
+        //
+        // Et il ne s'agit pas d'une destruction : le cache se REGENERE au
+        // prochain scan. Ce que l'utilisateur perd, c'est du temps, pas de la
+        // donnee — la consequence le dit, et c'est le bon instrument. Un delai
+        // graduable sur un compte invente serait pire que pas de delai.
+        delaiSecondes: 0,
+        motifSansDelai: "cache regenerable ; le nombre d'entrees n'est pas connu avant l'appel",
       },
     },
   ],
@@ -1750,6 +1767,12 @@ function _lancerActionDeSection(container, btn) {
       title: action.confirmation.titre,
       consequence: action.confirmation.corps,
       confirmLabel: action.confirmation.libelle,
+      // Le delai vient de la TABLE, jamais d'un defaut implicite : sans cette
+      // ligne, `dangerConfirmModal` le graduerait sur `items.length` — c'est-a-dire
+      // sur ZERO, faute de liste — et l'absence de delai passerait pour un choix
+      // alors que ce serait un silence. Cf. `motifSansDelai` a cote de chaque
+      // confirmation, et le garde `tests/test_actions_integration_parametres.py`.
+      countdownSeconds: action.confirmation.delaiSecondes,
       onConfirm: () => _executerActionDeSection(action, route, btn, ecrire),
     });
     return;
@@ -3644,6 +3667,12 @@ function _bindProfilsQualite(container) {
   // Le simulateur : une LECTURE, donc aucune confirmation.
   container.querySelectorAll("[data-parametres-ouvrir-simulateur]").forEach((btn) => {
     btn.addEventListener("click", () => ouvrirSimulateurQualite());
+  });
+
+  // Les reglages fins : options, calibration et partage. Une LECTURE aussi —
+  // l'ecran montre le diff d'un import AVANT d'ecrire quoi que ce soit.
+  container.querySelectorAll("[data-parametres-ouvrir-calibration]").forEach((btn) => {
+    btn.addEventListener("click", () => ouvrirCalibrationQualite());
   });
 
   container.querySelectorAll("[data-parametres-ouvrir-regles]").forEach((btn) => {

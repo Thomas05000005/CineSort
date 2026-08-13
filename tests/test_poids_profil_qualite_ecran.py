@@ -64,11 +64,13 @@ function registerRoute() {}
 function navigate() {}
 const rightPanel = { setWidth() {}, setExpanded() {}, setContent() {} };
 
-// LE SIMULATEUR, stubbe pour COMPTER ses ouvertures. Sans lui, cliquer le bouton
-// levait un ReferenceError — ce qu'aucun test ne faisait, faute de cliquer.
+// LES TROIS MODALES DE LA VAGUE D, stubbees pour COMPTER leurs ouvertures.
+// Sans elles, cliquer un bouton levait un ReferenceError — ce qu'aucun test ne
+// faisait, faute de cliquer.
 globalThis.__ouvertures = [];
 function ouvrirSimulateurQualite(...a) { globalThis.__ouvertures.push(["simulateur", a]); }
 function ouvrirReglesQualite(...a) { globalThis.__ouvertures.push(["regles", a]); }
+function ouvrirCalibrationQualite(...a) { globalThis.__ouvertures.push(["calibration", a]); }
 """
 
 _EXTRA = (
@@ -216,49 +218,26 @@ __emit({ appels: globalThis.__appels.map((a) => a.route) });
         )
 
 
-class LeBoutonDuSIMULATEUREstBRANCHETests(_Base):
+class LesTroisBoutonsDeLaVagueDOuvrentVraimentTests(_Base):
     """Cinquieme fois dans cette campagne : une fonction juste et inatteignable.
 
-    Le simulateur vit dans son propre module ; ses tests l'eprouvent chez lui.
-    Rien ne garantit pour autant que le bouton de l'ecran Parametres l'ouvre —
-    c'est exactement le defaut que toute cette vague corrige.
+    CES TESTS ONT DEJA ETE FAUX-VERTS. Ils assertaient
+    `typeof boutons[0].rappel === "function"` — vrai d'un gestionnaire au corps
+    VIDE. Mesure : remplacer les trois `() => ouvrir...()` par `() => {}` laissait
+    les 9 tests du fichier au vert, alors que les trois fonctionnalites entieres
+    de la vague D devenaient inatteignables depuis l'application. C'est le piege
+    n2 du CLAUDE.md (« un test qui verifie la PRESENCE d'une garde reste vert
+    quand elle est neutralisee »), applique a un CABLAGE plutot qu'a une garde.
 
-    CE TEST A ETE FAUX-VERT. Il assertait `typeof rappel === "function"`, vrai
-    d'un gestionnaire au corps VIDE : remplacer `() => ouvrirSimulateurQualite()`
-    par `() => {}` le laissait au vert alors que le simulateur devenait
-    inatteignable depuis l'application. C'est le piege n2 du CLAUDE.md
-    (« verifier la PRESENCE d'une garde ne prouve rien ») applique a un CABLAGE.
     On CLIQUE donc, et on observe l'ouverture.
     """
 
-    def test_le_clic_OUVRE_le_simulateur(self) -> None:
-        res = self._run(
+    def _clic(self, marqueur: str) -> dict:
+        return self._run(
             r"""
 const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
 const conteneur = {
-  querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-simulateur") >= 0 ? boutons : []; },
-  querySelector() { return null; },
-};
-M.__bind(conteneur);
-const branche = typeof boutons[0].rappel === "function";
-globalThis.__ouvertures.length = 0;
-if (branche) boutons[0].rappel();
-__emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]) });
-"""
-        )
-        self.assertTrue(
-            res["branche"],
-            "le bouton « Simuler un profil » n'a aucun gestionnaire : il est decoratif",
-        )
-        self.assertEqual(res["ouvertures"], ["simulateur"], "le clic n'ouvre pas le simulateur")
-
-    def test_le_clic_OUVRE_le_builder_de_regles(self) -> None:
-        """Sixieme fois : une capacite complete et inatteignable."""
-        res = self._run(
-            r"""
-const boutons = [{ dataset: {}, rappel: null, addEventListener(_t, fn) { this.rappel = fn; } }];
-const conteneur = {
-  querySelectorAll(sel) { return sel.indexOf("parametres-ouvrir-regles") >= 0 ? boutons : []; },
+  querySelectorAll(sel) { return sel.indexOf("MARQUEUR") >= 0 ? boutons : []; },
   querySelector() { return null; },
 };
 M.__bind(conteneur);
@@ -267,12 +246,20 @@ globalThis.__ouvertures.length = 0;
 if (branche) boutons[0].rappel();
 __emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]),
          arguments: globalThis.__ouvertures.map((o) => o[1].length) });
-"""
+""".replace("MARQUEUR", marqueur)
         )
-        self.assertTrue(
-            res["branche"],
-            "le bouton « Règles personnalisées » n'a aucun gestionnaire : il est decoratif",
-        )
+
+    def test_le_clic_OUVRE_le_simulateur(self) -> None:
+        res = self._clic("parametres-ouvrir-simulateur")
+
+        self.assertTrue(res["branche"], "le bouton « Simuler un profil » n'a aucun gestionnaire")
+        self.assertEqual(res["ouvertures"], ["simulateur"], "le clic n'ouvre pas le simulateur")
+
+    def test_le_clic_OUVRE_le_builder_de_regles(self) -> None:
+        """Sixieme fois : une capacite complete et inatteignable."""
+        res = self._clic("parametres-ouvrir-regles")
+
+        self.assertTrue(res["branche"], "le bouton « Règles personnalisées » n'a aucun gestionnaire")
         self.assertEqual(res["ouvertures"], ["regles"], "le clic n'ouvre pas le builder de regles")
         self.assertEqual(
             res["arguments"],
@@ -280,6 +267,12 @@ __emit({ branche, ouvertures: globalThis.__ouvertures.map((o) => o[0]),
             "le builder recoit un argument : il lit ses regles LUI-MEME, a la source qu'il ecrit "
             "(lui passer `_state.profileDraft.custom_rules` revenait a passer `undefined`)",
         )
+
+    def test_le_clic_OUVRE_la_calibration(self) -> None:
+        res = self._clic("parametres-ouvrir-calibration")
+
+        self.assertTrue(res["branche"], "le bouton « Réglages fins » n'a aucun gestionnaire")
+        self.assertEqual(res["ouvertures"], ["calibration"], "le clic n'ouvre pas les reglages fins")
 
 
 if __name__ == "__main__":
