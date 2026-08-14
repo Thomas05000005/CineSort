@@ -816,7 +816,26 @@ function _renderDoublonsList(runStats) {
   if (decided.length === 0 && skipped.length === 0) {
     return `
       <p class="historique-tab-stat"><strong>${dupGroups}</strong> groupe${dupGroups > 1 ? "s" : ""} de doublons</p>
-      ${dupGroups > 0 ? `${_emptyInline("Détail des groupes non disponible pour ce run.", "history")}<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>` : _emptyInline("Aucun doublon dans ce run.", "history")}
+      ${
+        dupGroups > 0
+          ? `${_emptyInline("Détail des groupes non disponible pour ce run.", "history")}<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>`
+          // NE PAS AFFIRMER CE QU'ON NE SAIT PAS. Cette branche disait « Aucun
+          // doublon dans ce run. » — une affirmation, et elle est fausse dès
+          // qu'un run a détecté des groupes que l'utilisateur n'a pas décidés.
+          //
+          // `duplicates_groups` n'est écrit NULLE PART : le scan persiste
+          // `dict(stats.__dict__)` et le dataclass `Stats` ne porte pas cette
+          // clé. Le `|| 0` de la lecture backend n'est donc pas un repli, c'est
+          // un zéro PERMANENT déguisé en repli — et cette branche est la seule
+          // atteignable.
+          //
+          // Ce qu'on sait vraiment, et qui se lit dans les données présentes :
+          // `decided` et `skipped` sont vides. On le dit, et on laisse la vue
+          // Doublons répondre à la question qu'on ne peut pas trancher ici.
+          // Afficher le nombre de groupes DÉTECTÉS demanderait de les persister
+          // au scan — un arbitrage produit, pas un correctif d'affichage.
+          : `${_emptyInline("Aucune décision de doublon pour ce run.", "history")}<a href="#/doublons" class="v5-btn v5-btn--secondary v5-btn--sm">→ Ouvrir la vue Doublons</a>`
+      }
     `;
   }
   const decidedHtml = decided.map((g) => {
