@@ -256,7 +256,7 @@ def check_disk_space_for_apply(
     # moment du pre-check : doublons ecartes et films marques pour suppression,
     # tous deux resolubles depuis la base. Les CONFLITS n'en font pas partie —
     # ils dependent de collisions de destination qu'on ne connait qu'a
-    # l'execution. Cette couverture est donc PARTIELLE, et c'est deliberе :
+    # l'execution. Cette couverture est donc PARTIELLE, et c'est delibere :
     # majorer au total complet ressusciterait le faux « espace insuffisant » qui
     # a deja bloque des apply legitimes deux fois (#698, Fix R6-04).
     if state_dir is not None and bucket_keys:

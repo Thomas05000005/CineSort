@@ -356,7 +356,7 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
     entries: List[Dict[str, Any]] = []
     total_size = 0
 
-    def _collect(scan_root: Path, *, persist_manifest: bool, source_root: Optional[str]) -> int:
+    def _collect(scan_root: Path, *, persist_manifest: bool, source_root: Optional[str]) -> None:
         nonlocal total_size
         files = _iter_review_files(scan_root)
         # Ancre la date d'entree en quarantaine (1re observation). Persiste
@@ -402,7 +402,11 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
             if source_root is not None:
                 entry["source_root"] = source_root
             entries.append(entry)
-        return len(files)
+        # PAS DE RETOUR. Le compte publie est recalcule juste apres
+        # (`files_count = len(entries)`) et il DIFFERE de `len(files)` :
+        # `entries` exclut les fichiers dont le `stat()` a echoue. Rendre
+        # `len(files)` donnait donc une valeur morte ET trompeuse pour qui
+        # s'en serait servi. Les deux appelants l'ignoraient deja.
 
     if root_exists:
         _collect(root, persist_manifest=True, source_root=None)
