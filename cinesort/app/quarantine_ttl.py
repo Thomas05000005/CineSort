@@ -356,7 +356,7 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
     entries: List[Dict[str, Any]] = []
     total_size = 0
 
-    def _collect(scan_root: Path, *, persist_manifest: bool, source_root: Optional[str]) -> int:
+    def _collect(scan_root: Path, *, persist_manifest: bool, source_root: Optional[str]) -> None:
         nonlocal total_size
         files = _iter_review_files(scan_root)
         # Ancre la date d'entree en quarantaine (1re observation). Persiste
@@ -402,7 +402,7 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
             if source_root is not None:
                 entry["source_root"] = source_root
             entries.append(entry)
-        return len(files)
+        # Pas de retour : `len(files)` differait du `files_count` publie (#1069-4).
 
     if root_exists:
         _collect(root, persist_manifest=True, source_root=None)

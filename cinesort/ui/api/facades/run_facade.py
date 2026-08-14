@@ -265,7 +265,7 @@ class RunFacade(_BaseFacade):
 
         Retourne `{ok, deleted, bytes_freed, considered, errors, by_subdir, ...}`.
 
-        `dry_run` vaut **True** par defaut, et c'est deliberе : cette methode est
+        `dry_run` vaut **True** par defaut, et c'est delibere : cette methode est
         exposee en REST (`POST /api/run/purge_quarantine_bucket`). Avec un defaut
         a False, un appel au corps VIDE supprimait des fichiers de l'utilisateur.
         Sur une frontiere destructive, l'omission doit produire l'APERCU, jamais
