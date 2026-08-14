@@ -80,29 +80,63 @@ class LesClesDuBackendSontCELLESQueLaVueLitTests(unittest.TestCase):
                 )
 
     def test_le_rollup_nomme_ses_groupes_group_name(self) -> None:
-        """LE cas qui a coute l'ecran.
+        """LE cas qui a coute l'ecran — eprouve sur le PAYLOAD, pas sur le source.
 
-        La cle est verifiee sur la DOCUMENTATION EXECUTABLE de la fonction — sa
-        propre construction — plutot que sur un echantillon : une bibliotheque
-        vide ne rend aucun groupe, donc aucun element a inspecter.
+        Version precedente : `inspect.getsource(library_support)` puis
+        `assertIn('"group_name"', source)`. C'est la famille que `CLAUDE.md`
+        proscrit, et les deux reproches se verifiaient ici :
+
+        - elle serait restee VERTE si `group_name` etait devenue une cle morte
+          ailleurs dans le module (la chaine y est, le rollup ne l'emet plus) ;
+        - elle serait devenue ROUGE sur un simple renommage de variable interne.
+
+        Son motif etait reel : une bibliotheque vide ne rend aucun groupe, donc
+        aucun element a inspecter. La reponse n'est pas de lire le source, c'est
+        de FOURNIR une row — au niveau ou la production la fabrique.
+        `_build_library_rows` est le seul producteur de rows du rollup ; on
+        l'intercepte la, et on lit ce que la vraie aggregation emet.
         """
-        import inspect
-
         from cinesort.ui.api import library_support
 
-        source = inspect.getsource(library_support)
-        self.assertIn(
-            '"group_name"',
-            source,
-            "get_scoring_rollup ne construit plus `group_name` : la vue Statistiques "
-            "affichera « — » sur chaque ligne du tableau Scores",
+        row = {
+            "row_id": "r1",
+            "title": "Dune",
+            "year": 2024,
+            "codec": "x265",
+            # DERIVEE de la production, pas ecrite a la main : `_classify_resolution`
+            # n'emet jamais « 2160p ». Meme discipline que
+            # tests/test_statistiques_dimensions.py.
+            "resolution": library_support._classify_resolution(3840, 2160),
+            "grain_era_v2": "modern_digital",
+            "tmdb_collection_name": "Dune (collection)",
+            "score_v2": 88.0,
+            "display_tier": "gold",
+        }
+
+        vrai_build = library_support._build_library_rows
+        vrai_resolve = library_support._resolve_run_id
+        library_support._build_library_rows = lambda *a, **k: [row]
+        library_support._resolve_run_id = lambda *a, **k: "run-1"
+        try:
+            rep = library_support.get_scoring_rollup(self.api, by="franchise")
+        finally:
+            library_support._build_library_rows = vrai_build
+            library_support._resolve_run_id = vrai_resolve
+
+        groupes = rep.get("groups") or []
+        self.assertTrue(groupes, f"le rollup ne rend aucun groupe sur une row complete : {rep}")
+
+        attendu = _LU_PAR_LA_VUE["library/get_scoring_rollup"]["element"]
+        manquantes = [c for c in attendu if c not in groupes[0]]
+        self.assertEqual(
+            manquantes,
+            [],
+            f"le rollup n'emet plus {manquantes} — la vue Statistiques affichera "
+            f"« — » sur chaque ligne du tableau Scores. Emis : {sorted(groupes[0])}",
         )
-        for absente in ('"group":', '"key":'):
-            self.assertNotIn(
-                f"groups.append({{\n                {absente}",
-                source,
-                f"le rollup emet desormais {absente} : la vue lit `group_name`",
-            )
+        # ASSERTER LA VALEUR, PAS SEULEMENT LA PRESENCE : une cle presente mais
+        # vide vide l'ecran tout autant.
+        self.assertEqual(groupes[0]["group_name"], "Dune (collection)")
 
     def test_la_timeline_rend_bien_une_liste_de_mois_datee(self) -> None:
         rep = self._appeler("library/get_library_timeline")
