@@ -402,11 +402,7 @@ def list_review_bucket_files(cfg: "Config", *, limit: int = 500) -> Dict[str, An
             if source_root is not None:
                 entry["source_root"] = source_root
             entries.append(entry)
-        # PAS DE RETOUR. Le compte publie est recalcule juste apres
-        # (`files_count = len(entries)`) et il DIFFERE de `len(files)` :
-        # `entries` exclut les fichiers dont le `stat()` a echoue. Rendre
-        # `len(files)` donnait donc une valeur morte ET trompeuse pour qui
-        # s'en serait servi. Les deux appelants l'ignoraient deja.
+        # Pas de retour : `len(files)` differait du `files_count` publie (#1069-4).
 
     if root_exists:
         _collect(root, persist_manifest=True, source_root=None)
