@@ -214,10 +214,15 @@ class PerceptualRepository(_BaseRepository):
         return result
 
     def get_global_score_v2_trend(self, *, since_ts: float, until_ts: Optional[float] = None) -> List[Dict[str, Any]]:
-        """Aggregation du score V2 moyen par jour entre since_ts et until_ts (inclus).
+        """Score V2 moyen PAR FILM, par jour, entre since_ts et until_ts (inclus).
 
         Renvoie [{"date": "YYYY-MM-DD", "avg_score": float, "count": int}, ...]
         trie par date croissante. Jours sans donnee absents du resultat.
+
+        `avg_score` est une moyenne PAR FILM, pas par rapport : un film analyse
+        plusieurs fois le meme jour compte pour un. C'est la meme population que
+        `count`, qui est deja dedoublonne — sans cela, les deux colonnes d'une
+        meme ligne decrivaient deux ensembles differents.
         """
         self._ensure_perceptual_tables()
         until_value = float(until_ts) if until_ts is not None else time.time() + 86400.0
@@ -229,12 +234,30 @@ class PerceptualRepository(_BaseRepository):
                 -- AUDIT 2026-06-14 (R7-15) : COUNT(DISTINCT row_id) au lieu de
                 -- COUNT(*) : re-scanner la meme biblio (nouveau run_id, memes
                 -- row_id) creait plusieurs reports par film -> compteurs gonfles.
-                SELECT date(ts, 'unixepoch', 'localtime') as d,
-                       AVG(global_score_v2) as avg_score,
-                       COUNT(DISTINCT row_id) as n
-                FROM perceptual_reports
-                WHERE global_score_v2 IS NOT NULL
-                  AND ts >= ? AND ts <= ?
+                --
+                -- AUDIT 2026-08-08 (#1010-2) : la MOYENNE portait, elle, sur
+                -- TOUTES les lignes. Les deux colonnes de la meme ligne ne
+                -- decrivaient donc pas le meme ensemble : un film re-scanne
+                -- trois fois le meme jour pesait TROIS fois dans la courbe et
+                -- UNE fois dans le nombre de films affiche a cote.
+                --
+                -- On moyenne donc PAR FILM avant d'agreger par jour. Le compte
+                -- devient un COUNT(*) sur la sous-requete, qui rend deja une
+                -- ligne par film et par jour : il reste identique a
+                -- COUNT(DISTINCT row_id), et le dit desormais par construction
+                -- plutot que par convention.
+                SELECT d,
+                       AVG(par_film) as avg_score,
+                       COUNT(*) as n
+                FROM (
+                    SELECT date(ts, 'unixepoch', 'localtime') as d,
+                           row_id,
+                           AVG(global_score_v2) as par_film
+                    FROM perceptual_reports
+                    WHERE global_score_v2 IS NOT NULL
+                      AND ts >= ? AND ts <= ?
+                    GROUP BY d, row_id
+                )
                 GROUP BY d
                 ORDER BY d ASC
                 """,
