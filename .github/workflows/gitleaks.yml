@@ -36,21 +36,51 @@ name: gitleaks
 # sortie de tests (32 dans docs/internal/r8/) et des fixtures de tests portant
 # des valeurs hexadecimales evidemment factices.
 #
-# Le seul en code de PRODUCTION est `app.py:248`, ou la regle `generic-api-key`
-# s'est declenchee sur un INTERVALLE EN SECONDES — une multiplication de minutes
-# par soixante, dont l'entropie mesuree atteint 3,50.
+# Le seul en code de PRODUCTION est dans `app.py`, ou la regle `generic-api-key`
+# s'est declenchee sur un NOM DE CLE de reglage, dont l'entropie mesuree atteint
+# 3,50.
 #
 # Ces valeurs ne sont volontairement pas recopiees ici : d'apres le point 3
 # ci-dessus, ce fichier et le message de commit qui l'introduit sont eux-memes
 # dans la plage scannee.
 #
-# Aucune suppression n'a donc ete ajoutee : un `.gitleaksignore` cacherait aussi
-# les vrais secrets futurs aux memes emplacements.
+# CE PARAGRAPHE DISAIT « aucune suppression n'a donc ete ajoutee : un
+# `.gitleaksignore` cacherait aussi les vrais secrets futurs aux memes
+# emplacements ». Le 2026-08-14, cette decision a ete REPRISE — et sa raison
+# corrigee, parce qu'elle ne vaut pas pour la forme employee ici :
+#
+#   - un `--exclude-path docs/` masque un CHEMIN, donc toute fuite future qui y
+#     tomberait : l'argument est juste pour cette forme-la ;
+#   - une EMPREINTE vaut pour un `(commit, fichier, regle, ligne)` precis. Un
+#     secret introduit demain vit dans un autre commit, donc une autre
+#     empreinte, donc il est detecte. Elle ne peut rien masquer d'a venir.
+#
+# Ce qui a fait pencher : le scan complet est desormais HEBDOMADAIRE (voir le
+# `schedule` ci-dessous). Sans suppression, il serait ROUGE chaque semaine sur
+# 56 detections connues et benignes — et une alerte permanente est inaudible.
+# On perdrait la 57e, la vraie, dans le bruit des 56 autres.
+#
+# Contre-mesure : les empreintes sont groupees par fichier dans
+# `.gitleaksignore`, avec le compte et la nature de chaque groupe. Une entree
+# posee a la legere transforme un check requis en decoration ; c'est ecrit en
+# tete de ce fichier-la, et cela reste vrai.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  # SCAN COMPLET RECURRENT (#996). `push` et `pull_request` ne scannent qu'une
+  # PLAGE DE COMMITS ; seul un evenement sans plage fait relire l'historique
+  # entier. Il n'a tourne QU'UNE FOIS, le 2026-08-06, et par accident un jour de
+  # panne GitHub. D'ou ce rendez-vous : la couverture ne doit pas dependre de
+  # quelqu'un qui y pense un jour ou GitHub tombe.
+  #
+  # Deuxieme passage, le 2026-08-14 : 56 detections, memes familles qu'au
+  # premier, ZERO secret reel. Les 56 empreintes sont figees dans
+  # `.gitleaksignore` — sans quoi ce rendez-vous serait rouge chaque semaine
+  # pour rien.
+  schedule:
+    - cron: "17 4 * * 1" # lundi 04h17 UTC, hors des heures de file
   workflow_dispatch:
 
 permissions:
