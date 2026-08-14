@@ -86,11 +86,30 @@ _PATTERNS_CODEC = [
 _PATTERN_BIT_DEPTH = re.compile(r"\b(8|10|12)[ \-]?bits?\b", re.IGNORECASE)
 
 # DV doit etre verifie avant HDR10 (DV implique souvent HDR10 en plus).
-# Pour eviter les faux positifs sur "DV" isole (ex: "DVD"), on exige un
-# contexte (boundary + lookahead non-DVD-like).
+#
+# Le lookahead `(?!\.?\s*[Dd])` a ete RETIRE. Il se voulait un garde « pas DVD »,
+# mais `\bDV\b` en tient DEJA lieu : dans `DVD`, `DVDRip`, `DVDScr` ou `HDV`, le
+# caractere qui suit `DV` est un caractere de mot, donc il n'y a AUCUNE frontiere
+# a cet endroit et `\bDV\b` ne matche pas. Le lookahead n'ecartait donc rien
+# qu'il fallait ecarter — il ecartait `DV` suivi d'un token commencant par `D`,
+# c'est-a-dire les formes les plus repandues du nom de release. Mesure :
+#
+#   Dune.2021.2160p.WEB-DL.DV.DDP5.1.H265-GRP.mkv          ->  hdr_hint = ''
+#   Heat.1995.2160p.REMUX.DV.DTS-HD.MA.5.1-FraMeSToR.mkv    ->  hdr_hint = ''
+#   Movie.2021.2160p.DV.HDR10.DDP5.1-GRP.mkv                ->  hdr_hint = 'dv'
+#
+# Le troisieme passe parce que le token suivant commence par `H` : c'est
+# exactement la forme du seul test qui couvrait ce motif
+# (`test_parse_uhd_dv_hdr_bluray_dts_hd_x265`, « 2160p DV HDR BluRay »), d'ou un
+# vert permanent sur une detection qui ne marchait qu'une fois sur deux.
+#
+# Consequence en aval : `quality_score._merge_probe_with_name_hints` ne pose
+# `hdr_dolby_vision` que si `hdr_hint == "dv"`. Sur un probe PARTIAL/FAILED — le
+# seul cas ou ce parser sert — le film perdait donc tout l'apport HDR de son
+# score.
 _PATTERNS_HDR = [
     (r"\bDolby[\. ]?Vision\b|\bDoVi\b|\bDOVI\b", "dv"),
-    (r"\bDV\b(?![A-Za-z0-9])(?!\.?\s*[Dd])", "dv"),  # \bDV\b mais pas DVD
+    (r"\bDV\b(?![A-Za-z0-9])", "dv"),  # `\bDV\b` exclut deja DVD/DVDRip/HDV
     (r"\bHDR10\+|\bHDR10P\b|\bHDR\+\b", "hdr10_plus"),
     (r"\bHDR10\b|\bHDR\b", "hdr10"),
     (r"\bHLG\b", "hlg"),
