@@ -247,7 +247,33 @@ def _act_force_tier(result, value, reason):
         logger.warning("custom_rules: force_tier ignored, invalid tier=%r", value)
 
 
+def _refus_plafond_non_numerique(result, atype: str, value, reason) -> bool:
+    """True si `value` n'est pas un nombre : la regle est REFUSEE et le DIT.
+
+    `_clamp` rend 0 sur une valeur non numerique — c'est son contrat historique,
+    documente. Le consommer directement transformait ce 0 en PLAFOND : un
+    `cap_max` mal saisi ramenait le score a 0, donc en Reject, alors que le
+    tier Reject oriente des decisions destructives (l'utilisateur supprime ce
+    qui y tombe). Et le message n'existait que si le champ « motif » etait
+    rempli, donc pas par defaut.
+
+    Meme remede que pour `score_multiplier` negatif (#723) et pour
+    `force_score` non numerique : on refuse la valeur, on preserve le score, et
+    on l'ecrit dans `reasons` — que l'utilisateur ait saisi un motif ou non.
+    """
+    if _num_strict(value) is not _MISSING:
+        return False
+    logger.warning("custom_rules: %s ignore, valeur non numerique value=%r", atype, value)
+    msg = f"Regle ignoree : plafond non numerique ({value!r})"
+    if reason:
+        msg = f"{msg} [{reason}]"
+    result["reasons"].append(msg)
+    return True
+
+
 def _act_cap_max(result, value, reason):
+    if _refus_plafond_non_numerique(result, "cap_max", value, reason):
+        return
     cap = _clamp(value)
     if result["score"] > cap:
         result["score"] = cap
@@ -256,6 +282,8 @@ def _act_cap_max(result, value, reason):
 
 
 def _act_cap_min(result, value, reason):
+    if _refus_plafond_non_numerique(result, "cap_min", value, reason):
+        return
     cap = _clamp(value)
     if result["score"] < cap:
         result["score"] = cap
@@ -437,6 +465,21 @@ def _validate_action(action: Any, rule_idx: int) -> Tuple[bool, List[str], Dict[
                 "(un multiplicateur negatif ferait tomber le film en Reject)"
             )
             return False, errs, {}
+    # Meme famille que #723, sur les deux actions restantes qui n'avaient PAS de
+    # garde. Un plafond non numerique vaut 0 via `_clamp`, et `cap_max` en fait
+    # un plafond a 0 : le film tombe en Reject. Le constructeur de regles envoie
+    # precisement cette valeur-la quand le champ est vide
+    # (web/dashboard/components/regles-qualite.js : `value === "" ? undefined`,
+    # et une cle `undefined` disparait a la serialisation JSON) ou quand la
+    # saisie n'est pas un nombre (`Number.isNaN(...) ? b.action.value`).
+    # Refus AMONT avec un message ; `_act_cap_max`/`_act_cap_min` gardent leur
+    # propre refus pour les profils DEJA persistes, qui ne repassent pas ici.
+    if atype in ("cap_max", "cap_min") and _num_strict(value) is _MISSING:
+        errs.append(
+            f"Regle {rule_idx + 1}: {atype} value {value!r} n'est pas un nombre "
+            "(un plafond non numerique vaut 0, ce qui ferait tomber le film en Reject)"
+        )
+        return False, errs, {}
     reason = _truncate_str(action.get("reason"), MAX_REASON_LEN)
     return True, [], {"type": atype, "value": value, "reason": reason}
 
