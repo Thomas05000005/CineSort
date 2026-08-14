@@ -185,6 +185,17 @@ Deux contre-feux, tous deux payes ce jour-la :
   schema faite sous une connexion deja ouverte — **1 site sur tout le depot**),
   la ou « profondeur 2 » obligeait a tout remesurer.
 
+**NE JAMAIS INSERER ENTRE UN DECORATEUR ET SA FONCTION.** Le 2026-08-14, une
+fonction d'aide posee juste au-dessus de `check_duplicates` s'est glissee SOUS
+son `@requires_valid_run_id`. Le decorateur s'appliquait donc a l'aide, et
+l'endpoint perdait TOUTE validation de son `run_id` — un identifiant arbitraire
+atteignait la couche base. Aucune erreur, aucun avertissement : le fichier reste
+syntaxiquement valide et l'aide, elle, marche.
+
+Sept tests l'ont dit, et seulement parce que le nombre de verts a ete COMPARE a
+celui de `main` (510) au lieu d'etre suppose. Apres toute insertion pres d'un
+`def`, verifier que le decorateur qui le precedait le precede toujours.
+
 **CHERCHER LE GARDE AVANT D'EN ECRIRE UN.** Le 2026-08-13, deux classes CSS
 posees par le JS et definies nulle part (dont `.v5-help-fab`, le bouton flottant
 d'aide, sans style depuis la premiere release publique). Sonde, cliquet, liste
@@ -478,6 +489,57 @@ vague 3.1 ; le reste vit dans les PR. Ce qui compte pour une session suivante :
 - **#1063** suivi immediat : la regle de #1061 etait opaque **en lecture** et
   translucide **au rendu** (`--surface-2` -> `rgba(255,255,255,0.055)`). Cf. le
   piege « une couleur se lit au RENDU ».
+
+### Depilage du backlog d'audit (2026-08-14) — 11 PR
+
+Les trois PR du bot du jour, PUIS les constats que ses rapports precedents
+avaient **verifies mais laisses sans PR**, faute de budget d'ouverture.
+
+- **#1066 PERTE DE DONNEES**, et c'est la seule de ce niveau. La garde
+  anti-jonction de #941 ne testait pas la RACINE transmise, or la production
+  n'entre jamais par le bucket entier. Reproduit avec une vraie jonction
+  Windows : l'ecran annonce **1 fichier**, l'application en supprime **4**, dont
+  **3 dans la bibliotheque** — et rapporte `errors: 0`, un succes franc. La
+  regle n3 exige une LISTE ; elle etait affichee, et fausse dans le sens
+  permissif.
+
+  En mutant ses TROIS gardes separement : `_purge_dir_recursive` a **quatre**
+  appelants, pas trois. Les deux gardes ajoutees couvrent `iterdir()` ; les deux
+  autres passent `root / sub` sans garde, et seule la garde du PARCOURS les
+  protege — elle n'etait eprouvee par personne. Test ajoute, **3/3**.
+- **#1067** un `cap_max` non numerique valait 0, donc un PLAFOND a 0 : score
+  80 -> **0**, tier **Reject** (seuil < 25), et `motifs: []` — totalement muet.
+  Le sac que l'utilisateur vide. **4/4 mutants.**
+- **#1068** le lookahead « pas DVD » mordait `DV.DDP`, `DV.DTS-HD` : **3 des 4**
+  formes reelles de release 4K perdaient leur Dolby Vision. Le lookahead
+  RESTANT etait mort pour la meme raison — equivalence prouvee sur **15 561
+  cas**, `\b` etant strictement plus fort. **3/3 mutants**, dans les deux
+  directions (ne plus detecter, et detecter trop).
+- **#1070 a #1075** les restes sans PR : un retour mort ET trompeur, deux
+  homoglyphes cyrilliques (garde a ZERO exemption sur `cinesort/`), le repli
+  d'etat RELATIF (`./CineSort` : lancer l'app d'ailleurs ouvrait silencieusement
+  une AUTRE base, 133 sites d'appel), deux frontieres d'exception asymetriques,
+  une docstring qui decrivait l'INVERSE du code, un test de contrat qui lisait
+  le SOURCE, `delta_reject` qui comptait `|A \ B|` au lieu de `|A|` (mesure :
+  **1 au lieu de 0**), et la moyenne de la courbe Qualite passee PAR FILM
+  (30,0 -> 50,0 sur le scenario discriminant, soit Bronze -> Silver).
+- **#1076** le scan gitleaks complet n'avait tourne qu'UNE fois, par accident.
+  Relance : **56 detections, ZERO secret reel** — exemples `curl` de la doc,
+  journaux de suites de tests, fixtures, et un NOM DE CLE de reglage signale par
+  entropie. Desormais HEBDOMADAIRE, avec les 56 empreintes figees.
+- **#1077** le nombre de groupes de doublons est desormais RANGE la ou il est
+  deja calcule (l'ouverture de l'ecran Doublons) et non au scan, ou il couterait
+  « ~1000 films + un parcours disque » (#406). L'absence vaut **INCONNU**, pas
+  zero : l'ecran a trois etats.
+
+**TROIS ISSUES OUVERTES ETAIENT DEJA CORRIGEES** — #984, #972, #1002. Mesurees
+avant d'ecrire une ligne : la garde d'unicite de #984 existe
+(`run_id_est_utilise` interroge les tables filles), le commentaire faux de #972
+est devenu un predicat nomme, et la fixture `scan_actif` de #1002 existe et
+explique meme pourquoi elle n'a pris aucune des deux directions proposees. Avec
+le contrat CSS de la veille, cela fait **quatre** implementations redondantes
+evitees en deux jours. **Re-mesurer avant de coder, y compris sur une issue
+ouverte.**
 
 **Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
 
