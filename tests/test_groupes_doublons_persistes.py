@@ -122,5 +122,96 @@ class LAbsenceVautINCONNUTests(unittest.TestCase):
         self.assertEqual(self._lire({"duplicates_groups": 0}), 0)
 
 
+class LeCABLAGEEstEprouveTests(unittest.TestCase):
+    """LE TEST QUE LA MUTATION A REVELE MANQUANT.
+
+    Eprouver `fusionner_stats` d'un cote et l'ecran de l'autre ne dit RIEN du
+    fil qui les relie. Retirer l'appel dans `check_duplicates` laissait toute la
+    batterie verte — le mutant a survecu, et c'etait une vraie faiblesse, pas un
+    equivalent : sans cet appel, aucun run ne porte jamais son compte.
+
+    Ce test emprunte donc la porte de PRODUCTION : un vrai run, un vrai
+    plan.jsonl, l'endpoint reel.
+    """
+
+    def setUp(self) -> None:
+        import json as _json
+        import time as _time
+
+        import cinesort.ui.api.cinesort_api as backend
+
+        self._tmp = Path(tempfile.mkdtemp(prefix="cs_cablage_dups_"))
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.root = self._tmp / "root"
+        self.state_dir = self._tmp / "state"
+        self.root.mkdir(parents=True)
+        self.state_dir.mkdir(parents=True)
+
+        self.api = backend.CineSortApi()
+        self.api.settings.save_settings(
+            {"root": str(self.root), "state_dir": str(self.state_dir), "tmdb_enabled": False}
+        )
+        self.store, _ = self.api._get_or_create_infra(self.state_dir)
+
+        self.run_id = "20260814_120000_001"
+        # DEUX rows visant la MEME destination : c'est ce qui fait un groupe.
+        rows = [
+            {
+                "row_id": f"r{i}",
+                "kind": "single",
+                "folder": str(self.root / f"Source {i}"),
+                "video": str(self.root / f"Source {i}" / "film.mkv"),
+                "proposed_title": "Dune",
+                "proposed_year": 2021,
+                "proposed_source": "name",
+                "confidence": 70,
+                "confidence_label": "med",
+                "candidates": [],
+                "notes": "",
+            }
+            for i in (1, 2)
+        ]
+        run_dir = self.state_dir / "runs" / f"tri_films_{self.run_id}"
+        run_dir.mkdir(parents=True)
+        lignes = [_json.dumps(r, ensure_ascii=False) for r in rows]
+        (run_dir / "plan.jsonl").write_text("\n".join(lignes) + "\n", encoding="utf-8")
+        debut = _time.time() - 60.0
+        self.store.run.insert_run_pending(
+            run_id=self.run_id,
+            root=str(self.root),
+            state_dir=str(self.state_dir),
+            config={"tmdb_enabled": False},
+            created_ts=debut - 2.0,
+        )
+        self.store.run.mark_run_running(self.run_id, started_ts=debut)
+        self.store.run.mark_run_done(self.run_id, stats={"planned_rows": 2}, ended_ts=debut + 5.0)
+
+    def _stats(self) -> dict:
+        import json as _json
+
+        with self.store._managed_conn() as conn:
+            row = conn.execute("SELECT stats_json FROM runs WHERE run_id=?", (self.run_id,)).fetchone()
+        return _json.loads(row[0]) if row and row[0] else {}
+
+    def test_avant_l_ouverture_la_cle_est_ABSENTE(self) -> None:
+        """La precondition, sans quoi le test suivant ne prouverait rien : il
+        pourrait lire une cle deja posee par le scan."""
+        self.assertNotIn("duplicates_groups", self._stats())
+
+    def test_ouvrir_l_ecran_Doublons_RANGE_le_compte(self) -> None:
+        rep = self.api.run.check_duplicates(self.run_id, decisions={})
+        self.assertTrue(rep.get("ok"), rep)
+
+        stats = self._stats()
+        self.assertIn(
+            "duplicates_groups",
+            stats,
+            "check_duplicates n'a pas range le compte : l'Historique restera a INCONNU pour toujours",
+        )
+        self.assertEqual(stats["duplicates_groups"], len(rep.get("groups") or []))
+        # LA STAT DU SCAN SURVIT. C'est la raison d'etre de la fusion.
+        self.assertEqual(stats.get("planned_rows"), 2, "le rangement a ecrase les stats du scan")
+
+
 if __name__ == "__main__":
     unittest.main()
