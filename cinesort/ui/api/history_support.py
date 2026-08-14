@@ -30,6 +30,24 @@ from cinesort.ui.api.settings_support import normalize_user_path
 logger = logging.getLogger(__name__)
 
 
+def _entier_ou_inconnu(brut: Any) -> Optional[int]:
+    """`None` quand la valeur est ABSENTE ou illisible — jamais 0 par defaut.
+
+    Le defaut d'origine (#1031) est exactement la confusion inverse : un
+    `int(x or 0)` transformait une cle JAMAIS ECRITE en « zero doublon », et
+    l'ecran l'affirmait. `duplicates_groups` n'est range qu'a l'ouverture de
+    l'ecran Doublons, jamais au scan : son absence est donc l'etat NORMAL d'un
+    run que l'utilisateur n'a pas ouvert, et elle doit se distinguer d'un zero
+    mesure.
+    """
+    if brut is None:
+        return None
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        return None
+
+
 def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Retire des warning_flags les alertes ignorees persistees (spec 06 §3.3).
 
@@ -555,25 +573,8 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # Conflicts (anomalies severity != info) si presents dans stats_obj, sinon 0.
     conflicts_count = int(stats_obj.get("conflicts_count") or stats_obj.get("anomalies_total") or 0)
 
-    # Duplicates groups : ABSENT vaut INCONNU, pas zero.
-    #
-    # Le `or 0` d'avant n'etait pas un repli : `stats_json` ne portait JAMAIS
-    # cette cle (le scan persiste `dict(stats.__dict__)`, et le dataclass `Stats`
-    # ne la declare pas), donc la valeur etait un zero PERMANENT. L'ecran en
-    # tirait « Aucun doublon dans ce run. » — une affirmation, fausse des qu'un
-    # run avait detecte des groupes non decides.
-    #
-    # La cle est desormais rangee a l'ouverture de l'ecran Doublons, la ou le
-    # compte est deja calcule. Elle reste donc ABSENTE pour tout run que
-    # l'utilisateur n'a pas ouvert, et pour tous les runs anterieurs : `None`
-    # dit « on ne sait pas », et l'ecran le dit aussi.
-    brut_groupes = stats_obj.get("duplicates_groups")
-    duplicates_groups: Optional[int] = None
-    if brut_groupes is not None:
-        try:
-            duplicates_groups = int(brut_groupes)
-        except (TypeError, ValueError):
-            duplicates_groups = None
+    # Duplicates groups : ABSENT vaut INCONNU, pas zero (cf. #1031).
+    duplicates_groups = _entier_ou_inconnu(stats_obj.get("duplicates_groups"))
 
     # Apply operations : derniere batch reel (non dry-run) DONE.
     apply_operations: List[Dict[str, Any]] = []

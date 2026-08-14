@@ -2265,7 +2265,11 @@ def _ranger_le_compte_de_groupes(store: Any, run_id: str, data: Dict[str, Any]) 
         return
     try:
         store.run.fusionner_stats(run_id, duplicates_groups=len(groupes))
-    except (AttributeError, OSError, TypeError, ValueError) as exc:  # pragma: no cover - best effort
+    # `sqlite3.Error` N'HERITE PAS D'OSError (regle inviolable n4). Sans elle,
+    # une base verrouillee par un apply concurrent faisait remonter l'erreur
+    # depuis un chemin d'AFFICHAGE : l'ecran Doublons tombait pour n'avoir pas
+    # pu ranger une metrique d'agrement. C'est une LECTURE, on l'attrape.
+    except (AttributeError, OSError, TypeError, ValueError, sqlite3.Error) as exc:  # pragma: no cover
         _logger.debug("rangement du compte de groupes impossible run_id=%s err=%s", run_id, exc)
 
 
