@@ -252,17 +252,19 @@ def _deltas_sur_journees_completes(points, store, now, period):
         )
 
     # Memes bornes que ci-dessus, exprimees en horodatages : aujourd'hui exclu,
-    # puis deux tranches egales. `count_v2_tier_since` n'a pas de borne haute,
-    # on l'obtient par difference.
+    # puis deux tranches egales. Chaque tranche est COMPTEE, pas deduite : la
+    # soustraction de deux `COUNT(DISTINCT row_id)` rend `|A u B| - |B|`, donc
+    # `|A \ B|` et pas `|A|`. Un film Reject present dans les DEUX tranches (un
+    # re-scan) disparaissait de la plus ancienne, et `delta_reject` penchait a la
+    # hausse. Mesure : verite 0, calcul 1.
     demi = max(1, period // 2)
     fin_recent = _minuit_local(now)
     debut_recent = fin_recent - demi * 86400.0
     debut_older = debut_recent - demi * 86400.0
     try:
-        depuis_fin = store.perceptual.count_v2_tier_since(tier="reject", since_ts=fin_recent)
-        depuis_recent = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_recent)
-        depuis_older = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_older)
-        delta_reject = (depuis_recent - depuis_fin) - (depuis_older - depuis_recent)
+        recents = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_recent, until_ts=fin_recent)
+        anciens = store.perceptual.count_v2_tier_since(tier="reject", since_ts=debut_older, until_ts=debut_recent)
+        delta_reject = recents - anciens
     except (OSError, AttributeError, TypeError, ValueError):
         delta_reject = 0
 
