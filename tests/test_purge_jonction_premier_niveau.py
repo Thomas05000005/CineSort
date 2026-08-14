@@ -177,5 +177,69 @@ class JonctionDePremierNiveauTests(unittest.TestCase):
         self.assertTrue(self.precieux.exists(), "le fichier hors bucket a disparu")
 
 
+class UneJonctionPORTANTUnNomDeTTLSUBDIRSTests(unittest.TestCase):
+    """LE QUATRIEME SITE D'APPEL, QUE LES DEUX GARDES AJOUTEES NE COUVRENT PAS.
+
+    `_purge_dir_recursive` a QUATRE appelants, pas trois. Les deux gardes posees
+    sur `root.iterdir()` couvrent les enfants DECOUVERTS. Les deux autres passent
+    `root / sub` pour chaque nom de `TTL_SUBDIRS`, directement, sans garde de site
+    d'appel — seule la garde du PARCOURS les protege.
+
+    MESURE, avec une vraie jonction nommee `_leftovers` :
+
+        correctif complet                 -> film hors bucket INTACT, deleted 0
+        correctif SANS la garde du parcours -> film hors bucket SUPPRIME, deleted 1
+
+    Sans ce test, retirer la garde du parcours laissait toute la batterie VERTE :
+    le mutant survivait, non parce qu'il etait equivalent, mais parce que
+    personne n'empruntait ce chemin. C'est la difference entre « la garde est
+    redondante » et « la garde est la seule defense et n'est pas eprouvee ».
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="cs_jonction_ttlsub_")
+        self.base = Path(self._tmp.name)
+        self.cfg = SimpleNamespace(root=self.base)
+        self.bucket = self.base / quarantine_ttl.REVIEW_FOLDER_NAME
+        self.bucket.mkdir()
+        self.dehors = self.base / "bibliotheque"
+        self.dehors.mkdir()
+        self.precieux = self.dehors / "Film Precieux.mkv"
+        self.precieux.write_bytes(b"x" * 2048)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _jonction_nommee_comme_un_ttl_subdir(self) -> Path:
+        # N'IMPORTE LEQUEL, mais il doit venir de la constante : figer « _leftovers »
+        # ici laisserait le test muet si la liste changeait.
+        nom = quarantine_ttl.TTL_SUBDIRS[-1]
+        lien = self.bucket / nom
+        if not _second_chemin(lien, self.dehors):
+            self.skipTest("jonction/lien impossible a creer (droits insuffisants)")
+        self.assertTrue(is_reparse_point(lien), "le lien pose n'est pas un point d'analyse")
+        return lien
+
+    def test_vider_maintenant_ne_traverse_pas_un_TTL_SUBDIR_qui_est_une_jonction(self) -> None:
+        lien = self._jonction_nommee_comme_un_ttl_subdir()
+
+        res = quarantine_ttl.purge_review_bucket_all(self.cfg)
+
+        self.assertTrue(
+            self.precieux.exists(),
+            "un fichier HORS du bucket a ete supprime a travers une jonction nommee comme un TTL_SUBDIR",
+        )
+        self.assertEqual(res["deleted"], 0, f"des suppressions ont eu lieu hors du bucket : {res}")
+        self.assertTrue(is_reparse_point(lien), "la jonction posee par l'utilisateur a ete retiree")
+
+    def test_le_cron_TTL_non_plus(self) -> None:
+        """La meme porte, avec `arrival_of` et un vrai TTL : l'autre appelant du
+        quatrieme site."""
+        lien = self._jonction_nommee_comme_un_ttl_subdir()
+
+        quarantine_ttl.purge_review_bucket(self.cfg, ttl_days=0)
+
+        self.assertTrue(self.precieux.exists(), "le cron TTL a supprime a travers la jonction")
+        self.assertTrue(is_reparse_point(lien), "le cron TTL a retire la jonction")
+
+
 if __name__ == "__main__":
     unittest.main()
