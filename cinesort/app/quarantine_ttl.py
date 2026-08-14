@@ -471,9 +471,26 @@ def _descendre_sans_franchir_les_jonctions(racine: Path) -> "Iterator[Path]":
     RESTRICTIF : le role de cette garde est de ne rien detruire hors du bucket,
     pas de decider du sort d'un lien que l'utilisateur a pose lui-meme.
 
+    `racine` EST TESTEE, ELLE AUSSI, et c'est la moitie qui manquait. La garde
+    ne s'appliquait qu'aux dossiers DECOUVERTS pendant le parcours ; or la
+    production n'entre jamais par le bucket entier. `purge_review_bucket[_all]`
+    enumerent `<root>/_review` eux-memes et passent CHAQUE enfant de premier
+    niveau a `_purge_dir_recursive`, qui fait de cet enfant la `racine` d'un
+    nouveau parcours — soit exactement le seul chemin ou la garde ne regardait
+    pas. Un `iterdir()` sur une jonction enumere sa CIBLE.
+
+    C'est la meme precondition que `apply_core._walk_without_crossing_reparse_points`
+    (« L'appelant doit avoir verifie `is_reparse_point(root)` en amont ») et que
+    `cleanup._classify_cleanable_residual_dir` (issue #517, qui teste `path`
+    AVANT toute enumeration). Ici elle est portee par le parcours lui-meme :
+    aucun de ses trois sites d'appel ne verifie le chemin qu'il transmet.
+
     `Path.is_symlink()` ne suffit PAS : il rend False pour une jonction Windows.
     C'est la raison d'etre de `is_reparse_point`.
     """
+    if is_reparse_point(racine):
+        _log.warning("purge: %s est une jonction/lien — NON parcourue, sa cible est hors du bucket", racine)
+        return
     a_visiter = [racine]
     while a_visiter:
         courant = a_visiter.pop()
@@ -634,7 +651,7 @@ def purge_review_bucket(
     top_stats = {"deleted": 0, "bytes_freed": 0, "errors": 0, "considered": 0}
     try:
         for child in root.iterdir():
-            if child.is_dir() and child.name not in excluded:
+            if child.is_dir() and child.name not in excluded and not is_reparse_point(child):
                 sub_stats = _purge_dir_recursive(child, cutoff_ts=cutoff_ts, dry_run=dry_run, arrival_of=_arrival_of)
                 top_stats["deleted"] += sub_stats["deleted"]
                 top_stats["bytes_freed"] += sub_stats["bytes_freed"]
@@ -730,7 +747,10 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
     top_stats = {"deleted": 0, "bytes_freed": 0, "errors": 0, "considered": 0}
     try:
         for child in root.iterdir():
-            if child.is_dir() and child.name not in excluded:
+            # `not is_reparse_point(child)` : sans lui, `child.rmdir()` plus bas
+            # retire la JONCTION elle-meme — la garde du parcours protege sa
+            # cible, pas le lien que l'utilisateur a pose.
+            if child.is_dir() and child.name not in excluded and not is_reparse_point(child):
                 sub_stats = _purge_dir_recursive(child, cutoff_ts=cutoff_ts, dry_run=dry_run)
                 top_stats["deleted"] += sub_stats["deleted"]
                 top_stats["bytes_freed"] += sub_stats["bytes_freed"]
