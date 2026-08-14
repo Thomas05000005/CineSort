@@ -23,3 +23,118 @@
 # pas dans `main` et cette ligne deviendra inerte. La supprimer alors est sans
 # risque — les `# gitleaks:allow` du fichier restent, eux, actifs.
 81ff6e032f77d203d0b7cace6c213617217f9e8e:tests/test_tmdb_client.py:generic-api-key:126
+
+# ---------------------------------------------------------------------------
+# SCAN COMPLET DE L'HISTORIQUE — 2026-08-14 (#996)
+#
+# Le workflow ne tourne sur l'historique ENTIER que pour un evenement sans
+# plage de commits. Cela n'etait arrive qu'UNE fois, le 2026-08-06, par accident
+# un jour de panne GitHub (57 detections, toutes verifiees benignes, cf. l'en-tete
+# de `.github/workflows/gitleaks.yml`). Le scan est desormais HEBDOMADAIRE.
+#
+# Sans les empreintes ci-dessous, ce rendez-vous serait ROUGE chaque semaine sur
+# des detections connues — et une alerte permanente est inaudible : on perdrait
+# la vraie dans le bruit des autres.
+#
+# Le scan du 2026-08-14 rend 56 detections (57 moins celle deja figee plus haut). Les 56 ont ete ouvertes une par une :
+# AUCUN secret reel. Reparties ainsi :
+#
+#   docs/api/ENDPOINTS.md            10   exemples `curl -H "Authorization: Bearer ..."`
+#   docs/internal/r8/*.txt           28   journaux de sortie de suites de tests
+#   fichiers de tests                17   fixtures factices (jetons et cles inventes)
+#   app.py                            1   "watch_interval_minutes", un NOM DE CLE de
+#                                         reglage, signale par entropie (3,50)
+#
+# On fige les EMPREINTES, pas des chemins. Une empreinte vaut pour un
+# (commit, fichier, regle, ligne) precis : elle ne peut pas couvrir une fuite
+# future, la ou un `--exclude-path docs/` l'aurait masquee pour toujours.
+# C'est la difference entre eteindre une alerte et eteindre le detecteur.
+# ---------------------------------------------------------------------------
+
+# app.py
+1126536dde566926593e1ba07fdfa3bf4750270b:app.py:generic-api-key:263
+
+# cinesort/tests/test_app_settings_bom.py
+529fcd0b1b5807f7bb22999dbdc6d727cf059769:cinesort/tests/test_app_settings_bom.py:generic-api-key:168
+529fcd0b1b5807f7bb22999dbdc6d727cf059769:cinesort/tests/test_app_settings_bom.py:generic-api-key:53
+
+# docs/api/ENDPOINTS.md
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:655
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:666
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:677
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:688
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:699
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:710
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:721
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:732
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:743
+1126536dde566926593e1ba07fdfa3bf4750270b:docs/api/ENDPOINTS.md:curl-auth-header:754
+
+# docs/internal/baseline_r8/captures/cap_contracts_static.py
+01d0a06abde0631dd65ffc16f1cf4a7745fadfec:docs/internal/baseline_r8/captures/cap_contracts_static.py:generic-api-key:412
+650d1620a45009d0b67c7d748af7b5b38e216887:docs/internal/baseline_r8/captures/cap_contracts_static.py:generic-api-key:412
+
+# docs/internal/r8/suite_baseline_prefix.txt
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_baseline_prefix.txt:generic-api-key:10901
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_baseline_prefix.txt:generic-api-key:13444
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_baseline_prefix.txt:generic-api-key:2952
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_baseline_prefix.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_f2a.txt
+da09ff974cc31953a4fc99a5759f4d0132181884:docs/internal/r8/suite_f2a.txt:generic-api-key:10901
+da09ff974cc31953a4fc99a5759f4d0132181884:docs/internal/r8/suite_f2a.txt:generic-api-key:13528
+da09ff974cc31953a4fc99a5759f4d0132181884:docs/internal/r8/suite_f2a.txt:generic-api-key:2952
+da09ff974cc31953a4fc99a5759f4d0132181884:docs/internal/r8/suite_f2a.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_f2b.txt
+2fd4f63c29ace4faf9822cfb3e0d595de23fdfe1:docs/internal/r8/suite_f2b.txt:generic-api-key:10901
+2fd4f63c29ace4faf9822cfb3e0d595de23fdfe1:docs/internal/r8/suite_f2b.txt:generic-api-key:13446
+2fd4f63c29ace4faf9822cfb3e0d595de23fdfe1:docs/internal/r8/suite_f2b.txt:generic-api-key:2952
+2fd4f63c29ace4faf9822cfb3e0d595de23fdfe1:docs/internal/r8/suite_f2b.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_f2c.txt
+75bb833252d224f64a195b1b28c3429ecf2137fd:docs/internal/r8/suite_f2c.txt:generic-api-key:10901
+75bb833252d224f64a195b1b28c3429ecf2137fd:docs/internal/r8/suite_f2c.txt:generic-api-key:13444
+75bb833252d224f64a195b1b28c3429ecf2137fd:docs/internal/r8/suite_f2c.txt:generic-api-key:2952
+75bb833252d224f64a195b1b28c3429ecf2137fd:docs/internal/r8/suite_f2c.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_f2d.txt
+217f55d5cf72ace1c4454745fad267fa2194ce1d:docs/internal/r8/suite_f2d.txt:generic-api-key:10901
+217f55d5cf72ace1c4454745fad267fa2194ce1d:docs/internal/r8/suite_f2d.txt:generic-api-key:13536
+217f55d5cf72ace1c4454745fad267fa2194ce1d:docs/internal/r8/suite_f2d.txt:generic-api-key:2952
+217f55d5cf72ace1c4454745fad267fa2194ce1d:docs/internal/r8/suite_f2d.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_postfix.txt
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_postfix.txt:generic-api-key:10901
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_postfix.txt:generic-api-key:13458
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_postfix.txt:generic-api-key:2952
+885402cbe20c38b107552fa81e0451a3cc09fd87:docs/internal/r8/suite_postfix.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_r8_001.txt
+7b25d50dd850d5bc445aa93f13574388b73518c7:docs/internal/r8/suite_r8_001.txt:generic-api-key:10901
+7b25d50dd850d5bc445aa93f13574388b73518c7:docs/internal/r8/suite_r8_001.txt:generic-api-key:13446
+7b25d50dd850d5bc445aa93f13574388b73518c7:docs/internal/r8/suite_r8_001.txt:generic-api-key:2952
+7b25d50dd850d5bc445aa93f13574388b73518c7:docs/internal/r8/suite_r8_001.txt:generic-api-key:3012
+
+# docs/internal/r8/suite_r8_002.txt
+e4c8723a5c4efee398782ab36dd87aa40cf2bb0a:docs/internal/r8/suite_r8_002.txt:generic-api-key:10901
+e4c8723a5c4efee398782ab36dd87aa40cf2bb0a:docs/internal/r8/suite_r8_002.txt:generic-api-key:13446
+e4c8723a5c4efee398782ab36dd87aa40cf2bb0a:docs/internal/r8/suite_r8_002.txt:generic-api-key:2952
+e4c8723a5c4efee398782ab36dd87aa40cf2bb0a:docs/internal/r8/suite_r8_002.txt:generic-api-key:3012
+
+# tests/test_cfg_sig_invalidation_f08.py
+2e213a60886c70c3010a530271a813e9c6d3c9ad:tests/test_cfg_sig_invalidation_f08.py:generic-api-key:90
+2e213a60886c70c3010a530271a813e9c6d3c9ad:tests/test_cfg_sig_invalidation_f08.py:generic-api-key:91
+2e213a60886c70c3010a530271a813e9c6d3c9ad:tests/test_cfg_sig_invalidation_f08.py:generic-api-key:99
+
+# tests/test_debug_auth_no_token_leak_v77.py
+f486f98227a61819bb71477a919831afa2ba23bc:tests/test_debug_auth_no_token_leak_v77.py:generic-api-key:33
+f486f98227a61819bb71477a919831afa2ba23bc:tests/test_debug_auth_no_token_leak_v77.py:generic-api-key:42
+f486f98227a61819bb71477a919831afa2ba23bc:tests/test_debug_auth_no_token_leak_v77.py:generic-api-key:53
+
+# tests/test_local_secret_store.py
+1126536dde566926593e1ba07fdfa3bf4750270b:tests/test_local_secret_store.py:generic-api-key:87
+
+# tests/test_lotd_chain_integrations.py
+f486f98227a61819bb71477a919831afa2ba23bc:tests/test_lotd_chain_integrations.py:generic-api-key:431
+f486f98227a61819bb71477a919831afa2ba23bc:tests/test_lotd_chain_integrations.py:generic-api-key:432
