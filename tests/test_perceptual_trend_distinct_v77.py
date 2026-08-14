@@ -32,11 +32,17 @@ from pathlib import Path
 
 from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
 
-_COLONNES = (
+#: Requete LITTERALE. Elle etait composee par f-string depuis deux
+#: constantes : les valeurs interpolees etaient constantes, donc sans
+#: risque d'injection, mais il fallait porter un `# noqa: S608` que
+#: l'analyse statique du depot signalait quand meme. Une chaine
+#: litterale n'a besoin d'aucune suppression, et se lit mieux.
+_INSERT = (
+    "INSERT INTO perceptual_reports ("
     "row_id, run_id, ts, global_tier_v2, global_score_v2, "
     "visual_score, audio_score, global_score, global_tier, metrics_json, settings_json"
+    ") VALUES (?, ?, ?, 'reject', 40.0, 0.0, 0.0, 40.0, 'reject', '{}', '{}')"
 )
-_VALEURS = "?, ?, ?, 'reject', 40.0, 0.0, 0.0, 40.0, 'reject', '{}', '{}'"
 
 
 class PerceptualTrendDistinctTests(unittest.TestCase):
@@ -56,7 +62,7 @@ class PerceptualTrendDistinctTests(unittest.TestCase):
         with self.store._managed_conn() as conn:
             for run_id, decalage in (("run-1", 0.0), ("run-2", 60.0)):
                 conn.execute(
-                    f"INSERT INTO perceptual_reports ({_COLONNES}) VALUES ({_VALEURS})",  # noqa: S608
+                    _INSERT,
                     ("film_unique", run_id, self.base + decalage),
                 )
 

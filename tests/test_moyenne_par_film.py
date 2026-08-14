@@ -27,11 +27,17 @@ from pathlib import Path
 
 from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
 
-_COLONNES = (
+#: Requete LITTERALE. Elle etait composee par f-string depuis deux
+#: constantes : les valeurs interpolees etaient constantes, donc sans
+#: risque d'injection, mais il fallait porter un `# noqa: S608` que
+#: l'analyse statique du depot signalait quand meme. Une chaine
+#: litterale n'a besoin d'aucune suppression, et se lit mieux.
+_INSERT = (
+    "INSERT INTO perceptual_reports ("
     "row_id, run_id, ts, global_tier_v2, global_score_v2, "
     "visual_score, audio_score, global_score, global_tier, metrics_json, settings_json"
+    ") VALUES (?, ?, ?, 'bronze', ?, 0.0, 0.0, 10.0, 'bronze', '{}', '{}')"
 )
-_VALEURS = "?, ?, ?, 'bronze', ?, 0.0, 0.0, 10.0, 'bronze', '{}', '{}'"
 
 
 class LaMoyenneEstPARFILMTests(unittest.TestCase):
@@ -56,7 +62,7 @@ class LaMoyenneEstPARFILMTests(unittest.TestCase):
         with self.store._managed_conn() as conn:
             for row_id, run_id, ts, score in lignes:
                 conn.execute(
-                    f"INSERT INTO perceptual_reports ({_COLONNES}) VALUES ({_VALEURS})",  # noqa: S608
+                    _INSERT,
                     (row_id, run_id, ts, score),
                 )
         self.depuis = base - 86400.0
@@ -92,7 +98,7 @@ class LaMoyenneEstPARFILMTests(unittest.TestCase):
         with store2._managed_conn() as conn:
             for i, score in enumerate((10.0, 90.0)):
                 conn.execute(
-                    f"INSERT INTO perceptual_reports ({_COLONNES}) VALUES ({_VALEURS})",  # noqa: S608
+                    _INSERT,
                     (f"film_{i}", "run-1", base + i, score),
                 )
         points = store2.perceptual.get_global_score_v2_trend(since_ts=base - 86400.0)
