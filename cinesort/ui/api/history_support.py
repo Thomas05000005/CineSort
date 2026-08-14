@@ -8,7 +8,7 @@ import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.domain.conversions import to_bool, to_int
@@ -28,6 +28,24 @@ from cinesort.ui.api._validators import requires_valid_run_id
 from cinesort.ui.api.settings_support import normalize_user_path
 
 logger = logging.getLogger(__name__)
+
+
+def _entier_ou_inconnu(brut: Any) -> Optional[int]:
+    """`None` quand la valeur est ABSENTE ou illisible — jamais 0 par defaut.
+
+    Le defaut d'origine (#1031) est exactement la confusion inverse : un
+    `int(x or 0)` transformait une cle JAMAIS ECRITE en « zero doublon », et
+    l'ecran l'affirmait. `duplicates_groups` n'est range qu'a l'ouverture de
+    l'ecran Doublons, jamais au scan : son absence est donc l'etat NORMAL d'un
+    run que l'utilisateur n'a pas ouvert, et elle doit se distinguer d'un zero
+    mesure.
+    """
+    if brut is None:
+        return None
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        return None
 
 
 def _subtract_ignored_flags(api: Any, payload_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -555,8 +573,8 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # Conflicts (anomalies severity != info) si presents dans stats_obj, sinon 0.
     conflicts_count = int(stats_obj.get("conflicts_count") or stats_obj.get("anomalies_total") or 0)
 
-    # Duplicates groups : on lit depuis stats_obj si dispo, sinon 0.
-    duplicates_groups = int(stats_obj.get("duplicates_groups") or 0)
+    # Duplicates groups : ABSENT vaut INCONNU, pas zero (cf. #1031).
+    duplicates_groups = _entier_ou_inconnu(stats_obj.get("duplicates_groups"))
 
     # Apply operations : derniere batch reel (non dry-run) DONE.
     apply_operations: List[Dict[str, Any]] = []

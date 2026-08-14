@@ -19,12 +19,15 @@ Methodes exposees :
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
 from cinesort.infra.db.repositories._base import _BaseRepository
 from cinesort.infra.db.repositories._sql import SQL_CHUNK, chunked
+
+logger = logging.getLogger(__name__)
 
 # AUDIT 2026-07-13 (HIGH-8) : predicat partage pour EXCLURE les runs utilitaires
 # de bulk re-scan (library_actions_support.rescan_rows_bulk pose un marqueur
@@ -213,6 +216,48 @@ class RunRepository(_BaseRepository):
                 """,
                 (ts, stats_json, run_id),
             )
+
+    def fusionner_stats(self, run_id: str, **cles: Any) -> bool:
+        """Ajoute ou remplace des cles dans le `stats_json` d'un run TERMINE.
+
+        POURQUOI UNE FUSION ET NON UNE ECRITURE. `stats_json` n'etait ecrit qu'a
+        la fin du run (`mark_run_done`), d'un bloc. Une metrique qui n'est
+        connue qu'APRES — parce que la calculer pendant le scan couterait trop
+        cher — n'avait donc aucun moyen d'y entrer sans ecraser le reste.
+
+        Fusion et lecture dans la MEME transaction : deux appels concurrents sur
+        le meme run ne peuvent pas se perdre l'un l'autre.
+
+        Rend False si le run n'existe pas ou si son `stats_json` est illisible —
+        jamais d'exception : l'appelant est un chemin d'affichage, il ne doit pas
+        tomber parce qu'une metrique d'agrement n'a pas pu etre rangee.
+        """
+        rid = str(run_id or "").strip()
+        if not rid or not cles:
+            return False
+        self._ensure_runs_table()
+        with self._managed_conn() as conn, conn:
+            cur = conn.execute("SELECT stats_json FROM runs WHERE run_id=?", (rid,))
+            row = cur.fetchone()
+            if row is None:
+                return False
+            brut = row[0]
+            if brut:
+                try:
+                    courant = json.loads(str(brut))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    logger.warning("fusionner_stats: stats_json illisible run_id=%s", rid)
+                    return False
+                if not isinstance(courant, dict):
+                    return False
+            else:
+                courant = {}
+            courant.update(cles)
+            conn.execute(
+                "UPDATE runs SET stats_json=? WHERE run_id=?",
+                (json.dumps(courant, ensure_ascii=False, sort_keys=True), rid),
+            )
+        return True
 
     def mark_run_cancelled(
         self, run_id: str, *, stats: Optional[Dict[str, Any]] = None, ended_ts: Optional[float] = None
