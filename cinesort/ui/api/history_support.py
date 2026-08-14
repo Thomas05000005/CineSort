@@ -8,7 +8,7 @@ import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cinesort.infra.state as state
 from cinesort.domain.conversions import to_bool, to_int
@@ -555,8 +555,25 @@ def _get_history_stats_impl(api: Any, run_id: str) -> Dict[str, Any]:
     # Conflicts (anomalies severity != info) si presents dans stats_obj, sinon 0.
     conflicts_count = int(stats_obj.get("conflicts_count") or stats_obj.get("anomalies_total") or 0)
 
-    # Duplicates groups : on lit depuis stats_obj si dispo, sinon 0.
-    duplicates_groups = int(stats_obj.get("duplicates_groups") or 0)
+    # Duplicates groups : ABSENT vaut INCONNU, pas zero.
+    #
+    # Le `or 0` d'avant n'etait pas un repli : `stats_json` ne portait JAMAIS
+    # cette cle (le scan persiste `dict(stats.__dict__)`, et le dataclass `Stats`
+    # ne la declare pas), donc la valeur etait un zero PERMANENT. L'ecran en
+    # tirait « Aucun doublon dans ce run. » — une affirmation, fausse des qu'un
+    # run avait detecte des groupes non decides.
+    #
+    # La cle est desormais rangee a l'ouverture de l'ecran Doublons, la ou le
+    # compte est deja calcule. Elle reste donc ABSENTE pour tout run que
+    # l'utilisateur n'a pas ouvert, et pour tous les runs anterieurs : `None`
+    # dit « on ne sait pas », et l'ecran le dit aussi.
+    brut_groupes = stats_obj.get("duplicates_groups")
+    duplicates_groups: Optional[int] = None
+    if brut_groupes is not None:
+        try:
+            duplicates_groups = int(brut_groupes)
+        except (TypeError, ValueError):
+            duplicates_groups = None
 
     # Apply operations : derniere batch reel (non dry-run) DONE.
     apply_operations: List[Dict[str, Any]] = []

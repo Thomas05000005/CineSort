@@ -2237,6 +2237,38 @@ def _browse_all_if_none_approved(rows: Any, safe: Dict[str, Dict[str, Any]]) -> 
     return browse
 
 
+def _ranger_le_compte_de_groupes(store: Any, run_id: str, data: Dict[str, Any]) -> None:
+    """Persiste le nombre de groupes DETECTES, la ou il vient d'etre calcule.
+
+    POURQUOI ICI ET PAS AU SCAN. L'ecran Historique ne pouvait pas dire combien
+    de groupes un run avait detectes : `stats_json` ne porte pas la cle, et le
+    `or 0` cote lecture n'etait donc pas un repli mais un ZERO PERMANENT.
+
+    Le calculer au scan couterait cher. Ce depot documente lui-meme
+    `check_duplicates` comme parcourant « ~1000 films + scanne le disque ->
+    plusieurs secondes » (issue #406, qui a du grouper 1000 appels en un seul
+    pour cette raison). L'ajouter au scan chargerait de plusieurs secondes ET
+    d'un parcours disque le chemin que la vague E vient d'alleger.
+
+    On le range donc au moment ou il est DEJA calcule : l'ouverture de l'ecran
+    Doublons. Le run que l'utilisateur a regarde porte alors son compte ; les
+    autres restent INCONNUS — ce que l'Historique dit desormais explicitement,
+    au lieu d'afficher un 0 invente.
+
+    Best-effort assume : c'est un chemin d'AFFICHAGE. Un echec de rangement ne
+    doit pas empecher l'ecran de s'afficher.
+    """
+    if store is None:
+        return
+    groupes = data.get("groups")
+    if not isinstance(groupes, list):
+        return
+    try:
+        store.run.fusionner_stats(run_id, duplicates_groups=len(groupes))
+    except (AttributeError, OSError, TypeError, ValueError) as exc:  # pragma: no cover - best effort
+        _logger.debug("rangement du compte de groupes impossible run_id=%s err=%s", run_id, exc)
+
+
 @requires_valid_run_id
 def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(decisions, dict):
@@ -2266,6 +2298,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
             _enrich_groups_with_quality_comparison(data, run_id, rs.store)
             _annotate_groups_with_decisions(data, run_id, rs.store)  # R8-057
             data["size_savings_total"] = _compute_size_savings_total(data)
+            _ranger_le_compte_de_groupes(rs.store, run_id, data)
             return {"ok": True, **data}
         except (KeyError, OSError, TypeError, ValueError) as exc:
             return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
@@ -2297,6 +2330,7 @@ def check_duplicates(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]]
         _enrich_groups_with_quality_comparison(data, run_id, found_store)
         _annotate_groups_with_decisions(data, run_id, found_store)  # R8-057
         data["size_savings_total"] = _compute_size_savings_total(data)
+        _ranger_le_compte_de_groupes(found_store, run_id, data)
         return {"ok": True, **data}
     except (OSError, KeyError, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)

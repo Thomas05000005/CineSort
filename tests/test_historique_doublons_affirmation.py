@@ -85,8 +85,24 @@ class LOngletNAffirmePasCeQuIlIgnoreTests(unittest.TestCase):
         reste sans reponse a la question qu'il se pose."""
         html = self._rendre("{ duplicates_decided: [], duplicates_skipped: [] }")
 
-        self.assertIn("Aucune décision de doublon", html, "l'ecran ne dit plus rien du tout")
+        self.assertIn("non comptés", html, "l'ecran ne dit plus rien du tout")
         self.assertIn("#/doublons", html, "aucun chemin vers l'ecran qui, lui, peut repondre")
+
+    def test_ZERO_range_se_dit_AUTREMENT_qu_inconnu(self) -> None:
+        """LE point des trois etats. Un run reellement sans doublon doit pouvoir
+        l'AFFIRMER — c'est la seule chose qui distingue une mesure d'une absence
+        de mesure, et c'est tout l'objet de cette suite."""
+        inconnu = self._rendre("{ duplicates_decided: [], duplicates_skipped: [] }")
+        zero = self._rendre("{ duplicates_decided: [], duplicates_skipped: [], duplicates_groups: 0 }")
+
+        self.assertIn("Aucun doublon détecté", zero, "un 0 MESURE ne s'affirme pas")
+        self.assertNotIn("Aucun doublon détecté", inconnu, "l'inconnu s'affirme comme un zero")
+        self.assertNotEqual(inconnu, zero, "les deux etats rendent le meme ecran")
+
+    def test_un_compte_NON_NUL_est_montre(self) -> None:
+        html = self._rendre("{ duplicates_decided: [], duplicates_skipped: [], duplicates_groups: 12 }")
+        self.assertIn("12", html)
+        self.assertIn("#/doublons", html)
 
     def test_avec_des_decisions_le_rendu_les_montre_toujours(self) -> None:
         """CONTRE-EPREUVE : le chemin nominal ne doit pas etre touche."""
