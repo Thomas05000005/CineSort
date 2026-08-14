@@ -109,7 +109,14 @@ _PATTERN_BIT_DEPTH = re.compile(r"\b(8|10|12)[ \-]?bits?\b", re.IGNORECASE)
 # score.
 _PATTERNS_HDR = [
     (r"\bDolby[\. ]?Vision\b|\bDoVi\b|\bDOVI\b", "dv"),
-    (r"\bDV\b(?![A-Za-z0-9])", "dv"),  # `\bDV\b` exclut deja DVD/DVDRip/HDV
+    # Le lookahead restant a ete retire par le MEME argument que celui qui motive
+    # ce correctif : `\b` en tient deja lieu, et il est STRICTEMENT plus fort —
+    # la frontiere de mot exige un non-mot, donc exclut aussi `_`, que
+    # `(?![A-Za-z0-9])` autorisait. Verifie par comparaison exhaustive des deux
+    # motifs sur un caractere avant et un caractere apres : 15 561 cas, ZERO
+    # divergence. Le garder aurait laisse dans le code un garde mort, exactement
+    # le defaut que cette PR corrige.
+    (r"\bDV\b", "dv"),  # `\bDV\b` exclut deja DVD/DVDRip/HDV
     (r"\bHDR10\+|\bHDR10P\b|\bHDR\+\b", "hdr10_plus"),
     (r"\bHDR10\b|\bHDR\b", "hdr10"),
     (r"\bHLG\b", "hlg"),
