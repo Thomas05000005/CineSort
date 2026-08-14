@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -11,6 +12,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
 
 APP_NAME = "CineSort"
 _DEBUG_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
@@ -38,10 +41,29 @@ def _debug_log_state(state_dir: Path, message: str) -> None:
 
 
 def default_state_dir() -> Path:
+    """Repertoire d'etat local (evite les ecritures reseau).
+
+    LE REPLI NE DOIT PAS ETRE RELATIF. Il valait `"."`, donc `./CineSort` quand
+    `LOCALAPPDATA` est absent — et la base, les runs et les journaux suivaient
+    alors le REPERTOIRE COURANT. Lancer l'application depuis un autre dossier
+    ouvrait silencieusement une AUTRE base, sans le moindre message : ni erreur,
+    ni migration, juste une bibliotheque vide qui a l'air neuve.
+
+    `LOCALAPPDATA` est toujours pose sur un poste Windows interactif, mais pas
+    necessairement dans un service, une tache planifiee ou un conteneur — et
+    cette fonction a 133 sites d'appel.
+
+    Le repli est donc ABSOLU et stable : `~/CineSort`. Il ne depend pas du
+    repertoire de lancement, et il est journalise pour que le cas se voie.
     """
-    Local PC (evite ecritures reseau).
-    """
-    base = os.environ.get("LOCALAPPDATA", ".")
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        repli = Path.home() / APP_NAME
+        _log.warning(
+            "LOCALAPPDATA absent : repli sur %s (un chemin RELATIF ferait dependre la base du repertoire de lancement)",
+            repli,
+        )
+        return repli
     return Path(base) / APP_NAME
 
 

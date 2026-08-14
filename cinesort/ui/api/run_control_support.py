@@ -89,6 +89,31 @@ def resume_run(api: Any, run_id: str) -> Dict[str, Any]:
     2. Signale le JobRunner via `request_resume` pour effacer le flag de pause.
     3. Retourne `{ok, run_id, status: "RUNNING"}` ou `_err_response`.
     """
+    # MEME FRONTIERE QUE `pause_run`, et pour la meme raison. Le dispatcher REST
+    # a bien un filet global, donc l'absence de ce wrap ne faisait pas tomber le
+    # serveur : elle rendait un « Erreur interne » generique la ou `pause_run`
+    # donne une phrase utile. Sur trois endpoints de pilotage du meme run,
+    # l'asymetrie de message est un defaut a elle seule.
+    try:
+        return _reprendre_le_run(api, run_id)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("resume_run failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "resume_run_failed",
+            "message": str(exc),
+            "user_message": "Impossible de reprendre le run.",
+        }
+
+
+def _reprendre_le_run(api: Any, run_id: str) -> Dict[str, Any]:
+    """Corps de `resume_run`, extrait pour que la frontiere reste lisible.
+
+    NOM DELIBERE. `_resume_run_impl` aurait forme une paire homonyme avec
+    `CineSortApi._resume_run_impl` — le suffixe `_X_impl` est reserve aux
+    methodes de la god-class, et `tests/test_contract_facades.py` refuse
+    toute NOUVELLE paire. `pause_run` suit la meme regle en deleguant a
+    `_pause_or_save`."""
     logger.debug("api: resume_run run_id=%s", run_id)
 
     found = _find_store(api, run_id)
@@ -142,8 +167,17 @@ def save_for_later(api: Any, run_id: str) -> Dict[str, Any]:
     distinguer un "operateur fait une pause cafe" d'un "operateur reviendra
     plus tard, libere le slot actif".
     """
-    logger.debug("api: save_for_later run_id=%s", run_id)
-    return _pause_or_save(api, run_id, saved=True, status_label=RunStatus.SAVED.value)
+    try:
+        logger.debug("api: save_for_later run_id=%s", run_id)
+        return _pause_or_save(api, run_id, saved=True, status_label=RunStatus.SAVED.value)
+    except Exception as exc:  # noqa: BLE001 - boundary top-level
+        logger.exception("save_for_later failed for run_id=%s", run_id)
+        return {
+            "ok": False,
+            "error": "save_for_later_failed",
+            "message": str(exc),
+            "user_message": "Impossible de sauvegarder le run pour plus tard.",
+        }
 
 
 def list_pending_runs(api: Any) -> Dict[str, Any]:

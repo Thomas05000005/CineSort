@@ -193,13 +193,24 @@ def migrate_legacy_blobs_to_ng(
 ) -> Dict[str, str]:
     """Scan d'un mapping name -> blob_b64 et migration silent en NG.
 
-    Appelable au demarrage de CineSort une fois settings.json charge.
-    Le caller passe le mapping des secrets actuels, recoit le mapping
-    mis a jour, et le reecrit (settings.json + SQLite secrets).
+    ETAT REEL : cette fonction n'a AUCUN appelant (verifie sur `cinesort/`,
+    `tests/` et `app.py` — ses seules occurrences sont sa definition, cette
+    docstring et `__all__`). La migration effective se fait secret par secret au
+    prochain SAVE (`settings_support.py`), ou c'est explicitement assume. Elle
+    est conservee, pas branchee : le retrait d'un symbole de securite se decide,
+    il ne se glisse pas dans un correctif de docstring.
 
-    Pour eviter une double-ecriture si rien n'a change, le mapping
-    retourne EST le meme objet (mute). Comparer l'identite des blobs
-    pour decider si une persistance est necessaire.
+    Le contrat ci-dessous a ete CORRIGE parce qu'il decrivait l'inverse du code.
+    Il annoncait « le mapping retourne EST le meme objet (mute) — comparer
+    l'identite des blobs pour decider si une persistance est necessaire ». Or le
+    code fait `updated = dict(stored)`, donc une COPIE : mesure, `retour is
+    entree` rend `False` des que `stored` est non vide (le raccourci du cas vide,
+    lui, rend bien le meme objet). Un appelant qui aurait suivi la recette
+    documentee aurait persiste a CHAQUE demarrage, sans qu'aucun secret n'ait
+    change.
+
+    Pour decider s'il faut persister, comparer donc les VALEURS
+    (`updated != stored`), ou se fier au callback `on_migrated`.
 
     Args:
         stored: { name: blob_b64 } actuel.
