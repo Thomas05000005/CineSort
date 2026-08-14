@@ -95,7 +95,7 @@ def resume_run(api: Any, run_id: str) -> Dict[str, Any]:
     # donne une phrase utile. Sur trois endpoints de pilotage du meme run,
     # l'asymetrie de message est un defaut a elle seule.
     try:
-        return _resume_run_impl(api, run_id)
+        return _reprendre_le_run(api, run_id)
     except Exception as exc:  # noqa: BLE001 - boundary top-level
         logger.exception("resume_run failed for run_id=%s", run_id)
         return {
@@ -106,8 +106,14 @@ def resume_run(api: Any, run_id: str) -> Dict[str, Any]:
         }
 
 
-def _resume_run_impl(api: Any, run_id: str) -> Dict[str, Any]:
-    """Corps de `resume_run`, extrait pour que la frontiere reste lisible."""
+def _reprendre_le_run(api: Any, run_id: str) -> Dict[str, Any]:
+    """Corps de `resume_run`, extrait pour que la frontiere reste lisible.
+
+    NOM DELIBERE. `_resume_run_impl` aurait forme une paire homonyme avec
+    `CineSortApi._resume_run_impl` — le suffixe `_X_impl` est reserve aux
+    methodes de la god-class, et `tests/test_contract_facades.py` refuse
+    toute NOUVELLE paire. `pause_run` suit la meme regle en deleguant a
+    `_pause_or_save`."""
     logger.debug("api: resume_run run_id=%s", run_id)
 
     found = _find_store(api, run_id)
