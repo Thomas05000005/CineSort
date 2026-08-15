@@ -38,15 +38,21 @@ from typing import Any, Callable
 
 import pytest
 
+# Garde-fou anti-ecriture dans l'etat REEL de l'utilisateur : sans lui, 130 tests
+# ouvrent `%LOCALAPPDATA%/CineSort` (mesure 2026-08-15). L'import doit venir TOT,
+# la redirection se faisant au CHARGEMENT du module — avant que le moindre
+# `CineSortApi()` ne resolve son state_dir. Detail dans
+# `tests/_etat_reel_guard.py`.
+from tests._etat_reel_guard import (  # noqa: F401  (importes pour leur effet de bord)
+    _etat_reel_attribution,
+    pytest_sessionfinish,
+    pytest_terminal_summary,
+)
+
 # Garde-fou anti-fuite de dossiers temporaires (issue #960). Les deux fixtures
 # sont `autouse`, donc les importer ici suffit a les activer pour toute la
 # suite. Le detail (et les variables d'environnement de reglage) est dans
 # `tests/_temp_leak_guard.py`.
-from tests._etat_reel_guard import (
-    _etat_reel_attribution,  # noqa: F401
-    pytest_sessionfinish,  # noqa: F401
-    pytest_terminal_summary,  # noqa: F401
-)
 from tests._temp_leak_guard import (
     _temp_leak_attribution,  # noqa: F401
     _temp_leak_guard,  # noqa: F401
