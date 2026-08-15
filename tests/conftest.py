@@ -42,6 +42,11 @@ import pytest
 # sont `autouse`, donc les importer ici suffit a les activer pour toute la
 # suite. Le detail (et les variables d'environnement de reglage) est dans
 # `tests/_temp_leak_guard.py`.
+from tests._etat_reel_guard import (
+    _etat_reel_attribution,  # noqa: F401
+    pytest_sessionfinish,  # noqa: F401
+    pytest_terminal_summary,  # noqa: F401
+)
 from tests._temp_leak_guard import (
     _temp_leak_attribution,  # noqa: F401
     _temp_leak_guard,  # noqa: F401
