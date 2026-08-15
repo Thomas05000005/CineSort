@@ -131,3 +131,16 @@ docs/internal/r8/suite_*.txt
 # tests/conftest.py et n'ait pas a parcourir un %TEMP% que d'autres processus
 # modifient pendant sa collecte. Le point initial les met hors collecte.
 tests/.sessions_filles/
+
+# Artefacts lourds retires du suivi (chore/alleger-artefacts-suivis)
+# Les 44 captures de maquette (22,4 Mo) : 23 a la racine, 17 dans v6-final/,
+# 4 dans v8-restraint/. On ignore TOUT le dossier sauf les .html, qui pesent
+# ~0 et que deux audits citent comme preuve (v6.html porte la seule definition
+# des variables --glass-*). On ecrit `docs/design-mockup/*` et non
+# `docs/design-mockup/` : git ne sait pas re-inclure un fichier dont le dossier
+# PARENT est exclu.
+docs/design-mockup/*
+!docs/design-mockup/*.html
+# Rapport visuel single-file 6,4 Mo : regenere par test_15_visual_catalog.py,
+# qui appelle generate_visual_report.py des que le fichier manque.
+tests/e2e/visual_report.html
