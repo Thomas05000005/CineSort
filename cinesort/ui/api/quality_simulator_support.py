@@ -20,6 +20,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.custom_rules import validate_rules as _validate_custom_rules
 from cinesort.domain.tiers_helpers import (
     DEFAULT_TIER_THRESHOLDS,
     determine_tier,
@@ -127,6 +128,30 @@ def save_custom_preset(api: Any, name: str, profile_json: Dict[str, Any]) -> Dic
             return _err_response(
                 "Profil invalide.", category="validation", level="info", log_module=__name__, errors=errs
             )
+
+        # `validate_quality_profile` fait PASSER les regles custom telles quelles
+        # (« validation deleguee a custom_rules.validate_rules », quality_score.py).
+        # Cette route est exposee en `POST /api/quality/save_custom_quality_preset`
+        # et prend un `profile_json` arbitraire : sans cet appel, la delegation
+        # n'aboutissait nulle part et les regles etaient persistees BRUTES.
+        # Y echappaient les bornes anti-DoS (50 regles, 10 conditions, 8000 octets)
+        # ET les refus de valeur payes par #723 et #1067 — multiplicateur negatif,
+        # plafond non numerique : deux facons de faire tomber un film en Reject,
+        # le tier qui oriente les suppressions.
+        # Meme forme que `quality_profile_support.save_quality_profile`, seul des
+        # six chemins d'ecriture du profil a porter deja cette validation.
+        raw_rules = normalized.get("custom_rules")
+        if raw_rules:
+            rules_ok, rules_errs, rules_norm = _validate_custom_rules(raw_rules)
+            if not rules_ok:
+                return _err_response(
+                    "Regles custom invalides.",
+                    category="validation",
+                    level="info",
+                    log_module=__name__,
+                    errors=rules_errs,
+                )
+            normalized["custom_rules"] = rules_norm
 
         slug = _slugify(name)
         normalized = copy.deepcopy(normalized)

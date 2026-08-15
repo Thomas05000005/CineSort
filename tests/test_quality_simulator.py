@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import tempfile
 import unittest
 
+from cinesort.domain.quality_score import default_quality_profile
 from cinesort.domain.tiers_helpers import DEFAULT_TIER_THRESHOLDS
 from cinesort.ui.api.quality_simulator_support import (
     _apply_weights,
@@ -19,6 +21,7 @@ from cinesort.ui.api.quality_simulator_support import (
     _tier_for,
     clear_cache,
     run_simulation,
+    save_custom_preset,
 )
 
 _DEFAULT_ACTIVE_PROFILE = {
@@ -182,6 +185,104 @@ class TierForTests(unittest.TestCase):
         tiers = _get_active_profile(_ApiQuiEchoue())["tiers"]
         self.assertEqual(tiers, dict(DEFAULT_TIER_THRESHOLDS))
         self.assertNotIn("premium", tiers)
+
+
+class _ApiEcritureProfil:
+    """Surface minimale de `save_custom_preset` : un seul point d'ecriture.
+
+    Le `_FakeApi` ci-dessus rend `None` depuis `_save_active_quality_profile`,
+    ce que `save_custom_preset` deballe (`**saved`) — il ne peut donc pas
+    exercer le chemin nominal. Celui-ci rend un dict, comme la production.
+    """
+
+    def __init__(self) -> None:
+        self.ecritures: list = []
+
+    def _save_active_quality_profile(self, profile_json):
+        self.ecritures.append(profile_json)
+        return {"profile_id": "custom_x", "profile_version": 1}
+
+
+def _profil_avec_regles(regles):
+    prof = copy.deepcopy(default_quality_profile())
+    prof["custom_rules"] = regles
+    return prof
+
+
+class SaveCustomPresetRulesValidationTests(unittest.TestCase):
+    """`POST /api/quality/save_custom_quality_preset` persistait les regles BRUTES.
+
+    `validate_quality_profile` fait passer `custom_rules` tel quel — son
+    commentaire delegue explicitement a `custom_rules.validate_rules`. Cette
+    route ne l'appelait pas : la delegation n'aboutissait nulle part.
+    """
+
+    def test_multiplicateur_negatif_est_refuse(self):
+        """ROUGE avant le correctif : ok=True et la regle refusee par #723 persistee."""
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "score_multiplier", "value": -2},
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [], "rien ne doit etre persiste quand les regles sont refusees")
+
+    def test_plafond_non_numerique_est_refuse(self):
+        """ROUGE avant le correctif : le defaut de #1067 (cap a 0 -> Reject) passait."""
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "cap_max", "value": "quatre-vingts"},
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [])
+
+    def test_borne_anti_dos_du_nombre_de_regles(self):
+        """ROUGE avant le correctif : 51 regles > MAX_RULES_PER_PROFILE persistees."""
+        regle = {
+            "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+            "action": {"type": "score_delta", "value": 1},
+        }
+        prof = _profil_avec_regles([dict(regle, id=f"r{i}") for i in range(51)])
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [])
+
+    def test_regles_valides_sont_persistees_normalisees(self):
+        """Contre-test : une regle valide reste acceptee, et elle est NORMALISEE.
+
+        `match` est le champ qui le montre le mieux : `evaluate_rule` lit
+        `all if match == "all" else any`, donc une valeur inconnue y devient un
+        OU. La normalisation la ramene a "all" AVANT la persistance.
+        """
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "score_delta", "value": 5},
+                    "match": "AND",
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(len(api.ecritures), 1)
+        self.assertEqual(api.ecritures[0]["custom_rules"][0]["match"], "all")
 
 
 class CountTiersTests(unittest.TestCase):
