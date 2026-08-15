@@ -371,7 +371,11 @@ def build_rich_explanation(
         factors : liste des deltas catégorisés (existant dans quality_score).
         subscores : {"video": int, "audio": int, "extras": int}.
         weights : {"video": int, "audio": int, "extras": int} du profil.
-        tier_thresholds : {"platinum": 85, "gold": 68, ...} du profil.
+        tier_thresholds : {"platinum": 70, "gold": 66, ...} du profil.
+            L'exemple porte la grille CANONIQUE (`DEFAULT_TIER_THRESHOLDS`).
+            Il donnait 85/68/54/30 — la grille pre-v1.5.5, celle-la meme dont
+            le commentaire de `normalize_tiers` ci-dessus dit qu'elle a rendu
+            `distance_to_next_tier` faux. Un exemple de docstring se recopie.
 
     Returns:
         Dict avec narrative, top_positive, top_negative, factors (enrichis),

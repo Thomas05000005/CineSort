@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import copy
 import tempfile
 import unittest
 
+from cinesort.domain.quality_score import default_quality_profile
+from cinesort.domain.tiers_helpers import DEFAULT_TIER_THRESHOLDS
 from cinesort.ui.api.quality_simulator_support import (
     _apply_weights,
     _count_tiers,
+    _get_active_profile,
     _group_avg_delta,
     _load_reports_for_scope,
     _recompute_in_memory,
@@ -17,6 +21,7 @@ from cinesort.ui.api.quality_simulator_support import (
     _tier_for,
     clear_cache,
     run_simulation,
+    save_custom_preset,
 )
 
 _DEFAULT_ACTIVE_PROFILE = {
@@ -126,6 +131,158 @@ class TierForTests(unittest.TestCase):
         self.assertEqual(_tier_for(55, t), "Silver")
         self.assertEqual(_tier_for(40, t), "Bronze")
         self.assertEqual(_tier_for(10, t), "Reject")
+
+    def test_seuil_bronze_a_zero_est_une_valeur_metier(self):
+        """ROUGE avant le correctif : `int(tiers.get("bronze") or 30)` rendait 30.
+
+        `normalize_tiers` clamp sur [0, 100] et `validate_quality_profile`
+        n'exige que `platinum >= gold >= silver >= bronze` : un bronze a 0 est
+        donc un profil VALIDE, et il dit « aucun film n'est Reject ». Le
+        simulateur le relisait comme 30 et annoncait « Reject » a l'utilisateur
+        pour des films que le scoring reel classe Bronze.
+        """
+        t = {"platinum": 70, "gold": 66, "silver": 55, "bronze": 0}
+        self.assertEqual(_tier_for(10, t), "Bronze")
+        self.assertEqual(_tier_for(0, t), "Bronze")
+
+    def test_seuils_adjacents_egaux_ne_declenchent_pas_de_repli(self):
+        """ROUGE avant le correctif : rendait "Gold" (repli sur 85/68/54/30).
+
+        L'ancien controle exigeait un ordre STRICTEMENT decroissant
+        (`p > g > s > br`) la ou la production admet l'egalite (`>=`, cf.
+        `validate_quality_profile`). Un profil 70/70/55/40 est donc valide et
+        classe 70 en Platinum ; le simulateur basculait EN SILENCE sur une
+        grille qui n'etait pas celle de l'utilisateur (log warning, payload muet).
+        """
+        t = {"platinum": 70, "gold": 70, "silver": 55, "bronze": 40}
+        self.assertEqual(_tier_for(70, t), "Platinum")
+
+    def test_tiers_absents_retombent_sur_la_grille_canonique(self):
+        """ROUGE avant le correctif : rendait "Gold" (grille pre-v1.5.5 85/68/54/30).
+
+        Le defaut canonique est 70/66/55/40 (`DEFAULT_TIER_THRESHOLDS`, egal a
+        `default_quality_profile()["tiers"]`). C'est exactement le cas « un film
+        a 72 » deja documente par `test_vue_statistiques` et deja corrige cote
+        frontend par `test_audit_ultra_wave4b_frontend_constants`.
+        """
+        self.assertEqual(DEFAULT_TIER_THRESHOLDS["platinum"], 70)
+        self.assertEqual(_tier_for(72, {}), "Platinum")
+        self.assertEqual(_tier_for(35, {}), "Reject")
+
+    def test_profil_actif_illisible_retombe_sur_la_grille_canonique(self):
+        """ROUGE avant le correctif : rendait {premium: 85, bon: 68, moyen: 54}.
+
+        Ce troisieme site etait le plus trompeur des trois : son dict est
+        TRUTHY, donc le defaut de `_recompute_in_memory` ne le rattrapait pas.
+        C'est bien cette grille-la qui servait de baseline des que la lecture du
+        profil actif echouait.
+        """
+
+        class _ApiQuiEchoue:
+            def _active_quality_profile_payload(self):
+                raise OSError("profil illisible")
+
+        tiers = _get_active_profile(_ApiQuiEchoue())["tiers"]
+        self.assertEqual(tiers, dict(DEFAULT_TIER_THRESHOLDS))
+        self.assertNotIn("premium", tiers)
+
+
+class _ApiEcritureProfil:
+    """Surface minimale de `save_custom_preset` : un seul point d'ecriture.
+
+    Le `_FakeApi` ci-dessus rend `None` depuis `_save_active_quality_profile`,
+    ce que `save_custom_preset` deballe (`**saved`) — il ne peut donc pas
+    exercer le chemin nominal. Celui-ci rend un dict, comme la production.
+    """
+
+    def __init__(self) -> None:
+        self.ecritures: list = []
+
+    def _save_active_quality_profile(self, profile_json):
+        self.ecritures.append(profile_json)
+        return {"profile_id": "custom_x", "profile_version": 1}
+
+
+def _profil_avec_regles(regles):
+    prof = copy.deepcopy(default_quality_profile())
+    prof["custom_rules"] = regles
+    return prof
+
+
+class SaveCustomPresetRulesValidationTests(unittest.TestCase):
+    """`POST /api/quality/save_custom_quality_preset` persistait les regles BRUTES.
+
+    `validate_quality_profile` fait passer `custom_rules` tel quel — son
+    commentaire delegue explicitement a `custom_rules.validate_rules`. Cette
+    route ne l'appelait pas : la delegation n'aboutissait nulle part.
+    """
+
+    def test_multiplicateur_negatif_est_refuse(self):
+        """ROUGE avant le correctif : ok=True et la regle refusee par #723 persistee."""
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "score_multiplier", "value": -2},
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [], "rien ne doit etre persiste quand les regles sont refusees")
+
+    def test_plafond_non_numerique_est_refuse(self):
+        """ROUGE avant le correctif : le defaut de #1067 (cap a 0 -> Reject) passait."""
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "cap_max", "value": "quatre-vingts"},
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [])
+
+    def test_borne_anti_dos_du_nombre_de_regles(self):
+        """ROUGE avant le correctif : 51 regles > MAX_RULES_PER_PROFILE persistees."""
+        regle = {
+            "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+            "action": {"type": "score_delta", "value": 1},
+        }
+        prof = _profil_avec_regles([dict(regle, id=f"r{i}") for i in range(51)])
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(api.ecritures, [])
+
+    def test_regles_valides_sont_persistees_normalisees(self):
+        """Contre-test : une regle valide reste acceptee, et elle est NORMALISEE.
+
+        `match` est le champ qui le montre le mieux : `evaluate_rule` lit
+        `all if match == "all" else any`, donc une valeur inconnue y devient un
+        OU. La normalisation la ramene a "all" AVANT la persistance.
+        """
+        prof = _profil_avec_regles(
+            [
+                {
+                    "id": "r1",
+                    "conditions": [{"field": "video_codec", "op": "=", "value": "hevc"}],
+                    "action": {"type": "score_delta", "value": 5},
+                    "match": "AND",
+                }
+            ]
+        )
+        api = _ApiEcritureProfil()
+        res = save_custom_preset(api, "Mon preset", prof)
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(len(api.ecritures), 1)
+        self.assertEqual(api.ecritures[0]["custom_rules"][0]["match"], "all")
 
 
 class CountTiersTests(unittest.TestCase):
