@@ -189,7 +189,7 @@ Deux contre-feux, tous deux payes ce jour-la :
 fonction d'aide posee juste au-dessus de `check_duplicates` s'est glissee SOUS
 son `@requires_valid_run_id`. Le decorateur s'appliquait donc a l'aide, et
 l'endpoint perdait TOUTE validation de son `run_id` — un identifiant arbitraire
-atteignait la couche base. Aucune erreur, aucun avertissement : le fichier reste
+atteignait la couche de persistance. Aucune erreur, aucun avertissement : le fichier reste
 syntaxiquement valide et l'aide, elle, marche.
 
 Sept tests l'ont dit, et seulement parce que le nombre de verts a ete COMPARE a
