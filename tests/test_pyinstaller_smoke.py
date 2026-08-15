@@ -57,11 +57,15 @@ def _tuer_l_arbre(proc: "subprocess.Popen[bytes]") -> None:
     parfaitement alterne. `taskkill /T` descend l'arbre entier.
     """
     if sys.platform == "win32":
-        # Chemin ABSOLU : un nom nu se resout via %PATH%, donc un `taskkill.exe`
-        # depose ailleurs prendrait la main (Codacy B607).
-        outil = shutil.which("taskkill") or r"C:\Windows\System32\taskkill.exe"
-        subprocess.run(  # noqa: S603 - args fixes, aucune entree externe
-            [outil, "/PID", str(proc.pid), "/T", "/F"],
+        # Chemin ABSOLU et LITTERAL — les deux comptent, et pour deux raisons
+        # differentes. Un nom nu (`taskkill`) se resout via %PATH%, donc un
+        # executable homonyme depose ailleurs prendrait la main. Et le passer
+        # par une VARIABLE (`shutil.which(...)`) fait perdre a l'analyse la
+        # preuve que la commande est fixe : le premier essai a simplement
+        # deplace le signalement de « chemin partiel » vers « appel sans chaine
+        # statique ». System32 est le seul emplacement de cet outil.
+        subprocess.run(  # noqa: S603 - commande litterale ; le seul argument variable est notre propre PID
+            [r"C:\Windows\System32\taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
         )
