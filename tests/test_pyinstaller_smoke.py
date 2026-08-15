@@ -64,7 +64,10 @@ def _tuer_l_arbre(proc: "subprocess.Popen[bytes]") -> None:
         # preuve que la commande est fixe : le premier essai a simplement
         # deplace le signalement de « chemin partiel » vers « appel sans chaine
         # statique ». System32 est le seul emplacement de cet outil.
-        subprocess.run(  # noqa: S603 - commande litterale ; le seul argument variable est notre propre PID
+        # `noqa` couvre ruff, `nosec` couvre bandit : ce sont deux analyseurs, et
+        # la marque de l'un n'eteint pas l'autre. Le depot emploie deja `nosec`
+        # (cf `domain/film_identity.py`, `infra/probe/auto_install.py`).
+        subprocess.run(  # noqa: S603 # nosec B603 - commande litterale ; seul argument variable = notre propre PID
             [r"C:\Windows\System32\taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
@@ -154,7 +157,11 @@ class PyInstallerSmokeTests(unittest.TestCase):
             # NB : l'exe doit accepter --api + --port. Si la signature change,
             # ce test detecte la regression.
             cmd = [str(EXE_PATH), "--api", "--port", str(port)]
-            proc = subprocess.Popen(
+            # `EXE_PATH` est une constante du module, les drapeaux sont litteraux
+            # et le port vient de `_find_free_port()` : rien d'externe. Le
+            # signalement n'est « nouveau » que parce que mes ajouts ont DECALE
+            # cette ligne — l'appel, lui, est celui de `main`.
+            proc = subprocess.Popen(  # noqa: S603 # nosec B603
                 cmd,
                 env=env,
                 stdout=subprocess.PIPE,
