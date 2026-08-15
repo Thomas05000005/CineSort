@@ -508,10 +508,33 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     if not (tiers["platinum"] >= tiers["gold"] >= tiers["silver"] >= tiers["bronze"]):
         errs.append("Seuils invalides: Platinum >= Gold >= Silver >= Bronze requis.")
 
-    # Custom rules (G6) : passer a travers si present, validation deleguee a custom_rules.validate_rules
+    # Custom rules (G6) : VALIDEES ICI, plus « deleguees » a un appelant.
+    #
+    # Ce bloc les laissait passer verbatim, avec un commentaire qui deleguait a
+    # `custom_rules.validate_rules`. Cette delegation n'avait AUCUN point
+    # d'application garanti : SIX chemins d'ecriture appellent cette fonction et
+    # un seul (`save_quality_profile`) appelait aussi le validateur dedie.
+    #
+    # MESURE : une regle portant un champ inconnu, un operateur inconnu ET un
+    # `match` non canonique est refusee par `validate_rules` (3 erreurs) et
+    # acceptee ici — `ok=True`, zero erreur, la regle recopiee telle quelle.
+    # `set_active_profile` la re-persiste ensuite a chaque activation.
+    #
+    # C'est le seul endroit qui garantit qu'aucun chemin ne l'oublie. Les deux
+    # modules vivent dans `domain/`, donc aucun contrat d'architecture n'est
+    # rompu. Import LOCAL : `custom_rules` importe deja depuis ce module au
+    # niveau global, un import en tete creerait un cycle.
     raw_rules = raw_profile.get("custom_rules")
     if isinstance(raw_rules, list):
-        profile["custom_rules"] = raw_rules
+        from cinesort.domain.custom_rules import validate_rules as _valider_regles
+
+        regles_ok, regles_errs, regles_norm = _valider_regles(raw_rules)
+        if not regles_ok:
+            errs.extend(regles_errs)
+        # On garde la forme NORMALISEE quand elle existe : c'est elle qui porte
+        # le `match` canonique, et donc l'accord entre ce que la regle annonce
+        # et ce que l'evaluateur en fera.
+        profile["custom_rules"] = regles_norm if regles_ok and regles_norm is not None else raw_rules
 
     # VP-B (Vague P) : hierarchie qualite multi-axes. Backward compat ABSOLUE :
     # un profil legacy SANS cle ``tier_hierarchy`` recoit le default
