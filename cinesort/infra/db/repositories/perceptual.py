@@ -277,22 +277,44 @@ class PerceptualRepository(_BaseRepository):
                 )
             return out
 
-    def count_v2_tier_since(self, *, tier: str, since_ts: float) -> int:
-        """Compte les films d'un tier V2 donne ajoutes depuis since_ts.
+    def count_v2_tier_since(self, *, tier: str, since_ts: float, until_ts: Optional[float] = None) -> int:
+        """Compte les films d'un tier V2 donne dans une fenetre de temps.
 
-        Utilise pour les insights actifs ("N nouveaux Reject ce mois", etc.).
+        `until_ts` (EXCLU) permet de COMPTER une tranche au lieu de la DEDUIRE
+        par soustraction. Ce n'est pas un confort : sans lui, l'appelant faisait
+
+            ancienne = count(depuis debut) - count(depuis milieu)
+
+        soit `|A u B| - |B| = |A \\ B|`, et PAS `|A|`. Comme le compte est en
+        `COUNT(DISTINCT row_id)`, un film present dans les DEUX tranches — un
+        re-scan, donc un second `run_id` — disparaissait de la tranche ancienne.
+
+        Mesure du biais, 3 films tous Reject (un stable re-scanne, un ancien, un
+        neuf), verite : ancienne = 2, recente = 2, delta = 0 :
+
+            moitie recente  calculee : 2   (juste)
+            moitie ancienne calculee : 1   <- le film re-scanne a disparu
+            delta_reject    calcule  : 1   au lieu de 0
+
+        L'insight annoncait donc une degradation qui n'avait pas eu lieu.
         """
         self._ensure_perceptual_tables()
+        # DEUX REQUETES LITTERALES plutot qu'une construite par jointure de
+        # clauses. Les fragments etaient constants — aucune injection possible —
+        # mais la construction par chaine declenche l'analyse statique, et un
+        # `noqa` pose pour la faire taire est une dette : le lecteur suivant ne
+        # sait pas s'il couvre un cas sur ou s'il a ete pose pour avoir la paix.
+        #
+        # AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter N fois un
+        # film re-scanne (insight "N films <tier> ce mois").
+        base = "SELECT COUNT(DISTINCT row_id) FROM perceptual_reports WHERE global_tier_v2 = ? AND ts >= ?"
+        if until_ts is None:
+            sql, params = base, (str(tier).lower(), float(since_ts))
+        else:
+            sql = base + " AND ts < ?"
+            params = (str(tier).lower(), float(since_ts), float(until_ts))
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                """
-                -- AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter
-                -- N fois un film re-scanne (insight "N films <tier> ce mois").
-                SELECT COUNT(DISTINCT row_id) FROM perceptual_reports
-                WHERE global_tier_v2 = ? AND ts >= ?
-                """,
-                (str(tier).lower(), float(since_ts)),
-            )
+            cur = conn.execute(sql, params)
             row = cur.fetchone()
             return int(row[0] or 0) if row else 0
 

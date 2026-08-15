@@ -49,11 +49,16 @@ def _api_avec_depot_a_debit_constant(maintenant: float):
     soit exactement `(now - X) * debit`. Toute asymetrie de bornes se lit alors
     directement dans `delta_reject`.
     """
-    appels: list[float] = []
+    appels: list[tuple[float, float]] = []
 
-    def _compter(*, tier: str, since_ts: float) -> int:
-        appels.append(since_ts)
-        return int(max(0.0, maintenant - since_ts) / 86400.0 * _REJECTS_PAR_JOUR)
+    def _compter(*, tier: str, since_ts: float, until_ts: float | None = None) -> int:
+        # LE FAUX DOIT HONORER LA BORNE HAUTE, sinon il ne reproduit plus la
+        # production : `count_v2_tier_since` la respecte depuis #1010-3, et un
+        # double qui l'ignore rendrait la MEME valeur pour deux fenetres
+        # differentes — exactement le defaut que ce fichier existe pour voir.
+        haute = maintenant if until_ts is None else float(until_ts)
+        appels.append((since_ts, haute))
+        return int(max(0.0, haute - since_ts) / 86400.0 * _REJECTS_PAR_JOUR)
 
     store = mock.MagicMock()
     store.perceptual.count_v2_tier_since.side_effect = _compter
@@ -92,50 +97,61 @@ class UneActiviteCONSTANTENAffichePasDeTendanceRejectTests(unittest.TestCase):
 
 
 class LesBornesTRANSMISESAuDepotSontSymetriquesTests(unittest.TestCase):
-    """L'assertion qui porte le correctif : ce sont les BORNES qui comptent."""
+    """L'assertion qui porte le correctif : ce sont les BORNES qui comptent.
 
-    def test_trois_bornes_a_minuit_local(self) -> None:
+    CES TESTS ONT ETE REECRITS le 2026-08-14. Ils exigeaient TROIS appels et
+    lisaient trois `since_ts` — la forme d'alors, ou la tranche ancienne se
+    DEDUISAIT par soustraction. Depuis #1010-3 elle se COMPTE : deux appels
+    bornes des deux cotes. Les trois proprietes restent les memes, seule leur
+    lecture change ; verrouiller le nombre d'appels aurait fait rougir un
+    correctif qui les preserve toutes.
+    """
+
+    def _bornes(self, periode: int = 30):
         maintenant = time.time()
         api, appels = _api_avec_depot_a_debit_constant(maintenant)
-
         with mock.patch.object(Q.time, "time", lambda: maintenant):
-            Q.get_history(api, period_days=30)
+            Q.get_history(api, period_days=periode)
+        return maintenant, appels
 
-        self.assertEqual(len(appels), 3, f"attendu 3 bornes, obtenu {len(appels)} : {appels}")
-        for borne in appels:
-            heure = time.localtime(borne)
-            self.assertEqual(
-                (heure.tm_hour, heure.tm_min, heure.tm_sec),
-                (0, 0, 0),
-                "une borne ne tombe pas a minuit : la fenetre demarre a l'heure courante",
-            )
+    def test_toutes_les_bornes_tombent_a_minuit_local(self) -> None:
+        _maintenant, appels = self._bornes()
+
+        self.assertEqual(len(appels), 2, f"attendu 2 fenetres bornees, obtenu {len(appels)} : {appels}")
+        for basse, haute in appels:
+            for borne in (basse, haute):
+                heure = time.localtime(borne)
+                self.assertEqual(
+                    (heure.tm_hour, heure.tm_min, heure.tm_sec),
+                    (0, 0, 0),
+                    "une borne ne tombe pas a minuit : la fenetre demarre a l'heure courante",
+                )
 
     def test_les_deux_tranches_ont_la_meme_duree(self) -> None:
-        maintenant = time.time()
-        api, appels = _api_avec_depot_a_debit_constant(maintenant)
+        _maintenant, appels = self._bornes()
 
-        with mock.patch.object(Q.time, "time", lambda: maintenant):
-            Q.get_history(api, period_days=30)
-
-        bornes = sorted(appels)
-        ancienne = bornes[1] - bornes[0]
-        recente = bornes[2] - bornes[1]
+        durees = sorted(haute - basse for basse, haute in appels)
         self.assertAlmostEqual(
-            ancienne,
-            recente,
+            durees[0],
+            durees[1],
             delta=3600.0,  # tolerance : un changement d'heure d'ete decale d'une heure
-            msg=f"tranches inegales : ancienne={ancienne / 86400:.3f} j, recente={recente / 86400:.3f} j",
+            msg=f"tranches inegales : {durees[0] / 86400:.3f} j vs {durees[1] / 86400:.3f} j",
         )
+
+    def test_les_deux_tranches_sont_ADJACENTES_et_sans_recouvrement(self) -> None:
+        """PROPRIETE NOUVELLE, et elle n'etait pas verifiable avant. Avec trois
+        bornes deduites, un recouvrement etait invisible ; avec deux fenetres
+        explicites, il se lit. Un film compte dans UNE tranche, pas deux."""
+        _maintenant, appels = self._bornes()
+
+        (b1, h1), (b2, h2) = sorted(appels)
+        self.assertEqual(h1, b2, f"les tranches se recouvrent ou laissent un trou : {appels}")
 
     def test_aujourd_hui_est_exclu_des_deux(self) -> None:
         """La borne haute de la fenetre recente est minuit, pas `now`."""
-        maintenant = time.time()
-        api, appels = _api_avec_depot_a_debit_constant(maintenant)
+        maintenant, appels = self._bornes()
 
-        with mock.patch.object(Q.time, "time", lambda: maintenant):
-            Q.get_history(api, period_days=30)
-
-        self.assertEqual(max(appels), Q._minuit_local(maintenant))
+        self.assertEqual(max(haute for _b, haute in appels), Q._minuit_local(maintenant))
 
 
 if __name__ == "__main__":
