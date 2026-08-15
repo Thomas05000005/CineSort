@@ -300,6 +300,29 @@ Deux pieges de mesure rencontres en reparant :
   ne supprime PAS sa branche. Archiver `git diff HEAD` avant, la purge etant
   irreversible.
 
+**L'ASCENDANCE MENT SUR CE DEPOT — IL FUSIONNE EN SQUASH.** Le SHA d'une branche
+n'entre jamais dans `main` : `git branch --merged`, `git log main..branche` et
+`git cherry` la declarent donc **non fusionnee** meme quand son travail est
+livre. Le 2026-08-15, 104 branches distantes sur 105 presentaient cette
+signature — 1 commit devant `main`, PR **CLOSED** et non MERGED. La lecture
+evidente (« 104 branches mortes ») etait fausse dans les DEUX sens :
+
+- **59 d'entre elles etaient l'unique exemplaire** de 117 rapports d'audit
+  absents de `main` (2026-05-25 au 2026-08-02). Les supprimer aurait detruit
+  trois mois d'historique — le motif exact de #990, ou 8 des 9 retraits proposes
+  avaient ete refutes ;
+- **4 portent un correctif de code toujours absent** de `main` et qui s'y
+  applique encore proprement, dont deux de securite (voir « Branches conservees »).
+
+Le seul controle qui tranche est le **CONTENU**, jamais l'ascendance : comparer
+les blobs **en binaire** (`read_text` decode en cp1252 et plante sur un rapport
+accentue ; une comparaison en mode texte a rendu « 0/117 identiques » la ou le
+binaire en rend **117/117**), et pour un correctif, tester s'il **s'annule** sur
+`main` (`git apply --check -R`). `git cherry` ne suffit pas non plus quand un
+commit melange le correctif ET son rapport : le patch-id diffère alors meme si le
+code a ete repris — il a rendu « 42 non appliques » la ou le test par fichier en
+trouve 3 deja presents.
+
 **Les processus de session survivent des JOURS.** Six `python.exe` tournaient
 depuis 3 a 5 jours — deux `http.server`, et surtout deux boucles d'entretien de
 la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
@@ -596,6 +619,46 @@ les tests du domaine : deux tests de bout en bout d'une AUTRE issue, le cliquet
 d'imports lazy (16 pour un plafond de 15 — le commentaire affirmant qu'un import
 en tete creerait un cycle etait faux, ce fichier importe deja `custom_rules`) et
 le gabarit de fonction.
+
+### Rangement du depot (2026-08-15) — 3 PR
+
+Le but etait de rendre les audits FUTURS moins couteux, pas de gagner des octets.
+
+**Ou vivent les rapports d'audit** — desormais tous dans
+`docs/internal/audits/` : les rapports en `claude/AAAA-MM-JJ-*.md`, leurs
+constats en `findings/AAAA-MM-JJ-*.jsonl`. **172 fichiers**, dont **117
+rapatries par #1085** depuis les branches qui en etaient l'unique exemplaire.
+Ils sont donc cherchables d'un seul `grep` — avant, une recherche dans `main`
+n'en voyait que le tiers.
+
+**#1086** retire du suivi 29 Mo regenerables : le rapport visuel
+`tests/e2e/visual_report.html` (6,4 Mo, que `test_15_visual_catalog.py`
+reconstruit des qu'il manque) et 44 captures de maquette (22,4 Mo). Les 2
+`.html` de `docs/design-mockup/` sont **gardes** : ils pesent ~0 et deux audits
+les citent comme preuve (`v6.html` porte la seule definition des variables
+`--glass-*` du depot). Cela n'allege PAS `.git` — les blobs restent dans
+l'historique ; le gain porte sur l'arbre de travail, donc sur chaque worktree.
+
+**#1087** borne la retention des artefacts CI. `windows-ci.yml` etait le seul
+des cinq workflows sans `retention-days` : il retombait sur le defaut du depot
+(90 j) la ou ses freres tiennent 3 a 30 j, d'ou **51,6 Go** dormants
+(245 runs x 216 Mo) pour un build de diagnostic. Aligne sur 7 j, comme
+l'artefact frere `CineSort-exe` de `ci.yml` qui porte le MEME binaire.
+
+**Le stock ne se resorbe pas tout seul** : a la cadence mesuree (~5 Go/jour de
+`windows-build-artifacts`), meme une retention a 7 jours laisse un regime
+permanent d'environ **36 Go**. Si ce poste redevient genant, la variable a
+regarder est le NOMBRE de runs, pas la duree.
+
+**Branches conservees.** 105 -> 41 distantes, 444 -> 84 locales. Ce qui reste
+n'est pas du residu : **4 branches portent un correctif absent de `main`** et
+qui s'y applique encore — `fix/audit-2026-05-30-core-min-vs-sorted`,
+`fix/audit-2026-06-20-radarr-sync-tmdb-defensif`,
+`sec/audit-cors-warning-2026-05-26`,
+`sec/audit-plugin-env-pythonpath-2026-05-25`. **35 autres sont indecidables**
+(`main` a diverge depuis) et demandent un examen un par un, plus
+`loop/correction-2026-06` (855 fichiers, chantier a part). Voir le piege
+« l'ascendance ment sur ce depot ».
 
 **Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
 

@@ -144,3 +144,8 @@ docs/design-mockup/*
 # Rapport visuel single-file 6,4 Mo : regenere par test_15_visual_catalog.py,
 # qui appelle generate_visual_report.py des que le fichier manque.
 tests/e2e/visual_report.html
+
+# Traces d'outils locaux, presentes dans le checkout et jamais destinees au
+# depot. Le cache de aider pesait 8,1 Mo a lui seul.
+.aider*
+.vscode/
