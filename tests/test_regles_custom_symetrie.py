@@ -45,7 +45,7 @@ from __future__ import annotations
 import unittest
 
 from cinesort.domain import custom_rules as CR
-from cinesort.domain.quality_score import default_quality_profile, validate_quality_profile
+from cinesort.domain.quality_score import default_quality_profile
 
 #: Contexte conforme a `FIELD_PATHS` : les champs vivent sous `detected`. Une
 #: fixture a plat ne matche RIEN et rendrait le test muet — c'est la premiere
@@ -110,46 +110,80 @@ class LEvaluateurEstSymetriqueDuValidateurTests(unittest.TestCase):
         self.assertTrue(CR.evaluate_rule(regle, _CONTEXTE))
 
 
-class LeProfilVALIDESesReglesCustomTests(unittest.TestCase):
-    def _profil(self, regles: list) -> dict:
-        p = dict(default_quality_profile())
-        p["custom_rules"] = regles
-        return p
+class UneRegleINVALIDEEstECARTEEAActivationTests(unittest.TestCase):
+    """`set_active_profile` est le SEUL chemin qui re-persistait des regles sans
+    les valider.
 
-    def test_une_regle_INVALIDE_fait_echouer_le_profil(self) -> None:
-        pourrie = {
-            "id": "r1",
-            "name": "regle invalide",
-            "match": "AND",
-            "conditions": [{"field": "CHAMP_INCONNU", "op": "OPERATEUR_INCONNU", "value": "x"}],
-            "action": {"type": "force_tier", "value": "reject"},
-        }
-        ok, errs, _ = validate_quality_profile(self._profil([pourrie]))
+    OU CETTE GARDE N'EST PAS, ET POURQUOI — c'est mesure, pas suppose. Deux
+    essais precedents l'ont posee dans `validate_quality_profile`, et les deux
+    ont ETEINT une garde existante :
 
-        self.assertFalse(ok, "le profil est accepte avec une regle que validate_rules refuse")
-        self.assertTrue(errs, "aucune erreur remontee")
+    - **ajouter les erreurs de regles a `errs`** : `compute_quality_score` fait
+      `if not ok: return _build_invalid_profile_result(...)`, donc une regle
+      inutilisable mettait TOUS les films a 0 (mesure : 0 au lieu de 46). Cela
+      annulait #723, dont le principe est de refuser la VALEUR en preservant le
+      score ;
+    - **ecarter les regles dans le validateur** : `save_quality_profile` lit
+      `custom_rules` APRES lui, donc sa propre verification ne voyait plus rien
+      et son refus de #723 cessait de fonctionner.
 
-    def test_un_profil_SANS_regle_reste_valide(self) -> None:
-        """CONTRE-EPREUVE : la garde ne doit pas rejeter le cas nominal."""
-        ok, errs, _ = validate_quality_profile(dict(default_quality_profile()))
-        self.assertTrue(ok, f"le profil par defaut est refuse : {errs}")
+    Ce chemin-ci re-persiste du STOCKE, que personne ne saisit. On y ecarte donc
+    les regles inutilisables — un profil stocke doit rester activable — au lieu
+    de refuser l'activation.
+    """
 
-    def test_une_regle_VALIDE_passe_et_ressort_NORMALISEE(self) -> None:
-        """La forme normalisee porte le `match` canonique — c'est elle qui fait
-        que l'evaluateur fera ce que la regle annonce."""
-        valide = {
-            "id": "r1",
-            "name": "regle valide",
+    def setUp(self) -> None:
+        import copy
+        import tempfile
+        from pathlib import Path
+
+        from tests.test_phase4_parametres_endpoints import _FakeApi
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.api = _FakeApi(Path(self._tmp.name))
+
+        self.bonne = {
+            "id": "ok",
+            "name": "valide",
             "match": "any",
             "conditions": [{"field": "resolution", "op": "=", "value": "4k"}],
             "action": {"type": "cap_max", "value": 70},
         }
-        ok, errs, norm = validate_quality_profile(self._profil([valide]))
+        self.pourrie = {
+            "id": "ko",
+            "name": "invalide",
+            "match": "AND",
+            "conditions": [{"field": "CHAMP_INCONNU", "op": "OPERATEUR_INCONNU", "value": "x"}],
+            "action": {"type": "force_tier", "value": "reject"},
+        }
+        prof = copy.deepcopy(default_quality_profile())
+        prof["id"] = "AvecRegles_v1"
+        prof["custom_rules"] = [self.bonne, self.pourrie]
+        self.api.settings._payload = {"custom_quality_profiles": [prof]}
 
-        self.assertTrue(ok, f"une regle valide est refusee : {errs}")
-        regles = norm.get("custom_rules") or []
-        self.assertEqual(len(regles), 1)
-        self.assertEqual(str(regles[0].get("match")), "any", "le match canonique est perdu")
+    def _activer(self):
+        from cinesort.ui.api import profiles_support
+
+        return profiles_support.set_active_profile(self.api, "AvecRegles_v1")
+
+    def test_l_activation_REUSSIT_malgre_la_regle_invalide(self) -> None:
+        """Un profil stocke doit rester activable : refuser l'enfermerait."""
+        out = self._activer()
+        self.assertTrue(out.get("ok"), out)
+
+    def test_la_regle_INVALIDE_n_est_pas_re_persistee(self) -> None:
+        self._activer()
+        regles = (self.api._db_active_profile or {}).get("custom_rules") or []
+        ids = [r.get("id") for r in regles]
+        self.assertNotIn("ko", ids, "la regle invalide a ete re-persistee telle quelle")
+
+    def test_la_regle_VALIDE_survit(self) -> None:
+        """CONTRE-EPREUVE : sans elle, tout ecarter passerait le test precedent."""
+        self._activer()
+        regles = (self.api._db_active_profile or {}).get("custom_rules") or []
+        ids = [r.get("id") for r in regles]
+        self.assertIn("ok", ids, "la regle valide a ete ecartee avec l'autre")
 
 
 if __name__ == "__main__":
