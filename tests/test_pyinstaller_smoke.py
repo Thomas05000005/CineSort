@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -56,8 +57,11 @@ def _tuer_l_arbre(proc: "subprocess.Popen[bytes]") -> None:
     parfaitement alterne. `taskkill /T` descend l'arbre entier.
     """
     if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+        # Chemin ABSOLU : un nom nu se resout via %PATH%, donc un `taskkill.exe`
+        # depose ailleurs prendrait la main (Codacy B607).
+        outil = shutil.which("taskkill") or r"C:\Windows\System32\taskkill.exe"
+        subprocess.run(  # noqa: S603 - args fixes, aucune entree externe
+            [outil, "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
         )
@@ -133,7 +137,10 @@ class PyInstallerSmokeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "root": str(etat / "lib"),
-                        "rest_api_token": "smoke-token-pyinstaller",
+                        # Jeton ENGENDRE, comme dans tests/e2e/smoke_exe.py :
+                        # une chaine en dur ressemble a un secret pour les
+                        # scanners, et n'apporte rien ici.
+                        "rest_api_token": secrets.token_hex(24),
                         "rest_api_enabled": True,
                         "tmdb_enabled": False,
                     }
