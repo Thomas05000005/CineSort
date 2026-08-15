@@ -67,7 +67,7 @@ def _tuer_l_arbre(proc: "subprocess.Popen[bytes]") -> None:
         # `noqa` couvre ruff, `nosec` couvre bandit : ce sont deux analyseurs, et
         # la marque de l'un n'eteint pas l'autre. Le depot emploie deja `nosec`
         # (cf `domain/film_identity.py`, `infra/probe/auto_install.py`).
-        subprocess.run(  # noqa: S603 # nosec B603 - commande litterale ; seul argument variable = notre propre PID
+        subprocess.run(  # noqa: S603 # nosec B603 # nosemgrep - commande litterale ; seul argument variable = notre propre PID
             [r"C:\Windows\System32\taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
@@ -161,7 +161,7 @@ class PyInstallerSmokeTests(unittest.TestCase):
             # et le port vient de `_find_free_port()` : rien d'externe. Le
             # signalement n'est « nouveau » que parce que mes ajouts ont DECALE
             # cette ligne — l'appel, lui, est celui de `main`.
-            proc = subprocess.Popen(  # noqa: S603 # nosec B603
+            proc = subprocess.Popen(  # noqa: S603 # nosec B603 # nosemgrep
                 cmd,
                 env=env,
                 stdout=subprocess.PIPE,
