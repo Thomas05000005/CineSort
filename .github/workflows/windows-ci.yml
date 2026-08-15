@@ -151,4 +151,9 @@ jobs:
             packages/*.zip
             packages/*.sha256
             packages/*.manifest.txt
+          # 7 jours, comme l'artefact frere `CineSort-exe` de ci.yml : c'est le
+          # meme binaire, et un build Windows ne sert a diagnostiquer que sur
+          # quelques jours. Sans cette ligne, l'artefact retombait sur le defaut
+          # du depot (90 j) et pesait 216 Mo x 245 runs = 51,6 Go.
+          retention-days: 7
           if-no-files-found: error
