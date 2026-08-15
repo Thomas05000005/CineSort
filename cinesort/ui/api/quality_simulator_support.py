@@ -199,7 +199,11 @@ def _get_active_profile(api: Any) -> Dict[str, Any]:
             "id": "default",
             "label": "Par defaut",
             "weights": {"video": 60, "audio": 30, "extras": 10},
-            "tiers": {"premium": 85, "bon": 68, "moyen": 54},
+            # Troisieme site de la meme grille pre-v1.5.5. Celui-ci est le plus
+            # trompeur : il est TRUTHY, donc le defaut de `_recompute_in_memory`
+            # ne le rattrape pas — c'est bien cette grille-la qui servait de
+            # baseline des que la lecture du profil actif echouait.
+            "tiers": dict(DEFAULT_TIER_THRESHOLDS),
         }
 
 

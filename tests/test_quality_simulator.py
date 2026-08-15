@@ -9,6 +9,7 @@ from cinesort.domain.tiers_helpers import DEFAULT_TIER_THRESHOLDS
 from cinesort.ui.api.quality_simulator_support import (
     _apply_weights,
     _count_tiers,
+    _get_active_profile,
     _group_avg_delta,
     _load_reports_for_scope,
     _recompute_in_memory,
@@ -164,6 +165,23 @@ class TierForTests(unittest.TestCase):
         self.assertEqual(DEFAULT_TIER_THRESHOLDS["platinum"], 70)
         self.assertEqual(_tier_for(72, {}), "Platinum")
         self.assertEqual(_tier_for(35, {}), "Reject")
+
+    def test_profil_actif_illisible_retombe_sur_la_grille_canonique(self):
+        """ROUGE avant le correctif : rendait {premium: 85, bon: 68, moyen: 54}.
+
+        Ce troisieme site etait le plus trompeur des trois : son dict est
+        TRUTHY, donc le defaut de `_recompute_in_memory` ne le rattrapait pas.
+        C'est bien cette grille-la qui servait de baseline des que la lecture du
+        profil actif echouait.
+        """
+
+        class _ApiQuiEchoue:
+            def _active_quality_profile_payload(self):
+                raise OSError("profil illisible")
+
+        tiers = _get_active_profile(_ApiQuiEchoue())["tiers"]
+        self.assertEqual(tiers, dict(DEFAULT_TIER_THRESHOLDS))
+        self.assertNotIn("premium", tiers)
 
 
 class CountTiersTests(unittest.TestCase):
