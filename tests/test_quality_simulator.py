@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 
+from cinesort.domain.tiers_helpers import DEFAULT_TIER_THRESHOLDS
 from cinesort.ui.api.quality_simulator_support import (
     _apply_weights,
     _count_tiers,
@@ -126,6 +127,43 @@ class TierForTests(unittest.TestCase):
         self.assertEqual(_tier_for(55, t), "Silver")
         self.assertEqual(_tier_for(40, t), "Bronze")
         self.assertEqual(_tier_for(10, t), "Reject")
+
+    def test_seuil_bronze_a_zero_est_une_valeur_metier(self):
+        """ROUGE avant le correctif : `int(tiers.get("bronze") or 30)` rendait 30.
+
+        `normalize_tiers` clamp sur [0, 100] et `validate_quality_profile`
+        n'exige que `platinum >= gold >= silver >= bronze` : un bronze a 0 est
+        donc un profil VALIDE, et il dit « aucun film n'est Reject ». Le
+        simulateur le relisait comme 30 et annoncait « Reject » a l'utilisateur
+        pour des films que le scoring reel classe Bronze.
+        """
+        t = {"platinum": 70, "gold": 66, "silver": 55, "bronze": 0}
+        self.assertEqual(_tier_for(10, t), "Bronze")
+        self.assertEqual(_tier_for(0, t), "Bronze")
+
+    def test_seuils_adjacents_egaux_ne_declenchent_pas_de_repli(self):
+        """ROUGE avant le correctif : rendait "Gold" (repli sur 85/68/54/30).
+
+        L'ancien controle exigeait un ordre STRICTEMENT decroissant
+        (`p > g > s > br`) la ou la production admet l'egalite (`>=`, cf.
+        `validate_quality_profile`). Un profil 70/70/55/40 est donc valide et
+        classe 70 en Platinum ; le simulateur basculait EN SILENCE sur une
+        grille qui n'etait pas celle de l'utilisateur (log warning, payload muet).
+        """
+        t = {"platinum": 70, "gold": 70, "silver": 55, "bronze": 40}
+        self.assertEqual(_tier_for(70, t), "Platinum")
+
+    def test_tiers_absents_retombent_sur_la_grille_canonique(self):
+        """ROUGE avant le correctif : rendait "Gold" (grille pre-v1.5.5 85/68/54/30).
+
+        Le defaut canonique est 70/66/55/40 (`DEFAULT_TIER_THRESHOLDS`, egal a
+        `default_quality_profile()["tiers"]`). C'est exactement le cas « un film
+        a 72 » deja documente par `test_vue_statistiques` et deja corrige cote
+        frontend par `test_audit_ultra_wave4b_frontend_constants`.
+        """
+        self.assertEqual(DEFAULT_TIER_THRESHOLDS["platinum"], 70)
+        self.assertEqual(_tier_for(72, {}), "Platinum")
+        self.assertEqual(_tier_for(35, {}), "Reject")
 
 
 class CountTiersTests(unittest.TestCase):

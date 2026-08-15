@@ -20,7 +20,11 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
-from cinesort.domain.tiers_helpers import normalize_tier_string
+from cinesort.domain.tiers_helpers import (
+    DEFAULT_TIER_THRESHOLDS,
+    determine_tier,
+    normalize_tier_string,
+)
 from cinesort.ui.api._responses import err as _err_response
 from cinesort.ui.api.library_support import _get_store, _resolve_run_id
 
@@ -294,7 +298,10 @@ def _recompute_in_memory(
 ) -> List[Dict[str, Any]]:
     """Pour chaque report, reapplique les poids+tiers du target sur les subscores stockes."""
     base_weights = baseline.get("weights") or {"video": 60, "audio": 30, "extras": 10}
-    base_tiers = baseline.get("tiers") or {"premium": 85, "bon": 68, "moyen": 54}
+    # Le defaut est DEMANDE au domaine, pas recopie : cette ligne portait la
+    # grille pre-v1.5.5 (85/68/54, sans bronze), celle-la meme que
+    # `test_audit_ultra_wave4b_frontend_constants` interdit deja cote frontend.
+    base_tiers = baseline.get("tiers") or dict(DEFAULT_TIER_THRESHOLDS)
     target_weights = target.get("weights") or base_weights
     target_tiers = target.get("tiers") or base_tiers
 
@@ -342,43 +349,34 @@ def _apply_weights(video: float, audio: float, extras: float, weights: Dict[str,
     return max(0, min(100, int(round(raw))))
 
 
-_DEFAULT_TIER_PLATINUM = 85
-_DEFAULT_TIER_GOLD = 68
-_DEFAULT_TIER_SILVER = 54
-_DEFAULT_TIER_BRONZE = 30
-
-
 def _tier_for(score: int, tiers: Dict[str, Any]) -> str:
-    """Derive le tier depuis le score. Accepte les anciennes cles (premium/bon/moyen)
-    en plus des nouvelles (platinum/gold/silver/bronze) pour retro-compat.
+    """Derive le tier depuis le score, EXACTEMENT comme le scoring de production.
 
-    Si l'ordre p > g > s > br n'est pas respecte (UI envoie un dict invalide ou
-    incomplet), on log et on retombe sur les defaults pour eviter une derivation
-    de tier silencieusement incorrecte (ex. score 55 mappe en Platinum quand
-    platinum=50 < gold=60).
+    Delegue a `tiers_helpers.determine_tier`, la source unique dont `quality_score`
+    se sert deja : retro-compat des cles legacy (premium/bon/moyen/faible),
+    completion des cles absentes depuis `DEFAULT_TIER_THRESHOLDS`, clamp [0, 100]
+    et cascade `>=`. Un simulateur n'a de valeur que s'il predit ce que la
+    production ferait ; toute grille propre a ce module finit par diverger.
+
+    Ce que la re-implementation precedente changeait, sur des profils que
+    `validate_quality_profile` accepte pourtant :
+
+    - `int(tiers.get("bronze") or 30)` : un seuil a **0** est une valeur METIER
+      valide (`normalize_tiers` clamp sur [0, 100], le validateur n'exige que
+      `platinum >= gold >= silver >= bronze`). Il signifie « aucun film n'est
+      Reject » — et il etait relu comme 30. Meme piege sur les trois autres
+      seuils. Cf. la regle « sentinelle falsy » de `domain/conversions.py`.
+    - l'ordre etait exige STRICTEMENT decroissant (`p > g > s > br`) alors que
+      la production admet l'egalite (`>=`). Un profil `70/70/55/40`, valide, ne
+      passait pas ce controle et le simulateur basculait EN SILENCE (log
+      warning, payload muet) sur une grille qui n'etait pas celle de
+      l'utilisateur.
+    - cette grille de repli, 85/68/54/30, est la grille **pre-v1.5.5**. C'est
+      celle que `test_audit_ultra_wave4b_frontend_constants.py` interdit deja
+      cote frontend (`_DEFAULT_TIERS` dans `parametres.js`) : le correctif
+      n'avait ete pose que d'un cote. La grille canonique est 70/66/55/40.
     """
-    p = int(tiers.get("platinum") or tiers.get("premium") or _DEFAULT_TIER_PLATINUM)
-    g = int(tiers.get("gold") or tiers.get("bon") or _DEFAULT_TIER_GOLD)
-    s = int(tiers.get("silver") or tiers.get("moyen") or _DEFAULT_TIER_SILVER)
-    br = int(tiers.get("bronze") or _DEFAULT_TIER_BRONZE)
-    if not (p > g > s > br):
-        logger.warning(
-            "_tier_for: ordre tiers invalide p=%d g=%d s=%d br=%d (attendu p > g > s > br) — fallback defaults",
-            p,
-            g,
-            s,
-            br,
-        )
-        p, g, s, br = _DEFAULT_TIER_PLATINUM, _DEFAULT_TIER_GOLD, _DEFAULT_TIER_SILVER, _DEFAULT_TIER_BRONZE
-    if score >= p:
-        return "Platinum"
-    if score >= g:
-        return "Gold"
-    if score >= s:
-        return "Silver"
-    if score >= br:
-        return "Bronze"
-    return "Reject"
+    return determine_tier(score, tiers)
 
 
 def _build_delta_report(
