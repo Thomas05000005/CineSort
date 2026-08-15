@@ -541,6 +541,62 @@ le contrat CSS de la veille, cela fait **quatre** implementations redondantes
 evitees en deux jours. **Re-mesurer avant de coder, y compris sur une issue
 ouverte.**
 
+### Lot du 2026-08-15 — 3 PR
+
+- **#1080** le simulateur de profil **reimplementait** la derivation de tier au
+  lieu de deleguer a `tiers_helpers.determine_tier`. Sur des profils que
+  `validate_quality_profile` ACCEPTE :
+
+  ```
+  bronze = 0        score 10 -> simulateur "Reject",   production "Bronze"
+  70/70/55/40       score 70 -> simulateur "Gold",     production "Platinum"
+  ```
+
+  Or `parametres.js` ORDONNE d'utiliser la simulation avant d'activer un profil.
+  Sa grille de repli etait la grille **pre-v1.5.5** (85/68/54/30), celle qu'un
+  test interdit deja cote frontend : le correctif n'avait ete pose que d'un
+  cote. Balayage : 42 sites la portent encore, **38 sont des tests** qui
+  l'exercent pour la retrocompatibilite et 3 des commentaires. **2/2 mutants.**
+- **#1083** deux defauts des regles custom, et surtout **deux essais de
+  correction qui ont chacun ETEINT une garde existante** — cf. le piege
+  ci-dessous.
+
+**UNE GARDE PEUT EN AVEUGLER UNE AUTRE EN S'EXECUTANT AVANT ELLE.** Le
+2026-08-15, `validate_quality_profile` laissait passer `custom_rules` sans les
+valider, en deleguant PAR COMMENTAIRE. Six chemins d'ecriture l'appellent, un
+seul appliquait la delegation. Poser la garde au point commun paraissait evident.
+Deux essais, deux gardes tuees :
+
+1. **Ajouter les erreurs a `errs`.** `compute_quality_score` fait
+   `if not ok: return _build_invalid_profile_result(...)` : une seule regle
+   inutilisable mettait **TOUS les films a 0** (mesure : 0 au lieu de 46), ce qui
+   annulait #723, dont le principe est de refuser la VALEUR en preservant le
+   score.
+2. **Ecarter les regles fautives dans le validateur.** Plus doux, et pire :
+   `save_quality_profile` lit `custom_rules` **APRES** lui. Elles avaient disparu,
+   sa propre verification ne voyait plus rien, et son refus cessait de
+   fonctionner — en silence.
+
+Le twist : une garde n'a pas besoin d'en supprimer une autre pour la tuer. Il lui
+suffit de s'executer **avant** elle et de lui retirer sa matiere.
+
+Trois contre-feux :
+
+- avant de poser une garde a un point de passage partage, lister ses appelants et
+  lire **ce que chacun fait du resultat** — `if not ok:` veut dire « refuse »
+  chez l'un et « degrade tout » chez l'autre ;
+- se demander qui lit la meme donnee **apres** ce point, et si la normaliser la
+  lui retire ;
+- souvent le bon endroit n'est pas le point commun mais **le seul appelant qui
+  manque la garde** (ici `set_active_profile`, un sur six, designe par la mesure
+  — `import_recyclarr_yaml` ne porte AUCUNE `custom_rules`).
+
+Les trois echecs de cette PR ont ete dits par la suite **complete**, jamais par
+les tests du domaine : deux tests de bout en bout d'une AUTRE issue, le cliquet
+d'imports lazy (16 pour un plafond de 15 — le commentaire affirmant qu'un import
+en tete creerait un cycle etait faux, ce fichier importe deja `custom_rules`) et
+le gabarit de fonction.
+
 **Constats d'audit ECARTES apres mesure** — ne pas les re-instruire :
 
 - « transaction `pragma_history` laissee ouverte » : NE SE REPRODUIT PAS
