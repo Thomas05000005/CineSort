@@ -385,9 +385,9 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9041 tests**
-(`passed`, suite complete sur `main` fusionne, mesure du 2026-08-13 ; s'y ajoutent
-20 skipped, 2 xfailed et 1619 subtests). Ce nombre se remesure, il ne se recopie
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9103 tests**
+(`passed`, suite complete sur `main` fusionne, mesure du 2026-08-15 ; s'y ajoutent
+20 skipped, 2 xfailed et 1624 subtests). Ce nombre se remesure, il ne se recopie
 pas — et il se remesure **par la meme commande**, sinon on compare un compte
 d'items (`--collect-only`) a un compte de `passed`.
 
