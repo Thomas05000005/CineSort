@@ -276,18 +276,22 @@ class PerceptualRepository(_BaseRepository):
         L'insight annoncait donc une degradation qui n'avait pas eu lieu.
         """
         self._ensure_perceptual_tables()
-        clauses = ["global_tier_v2 = ?", "ts >= ?"]
-        params: List[Any] = [str(tier).lower(), float(since_ts)]
-        if until_ts is not None:
-            clauses.append("ts < ?")
-            params.append(float(until_ts))
+        # DEUX REQUETES LITTERALES plutot qu'une construite par jointure de
+        # clauses. Les fragments etaient constants — aucune injection possible —
+        # mais la construction par chaine declenche l'analyse statique, et un
+        # `noqa` pose pour la faire taire est une dette : le lecteur suivant ne
+        # sait pas s'il couvre un cas sur ou s'il a ete pose pour avoir la paix.
+        #
+        # AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter N fois un
+        # film re-scanne (insight "N films <tier> ce mois").
+        base = "SELECT COUNT(DISTINCT row_id) FROM perceptual_reports WHERE global_tier_v2 = ? AND ts >= ?"
+        if until_ts is None:
+            sql, params = base, (str(tier).lower(), float(since_ts))
+        else:
+            sql = base + " AND ts < ?"
+            params = (str(tier).lower(), float(since_ts), float(until_ts))
         with self._managed_conn() as conn:
-            cur = conn.execute(
-                # AUDIT 2026-06-14 (R7-15) : DISTINCT row_id -> ne pas compter
-                # N fois un film re-scanne (insight "N films <tier> ce mois").
-                f"SELECT COUNT(DISTINCT row_id) FROM perceptual_reports WHERE {' AND '.join(clauses)}",  # noqa: S608
-                tuple(params),
-            )
+            cur = conn.execute(sql, params)
             row = cur.fetchone()
             return int(row[0] or 0) if row else 0
 
