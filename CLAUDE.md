@@ -300,6 +300,43 @@ Deux pieges de mesure rencontres en reparant :
   ne supprime PAS sa branche. Archiver `git diff HEAD` avant, la purge etant
   irreversible.
 
+**UNE ISOLATION DE TEST SE VERIFIE — LA VARIABLE PEUT N'ETRE LUE PAR PERSONNE.**
+Le smoke test PyInstaller posait `CINESORT_STATE_DIR` « pour ne pas polluer ».
+Cette variable n'est lue **nulle part** sous `cinesort/` : l'etat se resout par
+`%LOCALAPPDATA%/CineSort` (`infra/state.py:default_state_dir`). Le test demarrait
+donc l'application **packagee** sur l'etat REEL de l'utilisateur — vraie base
+SQLite, vrais reglages, vraie racine de bibliotheque. Un `grep` de la variable
+dans le code de PRODUCTION coute cinq secondes et tranche.
+
+L'ampleur n'etait pas celle qu'une premiere sonde montrait. Une sentinelle qui
+surveillait 4 fichiers temoins a nomme **3** tests ; le garde qui compte TOUTE
+entree creee en a nomme **130** — le cache de sonde vit sous
+`default_state_dir()/cache/probe`. `tests/_etat_reel_guard.py` redirige
+desormais `LOCALAPPDATA` pour toute la session et **attribue** au lieu
+d'interdire (meme parti que `tests/_temp_leak_guard.py` pour `%TEMP%`). Corriger
+les 3 sites n'aurait rien regle : le depot compte **338** `CineSortApi()` nus
+dans **144** fichiers.
+
+Trois pieges de cette famille, tous payes le 2026-08-15 :
+
+- **`terminate()` ne tue pas un bundle *onefile*.** `Popen` demarre le
+  BOOTLOADER, qui lance l'application dans un processus ENFANT. L'enfant
+  survivait et gardait `.cinesort.lock`, donc l'execution suivante sortait sur
+  « Another CineSort instance is already running » — un echec **un tour sur
+  deux, parfaitement alterne**. Un motif alterne n'est jamais du hasard : c'est
+  un etat partage entre executions. Remede : `taskkill /T`, par chemin absolu
+  **et litteral** (une variable fait perdre a l'analyse la preuve que la
+  commande est fixe).
+- **Un test peut ne passer QUE parce qu'il reutilise un etat provisionne.** Une
+  fois reellement isole, l'exe ne demarrait plus : en `--api` le serveur refuse
+  sans jeton, et il sort en code 1 avec stdout, stderr **et** journal vides
+  (build sans console).
+- **Rediriger `LOCALAPPDATA` casse Playwright**, qui range ses navigateurs sous
+  `%LOCALAPPDATA%\ms-playwright` : 52 tests `[chromium]` en **ERROR at setup**,
+  donc invisibles dans un grep `FAILED`. Le compte le disait au chiffre pres
+  (9071 au lieu de 9121). D'ou `PLAYWRIGHT_BROWSERS_PATH` fige avant la
+  redirection.
+
 **L'ASCENDANCE MENT SUR CE DEPOT — IL FUSIONNE EN SQUASH.** Le SHA d'une branche
 n'entre jamais dans `main` : `git branch --merged`, `git log main..branche` et
 `git cherry` la declarent donc **non fusionnee** meme quand son travail est
@@ -408,11 +445,17 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9118 tests**
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9121 tests**
 (`passed`, suite complete sur `main` fusionne, mesure du 2026-08-15 ; s'y ajoutent
-20 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
+17 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
 pas — et il se remesure **par la meme commande**, sinon on compare un compte
 d'items (`--collect-only`) a un compte de `passed`.
+
+Le TOTAL d'items est stable (9140) mais la repartition passed/skipped **depend de
+la machine** : plusieurs `skipUnless` portent sur l'environnement (`fpcalc.exe`
+present, `CINESORT_API_TOKEN` pose, rapport Lighthouse deja genere, symlinks
+sur Windows non eleve). Un ecart de quelques unites entre deux postes ne signale
+donc rien — c'est l'ecart sur le TOTAL qu'il faut regarder.
 
 Le bot d'audit quotidien tourne en Opus 5 et est **borne par un budget
 d'ouverture** (`.github/audit-prompt.md`) : au plus 3 PR et 5 issues par
