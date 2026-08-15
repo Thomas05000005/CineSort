@@ -344,8 +344,30 @@ def evaluate_rule(rule: Dict[str, Any], context: Dict[str, Any]) -> bool:
     conditions = rule.get("conditions") or []
     if not isinstance(conditions, list) or not conditions:
         return False
-    match_mode = str(rule.get("match") or "all").lower()
-    reducer = all if match_mode == "all" else any
+    match_mode = str(rule.get("match") or "all").strip().lower()
+    # SYMETRIQUE DU VALIDATEUR, et dans le sens RESTRICTIF.
+    #
+    # `_validate_single_rule` normalise ainsi : `"any" if match == "any" else "all"`
+    # — tout ce qui n'est pas exactement « any » devient « all ». L'evaluateur
+    # faisait l'inverse : `all if match == "all" else any`, donc tout ce qui
+    # n'etait pas exactement « all » s'evaluait sur UNE SEULE condition.
+    #
+    # MESURE, une condition vraie sur deux, contexte conforme a FIELD_PATHS :
+    #
+    #     match="all"   -> ne declenche pas   (conforme)
+    #     match="AND"   -> DECLENCHAIT        (le mot annonce « toutes »)
+    #     match="all "  -> DECLENCHAIT        (une simple espace de fin)
+    #
+    # Les actions disponibles incluent `force_tier` et `cap_max`, donc Reject —
+    # le tier qui oriente les suppressions. Une regle qui se declenche plus
+    # souvent que son propre texte ne le promet va dans le sens PERMISSIF sur un
+    # chemin destructif, ce que la regle n4 du depot interdit.
+    #
+    # Le `.strip()` couvre le cas de l'espace ; la symetrie couvre tout le reste.
+    # Meme defense en profondeur que `_act_score_mult` et
+    # `_refus_plafond_non_numerique` : elle vise les profils DEJA persistes, qui
+    # ne repassent pas par la validation.
+    reducer = any if match_mode == "any" else all
     return reducer(_eval_condition(c, context) for c in conditions)
 
 

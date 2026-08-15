@@ -24,6 +24,7 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.custom_rules import validate_rules as _validate_custom_rules
 from cinesort.ui.api._responses import err
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,44 @@ def save_profile(api: Any, profile: Any) -> Dict[str, Any]:
         return err(f"save_profile failed: {exc}", category="runtime", level="error")
 
 
+def _ecarter_les_regles_invalides(normalized: Dict[str, Any], pid: str) -> None:
+    """Retire du profil les regles custom que `validate_rules` refuse.
+
+    POURQUOI CE CHEMIN, ET PAS LE VALIDATEUR DE PROFIL — c'est mesure, pas
+    suppose. `validate_quality_profile` laisse passer `custom_rules` verbatim en
+    deleguant par commentaire ; cette delegation n'a pas de point d'application
+    garanti. Deux essais de la poser dans le validateur ont chacun ETEINT une
+    garde existante :
+
+    - ajouter ses erreurs a `errs` : `compute_quality_score` fait
+      `if not ok: return _build_invalid_profile_result(...)`, donc une regle
+      inutilisable mettait TOUS les films a 0 (mesure : 0 au lieu de 46), ce qui
+      annulait #723 — refuser la VALEUR en preservant le score ;
+    - y ecarter les regles : `save_quality_profile` lit `custom_rules` APRES lui,
+      donc sa propre verification ne voyait plus rien et son refus de #723
+      cessait de fonctionner.
+
+    Ce chemin-ci re-persiste du STOCKE, que personne ne saisit. On ECARTE donc,
+    au lieu de refuser l'activation : un profil stocke doit rester activable, et
+    une regle inutilisable ne doit ni s'appliquer, ni etre reecrite.
+    """
+    regles = normalized.get("custom_rules")
+    if not isinstance(regles, list) or not regles:
+        return
+    gardees: List[Dict[str, Any]] = []
+    for regle in regles:
+        regle_ok, _errs, regle_norm = _validate_custom_rules([regle])
+        if regle_ok and regle_norm:
+            gardees.extend(regle_norm)
+        else:
+            logger.warning(
+                "set_active_profile: regle custom ecartee (invalide) profil=%s id=%s",
+                pid,
+                regle.get("id") if isinstance(regle, dict) else None,
+            )
+    normalized["custom_rules"] = gardees
+
+
 def set_active_profile(api: Any, profile_id: str) -> Dict[str, Any]:
     """Active un profil qualite (preset OU custom).
 
@@ -385,6 +424,10 @@ def set_active_profile(api: Any, profile_id: str) -> Dict[str, Any]:
                 level="warning",
                 errors=errs,
             )
+
+        # 2b) Les regles custom : validees ICI aussi, seul chemin qui les
+        # re-persistait sans le faire. Cf. `_ecarter_les_regles_invalides`.
+        _ecarter_les_regles_invalides(normalized, pid)
 
         # 3) Persistance settings.active_quality_profile_id
         # On garde l'ancienne valeur pour rollback si la DB echoue ensuite.
