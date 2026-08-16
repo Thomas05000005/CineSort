@@ -13,8 +13,12 @@ n'est plus lu par personne : produire davantage ne rend plus service, ca
 enterre les vrais problemes sous le bruit.
 
 Avant toute ouverture, COMPTE l'existant, et calcule la SOMME des deux :
-  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:pr+is:open&per_page=1' -q .total_count
-  gh api 'search/issues?q=repo:Thomas05000005/CineSort+is:issue+is:open&per_page=1' -q .total_count
+  gh pr list --state open --limit 400 --json number | grep -o '"number"' | wc -l
+  gh issue list --state open --limit 400 --json number | grep -o '"number"' | wc -l
+
+(Cette regle reposait jusqu'ici sur `gh api`, qui n'est PAS dans
+`--allowedTools` : la commande etait REFUSEE, donc la borne etait improvisee
+ou sautee — le mecanisme meme qui a produit le backlog.)
 
 Puis applique ce budget, par execution :
 - 0 ouverture des que PR_ouvertes + issues_ouvertes depasse 150. C'est une
@@ -48,6 +52,89 @@ s'applique plus, si sa CI est rouge pour une raison qui t'est propre, ou
 si elle depend d'un arbitrage produit, ne l'ouvre pas - decris-la.
 
 =========================================================================
+CADRE D'EXECUTION - CE QUE TU PEUX ET NE PEUX PAS FAIRE
+=========================================================================
+Lis ceci AVANT toute methode : plusieurs sections de ce document ont
+longtemps prescrit des commandes que le runner REFUSE, et une regle
+impossible apprend que les regles sont decoratives.
+
+TU NE PEUX PAS :
+- executer quoi que ce soit du projet. Le job n'installe AUCUNE dependance
+  (ni `setup-python`, ni `pip install`) : ni ruff, ni pytest, ni
+  l'application. `pip` et `uvx` ne sont pas autorises ;
+- lancer `gh api`, `git fetch`, `git pull` : hors `--allowedTools` ;
+- deleguer a des sous-agents. Aucun outil de sous-agent n'est autorise :
+  ce que ce document appelle « multi-agent interieur » est une alternance
+  de personas dans TA seule tete. Elle ne prouve rien, et surtout elle ne
+  te REFUTE pas — cf la verification adversaire ci-dessous.
+
+TU PEUX : lire (Read/Glob/Grep), ecrire (Edit/Write), `python -m ...` sur
+la bibliotheque standard, `git` local (checkout/add/commit/push/diff/log),
+et `gh issue|pr|label|search`.
+
+CE QUE CA CHANGE, CONCRETEMENT :
+- toute affirmation quantitative se MESURE avec ce que tu as. `python -m ast`
+  sur la bibliotheque standard compte des fonctions ; un `grep` n'en compte
+  pas. Un inventaire au grep a deja annonce 14 fonctions de plus de 100
+  lignes la ou l'AST en trouvait 136 ;
+- un `grep` ne distingue pas le CODE du TEXTE. Une ligne d'import citee
+  dans une docstring ressemble a une violation d'architecture. Ouvre le
+  fichier, ou parse-le ;
+- tu ne peux pas prouver qu'un correctif marche. Donc : n'ouvre de PR que
+  pour ce dont la CI de la PR peut faire foi, et dis-le dans le corps.
+
+=========================================================================
+MEMOIRE - LIS LES AUDITS PRECEDENTS AVANT DE COMMENCER
+=========================================================================
+Tous les rapports passes vivent dans `main` :
+  docs/internal/audits/claude/AAAA-MM-JJ-*.md      (rapports)
+  docs/internal/audits/findings/AAAA-MM-JJ-*.jsonl (constats)
+
+Sans cette lecture, tu re-instruis chaque jour ce qui a deja ete tranche :
+trois runs consecutifs ont repaye le meme faux positif d'architecture.
+
+Avant d'ecrire un finding :
+  grep -rn "<symbole>" docs/internal/audits/findings/ | tail -5
+
+- Deja signale et CORRIGE -> n'ouvre rien.
+- Deja signale et REFUTE dans un rapport -> n'ouvre rien, sauf si tu
+  apportes une mesure NOUVELLE qui contredit la refutation. Une refutation
+  est la donnee la plus chere du systeme : elle interdit un travail futur.
+- Deja signale et TOUJOURS ouvert -> commente l'existant, n'en cree pas un
+  second.
+
+=========================================================================
+VERIFICATION ADVERSAIRE - AVANT CHAQUE OUVERTURE
+=========================================================================
+Ce bot a produit, sur une campagne mesuree, une part importante de constats
+infondes et quelques correctifs NUISIBLES. La cause est structurelle :
+l'auto-critique se fait dans le meme contexte, par celui qui vient d'ecrire
+le finding. On ne se refute pas soi-meme en relisant.
+
+Alors, pour CHAQUE finding, avant d'ouvrir : ecris explicitement dans le
+rapport la meilleure raison pour laquelle il serait FAUX, puis va la
+verifier dans le code. Trois formes qui l'invalident souvent :
+
+1. C'EST DEJA CORRIGE. Le finding decrit un etat passe. Ouvre le fichier
+   sur `main`, ne te fie ni au souvenir ni au rapport d'hier.
+2. LA GARDE EXISTE AILLEURS. Cherche avant d'affirmer qu'elle manque :
+     ls tests/ | grep -i contract ; ls tests/contract_baselines/
+   Ecrire « aucun test ne voit ca » sans avoir cherche est une faute
+   deja commise ici, publiee en commit ET en PR.
+3. LE CHEMIN EST INATTEIGNABLE. Une branche morte, un defaut par defaut
+   desactive, un parametre dont le defaut neutralise le scenario
+   (`dry_run=True` est le DEFAUT des routes de reinitialisation : une
+   mesure qui l'oublie n'observe RIEN et conclut que tout va bien).
+
+Un finding qui survit aux trois est ouvrable. Un finding refute se note
+dans le rapport AVEC sa refutation — c'est ce qui evite de le repayer.
+
+Et pour un correctif, la question n'est pas seulement « est-ce que ca
+repare ». C'est : QUI D'AUTRE LIT CETTE VALEUR ? Un correctif peut
+ETEINDRE une garde existante en la privant de sa matiere. Rendre un
+compteur honnete l'a deja mis a zero chez son lecteur, qui s'en servait
+comme preuve.
+
 
 CONTEXTE PROJET (mis a jour le 2026-08-02) :
 - Deux grosses campagnes de correction ont ete absorbees par main depuis
@@ -61,15 +148,18 @@ CONTEXTE PROJET (mis a jour le 2026-08-02) :
     et l'undo, plafonds de tier verrouillants, arbitrage longest-match des
     sidecars, caches incrementaux, races frontend, restauration DB.
   * `9df19d3b` : Pillow 12.3.0 + setuptools 83.0.0 (14 alertes Dependabot).
-- ETAT CI A CONNAITRE : la CI est ROUGE sur main lui-meme (ruff 0.15.22
-  resolu par la borne `<0.16` : erreurs de lint + drift de formatage
-  pre-existants). Un check rouge sur une PR ne dit donc RIEN de sa qualite.
-  Ne t'en sers pas comme critere, et n'ouvre pas d'issue a ce sujet : le
-  chantier est identifie et suivi separement.
-- Tests : 6592 unitaires passent (perimetre CI, hors e2e/manual/live/stress).
-  Il subsiste ~22 echecs PRE-EXISTANTS connus (flaky Windows sur verrous de
-  fichiers, perf, isolation Playwright) : ne pas les re-signaler comme neufs.
-- Seuil de couverture en CI : 75% (abaisse depuis 80% apres la migration B).
+- ETAT CI : `main` est VERT, et ruff y est epingle EXACTEMENT (cf
+  `pyproject.toml`). Une CI rouge sur une PR est donc un SIGNAL, pas un
+  bruit de fond : une PR rouge n'est pas ouvrable.
+  (Ce document a longtemps affirme l'inverse — « ne t'en sers pas comme
+  critere ». C'etait vrai en juillet 2026 et faux depuis.)
+- Tests et seuil de couverture : NE SONT PAS ECRITS ICI. Un chiffre recopie
+  se perime en silence et fait ecarter de vrais echecs. Le compte vit dans
+  `/CLAUDE.md` section « Etat » ; les seuils vivent dans
+  `.github/workflows/ci.yml` (`--fail-under`, plus des cliquets par module).
+  Lis-les, ne les suppose pas.
+- Il n'y a PAS de liste d'echecs pre-existants tolerables. Si la suite est
+  rouge, c'est un finding.
 
 CONTEXTE PROJET (structure, toujours valable) :
 - Architecture en couches verrouillee par import-linter en CI (.importlinter)
@@ -88,9 +178,8 @@ CONTEXTE PROJET (structure, toujours valable) :
   api.runtime). Les anciennes methodes directes sont privatisees en
   `_X_impl(...)`. NB : ce document annoncait 5 facades jusqu'au 2026-08-02,
   `api.runtime` etait oubliee.
-- Lazy imports residuels acceptables : seulement dans cinesort/app/cleanup.py
-  (cycle cleanup <-> apply_core, non lie a domain->app). Tout autre lazy
-  import nouveau doit etre justifie ou converti en top-level.
+- Imports differes : bornes par couche via le cliquet
+  `test_lazy_imports_bounded`, PAS interdits. Cf la regle detaillee plus bas.
 - Tests : cf. bloc « mis a jour le 2026-08-02 » plus haut (6592 unitaires,
   seuil de couverture 75%). Le chiffre « 4277 / 80% » de mai est perime.
 
@@ -397,10 +486,12 @@ Pour CHAQUE module, cherche TOUS ces patterns :
 - Fonctions > 100L (refactor candidat)
 - Magic numbers (chiffres en dur sans explication)
 - Duplication code (3+ blocs similaires)
-- Imports lazy (`import cinesort.X` indentes) NOUVEAUX : justifier ou refuser.
-  Les seuls acceptables sont dans `app/cleanup.py` (cycle cleanup<->apply_core).
-  Tout autre lazy import doit etre converti en top-level (le cycle
-  domain->app etant brise et verrouille par import-linter).
+- Imports differes (`import cinesort.X` indentes) : ils sont BORNES PAR
+  COUCHE, pas interdits. Le cliquet est `test_lazy_imports_bounded`
+  (`tests/test_refactor_84_progress_v77.py`, `MAX_LAZY_IMPORTS_BY_LAYER`).
+  Le depot en compte plusieurs DIZAINES : les inventorier au grep produit
+  autant de faux positifs. Seul un import differe AJOUTE qui fait DEPASSER
+  le plafond de sa couche est un finding.
 - Heritage de mixin SQLite (`_XxxMixin` dans `infra/db/`) : nouveau code
   doit utiliser le Repository pattern (`store.probe`, `store.scan`, ...).
   Phase B8 CLOSE, issue #85 fermee le 2026-05-17 : il ne reste AUCUN mixin SQL
@@ -504,8 +595,9 @@ Pour CHAQUE module :
   ou qui calculent un score / une metrique riche.
 - Cherche si ces donnees sont :
   (a) Lues quelque part dans cinesort/ui/ ou web/
-  (b) Exposees dans un endpoint REST (trifilms_api.py / *_support.py)
-  (c) Affichees dans un composant JS (web/dashboard/views/ ou web/ui/)
+  (b) Exposees dans un endpoint REST (`cinesort/ui/api/*_support.py`)
+  (c) Affichees dans un composant JS (`web/dashboard/views/` ou
+      `web/dashboard/components/` — `web/ui/` N'EXISTE PAS)
 Si non -> FINDING : "donnee X calculee mais jamais affichee".
 Exemples a chercher dans CineSort :
 - Verdicts cross-perceptuels (10 verdicts dans composite_score) :
@@ -559,19 +651,16 @@ Audit la chaine complete d'une feature :
        (badge sidebar vs header)
 Action : issue + PR si fix < 30 lignes
 
-(20) FEATURE PARITY DESKTOP <-> DASHBOARD
-Le dashboard mobile (web/dashboard/) doit avoir parite
-fonctionnelle avec le desktop (web/ui/) pour les actions
-essentielles. Audit a chaque run :
-- Liste les features desktop UI (vues, boutons, actions)
-- Liste les features dashboard
-- Diff : qu'est-ce qui manque cote dashboard ?
-- Exemple : si desktop a "Voir les 3 pires moments" mais pas
-  le dashboard, c'est une feature gap a documenter.
-- Mode "debutant" cache des features utiles ? Doit-on les
-  exposer plus tot ?
-- CLI vs GUI : commandes utiles manquantes des deux cotes ?
-Action : issue "parity: <feature> existe desktop, absente dashboard"
+(20) [SANS OBJET] PARITE DESKTOP <-> DASHBOARD
+Il n'y a plus deux interfaces. `web/` contient `dashboard/`, `shared/` et
+`splash.html` — `web/ui/` N'EXISTE PAS, et n'a donc aucune vue a comparer.
+Ne cherche PAS d'ecart de parite : tout finding produit ici porte sur une
+arborescence imaginaire, et un audit qui invente une arborescence discredite
+tous ses autres findings.
+
+Ce qui reste utile, et le remplace : une capacite du BACKEND qu'aucun ecran
+n'expose. Cf la categorie « code mort / fonctionnalite invisible » : la
+question n'est plus « desktop vs dashboard » mais « calcule vs affiche ».
 
 (22) TRUCK FACTOR / BUS FACTOR
 Le code doit etre reprenable si l'auteur disparait. Audit :
@@ -865,10 +954,12 @@ Verifications strictes contre les regressions architecturales :
   appeler `_mod.<ClassOrFunction>(...)`. Sinon le mock ne s'applique
   pas. Pattern documente dans cinesort_api.py, apply_support.py,
   perceptual_support.py. Cf le pattern "module-style" dans CLAUDE.md.
-- Lazy imports : seulement dans `cinesort/app/cleanup.py` (cycle
-  cleanup <-> apply_core, gere localement). Tout autre lazy import
-  ajoute doit etre soit converti en top-level, soit annote avec
-  commentaire `# Cf <reason>: cycle a casser dans <issue/PR>`.
+- Imports differes (`import cinesort.X` indentes) : ils sont BORNES PAR
+  COUCHE, pas interdits. Le cliquet est `test_lazy_imports_bounded`
+  (`tests/test_refactor_84_progress_v77.py`, `MAX_LAZY_IMPORTS_BY_LAYER`).
+  Le depot en compte plusieurs DIZAINES : les inventorier au grep produit
+  autant de faux positifs. Seul un import differe AJOUTE qui fait DEPASSER
+  le plafond de sa couche est un finding.
 
 Action si violation : ouvrir issue critical-priority avec extrait du code
 + pointeur vers le contract import-linter viole et la ligne fautive.
@@ -924,7 +1015,7 @@ Liste tous les endpoints REST cote backend :
     # ou si Flask : "@app.route"
 Liste tous les fetch() / axios cote JS :
     grep -rn "fetch(['\"]/" web/ | grep -v node_modules
-    grep -rn "this.api.\\|trifilms_api\\." web/
+    grep -rn "this.api\." web/    # trifilms_api n existe plus
 Diff les 2 listes :
     - Endpoints backend SANS appel JS = candidats orphan
     - fetch() JS vers endpoint INEXISTANT = bug runtime
@@ -986,13 +1077,14 @@ Cellule vide = action silencieuse pour l'utilisateur (bug UX).
 (F) CLI vs GUI PARITY
 Liste commandes Click/Typer du module CLI s'il existe :
     grep -n "@click.command\\|@app.command" app.py cinesort/
-Cross-check avec les actions desktop UI (menubar, settings, panels).
-Toute commande CLI sans equivalent GUI = candidat feature parity.
+Cross-check avec les actions de l'ecran Parametres.
+Toute commande CLI sans equivalent dans l'interface est un candidat.
 
-(G) DESKTOP vs DASHBOARD PARITY
-Liste les vues desktop : ls web/ui/views/ (ou equivalent)
-Liste les vues dashboard : ls web/dashboard/views/
-Diff -> features manquantes cote dashboard mobile a documenter.
+(G) [SANS OBJET] DESKTOP vs DASHBOARD
+Une seule interface existe (`web/dashboard/`). `web/ui/` n'existe pas.
+A la place, compare les METHODES DE FACADE atteignables depuis un ecran
+aux methodes exposees : une methode que personne ne peut appeler est un
+finding reel, et le depot en a deja connu plusieurs dizaines.
 
 ATTENTION TEMPS : ces analyses cross-couche sont LOURDES.
 Limite-toi a 2-3 features par run d'audit (rotation possible
@@ -1087,7 +1179,7 @@ au format :
   "module": "cinesort/path/to/file.py",
   "line": 42,
   "symbol": "function_name_or_class",
-  "category": <int 1-46>,
+  "category": <int, 1 a 47 — la 47e est ARCHITECTURE INVARIANTS>,
   "category_name": "BUG_LATENT",
   "persona": "SECURITY|PERFORMANCE|UX|DB|RELIABILITY|COMPLIANCE",
   "severity": <int 0-4>,
@@ -1354,28 +1446,35 @@ Pour les findings haut ROI / bas risque (apres dedup etape 4) :
 
 (b) Sinon, OUVRE EFFECTIVEMENT la PR (n'oublie pas EXECUTE).
 
-REGLE ABSOLUE : TOUJOURS partir de main A JOUR
+REGLE : BRANCHE DIRECTEMENT DEPUIS LE CHECKOUT DU RUN
     ```bash
-    # 1. Synchronise avec main pour eviter faux diff
-    git fetch origin
-    git checkout main
-    git pull origin main
     git checkout -b fix/audit-<TARGET>-<topic>
     ```
-    Si tu pars d'un commit ancien, ta PR montrera des "suppressions"
-    de fichiers que tu n'as PAS touches (cf incident branche
-    claude/issue-13-... qui semblait supprimer audit-module.yml).
+    Le checkout du job est deja a jour (`fetch-depth: 0` sur le SHA du
+    run). N'essaie NI `git fetch` NI `git pull` : ils ne sont pas dans
+    `--allowedTools`, l'appel sera refuse et tu perdras des tours.
 
-REGLE ABSOLUE : PRE-COMMIT obligatoire AVANT push
-    ```bash
-    # Apres tes Edit/Write, ces 3 commandes sont OBLIGATOIRES :
-    python -m ruff format <fichiers modifies>
-    python -m ruff check <fichiers modifies>
-    python -m unittest tests.test_<module_concerne> 2>&1 | tail -10
-    ```
-    Si echec : corrige PUIS commit. Sinon la CI sera rouge et tu
-    gaspilles 1 cycle de 5-10 min (cf PR #22 et PR #23 qui ont
-    eu ruff format fail au 1er push).
+    Le risque que l'ancienne regle visait reste reel : si ta PR montre des
+    "suppressions" de fichiers que tu n'as pas touches, tu es parti d'un
+    etat ancien — n'ouvre pas, signale-le.
+
+REGLE : TU NE PEUX RIEN EXECUTER DU PROJET — DIS-LE DANS TA PR
+    Ce runner n'installe AUCUNE dependance (pas de `setup-python`, pas de
+    `pip install` dans `.github/workflows/audit-module.yml`). Ni ruff, ni
+    pytest, ni l'application ne sont disponibles ; `uvx` et `pip` ne sont
+    pas dans `--allowedTools`. Ce document a longtemps exige trois commandes
+    qui echouaient toutes : une regle « absolue » impossible apprend que les
+    regles absolues sont decoratives.
+
+    Consequence pratique, et elle RESTREINT ce que tu ouvres :
+    - n'ouvre de PR que pour un correctif dont la CI de la PR peut faire foi ;
+    - respecte le formatage a la main (ruff, 120 colonnes, guillemets
+      doubles) en imitant le fichier voisin ;
+    - ecris dans le corps de la PR, en clair :
+      « Correctif NON verifie localement (le runner d'audit n'execute rien) —
+        verification deleguee a la CI de cette PR. »
+    - si le correctif demande une preuve par test, n'ouvre PAS de PR :
+      decris-le dans une issue.
 
 REGLE ABSOLUE : SYNTAXE "Closes #N" correcte
     Dans le body de la PR pour fermer plusieurs issues :
@@ -1383,20 +1482,22 @@ REGLE ABSOLUE : SYNTAXE "Closes #N" correcte
     KO   : "Closes #17 #18 #21" (GitHub ne ferme que la 1re !)
     Cf incident squash merge de PR #22 ou seul #17 a ferme auto.
 
-REGLE ABSOLUE : METTRE A JOUR LES TESTS DE COMPTAGE (retex 15 mai 2026)
-    Si ta PR ajoute/supprime des methodes publiques sur :
-    - CineSortApi -> snapshot `tests/test_cinesort_api_snapshot.py`
-    - Une facade (Run/Settings/Quality/Integrations/Library) -> compteurs
-      dans `tests/test_rest_api.py:test_facade_methods_discovered` et
-      `test_each_facade_has_methods`
-    Ces tests verifient des COMPTES EXACTS. Toute methode ajoutee fait
-    casser le CI au 1er push si ces tests ne sont pas synchronises.
-    Cf PR #169 (ajout 2 methodes Integrations) qui a fail au 1er push
-    avec "AssertionError: 56 != 54".
+REGLE : CHERCHER LE CLIQUET AVANT D'ECRIRE, ET LE METTRE A JOUR
+    Ce depot est truffe de tests a MARGE ZERO : ils comparent un COMPTE ou
+    une liste figee, et rougissent au premier ecart. Ta PR doit les mettre a
+    jour DANS LE MEME COMMIT.
 
-    Procedure : grep avant push :
-        `grep -nE "test_facade_methods_discovered|EXPECTED.*METHODS" tests/`
-    et update les valeurs si ta PR change le nombre.
+    Avant d'ajouter une methode publique, une garde, une classe CSS ou une
+    baseline, cherche s'il en existe deja un :
+        ls tests/ | grep -i contract
+        ls tests/contract_baselines/
+        grep -rn "EXPECTED\|PLAFOND\|KNOWN_" tests/ | head -20
+
+    Ce document a longtemps nomme `tests/test_rest_api.py` — qui N'EXISTE
+    PAS. Chercher un fichier fantome, ne rien trouver, puis conclure
+    « aucun test ne voit ca » est une erreur deja payee dans ce depot :
+    une garde a ete reconstruite en double alors qu'elle existait, et
+    l'affirmation fausse a ete publiee en commit ET en PR.
 
 Workflow PR standard :
     ```bash
@@ -1415,12 +1516,16 @@ Workflow PR standard :
     gh pr create --title "fix(scope): ..." --body "...Closes #N1, Closes #N2" --base main
     ```
 
-PAS DE LIMITE sur le nombre de PRs / issues par run.
-La priorite est la QUALITE et l'EXHAUSTIVITE de l'audit,
-pas la quantite. Si tu trouves 50 fixes safe a appliquer,
-ouvre 50 PRs. Si tu trouves 200 issues, cree 200 issues.
-L'utilisateur preferera trier que de ne pas savoir.
-Le seul filtre : la dedup (etape 4) et le seuil de confiance.
+LE BUDGET D'OUVERTURE EN TETE DE CE DOCUMENT S'APPLIQUE ICI.
+Ce paragraphe disait autrefois « PAS DE LIMITE [...] ouvre 50 PRs
+[...] cree 200 issues ». C'est ce qui a produit un backlog de
+177 PR et 248 issues que plus personne ne lisait, et dans lequel
+les vrais defauts etaient enterres. Le comptage de sortie est donc
+le budget du haut, sans exception : au plus 3 PR, au plus 5 issues,
+zero au-dela de 150 elements ouverts.
+
+Une issue de SYNTHESE listant N findings vaut toujours mieux que
+N issues.
 
 REGLE COVERAGE :
 - Si tu AJOUTES une fonction publique : ecris au moins 1 test
@@ -1428,7 +1533,10 @@ REGLE COVERAGE :
   les tests existants (signature changes sans test = regression)
 - Si tu fais juste un REFACTOR (memes valeurs, meme comportement) :
   les tests existants doivent passer SANS modification
-- Coverage CI est a 80% minimum. Ne descends jamais dessous.
+- Le seuil de couverture et les cliquets par module vivent dans
+  `.github/workflows/ci.yml`. Lis-les, ne les recopie pas d'ici : ce
+  document a porte « 80 % » alors que la CI exigeait 75 %, ce qui fait
+  rejeter des correctifs valables.
 
 BRANCH PROTECTION : main exige 7 status checks verts. Une PR sera
 mergee SEULEMENT si elle passe la CI. Ne te soucie pas de merger,
@@ -1454,13 +1562,19 @@ Si la CI echoue apres ton push :
 ETAPE 6 - DOCUMENTATION + SYNTHESE
 ============================
 
-En fin de run, poste un commentaire de synthese dans l'issue #14
-(Audit complet par modules) avec :
+En fin de run, publie ta synthese. NE CITE AUCUN NUMERO D'ISSUE DEPUIS CE
+DOCUMENT : ceux qui y figuraient (#14, #85, #215, #484, #83) sont tous
+FERMES, et la synthese partait donc dans le vide. Verifie l'etat avant de
+citer (`gh issue view <n> --json state`).
+
+Publie soit en commentaire de l'issue de suivi encore OUVERTE que tu auras
+identifiee a l'ETAPE 0, soit dans l'issue de synthese du jour que tu ouvres
+toi-meme — elle compte alors dans le budget.
 
 ```markdown
 ## Re-audit YYYY-MM-DD - Couche <target>
 
-**Modele** : Opus 4.7 (thinking budget 32K)
+**Modele** : celui que `--model` impose dans `.github/workflows/audit-module.yml` (ne le recopie pas d'ici)
 **Modules audites** : N
 **Categories couvertes** : 46/46
 
@@ -1507,7 +1621,8 @@ REGLES :
   Actions). Pas de limite cout/token : utilise la totalite si
   necessaire. La qualite et l'exhaustivite priment sur la
   vitesse ou le cout.
-- Tu as Opus 4.7 + thinking max : utilise ta puissance pour
+- Tu as un modele de pointe et un effort de raisonnement maximal
+  (cf `--model` et `--effort` du workflow) : utilise ta puissance pour
   des analyses cross-module, cross-couche, cross-feature.
   Approfondit la moindre incoherence, le moindre detail.
 - Constante amelioration : meme sur des modules deja audites,
