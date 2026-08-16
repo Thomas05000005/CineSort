@@ -21,6 +21,7 @@ ne detectent rien quand il casse.
 from __future__ import annotations
 
 import logging
+import secrets
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -128,7 +129,10 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
         srv._api = mock.Mock()
         srv._server = None
         srv._thread = None  # -> is_running False, on entre bien dans start()
-        srv._token = "jeton-de-test"  # sinon un AUTRE avertissement part
+        # Jeton ENGENDRE : une chaine en dur ressemble a un secret pour les
+        # scanners. Sa VALEUR est indifferente ici — seule sa presence compte,
+        # sinon `start()` emet un AUTRE avertissement qui polluerait la mesure.
+        srv._token = secrets.token_hex(8)
         # `_lan_demoted` court-circuite TOUTE la branche LAN : si la retrogradation
         # a eu lieu, l'avertissement CORS ne doit pas partir non plus.
         srv._lan_demoted = lan_demoted
@@ -147,7 +151,7 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
 
     def test_le_wildcard_sur_le_lan_declenche_l_avertissement(self):
         """ROUGE avant le correctif : la combinaison etait silencieuse."""
-        vus = self._avertissements("*", "0.0.0.0")  # noqa: S104 - c'est le cas teste
+        vus = self._avertissements("*", "0.0.0.0")  # noqa: S104 # nosec B104 - c'est le cas teste
         self.assertEqual(len(vus), 1, f"un avertissement CORS attendu, vu : {vus}")
         self.assertIn(
             "rest_api_cors_origin",
@@ -160,7 +164,7 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
     def test_pas_d_avertissement_quand_l_origine_est_restreinte(self):
         """Contre-test : un CORS explicite ne doit rien declencher, sinon
         l'avertissement devient du bruit que l'admin apprend a ignorer."""
-        self.assertEqual(self._avertissements("http://192.168.1.50:8642", "0.0.0.0"), [])  # noqa: S104
+        self.assertEqual(self._avertissements("http://192.168.1.50:8642", "0.0.0.0"), [])  # noqa: S104 # nosec B104
 
     def test_pas_d_avertissement_en_localhost(self):
         """Le wildcard sur la boucle locale n'expose rien au LAN."""
@@ -176,7 +180,7 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
         serveur retrograde annonce quand meme « expose sur 0.0.0.0 » — une
         fausse alerte, et une fausse alerte apprend a ignorer les vraies.
         """
-        self.assertEqual(self._avertissements("*", "0.0.0.0", lan_demoted=True), [])  # noqa: S104
+        self.assertEqual(self._avertissements("*", "0.0.0.0", lan_demoted=True), [])  # noqa: S104 # nosec B104
         self.assertEqual(
             [m for m in self._tous if "expose sur" in m],
             [],
