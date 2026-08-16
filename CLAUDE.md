@@ -445,9 +445,9 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9121 tests**
-(`passed`, suite complete sur `main` fusionne, mesure du 2026-08-15 ; s'y ajoutent
-17 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9131 tests**
+(`passed`, mesure de la CI sur `main` fusionne le 2026-08-16 ; s'y ajoutent
+20 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
 pas — et il se remesure **par la meme commande**, sinon on compare un compte
 d'items (`--collect-only`) a un compte de `passed`.
 
@@ -606,6 +606,57 @@ explique meme pourquoi elle n'a pris aucune des deux directions proposees. Avec
 le contrat CSS de la veille, cela fait **quatre** implementations redondantes
 evitees en deux jours. **Re-mesurer avant de coder, y compris sur une issue
 ouverte.**
+
+### Lot du 2026-08-16 — 5 PR, et le prompt de l'audit repare
+
+**#1096 — le prompt du bot d'audit annulait sa propre regle.** En tete : « au
+plus 3 PR, 5 issues ». **1360 lignes plus loin**, a l'etape ou le bot ouvre :
+« PAS DE LIMITE [...] ouvre 50 PRs [...] cree 200 issues ». Le bot obeit au
+DERNIER lu — voila le backlog de 177 PR et 248 issues. Chercher les
+contradictions INTERNES d'un prompt avant ses faits perimes.
+
+Trois « REGLES ABSOLUES » etaient par ailleurs IMPOSSIBLES : elles exigeaient
+`ruff`, `pytest`, `git fetch`, `gh api`, tous absents du runner ou de
+`--allowedTools`. Une regle absolue impossible apprend que les regles absolues
+sont decoratives. Et deux faits faux DESARMAIENT les gardes : « la CI est rouge
+sur main, ne t'en sers pas comme critere » et « ~22 echecs pre-existants ».
+
+Ajoute : le CADRE D'EXECUTION (le « multi-agent interieur » du document etait
+une alternance de personas — `grep -c Task` = 0), la MEMOIRE des audits passes,
+et la VERIFICATION ADVERSAIRE. Mesure du premier run sous le nouveau prompt :
+budget respecte (1 PR + 1 issue), une section « findings ECARTES » dont un que
+le bot se refute lui-meme, et une section « ce que cet audit N'A PAS couvert ».
+
+**#1098 — trois correctifs jamais repris**, dormants depuis mai-juin parce que
+le squash-merge rend l'ascendance illisible (cf. le piege plus haut). Dont deux
+de securite : les plugins TIERS ne recoivent plus `PYTHONPATH`/`PYTHONHOME`, et
+`CORS='*'` + `0.0.0.0` n'est plus silencieux. **5/5 mutants.**
+
+**#1097 — l'ecran Parametres effacait des reglages qu'il ne possede pas.** Meme
+famille que le piege du 2026-08-15 : la garde du backend etait CORRECTE mais
+INATTEIGNABLE, parce que `apply_settings_defaults` injecte toujours les cles et
+que l'ecran re-POSTe son instantane fige. Le remede ne remplace pas la garde, il
+la rend atteignable. Non uniforme : `ffprobe_path` est un VRAI champ de l'ecran,
+le filtrer aurait remplace un defaut par un autre. **4/4 mutants**, dont le
+contre-test qui le prouve.
+
+**#1099 — deux reecritures de `plan.jsonl` effacaient les lignes illisibles**,
+donc le TEMOIN de la perte : le plan redevenait syntaxiquement parfait, plus
+rien ne rougissait, et l'apply s'executait sur N-1 films avec `errors: 0`.
+Trouve par le bot. Deux defauts que son runner ne POUVAIT pas voir ont ete
+corriges a la main : formatage et handler d'exception redondant.
+
+**TROIS ANALYSEURS, TROIS MARQUES.** `# noqa` couvre ruff, `# nosec` couvre
+bandit, `# nosemgrep` couvre semgrep. Poser l'une ne fait pas taire les autres,
+et le signalement change de LIBELLE a chaque fois — ce qui donne l'illusion d'un
+nouveau defaut alors que c'est le meme appel vu par un outil de plus. Quatre
+iterations perdues sur un seul `subprocess.run`.
+
+**UN MUTANT SURVIVANT SE QUALIFIE AVANT DE CONCLURE.** La batterie sur #1099 a
+d'abord rendu « 1 tue sur 3 » — de quoi refuser la PR. Faux : l'un etait
+EQUIVALENT par construction (une seconde garde rend le meme resultat avant toute
+ecriture), l'autre visait du code couvert AILLEURS (7 tests rougissent sur les
+21 fichiers concernes). Bilan reel : correctement eprouve.
 
 ### Lot du 2026-08-15 — 3 PR
 
