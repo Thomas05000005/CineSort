@@ -282,6 +282,68 @@ def load_rows_from_plan_jsonl(run_paths: Any) -> List[core.PlanRow]:
     return rows
 
 
+def read_plan_rows_as_dicts(plan_jsonl: Path) -> List[Dict[str, Any]]:
+    """Lit `plan.jsonl` en dicts BRUTS, et refuse un plan AMPUTE (issue #519).
+
+    JUMEAU DE `load_rows_from_plan_jsonl`, POUR LES CHEMINS QUI REECRIVENT.
+    Deux fonctions relisent le plan puis le REECRIVENT EN ENTIER :
+    `library_actions_support._rematch_tmdb_and_update_plan` (re-scan d'un film)
+    et `tmdb_support.enrich_tmdb_ids_by_title` (enrichissement des jaquettes).
+    Toutes deux sautaient les lignes illisibles par un `continue` silencieux,
+    puis appelaient `write_plan_jsonl(plan, all_rows)` : la ligne fautive
+    DISPARAISSAIT du fichier, definitivement.
+
+    Ce qui rend la perte grave, c'est qu'elle EFFACE AUSSI SON PROPRE TEMOIN.
+    Avant la reecriture, `load_rows_from_plan_jsonl` refusait ce plan et l'apply
+    disait « Plan corrompu: 1 ligne(s) illisible(s) (ligne 42) » : l'utilisateur
+    savait qu'un film manquait et lequel. Apres, le plan est syntaxiquement
+    PARFAIT, plus rien ne rougit, et l'apply s'execute sur N-1 films avec
+    `errors: 0` — un succes franc. Le film reste en place sans que personne
+    puisse le savoir.
+
+    Meme politique fail-closed, mot pour mot, que `load_rows_from_plan_jsonl` :
+    octet non-UTF-8, JSON casse et ligne JSON valide mais non-dict comptent tous
+    comme perdus ; le fichier est parcouru EN ENTIER pour que le compteur soit
+    complet ; rien n'est retourne partiellement. Les lignes VIDES restent
+    tolerees (`write_plan_jsonl` termine par `\\n`).
+
+    Raises:
+        FileNotFoundError: le plan n'existe pas.
+        PlanCorruptedError: au moins une ligne est illisible.
+    """
+    if not plan_jsonl.exists():
+        raise FileNotFoundError(f"Plan introuvable: {plan_jsonl}")
+    rows: List[Dict[str, Any]] = []
+    invalid_lines: List[int] = []
+    # Lecture BINAIRE : en mode texte, `UnicodeDecodeError` est leve par
+    # l'iterateur, donc HORS de tout `try` local — un seul octet fautif
+    # emporterait la lecture entiere au lieu d'etre compte comme une ligne.
+    # Meme raison qu'en tete de `load_rows_from_plan_jsonl`.
+    with plan_jsonl.open("rb") as file_obj:
+        for line_no, raw_bytes in enumerate(file_obj, start=1):
+            try:
+                line = raw_bytes.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                invalid_lines.append(line_no)
+                continue
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except ValueError:
+                invalid_lines.append(line_no)
+                continue
+            if isinstance(data, dict):
+                rows.append(data)
+            else:
+                invalid_lines.append(line_no)
+    if invalid_lines:
+        error = PlanCorruptedError(plan_jsonl, invalid_lines, len(rows))
+        logger.error("%s", error)
+        raise error
+    return rows
+
+
 def _invalidate_dashboard_cache(api: Any, run_paths: Any) -> None:
     """Supprime dashboard_cache.json (best-effort).
 

@@ -680,6 +680,40 @@ def _carry_over_scan_only_fields(target: Dict[str, Any], new_row_json: Dict[str,
         new_row_json["notes"] = new_notes
 
 
+def _lire_le_plan_pour_reecriture(plan_jsonl: Path, run_id: str, row_id: str) -> Optional[List[Dict[str, Any]]]:
+    """Le plan, en dicts bruts — ou `None` s'il n'est pas integralement lisible.
+
+    `_rematch_tmdb_and_update_plan` REECRIT `plan.jsonl` en entier. Il sautait
+    jusqu'ici les lignes illisibles par un `continue` muet, donc la reecriture
+    les EFFACAIT — et effacait du meme coup le seul temoin de la perte : sans
+    elles, l'apply cesse de refuser le plan et deplace N-1 films avec
+    `errors: 0`. Cf. `run_data_support.read_plan_rows_as_dicts`, qui applique ici
+    la meme politique fail-closed que `load_rows_from_plan_jsonl` (#519).
+
+    `None` est le contrat de repli DEJA en place sur ce chemin (video
+    introuvable, kind non replanifiable, cfg absente) : l'appelant
+    `_rescan_single_row_full_pipeline` rend alors `tmdb_rematched: False` et
+    conserve le plan tel quel. Un plan corrompu n'est pas plus reparable ici
+    qu'une video absente — mais il ne doit surtout pas etre « nettoye ».
+
+    Fonction SEPAREE, et pas trois lignes en place : `_rematch_tmdb_and_update_plan`
+    figure dans l'allowlist de `tests/test_function_size_budget.py` avec un
+    plafond GELE, et ce cliquet refuse qu'une fonction deja trop longue
+    GROSSISSE. Monter son plafond pour y loger un garde serait exactement la
+    dette silencieuse qu'il existe pour empecher.
+    """
+    try:
+        return run_data_support.read_plan_rows_as_dicts(plan_jsonl)
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "_rematch_tmdb: plan illisible run_id=%s row_id=%s, re-match abandonne (plan inchange) : %s",
+            run_id,
+            row_id,
+            exc,
+        )
+        return None
+
+
 def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optional[Dict[str, Any]]:
     """Relance le match TMDb pour 1 row + persiste la nouvelle row dans plan.jsonl.
 
@@ -703,22 +737,14 @@ def _rematch_tmdb_and_update_plan(api: Any, run_id: str, row_id: str) -> Optiona
     if plan_jsonl is None or not plan_jsonl.exists():
         return None
 
-    all_rows: List[Dict[str, Any]] = []
+    all_rows = _lire_le_plan_pour_reecriture(plan_jsonl, run_id, row_id)
+    if all_rows is None:
+        return None
+
     target_idx: Optional[int] = None
-    with open(plan_jsonl, encoding="utf-8") as fp:
-        for line in fp:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(data, dict):
-                continue
-            all_rows.append(data)
-            if str(data.get("row_id") or "") == str(row_id):
-                target_idx = len(all_rows) - 1
+    for idx, data in enumerate(all_rows):
+        if str(data.get("row_id") or "") == str(row_id):
+            target_idx = idx
 
     if target_idx is None:
         return None
