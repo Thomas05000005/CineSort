@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cinesort.infra.state as state
 from cinesort.domain.i18n_messages import t
@@ -172,6 +172,45 @@ def _poster_url_from_path(poster_path: Any, size: str = "w185") -> Optional[str]
     return f"https://image.tmdb.org/t/p/{size}{path}"
 
 
+def _charger_le_plan_pour_reecriture(
+    plan_jsonl: Any,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+    """`(rows, None)` si le plan est INTEGRALEMENT lisible, `(None, erreur)` sinon.
+
+    `enrich_tmdb_ids_by_title` REECRIT `plan.jsonl` en entier. Il sautait
+    jusqu'ici les lignes illisibles par un `continue` muet, donc la reecriture
+    les EFFACAIT — et effacait du meme coup le seul temoin de la perte : sans
+    elles, `load_rows_from_plan_jsonl` cesse de refuser le plan (#519) et
+    l'apply deplace N-1 films en annoncant `errors: 0`.
+
+    La lecture est desormais fail-closed : plutot que d'enrichir un plan ampute,
+    on refuse et on laisse le fichier EXACTEMENT tel qu'il est, corruption
+    intacte et VISIBLE.
+
+    Fonction SEPAREE, et pas trois lignes en place : `enrich_tmdb_ids_by_title`
+    figure dans l'allowlist de `tests/test_function_size_budget.py` avec un
+    plafond GELE, et ce cliquet refuse qu'une fonction deja trop longue
+    GROSSISSE.
+    """
+    try:
+        return run_data_support.read_plan_rows_as_dicts(plan_jsonl), None
+    except run_data_support.PlanCorruptedError as exc:
+        # `PlanCorruptedError` herite de `ValueError` : cette branche DOIT
+        # preceder celle ci-dessous, sinon le message qui NOMME la perte est
+        # remplace par le message generique.
+        return None, _err_response(
+            f"Enrichissement TMDb refuse : {exc}. Le plan n'a pas ete modifie ; "
+            "relance un scan pour le reconstruire.",
+            category="state",
+            level="error",
+            log_module=__name__,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        # Plan verrouille (AV Windows) ou encodage corrompu -> erreur propre
+        # plutot qu'un HTTP 500 (cet endpoint n'a pas de wrap global).
+        return None, _err_response(f"Plan illisible: {exc}", category="runtime", level="error", log_module=__name__)
+
+
 def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, Any]:
     """R5-H2 : resout le tmdb_id (+ jaquette) de films deja identifies (NFO/nom)
     SANS tmdb_id, par recherche TMDb titre+annee, et le PERSISTE dans le plan.
@@ -205,28 +244,14 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
     if plan_jsonl is None or not plan_jsonl.exists():
         return _err_response("Plan introuvable pour ce run.", category="resource", level="info", log_module=__name__)
 
-    # Cette fonction REECRIT `plan.jsonl` en entier plus bas. Elle sautait
-    # jusqu'ici les lignes illisibles par un `continue` muet, donc la reecriture
-    # les EFFACAIT — et effacait du meme coup le seul temoin de la perte (cf.
-    # `read_plan_rows_as_dicts`). La lecture est desormais fail-closed : plutot
-    # que d'enrichir un plan ampute, on refuse l'enrichissement et on laisse le
-    # fichier EXACTEMENT tel qu'il est, avec sa corruption intacte et visible.
-    try:
-        all_rows: List[Dict[str, Any]] = run_data_support.read_plan_rows_as_dicts(plan_jsonl)
-    except run_data_support.PlanCorruptedError as exc:
-        # `PlanCorruptedError` herite de `ValueError` : cette branche DOIT
-        # preceder celle ci-dessous, sinon le message specifique est perdu.
-        return _err_response(
-            f"Enrichissement TMDb refuse : {exc}. Le plan n'a pas ete modifie ; "
-            "relance un scan pour le reconstruire.",
-            category="state",
-            level="error",
-            log_module=__name__,
-        )
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
-        # Plan verrouille (AV Windows) ou encodage corrompu -> erreur propre
-        # plutot qu'un HTTP 500 (cet endpoint n'a pas de wrap global).
-        return _err_response(f"Plan illisible: {exc}", category="runtime", level="error", log_module=__name__)
+    # FAIL-CLOSED, parce que cette fonction REECRIT le plan en entier plus bas :
+    # une ligne illisible sautee ici disparaitrait du fichier, et avec elle le
+    # seul temoin de la perte (#519). On refuse plutot que d'enrichir un plan
+    # ampute, et on laisse le fichier tel quel. Cf.
+    # `_charger_le_plan_pour_reecriture`.
+    all_rows, plan_err = _charger_le_plan_pour_reecriture(plan_jsonl)
+    if plan_err is not None:
+        return plan_err
 
     posters: Dict[str, str] = {}
     # AUDIT 2026-06-14 (R6-H) : on renvoie aussi le tmdb_id resolu par row_id.
