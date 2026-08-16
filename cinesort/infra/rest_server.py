@@ -1576,6 +1576,17 @@ class RestApiServer:
                 "Verifiez votre reseau de confiance et utilisez HTTPS pour l'exposition externe.",
                 self._port,
             )
+            # Audit 2026-05-26 [audit-bot:2026-05-26-A2] : si exposition LAN + CORS wildcard,
+            # toute origine peut envoyer des requetes (auth Bearer reste la barriere).
+            # Avertir l'admin pour qu'il puisse restreindre via rest_api_cors_origin.
+            if self._cors_origin == "*":
+                logger.warning(
+                    "REST: CORS='*' combine avec host=0.0.0.0. Toute origine "
+                    "peut envoyer des requetes au serveur. Pour restreindre, "
+                    "definir rest_api_cors_origin dans les settings "
+                    "(ex: 'http://192.168.1.50:%d').",
+                    self._port,
+                )
 
         methods = _get_api_methods(self._api)
         spec = generate_openapi_spec(self._api, port=self._port)
