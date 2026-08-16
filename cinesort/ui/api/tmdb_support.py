@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 from typing import Any, Dict, List, Optional, Set
 
@@ -206,20 +205,25 @@ def enrich_tmdb_ids_by_title(api: Any, run_id: str, row_ids: Any) -> Dict[str, A
     if plan_jsonl is None or not plan_jsonl.exists():
         return _err_response("Plan introuvable pour ce run.", category="resource", level="info", log_module=__name__)
 
-    all_rows: List[Dict[str, Any]] = []
+    # Cette fonction REECRIT `plan.jsonl` en entier plus bas. Elle sautait
+    # jusqu'ici les lignes illisibles par un `continue` muet, donc la reecriture
+    # les EFFACAIT — et effacait du meme coup le seul temoin de la perte (cf.
+    # `read_plan_rows_as_dicts`). La lecture est desormais fail-closed : plutot
+    # que d'enrichir un plan ampute, on refuse l'enrichissement et on laisse le
+    # fichier EXACTEMENT tel qu'il est, avec sa corruption intacte et visible.
     try:
-        with open(plan_jsonl, encoding="utf-8") as fp:
-            for line in fp:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(data, dict):
-                    all_rows.append(data)
-    except (OSError, UnicodeDecodeError) as exc:
+        all_rows: List[Dict[str, Any]] = run_data_support.read_plan_rows_as_dicts(plan_jsonl)
+    except run_data_support.PlanCorruptedError as exc:
+        # `PlanCorruptedError` herite de `ValueError` : cette branche DOIT
+        # preceder celle ci-dessous, sinon le message specifique est perdu.
+        return _err_response(
+            f"Enrichissement TMDb refuse : {exc}. Le plan n'a pas ete modifie ; "
+            "relance un scan pour le reconstruire.",
+            category="state",
+            level="error",
+            log_module=__name__,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         # Plan verrouille (AV Windows) ou encodage corrompu -> erreur propre
         # plutot qu'un HTTP 500 (cet endpoint n'a pas de wrap global).
         return _err_response(f"Plan illisible: {exc}", category="runtime", level="error", log_module=__name__)
