@@ -242,7 +242,6 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/app/apply_core.py", "quarantine_row"): 103,
     ("cinesort/app/cleanup.py", "preview_cleanup_residual_folders"): 102,
     ("cinesort/app/radarr_sync.py", "build_radarr_report"): 102,
-    ("cinesort/infra/rest_server.py", "start"): 102,
     ("cinesort/ui/api/apply_support.py", "build_undo_by_row_preview"): 102,
     ("cinesort/ui/api/dashboard_support.py", "compose_score_explanation"): 102,
     ("cinesort/domain/perceptual/grain_analysis.py", "analyze_grain_v2"): 101,

@@ -111,6 +111,39 @@ def _dispatch_sync(
             logger.warning("[plugins] exception dispatch %s %s: %s", event, plugin["name"], exc)
 
 
+# Vars essentielles pour Python + Windows shell + locale, transmises aux
+# scripts plugin de l'utilisateur (issue #102 : whitelist au lieu de tout
+# os.environ, qui laissait fuiter OPENAI_API_KEY, GITHUB_TOKEN, AWS_*...).
+#
+# Audit 2026-05-25 : PYTHONPATH / PYTHONHOME RETIRES. Ils revelaient le chemin
+# d'installation a un script TIERS, de quoi deduire l'architecture et cibler des
+# bibliotheques locales. Ils n'etaient pas necessaires : la commande est
+# `[sys.executable, plugin]`, et un interpreteur se localise seul — pire, un
+# PYTHONHOME herite d'un parent mal configure peut CASSER un venv.
+# PYTHONIOENCODING reste : c'est un encodage de flux, pas un chemin.
+_ENV_WHITELIST = (
+    "PATH",
+    "PATHEXT",
+    "WINDIR",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "TEMP",
+    "TMP",
+    "COMSPEC",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "PYTHONIOENCODING",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+)
+
+
 def _run_plugin(
     plugin_path: Path,
     event: str,
@@ -127,30 +160,6 @@ def _run_plugin(
     CINESORT_* explicites.
     """
     payload = json.dumps({"event": event, **data}, ensure_ascii=False, default=str)
-    # Vars essentielles pour Python + Windows shell + locale
-    _ENV_WHITELIST = (
-        "PATH",
-        "PATHEXT",
-        "WINDIR",
-        "SYSTEMROOT",
-        "SYSTEMDRIVE",
-        "COMSPEC",
-        "TEMP",
-        "TMP",
-        "LOCALAPPDATA",
-        "APPDATA",
-        "USERPROFILE",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "OS",
-        "PROCESSOR_ARCHITECTURE",
-        "PYTHONPATH",
-        "PYTHONHOME",
-        "PYTHONIOENCODING",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-    )
     env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env["CINESORT_EVENT"] = event
     env["CINESORT_RUN_ID"] = str(data.get("run_id") or "")
