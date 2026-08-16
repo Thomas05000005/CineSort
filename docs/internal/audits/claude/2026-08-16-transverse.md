@@ -47,7 +47,8 @@ revient pas, l'audit quotidien est structurellement cantonne au role de lecteur.
 ## Resume executif
 
 Les 5 points transverses du prompt ressortent **propres**, comme au 2026-08-09 —
-et l'un d'eux est desormais verrouille par un test de contrat (point 5).
+et l'un d'eux (point 5) est verrouille par un test de contrat que le rapport
+precedent avait manque, alors qu'il existait deja.
 
 Le finding du jour ne vient pas de la structure mais d'une **frontiere de
 proprietaire** : plusieurs reglages sont ecrits par des routes DEDIEES, pendant
@@ -113,11 +114,24 @@ Phase B8 close, issue #85 fermee. Confirme par mesure.
 
 ### 5) Pattern module-style pour les modules mockes — GARDE PAR LA CI, PERIMETRE PARTIEL
 
-Nouveau depuis le 2026-08-09 : ce point n'est plus tenu par la relecture, il a un
-**test de contrat**, `tests/test_architecture_invariants.py::UiApiPatchableImportTests`.
-Il croise les cibles `patch("cinesort.ui.api.<module>.<symbole>")` trouvees dans
-`tests/` avec les imports de SYMBOLE en tete de `cinesort/ui/api/**`, et gele
-4 violations pre-existantes dans `_KNOWN_SYMBOL_IMPORTS`.
+Ce point n'est pas tenu par la relecture : il a un **test de contrat**,
+`tests/test_architecture_invariants.py::UiApiPatchableImportTests`. Il croise les
+cibles `patch("cinesort.ui.api.<module>.<symbole>")` trouvees dans `tests/` avec
+les imports de SYMBOLE en tete de `cinesort/ui/api/**`, et gele 4 violations
+pre-existantes dans `_KNOWN_SYMBOL_IMPORTS`.
+
+**Ce garde existait deja le 2026-08-09** — ajoute le **2026-08-05** par le commit
+`14d5280` (PR #958, issues #485 et #779). Le rapport de ce jour-la a pourtant
+refait le point 5 **a la main** (« 88 cibles `patch("cinesort...")` distinctes
+recensees »), sans le mentionner. C'est le piege que le CLAUDE.md nomme —
+« CHERCHER LE GARDE AVANT D'EN ECRIRE UN » — dans sa variante lecture : le
+travail n'a pas ete perdu (il a couvert les couches que le cliquet ignore, cf.
+ci-dessous), mais il a ete presente comme la seule mesure du point alors qu'une
+partie etait deja verrouillee par la CI.
+
+Ma propre premiere redaction disait « nouveau depuis le 2026-08-09 » : faux, et
+corrige apres verification par `git log --diff-filter=A`. La date d'apparition
+d'un garde se mesure, elle ne se deduit pas de son absence dans un rapport.
 
 **Son perimetre s'arrete a `cinesort.ui.api`** — dans les deux sens : la regex
 `_PATCH_TARGET_RE` n'accepte que les cibles `cinesort.ui.api.*`, et
@@ -399,9 +413,9 @@ chiffres, ce qui est la forme utile ici.
 
 ## Tendance
 
-Compare au 2026-08-09 : les 5 points du prompt restent propres, et le point 5 est
-passe de « tenu par la relecture » a « verrouille par un test de contrat » — un
-progres reel.
+Compare au 2026-08-09 : les 5 points du prompt restent propres. Le point 5 n'a
+pas progresse entre les deux runs — son cliquet existait deja le 2026-08-05 ; ce
+qui a change, c'est qu'il a ete TROUVE cette fois.
 
 Les deux runs pointaient le **cycle de vie des donnees**. Celui-ci deplace la
 cible d'un cran : ce n'est plus ce que l'application garde ou detruit toute
