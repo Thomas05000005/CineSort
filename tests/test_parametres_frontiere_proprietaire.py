@@ -206,8 +206,7 @@ __emit({ ffprobe: s.ffprobe_path, mediainfo: s.mediainfo_path });
         self.assertEqual(
             res["ffprobe"],
             "C:/outils/ffprobe.exe",
-            "sans le report, l'autosave reposte la chaine VIDE d'ouverture et "
-            "efface le chemin qu'on vient d'installer",
+            "sans le report, l'autosave reposte la chaine VIDE d'ouverture et efface le chemin qu'on vient d'installer",
         )
         self.assertEqual(res["mediainfo"], "C:/outils/mediainfo.exe")
 
