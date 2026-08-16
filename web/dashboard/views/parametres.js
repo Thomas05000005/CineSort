@@ -2403,6 +2403,55 @@ const FLUSH_WAIT_MAX_MS = 1500;
 // pouvoir etre declenche AUSSI hors debounce (flush au demontage de la vue).
 // Aucun `opts.signal` volontairement : le flush doit survivre a
 // `abortCurrentNav()` que le router appelle juste apres `_currentCleanup()`.
+// Cles ECRITES PAR UNE ROUTE DEDIEE, jamais par un champ de cet ecran.
+// `settings/save_settings` porte deja la bonne garde cote backend — « cle
+// ABSENTE = silence, cle presente et VIDE = demande » — mais elle ne pouvait
+// PAS se declencher : `apply_settings_defaults` injecte toujours ces cles dans
+// le payload du GET, l'ecran fige ce payload a l'ouverture et le re-POSTe EN
+// BLOC a chaque champ modifie. La cle n'etait donc jamais absente.
+//
+// Consequence mesuree : creer un profil qualite puis toucher n'importe quel
+// autre reglage le faisait disparaitre, sous un « ✓ Sauvegarde a HH:MM:SS ».
+// Idem pour l'activation d'un profil et pour scan_max_workers.
+//
+// On ne remplace pas la garde du backend : on la rend ATTEIGNABLE, en cessant
+// d'envoyer ce que cet ecran ne possede pas. Les clients REST qui postent
+// volontairement ces cles gardent le comportement d'avant.
+//
+// NB : `ffprobe_path` et `mediainfo_path` N'ENTRENT PAS dans cette liste — ce
+// sont de VRAIS champs de cet ecran. Les filtrer empecherait l'utilisateur de
+// les vider a la main. Leur cas se traite a la source, apres l'installation.
+const _CLES_POSSEDEES_AILLEURS = Object.freeze([
+  "custom_quality_profiles",   // settings/save_profile
+  "active_quality_profile_id", // settings/set_active_profile
+  "scan_max_workers_mode",     // settings/set_scan_max_workers
+  "scan_max_workers_value",    // settings/set_scan_max_workers
+]);
+
+// Contrepartie du filtre ci-dessus, pour les DEUX cles qui ne peuvent pas y
+// entrer parce que ce sont de vrais champs de l'ecran. L'instantane
+// `_state.settings`, fige a l'ouverture, les porte VIDES tant que les outils
+// ne sont pas installes ; sans ce report, l'autosave suivant repostait ces
+// chaines vides — que `_save_section_probe` lit comme « cle presente et VIDE
+// = demande » et qui EFFACE donc les chemins qu'on vient d'installer.
+//
+// Appele aux TROIS sites qui rafraichissent `probeToolsStatus` : le meme motif
+// y est ecrit trois fois, et n'en corriger qu'un laissait deux chemins ouverts.
+function _reporterLesCheminsOutils(status) {
+  if (!status || typeof status !== "object") return;
+  for (const cle of ["ffprobe_path", "mediainfo_path"]) {
+    if (typeof status[cle] === "string" && status[cle]) {
+      _state.settings[cle] = status[cle];
+    }
+  }
+}
+
+function _payloadPossede(settings) {
+  const sortie = { ...(settings || {}) };
+  for (const cle of _CLES_POSSEDEES_AILLEURS) delete sortie[cle];
+  return sortie;
+}
+
 async function _saveSettingsNow() {
   // Seul `savedAt` est garde par `_state.containerRef` : c'est lui qui produisait
   // le badge fantome « ✓ Sauvegarde a HH:MM » au remontage de la vue.
@@ -2411,7 +2460,7 @@ async function _saveSettingsNow() {
   // demontage — sinon un flush refuse par le backend perdait l'edition en
   // silence, exactement comme avant le correctif.
   try {
-    const res = await apiPost("settings/save_settings", { settings: _state.settings });
+    const res = await apiPost("settings/save_settings", { settings: _payloadPossede(_state.settings) });
     if (res && res.data && (res.data.ok || res.data === true || !res.data.message)) {
       _state.lastFlushError = null;
       if (_state.containerRef) {
@@ -3695,6 +3744,7 @@ function _bindProbeToolsActions(container) {
           }
           if (data && data.status) {
             _state.probeToolsStatus = { ok: true, ...data.status };
+            _reporterLesCheminsOutils(data.status);
             _refreshProbeToolsPanel(container);
           } else {
             await _loadProbeToolsStatus(container, { force: true });
@@ -3722,6 +3772,7 @@ function _bindProbeToolsActions(container) {
           }
           if (data && data.status) {
             _state.probeToolsStatus = { ok: true, ...data.status };
+            _reporterLesCheminsOutils(data.status);
             _refreshProbeToolsPanel(container);
           }
         }
@@ -3772,6 +3823,7 @@ function _bindProbeToolsActions(container) {
           }
           if (data && data.status) {
             _state.probeToolsStatus = { ok: true, ...data.status };
+            _reporterLesCheminsOutils(data.status);
             _refreshProbeToolsPanel(container);
           } else {
             await _loadProbeToolsStatus(container, { force: true });
