@@ -76,12 +76,23 @@ class PluginEnvNeFuitePasLesCheminsPythonTests(unittest.TestCase):
 
         Les plugins recoivent du JSON UTF-8 sur stdin — sans `PYTHONIOENCODING`
         ils le decodent en cp1252 sur un poste Windows francais.
+
+        Le parent porte ici `cp1252` VOLONTAIREMENT. Une premiere version de ce
+        test posait `utf-8` des deux cotes : le mutant qui supprimait le forcage
+        a SURVECU, parce que la valeur arrivait quand meme par heritage. Une
+        assertion satisfaite par une AUTRE source ne prouve rien — il faut
+        asserter ce que SEUL le correctif produit.
         """
         import tempfile
 
         with tempfile.TemporaryDirectory(prefix="cinesort_plug_") as td:
-            env = self._env_transmis(Path(td))
-        self.assertEqual(env.get("PYTHONIOENCODING"), "utf-8")
+            with mock.patch.dict("os.environ", {"PYTHONIOENCODING": "cp1252"}, clear=False):
+                env = self._env_transmis(Path(td))
+        self.assertEqual(
+            env.get("PYTHONIOENCODING"),
+            "utf-8",
+            "le forcage doit ECRASER la valeur heritee du parent, sinon le JSON envoye sur stdin est decode en cp1252",
+        )
         self.assertIn("PATH", env, "sans PATH, aucun interpreteur ni outil n'est trouvable")
         self.assertEqual(env.get("CINESORT_RUN_ID"), "r1", "le contexte metier doit passer")
 
