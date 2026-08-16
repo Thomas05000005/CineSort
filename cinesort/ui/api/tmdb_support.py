@@ -204,7 +204,10 @@ def _charger_le_plan_pour_reecriture(
             level="error",
             log_module=__name__,
         )
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
+        # `UnicodeDecodeError` HERITE de `ValueError` : le nommer en plus est
+        # redondant, et `tests/test_no_redundant_exception_handlers.py` le
+        # refuse. Un encodage corrompu reste donc bien attrape ici.
         # Plan verrouille (AV Windows) ou encodage corrompu -> erreur propre
         # plutot qu'un HTTP 500 (cet endpoint n'a pas de wrap global).
         return None, _err_response(f"Plan illisible: {exc}", category="runtime", level="error", log_module=__name__)
