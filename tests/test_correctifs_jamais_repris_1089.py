@@ -110,7 +110,7 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
     purge TTL, qui agit sur la bibliotheque REELLE (cf. CLAUDE.md).
     """
 
-    def _avertissements(self, cors_origin: str, host: str) -> list[str]:
+    def _avertissements(self, cors_origin: str, host: str, *, lan_demoted: bool = False) -> list[str]:
         from cinesort.infra import rest_server
 
         vus: list[str] = []
@@ -131,8 +131,8 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
         srv._token = "jeton-de-test"  # sinon un AUTRE avertissement part
         # `_lan_demoted` court-circuite TOUTE la branche LAN : si la retrogradation
         # a eu lieu, l'avertissement CORS ne doit pas partir non plus.
-        srv._lan_demoted = False
-        srv._lan_demotion_reason = ""
+        srv._lan_demoted = lan_demoted
+        srv._lan_demotion_reason = "retrograde sur 127.0.0.1 : jeton trop court"
 
         # Le corps de `start()` au-dela de l'avertissement monte un serveur HTTP
         # et un thread : on le laisse echouer et on ne garde que le journal.
@@ -142,6 +142,7 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 rest_server.RestApiServer.start(srv)
+        self._tous = vus
         return [m for m in vus if "CORS" in m]
 
     def test_le_wildcard_sur_le_lan_declenche_l_avertissement(self):
@@ -164,6 +165,27 @@ class CorsWildcardSurLanAvertitTests(unittest.TestCase):
     def test_pas_d_avertissement_en_localhost(self):
         """Le wildcard sur la boucle locale n'expose rien au LAN."""
         self.assertEqual(self._avertissements("*", "127.0.0.1"), [])
+
+    def test_la_retrogradation_lan_court_circuite_les_deux_messages(self):
+        """Un serveur RETROGRADE n'expose rien : ni le message d'exposition, ni
+        celui sur CORS ne doivent partir.
+
+        Ajoute apres qu'un mutant a SURVECU. L'extraction de
+        `_avertir_des_expositions_reseau` a remplace un `elif` par un `return`
+        anticipe ; retirer ce `return` ne rougissait aucun test. Or sans lui, un
+        serveur retrograde annonce quand meme « expose sur 0.0.0.0 » — une
+        fausse alerte, et une fausse alerte apprend a ignorer les vraies.
+        """
+        self.assertEqual(self._avertissements("*", "0.0.0.0", lan_demoted=True), [])  # noqa: S104
+        self.assertEqual(
+            [m for m in self._tous if "expose sur" in m],
+            [],
+            "un serveur retrograde n'expose rien : ce message ne doit pas partir",
+        )
+        self.assertTrue(
+            [m for m in self._tous if "retrograde" in m],
+            "la RAISON de la retrogradation doit rester journalisee",
+        )
 
 
 class FindBestNfoRendLeMemeResultatTests(unittest.TestCase):
