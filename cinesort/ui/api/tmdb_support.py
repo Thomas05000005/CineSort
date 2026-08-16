@@ -199,8 +199,7 @@ def _charger_le_plan_pour_reecriture(
         # preceder celle ci-dessous, sinon le message qui NOMME la perte est
         # remplace par le message generique.
         return None, _err_response(
-            f"Enrichissement TMDb refuse : {exc}. Le plan n'a pas ete modifie ; "
-            "relance un scan pour le reconstruire.",
+            f"Enrichissement TMDb refuse : {exc}. Le plan n'a pas ete modifie ; relance un scan pour le reconstruire.",
             category="state",
             level="error",
             log_module=__name__,
