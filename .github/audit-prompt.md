@@ -103,12 +103,30 @@ Analyse transverse (si target=transverse) :
    2026-08-03). Ne cherche PAS de doublons desktop/dashboard : il n'y en a pas.
 3) Verifie qu'aucun nouveau import inter-couches interdit n'a ete introduit
    depuis le dernier audit (cross-check avec `lint-imports`).
-4) Audit du Repository pattern : usages residuels de la couche mixin
-   (store.<methode_legacy>) qui pourraient migrer vers store.<repo>.<methode>
-   en preparation de la phase B8 (issue #85, suppression mixins).
+   FAUX POSITIF CONNU, repaye par trois runs consecutifs (2026-08-09, 08-15,
+   08-16) : `cinesort/domain/_runners.py` contient litteralement la ligne
+   `from cinesort.infra.subprocess_safety import tracked_run` — DANS LA
+   DOCSTRING de `tracked_run`, celle qui documente l'import que le Service
+   Locator a justement remplace. Un `grep` seul conclut a une violation ;
+   ouvre le fichier. Meme chose pour `cinesort/domain/core.py`, sous
+   `if TYPE_CHECKING:` et deja dans `ignore_imports`.
+4) [SANS OBJET — issue #85 fermee le 2026-05-17] Le Repository pattern est
+   installe et la phase B8 est CLOSE : plus aucun `_XxxMixin` SQL, plus
+   d'heritage MRO. Remesure du 2026-08-16 : les seules occurrences de
+   `_XxxMixin` dans `cinesort/` sont 8 DOCSTRINGS de
+   `infra/db/repositories/*.py` qui documentent la suppression, et
+   `_PeerGuardMixin` (`infra/_http_utils.py`), un mixin de connexion urllib3
+   pour le garde SSRF — sans rapport avec SQL. Ne re-instruis pas ce point.
 5) Verifie que les modules avec classes mockees par tests utilisent bien
    le pattern module-style (import X as _mod) et non `from X import Y`
    (sinon le mock `patch("cinesort.X.Y")` ne fonctionnera plus).
+   CE POINT A UN TEST DE CONTRAT depuis 2026-08 :
+   `tests/test_architecture_invariants.py::UiApiPatchableImportTests`. Il ne
+   couvre que les cibles `cinesort.ui.api.*` (regex `_PATCH_TARGET_RE`) et les
+   consommateurs de `cinesort/ui/api/**`. Les couches `app`, `infra` et
+   `domain` restent a verifier a la main — verifiees saines le 2026-08-16, et
+   l'intention y est ecrite dans le code (`app/runtime_probe_check.py`
+   documente son import lazy « tests patchent au niveau du module source »).
 
 Sinon, modules a auditer ({0} fichiers) :
 
@@ -385,7 +403,8 @@ Pour CHAQUE module, cherche TOUS ces patterns :
   domain->app etant brise et verrouille par import-linter).
 - Heritage de mixin SQLite (`_XxxMixin` dans `infra/db/`) : nouveau code
   doit utiliser le Repository pattern (`store.probe`, `store.scan`, ...).
-  Issue #85 phase B8 supprimera l'heritage MRO une fois B1-B7 valides en prod.
+  Phase B8 CLOSE, issue #85 fermee le 2026-05-17 : il ne reste AUCUN mixin SQL
+  ni heritage MRO. Toute reapparition est une regression, pas un reliquat.
 - Methodes directes sur CineSortApi (au lieu des facades `api.run`, `api.settings`,
   etc.) : ajout d'une methode directe est un regression du pattern facade,
   prefere `api.<facade>.<method>`.
@@ -910,6 +929,23 @@ Diff les 2 listes :
     - Endpoints backend SANS appel JS = candidats orphan
     - fetch() JS vers endpoint INEXISTANT = bug runtime
 (cf earezki.com a supprime 16000 lignes Node.js ainsi)
+
+SUR CE DEPOT, le client est `apiPost("<facade>/<methode>")` (web/dashboard/
+core/api.js). UN GREP LITTERAL NE SUFFIT PAS : plusieurs vues construisent la
+route depuis une TABLE. Mesure du 2026-08-16 — 5 sites dynamiques, tous
+resolvant vers une methode de facade existante :
+    web/dashboard/views/statistiques.js   (table de thunks)
+    web/dashboard/views/parametres.js     (x3 : ACTIONS_DE_SECTION,
+                                           field.testMethod, recheck/get probe)
+    web/dashboard/components/film-detail.js (set/clear_field_lock)
+Complete donc le grep litteral par une recherche des `apiPost(` dont le premier
+argument n'est PAS un litteral — c'est-a-dire ni guillemet simple, ni guillemet
+double, ni backtick juste apres la parenthese (outil : ripgrep sur web/, filtre
+*.js). Puis resous chaque table a la main. Sans cela, une vue entiere passe pour
+« sans appel API » : c'est ce qui serait arrive a statistiques.js, ajoutee
+apres l'inventaire du 2026-08-09.
+Note : `web/dashboard/views/_v5_helpers.js` exporte AUSSI un `apiPost` — ce
+n'est pas un second client HTTP, il delegue a `core/api.js`.
 
 (B) COLUMN/FIELD USAGE TRACING
 Pour chaque colonne DB calculee (perceptual, quality, score) :
@@ -1478,13 +1514,19 @@ REGLES :
   cherche si quelque chose a evolue ou pourrait etre mieux.
 
 Pour la couche transverse (si target=transverse) — les inventaires ci-dessous sont
-DEJA SUIVIS par des issues OUVERTES : ENRICHIS-les, ne recree PAS d'issue.
+DEJA SUIVIS : ENRICHIS l'issue quand elle est ouverte, ne recree PAS d'issue.
 Les chiffres du prompt d'origine (49 fonctions / 22 composants JS / 161 imports
-lazy) sont PERIMES — cf issue #484.
-1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue OUVERTE #215.
+lazy) sont PERIMES — cf issue #484. L'ETAT DES ISSUES CI-DESSOUS SE REMESURE
+(`gh issue view <n> --json state`), il ne se recopie pas : ce paragraphe a decrit
+#215 et #85 comme ouvertes pendant plus de deux mois apres leur fermeture, et
+trois audits successifs ont repaye la verification.
+1) Fonctions de plus de 100 lignes triees par ROI de refactor -> issue #215,
+   FERMEE le 2026-08-06. Point sans objet sauf regression mesuree.
 2) Duplication JS desktop/dashboard : SANS OBJET, elle n'existe plus (cf ci-dessus).
-3) Imports lazy et decouplage -> issue OUVERTE #779. Le cycle domain<->app est
-   BRISE (issue #83 close) ; le reliquat est INTRA-ui/api (cycles entre modules
-   *_support), pas un cycle inter-couches.
+3) Imports lazy et decouplage -> issue #779, OUVERTE (verifie le 2026-08-16).
+   Le cycle domain<->app est BRISE (issue #83 close) ; le reliquat est
+   INTRA-ui/api (cycles entre modules *_support), pas un cycle inter-couches.
+4) Repository pattern / mixins SQL -> issue #85, FERMEE le 2026-05-17, phase B8
+   CLOSE. Point sans objet sauf regression mesuree.
 
 ALLEZ. Maintenant LIS, ANALYSE, CREE LES ISSUES ET PRs. EXECUTE.
