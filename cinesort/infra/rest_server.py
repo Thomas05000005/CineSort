@@ -1569,7 +1569,9 @@ class RestApiServer:
         if self._lan_demoted:
             logger.warning("REST: %s", self._lan_demotion_reason)
             return
-        if self._host != "0.0.0.0":  # noqa: S104 - on TESTE la valeur, on ne s y lie pas
+        # `noqa` couvre ruff, `nosec` couvre bandit : ce sont deux analyseurs.
+        # Ici on TESTE la valeur configuree ; le serveur ne s y lie pas.
+        if self._host != "0.0.0.0":  # noqa: S104 # nosec B104
             return
         logger.warning(
             "REST: serveur expose sur 0.0.0.0:%d (acces LAN). "
