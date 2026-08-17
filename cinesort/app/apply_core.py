@@ -3292,6 +3292,45 @@ def apply_tv_episode(
     # qui comptait l'épisode même quand rien n'était déplacé.
 
 
+def _quarantine_single_folder(
+    cfg: "Config",
+    folder: Path,
+    row: "PlanRow",
+    dry_run: bool,
+    log: Callable[[str, str], None],
+    res: "ApplyResult",
+    review_root: Path,
+    record_op: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> None:
+    """Met en quarantaine le DOSSIER ENTIER d'une row `single`.
+
+    Extrait de `quarantine_row` : SEUL le kind "single" possede un dossier
+    dedie (invariant destructif documente sur `PlanRow.kind`), donc seul lui
+    autorise un deplacement de dossier. Garder les deux granularites dans deux
+    fonctions distinctes evite qu'un futur ajout dans la branche partagee
+    retombe par inadvertance sur celle-ci.
+    """
+    target = review_root / core_mod.windows_safe(Path(row.folder).name)
+    core_mod.ensure_inside_root(cfg, target)
+    if target.exists():
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
+        return
+    log("INFO", f"QUARANTINE folder: {folder} -> {target}")
+    if not dry_run:
+        # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
+        # Le dossier du film part en entier sous `_review/` : une degradation en
+        # copytree+rmtree y dedoublerait le contenu et eventrerait la source.
+        atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR", allow_copy_fallback=False)
+        record_apply_op(
+            record_op,
+            op_type="QUARANTINE_DIR",
+            src_path=folder,
+            dst_path=target,
+            reversible=True,
+        )
+    res.quarantined += 1
+
+
 def quarantine_row(
     cfg: "Config",
     folder: Path,
@@ -3313,25 +3352,25 @@ def quarantine_row(
         return
 
     if row.kind == "single":
-        target = review_root / core_mod.windows_safe(Path(row.folder).name)
-        core_mod.ensure_inside_root(cfg, target)
-        if target.exists():
-            core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
-            return
-        log("INFO", f"QUARANTINE folder: {folder} -> {target}")
-        if not dry_run:
-            # `allow_copy_fallback=False` : cf. `move_journal._rename_or_cross_device_copy`.
-            # Le dossier du film part en entier sous `_review/` : une degradation en
-            # copytree+rmtree y dedoublerait le contenu et eventrerait la source.
-            atomic_move(record_op, src=folder, dst=target, op_type="QUARANTINE_DIR", allow_copy_fallback=False)
-            record_apply_op(
-                record_op,
-                op_type="QUARANTINE_DIR",
-                src_path=folder,
-                dst_path=target,
-                reversible=True,
-            )
-        res.quarantined += 1
+        _quarantine_single_folder(cfg, folder, row, dry_run, log, res, review_root, record_op=record_op)
+        return
+
+    # AUDIT 2026-07-13 [CRIT-1] : le garde-fou de granularite manquait sur CE
+    # site — celui-la meme que le correctif de l'epoque cite comme REFERENCE de
+    # la semantique correcte. `PlanRow.video` est documente « can be empty », or
+    # `folder / ""` vaut `folder` : les deux `.exists()` ci-dessous repondent
+    # alors VRAI et c'est le DOSSIER PARTAGE (serie entiere, ou film principal a
+    # cote de son bonus) qui part sous `_review/`, journalise en
+    # `QUARANTINE_FILE` — donc restaure par `shutil.move` a l'undo, avec la
+    # degradation copytree+rmtree que les moves de dossier interdisent ailleurs.
+    # Les trois sites jumeaux refusent deja ce cas (`apply_tv_episode`, bucket x2).
+    if not row.video:
+        log(
+            "WARN",
+            f"QUARANTINE row {row.row_id} kind={row.kind!r} sans video, "
+            f"skip (dossier partage jamais deplace en entier): {folder}",
+        )
+        core_mod._mark_skip(res, core_mod.SKIP_REASON_AUTRE)
         return
 
     video = folder / row.video
