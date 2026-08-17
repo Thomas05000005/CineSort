@@ -28,7 +28,7 @@ pytest>=9.0.3,<10
 pytest-cov>=5.0
 # sqlparse : chemin complet du splitter SQL de migration_manager (cf hotfix3
 # 2026-06-02, commentaire detaille dans pyproject.toml [dev]).
-sqlparse>=0.5,<1
+sqlparse>=0.6.0,<1
 # Cf issue #87 : property-based testing pour les modules domain purs
 # (naming, conversions, fuzzy_matching, etc.). MIT, pure Python, ~2 MB.
 hypothesis>=6.152.9,<7

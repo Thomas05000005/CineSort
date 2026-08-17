@@ -79,7 +79,7 @@ dev = [
     # geree via fallback regex + WARNING log (cf. BUG-015 hotfix2).
     # Pas ajoute en runtime : aucune migration actuelle n utilise /* */
     # et on prefere garder le bundle minimal.
-    "sqlparse>=0.5,<1",
+    "sqlparse>=0.6.0,<1",
 ]
 # build : pyinstaller + Pillow (alignement avec requirements-build.txt).
 build = [
