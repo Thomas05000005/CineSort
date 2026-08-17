@@ -10,7 +10,7 @@ playwright>=1.60.0,<2
 # `verify` (windows-ci) etait rouge sur les **29 derniers runs de main**,
 # uniquement pour cette raison — 8 417 tests verts, 0 echec, 52 erreurs.
 # `ci.yml` l'installait a la main de son cote, ce qui masquait le manque.
-pytest-playwright>=0.8.0,<0.9
+pytest-playwright>=0.8.0,<0.10
 Pillow>=12.3
 # Epingle exactement : cf. justification dans pyproject.toml (une borne
 # flottante a mis la CI au rouge sur main le 2026-08-02).

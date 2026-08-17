@@ -58,7 +58,7 @@ dev = [
     "playwright>=1.60.0,<2",
     # Le plugin, distinct de la bibliotheque : c'est LUI qui fournit la
     # fixture `page`. Cf. la justification mesuree dans requirements-dev.txt.
-    "pytest-playwright>=0.8.0,<0.9",
+    "pytest-playwright>=0.8.0,<0.10",
     "Pillow>=12.3",
     # EPINGLE EXACTEMENT (2026-08-02) : la borne flottante `>=0.15.14,<0.16`
     # laissait la CI resoudre le dernier patch. Un formateur legerement different
