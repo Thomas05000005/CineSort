@@ -34,6 +34,7 @@ from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_roo
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
+from cinesort.infra import log_context
 from cinesort.infra.db import SQLiteStore
 from cinesort.infra.integration_errors import IntegrationError
 from cinesort.infra.jellyfin_client import JellyfinClient
@@ -3053,6 +3054,52 @@ def apply_changes(
     de retour reste `{ok: bool, ...}` (backward compat ABSOLUE — AC-1).
     """
     _log.info("api: apply run_id=%s dry_run=%s atomic=%s", run_id, dry_run, bool(apply_atomic))
+    # L'APPLY N'ESTAMPILLAIT PAS SON `run_id`. `apply_changes` s'execute
+    # SYNCHRONIQUEMENT dans le thread de la requete REST — il ne passe donc pas
+    # par `job_runner._run_worker`, qui est l'un des quatre seuls sites a poser
+    # la ContextVar. Consequence mesuree : toutes les lignes de `cinesort.log`
+    # emises par l'operation la plus destructive du produit sortaient en
+    # `[run=- req=a1b2c3d4]` — corrélables a la requete, PAS au run.
+    #
+    # Le `run_id` etait pourtant disponible en parametre a chaque etage. On le
+    # pose donc pour toute la duree de l'apply, et on RESTAURE le jeton en
+    # sortie : le thread REST sert d'autres requetes ensuite, et laisser la
+    # ContextVar posee estampillerait les suivantes avec un run qui n'est plus
+    # le leur.
+    _jeton_run = log_context.set_run_id(run_id)
+    try:
+        return _apply_changes_estampille(
+            api,
+            run_id,
+            decisions,
+            dry_run,
+            quarantine_unapproved,
+            cleanup_scope_label=cleanup_scope_label,
+            cleanup_status_label=cleanup_status_label,
+            cleanup_reason_label=cleanup_reason_label,
+            apply_atomic=apply_atomic,
+        )
+    finally:
+        log_context.reset_run_id(_jeton_run)
+
+
+def _apply_changes_estampille(
+    api: Any,
+    run_id: str,
+    decisions: Dict[str, Dict[str, Any]],
+    dry_run: bool,
+    quarantine_unapproved: bool,
+    *,
+    cleanup_scope_label: Callable[[str], str],
+    cleanup_status_label: Callable[..., str],
+    cleanup_reason_label: Callable[[str], str],
+    apply_atomic: bool = False,
+) -> Dict[str, Any]:
+    """Corps de `apply_changes`, execute sous `run_id` pose.
+
+    Extrait pour que la pose de la ContextVar encadre TOUT le corps sans faire
+    grossir une fonction deja sous cliquet (`test_function_size_budget.py`).
+    """
     # Fix audit 2026-05-25 (v1.5.3) Vague H : context manager pour garantir
     # le release du slot meme si une exception se propage au-dela des except
     # locaux (avant ce fix, un crash inattendu laissait le slot bloque).
