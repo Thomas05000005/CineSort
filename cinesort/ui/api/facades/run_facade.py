@@ -245,16 +245,22 @@ class RunFacade(_BaseFacade):
         """
         return self._api._delete_run_impl(run_id)
 
-    def cleanup_old_runs(self, retention_days: int = 90) -> Dict[str, Any]:
+    def cleanup_old_runs(self, retention_days: int = 90, dry_run: bool = True) -> Dict[str, Any]:
         """Supprime tous les runs > N jours (defaut 90).
 
-        Appele :
-        - manuellement (debug / forcer la purge)
-        - automatiquement au boot par le cron retention_cleanup
+        `dry_run=True` PAR DEFAUT, comme les autres frontieres destructives de
+        cette facade (`purge_quarantine_bucket`, `purge_review_bucket_all`) et
+        de `quality` (`reset_quality_profile`). C'etait la SEULE qui ne l'avait
+        pas : un POST au corps vide sur cette route supprimait, ce que le
+        durcissement des purges avait justement corrige ailleurs.
 
-        Retourne `{ok, deleted_count, deleted_run_ids: [...], retention_days}`.
+        Le seul appelant qui doit REELLEMENT supprimer est le cron de retention,
+        et il le declare desormais explicitement (`retention_cleanup.py`).
+
+        En apercu, rend la meme forme avec `deleted_count` / `deleted_run_ids`
+        remplis de ce qui SERAIT supprime, plus `dry_run: True`.
         """
-        return self._api._cleanup_old_runs_impl(retention_days)
+        return self._api._cleanup_old_runs_impl(retention_days, dry_run=dry_run)
 
     # VQ-2 QUARANTAINE-TTL : 3 endpoints filesystem `_review` ----------
     def purge_quarantine_bucket(self, ttl_days: int = 30, dry_run: bool = True) -> Dict[str, Any]:

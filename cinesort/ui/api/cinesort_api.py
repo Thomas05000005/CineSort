@@ -2928,9 +2928,9 @@ class CineSortApi:
         """Supprime un run de l'historique (DB seulement)."""
         return history_support.delete_run(self, run_id)
 
-    def _cleanup_old_runs_impl(self, retention_days: int = 90) -> Dict[str, Any]:
+    def _cleanup_old_runs_impl(self, retention_days: int = 90, dry_run: bool = True) -> Dict[str, Any]:
         """Supprime les runs > N jours (defaut 90). Appele aussi par le cron retention."""
-        return history_support.cleanup_old_runs(self, retention_days=retention_days)
+        return history_support.cleanup_old_runs(self, retention_days=retention_days, dry_run=dry_run)
 
     # ---------- VQ-2 QUARANTAINE-TTL (bucket _review filesystem) ----------
     def _build_quarantine_cfg(self) -> core.Config:

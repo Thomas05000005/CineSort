@@ -45,7 +45,13 @@ def _run_cleanup_once(api: Any, retention_days: int) -> None:
     Loggue un info sur succes (avec compteur) ou un warning sur echec.
     """
     try:
-        result = api.run.cleanup_old_runs(retention_days)
+        # `dry_run=False` EXPLICITE. La route est passee en apercu par defaut
+        # (comme les autres frontieres destructives), et ce cron est le seul
+        # appelant qui doive REELLEMENT supprimer. Le dire ici plutot que de
+        # dependre d'un defaut rend l'intention lisible au bon endroit — et un
+        # futur changement de defaut ne peut plus eteindre la retention en
+        # silence.
+        result = api.run.cleanup_old_runs(retention_days, dry_run=False)
     # R8-024 (F2-d) : +sqlite3.Error. Un verrou DB transitoire (« database is locked »,
     # une OperationalError = DatabaseError, PAS un OSError) echappait au tuple, sortait de
     # _run_cleanup_once vers _worker -> le thread cron MOURAIT (retention definitivement morte).

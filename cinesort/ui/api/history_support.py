@@ -759,7 +759,7 @@ def delete_run(api: Any, run_id: str) -> Dict[str, Any]:
     return {"ok": True, "run_id": run_id, "deleted_records": int(deleted)}
 
 
-def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
+def cleanup_old_runs(api: Any, retention_days: int = 90, dry_run: bool = True) -> Dict[str, Any]:
     """Supprime tous les runs dont la date la plus recente est > N jours.
 
     Iteration sur tous les stores actifs (multi state_dir). Retourne le
@@ -794,22 +794,39 @@ def cleanup_old_runs(api: Any, retention_days: int = 90) -> Dict[str, Any]:
     for store in stores:
         try:
             run_ids = store.run.list_runs_older_than(cutoff_ts=cutoff_ts)
-        except (OSError, AttributeError, TypeError, ValueError) as exc:
+        # `sqlite3.Error` N'HERITE PAS de `OSError` (regle inviolable n4) : une
+        # `OperationalError` « database is locked » echappait a ce tuple et
+        # sortait de la fonction, abandonnant les stores SUIVANTS. Le cron la
+        # rattrape (cf. R8-024 dans `retention_cleanup.py`), mais une passe
+        # entiere etait perdue pour un verrou transitoire sur UN store.
+        except (OSError, AttributeError, TypeError, ValueError, sqlite3.Error) as exc:
             logger.warning("cleanup_old_runs: list_runs_older_than err: %s", exc)
+            continue
+        if dry_run:
+            # APERCU : on rend ce qui SERAIT supprime, sans toucher a la base.
+            deleted_ids.extend(run_ids)
             continue
         for rid in run_ids:
             try:
                 store.run.delete_run(rid)
                 deleted_ids.append(rid)
-            except (OSError, AttributeError, TypeError, ValueError) as exc:
+            # Meme raison qu'au-dessus, et elle compte davantage ici : un seul
+            # run verrouille ne doit pas emporter la purge des autres.
+            except (OSError, AttributeError, TypeError, ValueError, sqlite3.Error) as exc:
                 logger.warning("cleanup_old_runs: delete_run err run_id=%s err=%s", rid, exc)
 
-    logger.info("cleanup_old_runs: deleted %d runs older than %d days", len(deleted_ids), days)
+    logger.info(
+        "cleanup_old_runs: %s %d runs older than %d days",
+        "would delete" if dry_run else "deleted",
+        len(deleted_ids),
+        days,
+    )
     return {
         "ok": True,
         "deleted_count": len(deleted_ids),
         "deleted_run_ids": deleted_ids,
         "retention_days": days,
+        "dry_run": bool(dry_run),
     }
 
 
