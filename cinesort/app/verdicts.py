@@ -345,30 +345,52 @@ def verifier_operations_qui_emportent_d_autres_lignes(
     Returns:
         Une incoherence par operation ayant emporte plus d'une ligne.
     """
-    par_dossier: Dict[str, List[str]] = {}
-    for row_id, dossier in (dossiers_par_ligne or {}).items():
-        cle = _cle_de_chemin(dossier)
-        if cle:
-            par_dossier.setdefault(cle, []).append(str(row_id))
-
-    trouvees: List[Incoherence] = []
+    # PERIMETRE : la quarantaine seulement.
+    #
+    # Un `MOVE_DIR` de collection deplace legitimement un dossier racine qui
+    # CONTIENT plusieurs films (`move_collection_folder`) : l'y inclure ferait
+    # rougir chaque apply de collection. La restriction est volontaire, et c'est
+    # la limite connue de cet invariant.
+    quarantaines = []
     for op in operations or ():
         try:
-            op_type = str(op.get("op_type") or "")
-            source = _cle_de_chemin(op.get("src_path"))
+            if str(op.get("op_type") or "") in OPS_DE_QUARANTAINE:
+                source = _cle_de_chemin(op.get("src_path"))
+                if source:
+                    quarantaines.append((source, op))
         except AttributeError:
             continue
-        # PERIMETRE : la quarantaine seulement.
-        #
-        # Un `MOVE_DIR` de collection deplace legitimement un dossier racine qui
-        # CONTIENT plusieurs films (`move_collection_folder`) : l'y inclure
-        # ferait rougir chaque apply de collection. La restriction est donc
-        # volontaire, et elle est la limite connue de cet invariant.
-        if op_type not in OPS_DE_QUARANTAINE or not source:
-            continue
-        emportees = sorted({rid for cle, rids in par_dossier.items() if _est_sous(cle, source) for rid in rids})
+    if not quarantaines:
+        return []
+
+    # PAR LES ANCETRES, ET NON PAIRE A PAIRE.
+    #
+    # La premiere version comparait chaque ligne du plan a chaque operation.
+    # MESURE : 20 000 lignes x 2 000 operations = 4,7 SECONDES — un apply termine
+    # qui se fige cinq secondes pour calculer un verdict, c'est un instrument
+    # qu'on finit par debrancher.
+    #
+    # On indexe donc les sources de quarantaine, puis on remonte les ancetres de
+    # chaque dossier de ligne : la profondeur d'un chemin est bornee (~10), le
+    # nombre d'operations ne l'est pas.
+    sources = {src for src, _ in quarantaines}
+    emportees_par_source: Dict[str, set] = {src: set() for src in sources}
+    for row_id, dossier in (dossiers_par_ligne or {}).items():
+        cle = _cle_de_chemin(dossier)
+        while cle:
+            if cle in emportees_par_source:
+                emportees_par_source[cle].add(str(row_id))
+            parent = os.path.dirname(cle)
+            if parent == cle:  # racine atteinte : `dirname('d:\')` rend `d:\`
+                break
+            cle = parent
+
+    trouvees: List[Incoherence] = []
+    for source, op in quarantaines:
+        emportees = sorted(emportees_par_source.get(source) or ())
         if len(emportees) <= 1:
             continue
+        op_type = str(op.get("op_type") or "")
         trouvees.append(
             Incoherence(
                 code="une_operation_emporte_plusieurs_lignes",

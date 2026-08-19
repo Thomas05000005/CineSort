@@ -160,3 +160,51 @@ class LaComparaisonDeCheminsNEstPasMUETTETests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeCoutNeRedevientPasQUADRATIQUETests(unittest.TestCase):
+    """Un verdict qui fige l'application est un verdict qu'on debranche.
+
+    La premiere version comparait chaque ligne du plan a chaque operation.
+    MESURE sur ce poste :
+
+        1 000 lignes x   100 operations ->      10 ms
+        5 000 lignes x   500 operations ->     274 ms
+       20 000 lignes x 2 000 operations ->   4 675 ms   <-- inacceptable
+
+    Un apply termine qui se fige cinq secondes pour calculer un verdict finit
+    debranche, et l'instrument avec. La version par ANCETRES rend 48 ms sur le
+    meme cas — la profondeur d'un chemin est bornee (~10), le nombre
+    d'operations ne l'est pas.
+
+    Le seuil est volontairement LARGE (1 s contre 48 ms mesures) : ce test ne
+    mesure pas une performance, il refuse un CHANGEMENT D'ORDRE DE GRANDEUR. La
+    version quadratique met 4,7 s ici — meme sur un runner trois fois plus lent,
+    les deux restent separes sans ambiguite.
+    """
+
+    def test_vingt_mille_lignes_et_deux_mille_operations_restent_sous_la_seconde(self):
+        import time
+
+        plan = {f"r{i}": f"D:/films/Film {i}" for i in range(20_000)}
+        ops = [{"op_type": "QUARANTINE_DIR", "src_path": f"D:/films/Film {i}"} for i in range(2_000)]
+
+        debut = time.perf_counter()
+        verifier_operations_qui_emportent_d_autres_lignes(ops, plan)
+        ecoule = time.perf_counter() - debut
+
+        self.assertLess(
+            ecoule,
+            1.0,
+            f"{ecoule:.2f} s — le cout a change d'ordre de grandeur (quadratique ?). "
+            "Mesure de reference : 0,05 s par ancetres, 4,7 s paire a paire.",
+        )
+
+    def test_et_la_detection_reste_VIVANTE_a_cette_echelle(self):
+        """Sans ceci, rendre `[]` tout de suite passerait le test de cout."""
+        plan = {f"r{i}": f"D:/films/Film {i}" for i in range(20_000)}
+        plan["intrus-1"] = "D:/films/Film 7"
+        ops = [{"op_type": "QUARANTINE_DIR", "src_path": f"D:/films/Film {i}"} for i in range(2_000)]
+        incs = verifier_operations_qui_emportent_d_autres_lignes(ops, plan)
+        self.assertEqual(len(incs), 1, "l'optimisation a rendu le detecteur muet")
+        self.assertEqual(incs[0].journal["lignes_emportees"], ["intrus-1", "r7"])
