@@ -98,6 +98,15 @@ class DEBUG_TMDB_NE_FUITE_PAS_LA_CLE_Tests(unittest.TestCase):
     """Le journal TMDb ne doit jamais porter une clé d'API en clair."""
 
     def _ecrire(self, message: str, tmp: Path) -> str:
+        # Construction MINIMALE volontaire : `_debug` n'a besoin que de
+        # `cache_path`, et un `TmdbClient` complet exigerait une configuration,
+        # un cache et un disjoncteur qui n'ont rien a voir avec ce qu'on mesure.
+        #
+        # Sourcery signale le couplage a la structure interne. Il est reel, mais
+        # il echoue BRUYAMMENT : si `_debug` se met a lire un autre attribut,
+        # `object.__new__` le laisse absent et le test leve `AttributeError`. Un
+        # client complet, lui, fournirait silencieusement toutes les valeurs par
+        # defaut et masquerait le changement. Ici, la fragilite est le signal.
         client = object.__new__(TmdbClient)
         client.cache_path = tmp / "tmdb_cache.json"
         with mock.patch.dict("os.environ", {"CINESORT_DEBUG": "1"}, clear=False):
