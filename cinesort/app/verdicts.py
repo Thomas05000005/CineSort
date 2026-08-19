@@ -123,12 +123,37 @@ def _compter_par_type(operations: Iterable[Mapping[str, Any]]) -> Dict[str, int]
 def _en_echec(op: Mapping[str, Any]) -> bool:
     """Une operation porte-t-elle la marque d'un echec ?
 
-    Deux formes coexistent dans ce depot : `undo_status == "FAILED"` sur les
-    lignes de `apply_operations`, et une cle `error` non vide sur les evenements
-    de `apply_audit.jsonl`. Les deux comptent.
+    LES FORMES SONT MESUREES, PAS SUPPOSEES
+    ---------------------------------------
+    Une premiere version de cette fonction cherchait une cle `error`. Elle
+    passait ses 15 tests et tuait ses mutants — parce que les tests lui
+    fournissaient la forme que j'avais IMAGINEE. Confrontee aux deux sources
+    reelles, elle etait MUETTE sur les deux. Un detecteur muet est pire
+    qu'absent : il fait croire que le controle a eu lieu.
+
+    Les deux sources, relevees dans le code qui les ECRIT :
+
+    1. `apply_operations` (SQLite, `list_apply_operations`). La regle qui fait
+       autorite est celle de `apply_batches_reconciliation.py:247`, qui s'en
+       sert pour classer un batch `ROLLED_BACK` :
+       *`error_message` non vide OU `undo_status='FAILED'`*.
+       A noter — et c'est une limite a connaitre : `record_apply_op` n'a aucun
+       parametre d'erreur et n'est appelee qu'APRES un move reussi. Cette table
+       ne porte donc quasiment que des succes ; c'est `apply_audit.jsonl` qui
+       voit les echecs.
+    2. `apply_audit.jsonl` (`read_apply_audit`). L'echec n'y est pas une CLE
+       mais un TYPE d'evenement : `ApplyAuditLogger.error()` ecrit
+       `{"event": "error", "context": ..., "message": ...}`.
+
+    La cle `error` nue reste acceptee : c'est la forme des payloads internes, et
+    la retirer ferait de ce troisieme cas un silence de plus.
     """
     try:
         if str(op.get("undo_status") or "") == "FAILED":
+            return True
+        if str(op.get("error_message") or ""):
+            return True
+        if str(op.get("event") or "") == "error":
             return True
         return bool(op.get("error"))
     except AttributeError:
@@ -139,13 +164,33 @@ def comparer_annonce_et_journal(
     annonce: Mapping[str, Any],
     operations: Sequence[Mapping[str, Any]],
     *,
+    evenements_audit: Sequence[Mapping[str, Any]] = (),
     dry_run: bool = False,
 ) -> Verdict:
     """Compare le payload rendu a l'utilisateur au journal des operations.
 
+    DEUX SOURCES, ET IL EN FAUT DEUX
+    --------------------------------
+    Ce depot journalise l'apply a deux endroits qui ne voient PAS la meme chose,
+    et n'ont meme pas la meme forme :
+
+    - `operations` — les lignes SQLite `apply_operations`, cle `op_type` en
+      MAJUSCULES (`MOVE_FILE`). `record_apply_op` n'est appelee qu'APRES un move
+      reussi et n'a aucun parametre d'erreur : cette table dit ce qui a BOUGE,
+      presque jamais ce qui a echoue.
+    - `evenements_audit` — les lignes de `apply_audit.jsonl` (`read_apply_audit`),
+      cle `event` en minuscules (`op_move_file`), et surtout `event="error"`,
+      seule trace des echecs, ecrite en trois endroits de `apply_core`.
+
+    N'en brancher qu'une rendrait l'instrument muet sur la moitie du probleme :
+    les comptes sans les echecs, ou les echecs sans les comptes. Les echecs sont
+    donc cherches dans les DEUX, les comptes seulement dans `operations` — seule
+    source a porter un `op_type` exploitable.
+
     Args:
         annonce: le payload d'apply (`ApplyResult` aplati, ou le dict rendu).
-        operations: les operations REELLEMENT journalisees pour ce batch.
+        operations: les lignes `apply_operations` du batch.
+        evenements_audit: les evenements `apply_audit.jsonl` du batch.
         dry_run: en apercu, rien n'est journalise. Les comparaisons de compte
             sont alors sans objet, et sans ce garde un dry-run leverait une
             incoherence a chaque fois — le genre de faux positif qui fait
@@ -164,7 +209,9 @@ def comparer_annonce_et_journal(
             return 0
 
     erreurs_annoncees = _entier("errors")
-    ops_en_echec = sum(1 for op in operations or () if _en_echec(op))
+    ops_en_echec = sum(1 for op in operations or () if _en_echec(op)) + sum(
+        1 for ev in evenements_audit or () if _en_echec(ev)
+    )
 
     # --- 1. UN SUCCES FRANC QUI CACHE DES ECHECS -------------------------
     # C'est #1062 mot pour mot : « 0 fichier(s) supprime(s) » affiche en VERT

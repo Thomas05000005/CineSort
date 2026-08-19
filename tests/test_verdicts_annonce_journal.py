@@ -17,6 +17,7 @@ et le cablage se mute separement.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from cinesort.app import verdicts
 from cinesort.app.verdicts import (
@@ -217,6 +218,129 @@ class LeDetecteurNEstPasMuetTests(unittest.TestCase):
         self.assertTrue(verdicts._en_echec({"error": "boom"}))
         self.assertFalse(verdicts._en_echec({"undo_status": "DONE"}))
         self.assertFalse(verdicts._en_echec({}))
+
+
+class LaFormeVientDuCODEDEPRODUCTIONTests(unittest.TestCase):
+    """Le test qui aurait attrape l'erreur que les 15 autres ont laissee passer.
+
+    Une premiere version de `_en_echec` cherchait une cle `error`. Elle passait
+    tous les tests et tuait tous ses mutants — parce que MOI qui ecrivais les
+    tests fournissais la forme que MOI j'avais imaginee. Confrontee aux deux
+    sources reelles, elle etait muette sur les deux :
+
+        apply_operations   -> `error_message`, pas `error`
+        apply_audit.jsonl  -> `event="error"`, un TYPE, pas une cle
+
+    Un detecteur muet est pire qu'absent : il fait croire que le controle a eu
+    lieu. La seule parade est de ne jamais fabriquer la forme soi-meme. Ici les
+    evenements sont ecrits par `ApplyAuditLogger` et relus par
+    `read_apply_audit` — les deux fonctions de production. Si leur format
+    change, ce test rougit ; un dict ecrit a la main, lui, resterait vert pour
+    toujours.
+    """
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self._td = tempfile.mkdtemp(prefix="cinesort_verdict_")
+        self.run_dir = Path(self._td)
+        self.addCleanup(shutil.rmtree, self._td, ignore_errors=True)
+
+    def _relire(self, ecrire) -> list:
+        """Ecrit via le logger de production, relit via le lecteur de production."""
+        from cinesort.app.apply_audit import ApplyAuditLogger, audit_path_for_run, read_apply_audit
+
+        with ApplyAuditLogger(audit_path_for_run(self.run_dir), batch_id="b1", run_id="r1") as journal:
+            ecrire(journal)
+        return read_apply_audit(self.run_dir, batch_id="b1")
+
+    def test_l_alller_retour_produit_bien_des_evenements(self):
+        """Sans ce garde, un journal casse rendrait [] et TOUT le reste de cette
+        classe serait vert sans rien avoir mesure."""
+        evs = self._relire(lambda j: j.error(context="move", message="PermissionError"))
+        self.assertTrue(evs, "le journal de production n'a rien rendu : la mesure serait vide")
+        self.assertEqual([e.get("event") for e in evs], ["error"])
+
+    def test_un_echec_REEL_est_reconnu(self):
+        """C'est le cas exact qui echouait : `event="error"`, aucune cle `error`."""
+        evs = self._relire(lambda j: j.error(context="move", message="PermissionError"))
+        self.assertNotIn("error", evs[0], "la forme reelle n'a PAS de cle `error` — c'est tout le piege")
+        self.assertTrue(verdicts._en_echec(evs[0]))
+
+    def test_1062_de_bout_en_bout_sur_la_forme_REELLE(self):
+        """300 echecs ecrits par le code de production, un payload `errors: 0`."""
+
+        def _ecrire(j):
+            for i in range(300):
+                j.error(context="move", message="PermissionError", row_id=f"r{i}")
+
+        evs = self._relire(_ecrire)
+        v = comparer_annonce_et_journal({"errors": 0, "quarantined": 0}, [], evenements_audit=evs)
+        self.assertFalse(v.coherent, "300 erreurs REELLES et le verdict ne dit rien")
+        inc = next(i for i in v.incoherences if i.code == "succes_annonce_malgre_des_echecs")
+        self.assertEqual(inc.journal, {"operations_en_echec": 300})
+
+    def test_un_deplacement_REUSSI_n_est_pas_pris_pour_un_echec(self):
+        """Contre-test : `op_move_file` porte `reversible`, `sha1`, `size`. Si
+        l'une de ces cles etait prise pour une marque d'echec, chaque apply sain
+        leverait — le faux positif qui tue l'outil."""
+        evs = self._relire(lambda j: j.op_move_file(row_id="r1", src="a.mkv", dst="b.mkv", sha1="deadbeef", size=42))
+        self.assertFalse(verdicts._en_echec(evs[0]), f"faux positif sur un move reussi : {evs[0]}")
+
+    def test_les_conflits_et_skips_ne_sont_pas_des_echecs(self):
+        """`op_skip` et `conflict` sont des issues NORMALES : les compter comme
+        echecs ferait rougir des apply parfaitement sains."""
+
+        def _ecrire(j):
+            j.skip(row_id="r1", reason="user_rejected")
+            j.conflict(row_id="r2", src="a", dst="b", conflict_type="dst_exists", resolution="quarantine")
+
+        for ev in self._relire(_ecrire):
+            self.assertFalse(verdicts._en_echec(ev), f"pris a tort pour un echec : {ev}")
+
+
+class LaFormeSQLiteEstCELLEDuDEPOTTests(unittest.TestCase):
+    """L'autre source : `apply_operations`, dont la regle d'echec fait autorite.
+
+    `apply_batches_reconciliation.py` classe un batch `ROLLED_BACK` sur
+    *`error_message` non vide OU `undo_status='FAILED'`*. C'est la meme regle qui
+    doit valoir ici — deux definitions de « echec » dans un meme depot, et l'une
+    des deux se tait forcement au mauvais moment.
+    """
+
+    #: Les cles EXACTES que `list_apply_operations` construit (apply.py:463).
+    LIGNE_TYPE = {
+        "id": 1,
+        "batch_id": "b1",
+        "op_index": 0,
+        "op_type": "MOVE_FILE",
+        "src_path": "a",
+        "dst_path": "b",
+        "reversible": 1,
+        "undo_status": "PENDING",
+        "error_message": "",
+    }
+
+    def test_une_ligne_NOMINALE_n_est_pas_un_echec(self):
+        self.assertFalse(verdicts._en_echec(dict(self.LIGNE_TYPE)))
+
+    def test_error_message_non_vide_est_un_echec(self):
+        """C'est la cle que la premiere version ignorait."""
+        self.assertTrue(verdicts._en_echec({**self.LIGNE_TYPE, "error_message": "PermissionError"}))
+
+    def test_undo_status_FAILED_est_un_echec(self):
+        self.assertTrue(verdicts._en_echec({**self.LIGNE_TYPE, "undo_status": "FAILED"}))
+
+    def test_les_comptes_se_lisent_bien_sur_CETTE_source(self):
+        """`op_type` en MAJUSCULES ici, `event` en minuscules dans le JSONL :
+        seule cette source-ci porte de quoi compter."""
+        v = comparer_annonce_et_journal(
+            {"errors": 0, "quarantined": 0},
+            [{**self.LIGNE_TYPE, "op_type": "QUARANTINE_FILE"}],
+        )
+        self.assertEqual(v.comptes_journal, {"QUARANTINE_FILE": 1})
+        self.assertIn("compte_de_quarantaine_diverge", {i.code for i in v.incoherences})
 
 
 if __name__ == "__main__":
