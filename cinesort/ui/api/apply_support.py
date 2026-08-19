@@ -32,7 +32,9 @@ from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.app.verdicts import (
+    STATUTS_UNDO,
     comparer_annonce_et_journal,
+    comparer_undo_annonce_et_journal,
     verifier_granularite_des_operations,
     verifier_operations_qui_emportent_d_autres_lignes,
 )
@@ -1417,6 +1419,59 @@ def _extract_undo_context(preview: Dict[str, Any], batch: Any) -> Dict[str, Any]
     }
 
 
+def _comptes_undo_par_statut(operations: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
+    """Compte les operations par `undo_status`, statuts connus a zero inclus.
+
+    Les zeros explicites comptent : sans eux, un statut ABSENT et un statut a
+    zero se confondraient, et le delta d'un statut apparu en cours d'undo serait
+    illisible.
+    """
+    comptes: Dict[str, int] = dict.fromkeys(STATUTS_UNDO, 0)
+    for op in operations or ():
+        try:
+            statut = str(op.get("undo_status") or "PENDING")
+        except AttributeError:
+            continue
+        comptes[statut] = comptes.get(statut, 0) + 1
+    return comptes
+
+
+def _verdict_undo(
+    payload: Dict[str, Any],
+    api: Any,
+    *,
+    store: Any,
+    batch_id: Any,
+    avant: Dict[str, int],
+    log_fn: Callable[[str, str], None],
+) -> Dict[str, Any]:
+    """Ferme le triangle sur l'UNDO, seconde route la plus destructive.
+
+    Le journal est RELU apres la boucle : `undo_status` s'ecrit au fil de l'eau
+    et `_mark_undo_status` avale volontairement `sqlite3.Error`. Comparer les
+    deltas avant/apres est donc le seul moyen de voir qu'un statut n'a pas ete
+    persiste — et un statut manquant signifie que l'operation sera REJOUEE au
+    prochain essai, l'undo complet ne filtrant pas sur ce champ.
+
+    Meme regle que sur l'apply : ne jamais transformer un undo disque REUSSI en
+    erreur, mais ne jamais laisser un controle impossible passer pour un
+    controle vert.
+    """
+    try:
+        apres = _comptes_undo_par_statut(store.apply.list_apply_operations(batch_id=str(batch_id)) or [])
+        incoherences = comparer_undo_annonce_et_journal(payload.get("counts") or {}, avant, apres)
+    except Exception as exc:  # noqa: BLE001 - le controle ne doit jamais casser l'undo
+        log_fn("WARN", f"Verdict undo NON CALCULE (batch={batch_id}) : {exc}")
+        _log.debug("verdict undo indisponible", exc_info=True)
+        return payload
+    if not incoherences:
+        return payload
+    payload["verdict"] = {"coherent": False, "incoherences": [i.as_dict() for i in incoherences]}
+    log_fn("WARN", f"INCOHERENCE undo batch={batch_id} : {json.dumps(payload['verdict'], ensure_ascii=False)}")
+    _publier_incoherence(api, nombre=len(incoherences), batch_id=batch_id)
+    return payload
+
+
 def _execute_and_finalize_undo(
     api: Any,
     run_id: str,
@@ -1435,6 +1490,7 @@ def _execute_and_finalize_undo(
     log_fn = api._file_logger(run_paths)
     log_fn("INFO", f"=== UNDO start batch={batch_id} run_id={run_id} ===")
 
+    _statuts_avant = _comptes_undo_par_statut(reversible_ops)  # photo AVANT, sans lecture de plus
     undo_counts = _execute_undo_ops(
         api,
         reversible_ops,
@@ -1562,7 +1618,7 @@ def _execute_and_finalize_undo(
             },
         )
 
-    return {
+    _payload: Dict[str, Any] = {
         "ok": True,
         "run_id": run_id,
         "batch_id": batch_id,
@@ -1589,6 +1645,7 @@ def _execute_and_finalize_undo(
             else (t("errors.undo_done") if failed == 0 else t("errors.undo_done_with_anomalies"))
         ),
     }
+    return _verdict_undo(_payload, api, store=store, batch_id=batch_id, avant=_statuts_avant, log_fn=log_fn)
 
 
 @requires_valid_run_id

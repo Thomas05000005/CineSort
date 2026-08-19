@@ -53,7 +53,7 @@ _FACADES = pathlib.Path("cinesort/ui/api/facades")
 MARQUEURS_DESTRUCTIFS = ("dry_run", "confirmation")
 
 #: Marge ZERO. Ce nombre ne peut que descendre.
-NON_COUVERTES_MAX = 9
+NON_COUVERTES_MAX = 8
 
 
 def _routes_destructives() -> set[str]:
@@ -86,12 +86,33 @@ def _prouver_run_facade_apply() -> bool:
     return "verdict" in payload
 
 
+def _prouver_run_facade_undo_last_apply() -> bool:
+    """Execute le VRAI corps d'undo et exige qu'il produise un verdict.
+
+    Meme exigence que pour l'apply : si l'appel disparait de
+    `_execute_and_finalize_undo`, ou si la photo `avant` cesse d'etre prise, la
+    preuve echoue et la route cesse d'etre declarable comme couverte.
+    """
+    from tests.test_verdicts_undo import (
+        LE_CORPS_D_UNDO_APPELLE_VRAIMENT_LE_VERDICT_Tests as Reel,
+    )
+
+    cas = Reel("test_un_undo_REEL_incoherent_porte_son_verdict")
+    payload = cas._payload_d_un_undo_reel(
+        [{"undo_status": "PENDING"}] * 3,
+        Reel.COMPTES,
+        [{"undo_status": "DONE"}, {"undo_status": "PENDING"}, {"undo_status": "PENDING"}],
+    )
+    return "verdict" in payload
+
+
 #: Route -> preuve EXECUTABLE qu'elle produit reellement un verdict.
 #:
 #: C'est ce dictionnaire, et non une liste de noms, qui fait foi. Y ajouter une
 #: route sans ecrire sa preuve fait rougir l'assertion 4.
 PREUVES: Dict[str, Callable[[], bool]] = {
     "RunFacade.apply": _prouver_run_facade_apply,
+    "RunFacade.undo_last_apply": _prouver_run_facade_undo_last_apply,
 }
 
 ROUTES_COUVERTES: frozenset[str] = frozenset(PREUVES)
@@ -185,10 +206,22 @@ class LaPremisseEstTesteeTests(unittest.TestCase):
 
         from cinesort.ui.api import apply_support
 
-        with mock.patch.object(apply_support, "_avec_verdict", side_effect=lambda payload, **_: payload):
+        with mock.patch.object(apply_support, "_avec_verdict", side_effect=lambda payload, *_a, **_k: payload):
             self.assertFalse(
                 _prouver_run_facade_apply(),
                 "la preuve rend True alors que le verdict est neutralise : elle ne prouve rien",
+            )
+
+    def test_la_preuve_d_undo_SAIT_dire_NON(self):
+        """Meme exigence pour la seconde route couverte."""
+        from unittest import mock
+
+        from cinesort.ui.api import apply_support
+
+        with mock.patch.object(apply_support, "_verdict_undo", side_effect=lambda payload, *_a, **_k: payload):
+            self.assertFalse(
+                _prouver_run_facade_undo_last_apply(),
+                "la preuve d'undo rend True alors que le verdict est neutralise",
             )
 
     def test_une_route_SANS_preuve_ferait_bien_rougir(self):
