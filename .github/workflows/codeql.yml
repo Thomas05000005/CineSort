@@ -64,9 +64,12 @@ jobs:
         uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           languages: ${{ matrix.language }}
-          # security-extended : requetes additionnelles au-dela du default
-          # (utile sur du code Python qui manipule fichiers/subprocess/REST)
-          queries: +security-extended
+          # `queries: +security-extended` a MIGRE dans le fichier de config, qui
+          # le reprend a l'identique. Il fallait un fichier pour charger le model
+          # pack local (`packs:`), et le laisser ici EN PLUS aurait duplique un
+          # reglage a deux endroits — la forme exacte de derive que ce depot a
+          # deja payee sur la version de ruff, epinglee en 5 points.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4

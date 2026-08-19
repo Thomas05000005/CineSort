@@ -1,0 +1,18 @@
+# `scrub_secrets` est une BARRIERE : ce qui en sort ne porte plus de secret.
+#
+# ATTENTION, point non tranche a l'ecriture : le `kind` attendu par
+# `barrierModel` pour la famille « clear-text storage/logging » n'est pas
+# documente publiquement. Les deux valeurs plausibles sont declarees ci-dessous ;
+# une valeur inconnue est IGNOREE par CodeQL (elle ne casse pas l'analyse), donc
+# le sur-declarer est sans risque et la CI tranchera laquelle mord.
+#
+# Si aucune ne mord, ce fichier reste vrai mais inoperant : il faudra alors
+# passer par une requete personnalisee, et ce commentaire dit pourquoi.
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierModel
+    data:
+      - ["cinesort.infra.log_scrubber", "Member[scrub_secrets].ReturnValue", "clear-text-storage"]
+      - ["cinesort.infra.log_scrubber", "Member[scrub_secrets].ReturnValue", "clear-text-logging"]
+      - ["cinesort.infra.log_scrubber", "Member[scrub_secrets].ReturnValue", "sensitive-data"]

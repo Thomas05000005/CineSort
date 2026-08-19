@@ -1,0 +1,22 @@
+# Model pack CineSort : declare `scrub_secrets` comme BARRIERE d'assainissement.
+#
+# POURQUOI. `cinesort/infra/log_scrubber.py::scrub_secrets` retire les cles
+# d'API, jetons et mots de passe d'une chaine avant ecriture (6 motifs, cf. le
+# module). CodeQL ne peut pas le deviner : il voit une chaine « sensible » qui
+# atteint une ecriture fichier, et leve `py/clear-text-storage-sensitive-data`.
+#
+# Mesure du 2026-08-19 : l'alerte etait DEJA OUVERTE sur `main`
+# (`cinesort/infra/tmdb_client.py:225`), a l'endroit ou le message partait
+# REELLEMENT en clair. Le correctif qui pose le scrub a decale la ligne, et
+# CodeQL l'a comptee comme une alerte NEUVE — la meme, deplacee, desormais sans
+# fuite reelle.
+#
+# Declarer la barriere est donc l'enonce VRAI, et il vaut pour les ~9 usages de
+# `scrub_secrets`, pas seulement pour cette ligne.
+library: true
+name: cinesort/python-models
+version: 1.0.0
+extensionTargets:
+  codeql/python-all: "*"
+dataExtensions:
+  - models/**/*.yml
