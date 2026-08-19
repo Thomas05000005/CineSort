@@ -222,7 +222,14 @@ class TmdbClient:
             ts = time.strftime("%Y-%m-%d %H:%M:%S")
             debug_path = self.cache_path.parent / "debug_tmdb.log"
             with open(debug_path, "a", encoding="utf-8") as f:
-                f.write(f"[{ts}] {message}\n")
+                # SCRUB OBLIGATOIRE. Les 16 sites d'appel de `_debug` sont TOUS
+                # des chemins d'ECHEC, du type `... error={exc}` : `exc` est une
+                # exception de client HTTP dont la representation porte l'URL
+                # complete, `?api_key=...` compris. Ce fichier ne passe par AUCUN
+                # filtre stdlib — sans cet appel, la cle TMDb/OMDb de
+                # l'utilisateur est ecrite EN CLAIR sur son disque (CWE-532).
+                # `scrub_secrets` est deja importe (l. 20) et ne leve jamais.
+                f.write(f"[{ts}] {scrub_secrets(message)}\n")
         except OSError:
             return
 
