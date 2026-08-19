@@ -11,7 +11,7 @@ import sqlite3
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import requests
 
@@ -31,6 +31,11 @@ from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
+from cinesort.app.verdicts import (
+    comparer_annonce_et_journal,
+    verifier_granularite_des_operations,
+    verifier_operations_qui_emportent_d_autres_lignes,
+)
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
@@ -3083,6 +3088,159 @@ def apply_changes(
         log_context.reset_run_id(_jeton_run)
 
 
+def _granularites_observees(operations: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Regarde le DISQUE, juste ce qu'il faut : la destination est-elle un dossier ?
+
+    Un `is_dir()` par operation de deplacement, aucune lecture de contenu, aucun
+    hachage. C'est la seule E/S de tout le controle, et elle est bornee par le
+    nombre d'operations du batch — la ou une photo avant/apres du sous-arbre
+    aurait exige de parcourir la bibliotheque.
+
+    Une destination illisible (droits, disparue, chemin invalide) rend
+    `dst_est_dossier` ABSENT plutot que `False` : l'absence de mesure n'est pas
+    une mesure negative, et `verifier_granularite_des_operations` ignore ce cas.
+    """
+    observees: List[Dict[str, Any]] = []
+    for op in operations or ():
+        try:
+            op_type = str(op.get("op_type") or "")
+            dst = str(op.get("dst_path") or "")
+        except AttributeError:
+            continue
+        if not op_type.endswith("_FILE") or not dst:
+            continue
+        obs: Dict[str, Any] = {"op_type": op_type, "dst_path": dst}
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            # Cle ABSENTE et non False : une destination illisible n'est pas une
+            # destination qui n'est pas un dossier.
+            #
+            # HONNETETE SUR LA PORTEE : aujourd'hui les deux formes produisent le
+            # MEME verdict, `verifier_granularite_des_operations` exigeant
+            # `is True` pour accuser. Le mutant qui pose `False` ici est donc
+            # EQUIVALENT PAR CONSTRUCTION, et aucun test ne peut l'attraper —
+            # c'est mesure, pas suppose. La distinction est conservee pour le
+            # lecteur du verdict, a qui « je n'ai pas pu mesurer » et « ce n'est
+            # pas un dossier » ne disent pas la meme chose.
+            obs["dst_est_dossier"] = Path(dst).is_dir()
+        except OSError:
+            pass
+        observees.append(obs)
+    return observees
+
+
+def _publier_incoherence(api: Any, *, nombre: int, batch_id: Any) -> None:
+    """Fait remonter l'incoherence a un HUMAIN, pas seulement au journal.
+
+    Une cle de payload que personne n'affiche serait un silence de plus — et
+    c'est MESURE, pas suppose : aucun fichier du front ne lit `verdict`, pas plus
+    qu'il ne lit `journal_warning` ni `undo_available`. Le centre de
+    notifications est le seul canal qui SURVIT a la fermeture de l'ecran
+    d'apply, et son miroir est inconditionnel ; c'est deja le choix fait plus
+    haut pour l'undo indisponible.
+
+    Un echec de publication ne doit jamais transformer un apply disque REUSSI en
+    HTTP 500 — ce serait re-creer le defaut F11.
+    """
+    try:
+        api._notify.notify(
+            "error",
+            t("notifications.title_incoherence_apply"),
+            t("notifications.incoherence_apply_body", nombre=int(nombre), batch=str(batch_id or "?")),
+            level="error",
+        )
+    except Exception:  # noqa: BLE001 - une notification ne casse jamais un apply reussi
+        _log.debug("notification 'incoherence annonce/journal' non publiee", exc_info=True)
+
+
+def _avec_verdict(
+    payload: Dict[str, Any],
+    api: Any,
+    *,
+    store: Any,
+    run_paths: Any,
+    rows: Any,
+    dry_run: bool,
+    log_fn: Callable[[str, str], None],
+) -> Dict[str, Any]:
+    """Ferme le premier cote du triangle : ce qu'on ANNONCE contre ce qu'on a INSCRIT.
+
+    Sur la semaine du 2026-08-13, quatre defauts de la meme forme ont ete
+    trouves — a la main, apres coup, jamais par un journal : *ce que
+    l'application annonce n'est pas ce qu'elle a fait* (#1103, #1097, #1099,
+    #1062). L'invariant qui les attrape existait, mais reinvente endpoint par
+    endpoint et toujours APRES l'incident. Cette fonction le pose une fois, au
+    seul endroit ou les deux termes se rencontrent.
+
+    Les deux journaux sont lus, et il en faut deux : `apply_operations` dit ce
+    qui a BOUGE, `apply_audit.jsonl` est le seul a voir les ECHECS.
+
+    UN ECHEC NE DOIT PAS DEVENIR UN SUCCES SILENCIEUX — dans les deux sens :
+
+    - calculer le verdict ne doit jamais transformer un apply disque REUSSI en
+      HTTP 500 (ce serait re-creer le defaut F11), d'ou le `except` large ;
+    - mais un verdict qu'on n'a PAS PU calculer n'est pas un verdict vert. Il
+      part en WARN nomme, jamais en silence.
+
+    Les deux termes se lisent dans le `payload` lui-meme (`result`,
+    `apply_batch_id`) : les repasser en parametres serait offrir a ce controle
+    une source differente de celle rendue a l'utilisateur, donc la possibilite
+    de valider autre chose que ce qui est affiche.
+
+    Enrichit `payload["verdict"]` SEULEMENT en cas d'incoherence — sur le modele
+    de `journal_warning` juste au-dessus — puis rend le payload.
+    """
+    apply_batch_id = payload.get("apply_batch_id")
+    # COUT : les deux journaux sont lus INTEGRALEMENT, une fois, a la toute fin
+    # de l'apply — apres que le disque a fini de bouger. Sur un apply de 500
+    # films cela fait quelques milliers de lignes ; c'est assume.
+    #
+    # `read_apply_audit` accepte un `limit`, volontairement NON utilise : borner
+    # la lecture ferait manquer les erreurs au-dela de la borne, et un verdict
+    # calcule sur un echantillon serait un faux vert. Si le volume devenait
+    # ingerable, l'echec de lecture partirait en WARN « NON CALCULE » — un
+    # silence assume plutot qu'une conclusion fausse.
+    try:
+        operations: List[Dict[str, Any]] = []
+        evenements: List[Dict[str, Any]] = []
+        if apply_batch_id is not None:
+            operations = list(store.apply.list_apply_operations(batch_id=apply_batch_id) or [])
+            evenements = list(read_apply_audit(run_paths.run_dir, batch_id=apply_batch_id) or [])
+        verdict = comparer_annonce_et_journal(
+            dict(payload.get("result") or {}),
+            operations,
+            evenements_audit=evenements,
+            dry_run=bool(dry_run),
+        )
+        # #1103 : une operation comptee UNE qui emporte tout un dossier partage.
+        # On passe TOUTES les lignes du plan, pas seulement celles qu'on
+        # applique — c'est justement une ligne non appliquee qui se faisait
+        # emporter.
+        verdict.incoherences.extend(
+            verifier_operations_qui_emportent_d_autres_lignes(
+                operations,
+                {str(getattr(r, "row_id", "")): str(getattr(r, "folder", "")) for r in rows or ()},
+            )
+        )
+        verdict.incoherences.extend(verifier_granularite_des_operations(_granularites_observees(operations)))
+    except Exception as exc:  # noqa: BLE001 - le controle ne doit jamais casser l'apply
+        # Le silence serait le vrai defaut : sans cette ligne, un journal
+        # illisible rendrait un apply indistinguable d'un apply verifie.
+        log_fn("WARN", f"Verdict annonce/journal NON CALCULE (batch={apply_batch_id}) : {exc}")
+        _log.debug("verdict annonce/journal indisponible", exc_info=True)
+        return payload
+    if verdict.coherent:
+        return payload
+    # WARN et non ERROR : l'apply lui-meme a pu reussir. C'est la COHERENCE de
+    # ce qu'on en dit qui est en cause, et c'est deja beaucoup.
+    log_fn(
+        "WARN",
+        f"INCOHERENCE annonce/journal batch={apply_batch_id} : {json.dumps(verdict.as_dict(), ensure_ascii=False)}",
+    )
+    payload["verdict"] = verdict.as_dict()
+    _publier_incoherence(api, nombre=len(verdict.incoherences), batch_id=apply_batch_id)
+    return payload
+
+
 def _apply_changes_estampille(
     api: Any,
     run_id: str,
@@ -3384,7 +3542,7 @@ def _apply_changes_body(
                 # Un echec de notification ne doit pas transformer un apply
                 # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
                 _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
-        return payload
+        return _avec_verdict(payload, api, store=store, run_paths=run_paths, rows=rows, dry_run=dry_run, log_fn=log_fn)
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]

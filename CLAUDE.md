@@ -369,6 +369,71 @@ inclure son extinction. Un `Get-Process python` en debut de session longue les
 revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
 non encore mesuree, pour le `WinError 5` du point 3.
 
+### Le triangle : annonce / journal / disque
+
+Quatre defauts de la MEME forme sur la semaine du 2026-08-13 au 2026-08-19 :
+*ce que l'application annonce n'est pas ce qu'elle a fait* (#1103, #1097, #1099,
+#1062). `cinesort/app/verdicts.py` pose l'invariant generique qui manquait.
+
+**Ce qu'il couvre REELLEMENT : #1103 seul.** La premiere redaction annoncait
+« deux defauts sur quatre » — c'etait faux, et le detail compte : le payload de
+#1062 portait `errors: 300`, il etait HONNETE, c'est l'ecran qui ne lisait que
+`deleted` ; #1099 tronquait le plan AVANT l'apply ; #1097 est l'ecran des
+reglages. Ne pas rouvrir ce chantier en croyant ces trois-la gardes.
+
+Quatre choses a savoir avant d'y toucher :
+
+1. **Deux journaux, et il en faut deux.** `apply_operations` (SQLite, `op_type`
+   en MAJUSCULES) dit ce qui a BOUGE ; `apply_audit.jsonl` (`event` en
+   minuscules) voit les ECHECS de l'apply. Brancher une seule source rend
+   l'instrument muet sur la moitie du probleme — c'est arrive : la premiere
+   version cherchait une cle `error` qui n'existe dans NI l'une NI l'autre.
+   Quinze tests verts, tous leurs mutants morts, zero detection.
+2. **#1103 se voit sans lire le disque.** Le plan prevoyait une photo
+   avant/apres ; `_snapshot_tree` hache chaque fichier, impensable sur une
+   bibliotheque. Le mecanisme etait geometrique — un dossier PARTAGE entre
+   plusieurs lignes du plan — donc une comparaison de chemins suffit, et elle
+   reste vraie APRES coup, quand la source n'existe plus. Un second controle,
+   la GRANULARITE (`op_type` dit FICHIER, destination est un DOSSIER), attrape
+   l'autre moitie : contrairement a ce que j'avais d'abord ecrit, l'`op_type`
+   de #1103 N'ETAIT PAS honnete — l'issue dit `QUARANTINE_FILE`.
+3. **Un invariant peut etre correct et INATTEIGNABLE.**
+   `succes_annonce_malgre_des_echecs` ne peut pas se declencher : les trois
+   `audit_logger.error` d'`apply_core` incrementent tous `res.errors` juste
+   avant, et `append_apply_operation` n'a aucun parametre d'erreur. Il est
+   conserve en defense en profondeur et ETIQUETE comme tel dans le module. Ne
+   pas le presenter comme le cœur du dispositif.
+4. **Le cliquet est la vraie garantie.** `test_cliquet_couverture_triangle.py`
+   compte les routes destructives — methodes de facade portant `dry_run` **ou**
+   `confirmation`, relevees a l'AST — qui echappent au verdict. Le marqueur
+   `confirmation` a ete ajoute apres coup : sans lui, `reset_all_user_data`, qui
+   efface TOUTES les donnees, etait hors du denominateur. Marge zero.
+
+**Trois pieges de methode, tous payes dans ce chantier :**
+
+- **La FORME IMAGINEE.** J'ai invente la forme d'une donnee quatre fois (cle
+  `error` inexistante ; `conflict(kind=)` qui n'existe pas ; quatre compteurs de
+  deplacement sur DIX-HUIT ; `res.quarantined` compare a une population
+  disjointe). Chaque fois, mes propres tests me la resservaient et la mutation
+  tuait proprement. Parade : faire produire la fixture par le code de PRODUCTION
+  (`ApplyAuditLogger` -> `read_apply_audit`), et poser un test de DERIVE sur
+  toute liste recopiee depuis un dataclass.
+- **Toute reecriture INVALIDE la batterie de mutation qui la precede.** Le
+  correctif de performance a rendu un helper MORT ; ses cinq assertions
+  restaient vertes, et la batterie jouee avant validait donc du code mort.
+- **Tester la decision ne dit RIEN du site d'appel.** Trois fois de suite, un
+  mutant qui supprimait un appel a survecu. Il faut executer le VRAI corps de la
+  fonction appelante, et eprouver aussi ses ARGUMENTS (passer `rows=()` au lieu
+  de `rows=rows` laissait la batterie entiere verte).
+
+**Ou l'incoherence atterrit** : `payload["verdict"]` n'est lu par AUCUN ecran —
+pas plus que `journal_warning` ni `undo_available`, poses par des correctifs
+anterieurs pour la meme raison. Le canal qui atteint reellement l'utilisateur est
+le CENTRE DE NOTIFICATIONS, seul a survivre a la fermeture de l'ecran d'apply.
+Un test (`LeVerdictNAtteintAUCUNEcranTests`) CONSTATE l'absence de lecteur cote
+front, pour que le jour ou un ecran le lira, quelqu'un vienne mettre ce constat
+a jour au lieu de le decouvrir.
+
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
