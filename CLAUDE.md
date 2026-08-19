@@ -369,6 +369,47 @@ inclure son extinction. Un `Get-Process python` en debut de session longue les
 revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
 non encore mesuree, pour le `WinError 5` du point 3.
 
+### Le triangle : annonce / journal / disque
+
+Sur la semaine du 2026-08-13 au 2026-08-19, **quatre defauts de la meme forme**
+ont ete trouves — a la main, apres coup, jamais par un journal :
+
+| | annonce | reel |
+|---|---|---|
+| #1103 | « 1 fichier » mis en quarantaine | un **dossier entier**, dont 3 films |
+| #1097 | « ✓ Sauvegarde a HH:MM » | les reglages **effaces** |
+| #1099 | apply `errors: 0` | **N−1 films**, une ligne du plan disparue |
+| #1062 | « ✓ 0 fichier supprime » en vert | les 300 fichiers avaient **resiste** |
+
+`cinesort/app/verdicts.py` pose l'invariant generique qui manquait. Trois choses
+a savoir avant d'y toucher :
+
+1. **Deux journaux, et il en faut deux.** `apply_operations` (SQLite, `op_type`
+   en MAJUSCULES) dit ce qui a BOUGE ; `apply_audit.jsonl` (`event` en
+   minuscules) est le seul a voir les ECHECS — `record_apply_op` n'a aucun
+   parametre d'erreur et n'est appelee qu'APRES un move reussi. Brancher une
+   seule source rend l'instrument muet sur la moitie du probleme. C'est arrive :
+   la premiere version cherchait une cle `error` qui n'existe dans NI l'une NI
+   l'autre. Quinze tests verts, tous leurs mutants morts, zero detection.
+2. **#1103 se voit sans lire le disque.** Le plan prevoyait une photo
+   avant/apres ; `_snapshot_tree` hache chaque fichier, impensable sur une
+   bibliotheque. Le mecanisme reel etait geometrique — un dossier PARTAGE entre
+   plusieurs lignes du plan — donc une comparaison de chemins suffit, et elle
+   reste vraie APRES coup, quand la source n'existe plus.
+3. **Le cliquet est la vraie garantie.** `test_cliquet_couverture_triangle.py`
+   compte les routes destructives (methodes de facade portant `dry_run`,
+   relevees a l'AST) qui echappent au verdict. Marge zero. Sa 4e assertion prouve
+   la couverture declaree en EXECUTANT le vrai corps d'apply : sans elle, il
+   suffirait d'ecrire les neuf noms dans `ROUTES_COUVERTES` pour tout verdir.
+
+**Le piege qui revient trois fois dans ce chantier** : j'ai IMAGINE une forme au
+lieu de la MESURER, et les tests que j'ecrivais me la resservaient. La cle
+`error` inexistante ; `conflict(kind=)` qui n'existe pas ; quatre compteurs de
+deplacement sur DIX-HUIT, d'ou un faux positif sur l'apply le plus banal. La
+parade est structurelle : faire produire la forme par le code de PRODUCTION
+(`ApplyAuditLogger` -> `read_apply_audit`), et poser un test de derive sur toute
+liste recopiee depuis un dataclass.
+
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
