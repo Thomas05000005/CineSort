@@ -343,5 +343,70 @@ class LaFormeSQLiteEstCELLEDuDEPOTTests(unittest.TestCase):
         self.assertIn("compte_de_quarantaine_diverge", {i.code for i in v.incoherences})
 
 
+class LesCompteursNONTPasDeriveTests(unittest.TestCase):
+    """`COMPTEURS_D_ACTION_DISQUE` doit suivre `ApplyResult`.
+
+    La liste a d'abord ete DEVINEE — quatre compteurs sur dix-huit — et le
+    premier apply reel l'a mise en defaut : un nettoyage de buckets incremente
+    `applied_count` et `leftovers_moved_count` sans toucher aux quatre, donc le
+    verdict criait a l'incoherence sur un apply sain.
+
+    Le probleme n'etait pas la liste, c'etait qu'elle ne pouvait pas se tromper
+    BRUYAMMENT. Ce test le lui apprend : ajouter un compteur de deplacement a
+    `ApplyResult` sans passer par la liste rougit ici, au lieu de refabriquer le
+    faux positif quelques versions plus tard.
+    """
+
+    #: Les champs d'`ApplyResult` dont on a VERIFIE qu'ils ne signifient aucune
+    #: action sur le disque. Tout le reste doit etre dans la liste.
+    SANS_ACTION_DISQUE = frozenset(
+        {
+            "cleanup_residual_diagnostic",  # detail de diagnostic, pas un compte
+            "considered_rows",  # combien de lignes examinees
+            "error_messages",  # les libelles d'erreur
+            "errors",  # les echecs — couverts par l'invariant n1
+            "journal_failures",  # deplacement FAIT mais non journalise
+            "skip_reasons",  # pourquoi on n'a rien fait
+            "skipped",  # rien n'a bouge, par definition
+            "total_rows",  # taille du plan
+        }
+    )
+
+    def _champs(self) -> set:
+        import dataclasses
+
+        from cinesort.domain.core import ApplyResult
+
+        return {f.name for f in dataclasses.fields(ApplyResult)}
+
+    def test_le_dataclass_est_bien_lu(self):
+        """Sans ce garde, un import casse rendrait un ensemble vide et les deux
+        tests suivants seraient verts sans rien avoir compare."""
+        champs = self._champs()
+        self.assertGreater(len(champs), 20, "ApplyResult n'a pas ete lu correctement")
+        self.assertIn("applied_count", champs)
+
+    def test_aucun_compteur_d_ApplyResult_n_est_OUBLIE(self):
+        """Le sens qui produit le faux positif."""
+        from cinesort.app.verdicts import COMPTEURS_D_ACTION_DISQUE
+
+        oublies = self._champs() - set(COMPTEURS_D_ACTION_DISQUE) - self.SANS_ACTION_DISQUE
+        self.assertEqual(
+            oublies,
+            set(),
+            "ces champs d'ApplyResult ne sont ni classes « action disque » ni "
+            "declares sans action : un apply qui ne les incremente qu'eux "
+            "rougira a tort. Les trancher explicitement.",
+        )
+
+    def test_la_liste_n_INVENTE_pas_de_compteur(self):
+        """Le sens inverse : un compteur disparu d'ApplyResult resterait lu a 0
+        pour toujours, elargissant silencieusement l'invariant."""
+        from cinesort.app.verdicts import COMPTEURS_D_ACTION_DISQUE
+
+        fantomes = set(COMPTEURS_D_ACTION_DISQUE) - self._champs()
+        self.assertEqual(fantomes, set(), "ces compteurs n'existent plus dans ApplyResult")
+
+
 if __name__ == "__main__":
     unittest.main()

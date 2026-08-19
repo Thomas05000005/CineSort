@@ -27,6 +27,22 @@ Consequence a connaitre, et ecrite plutot que tue : ce cote seul attrape #1062
 (un succes vert alors que le journal porte des echecs) mais PAS #1103, ou une
 seule operation journalisee emportait tout un dossier — la, seul le disque parle.
 
+DEUX JOURNAUX, ET IL EN FAUT DEUX
+---------------------------------
+Ce depot journalise l'apply a deux endroits qui ne voient PAS la meme chose, et
+n'ont meme pas la meme forme :
+
+- `apply_operations` (SQLite) — cle `op_type` en MAJUSCULES (`MOVE_FILE`).
+  `record_apply_op` n'est appelee qu'APRES un move reussi et n'a aucun parametre
+  d'erreur : cette table dit ce qui a BOUGE, presque jamais ce qui a echoue.
+- `apply_audit.jsonl` (`read_apply_audit`) — cle `event` en minuscules
+  (`op_move_file`), et surtout `event="error"`, seule trace des echecs, ecrite en
+  trois endroits de `apply_core`.
+
+N'en brancher qu'une rendrait l'instrument muet sur la moitie du probleme. Les
+echecs sont donc cherches dans les DEUX, les comptes seulement dans
+`apply_operations` — seule source a porter un `op_type` exploitable.
+
 AUCUNE CONCLUSION SANS SA MATIERE
 ---------------------------------
 Chaque `Incoherence` porte les GRANDEURS qui l'ont produite, pas seulement un
@@ -42,7 +58,7 @@ cablage se mute separement (regle du depot : muter le SITE D'APPEL a part).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 #: Les `op_type` qui deplacent quelque chose et que l'undo sait rejouer.
 #: `apply_rollback.py` refuse tout ce qui n'est pas dans cette liste ; la
@@ -52,6 +68,41 @@ OPS_DE_DEPLACEMENT: tuple[str, ...] = ("MOVE_FILE", "MOVE_DIR", "QUARANTINE_FILE
 
 #: Les `op_type` de mise en quarantaine, sous-ensemble strict du precedent.
 OPS_DE_QUARANTAINE: tuple[str, ...] = ("QUARANTINE_FILE", "QUARANTINE_DIR")
+
+#: Tous les compteurs d'`ApplyResult` qui signifient « le disque a change ».
+#:
+#: Une premiere version n'en listait que QUATRE (`renames`, `moves`,
+#: `quarantined`, `collection_moves`) — ceux que j'avais devines. Confrontee a un
+#: vrai `ApplyResult`, elle produisait un FAUX POSITIF sur l'apply le plus
+#: banal : un nettoyage de buckets incremente `applied_count` et
+#: `leftovers_moved_count` sans toucher aux quatre. Le verdict criait a
+#: l'incoherence sur un apply sain.
+#:
+#: Un faux positif est le pire defaut possible pour un detecteur : on apprend a
+#: l'ignorer, et les vrais avec. La liste est donc RELEVEE sur le dataclass, et
+#: `test_verdicts_annonce_journal.py` rougit si un compteur de deplacement y est
+#: ajoute sans passer ici — sinon la derive rendrait le faux positif au bout de
+#: quelques versions.
+COMPTEURS_D_ACTION_DISQUE: tuple[str, ...] = (
+    "applied_count",
+    "cleanup_residual_folders_moved_count",
+    "collection_moves",
+    "conflicts_quarantined_count",
+    "conflicts_sidecars_quarantined_count",
+    "duplicates_identical_deleted_count",
+    "duplicates_identical_moved_count",
+    "duplicates_user_decided_moved_count",
+    "empty_folders_moved_count",
+    "leftovers_moved_count",
+    "marked_for_deletion_moved_count",
+    "merges_count",
+    "mkdirs",
+    "moves",
+    "quarantined",
+    "renames",
+    "sidecar_conflicts_kept_both_count",
+    "source_dirs_deleted_count",
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +211,63 @@ def _en_echec(op: Mapping[str, Any]) -> bool:
         return False
 
 
+def _verifier_succes_menteur(erreurs_annoncees: int, ops_en_echec: int) -> Optional[Incoherence]:
+    """#1062 mot pour mot : « 0 fichier(s) supprime(s) » affiche en VERT alors
+    que les 300 fichiers avaient resiste.
+
+    Le payload posait son succes a la CONSTRUCTION et ne le rediscutait jamais ;
+    les echecs vivaient dans une cle que l'ecran ne lisait pas.
+    """
+    if erreurs_annoncees != 0 or ops_en_echec <= 0:
+        return None
+    return Incoherence(
+        code="succes_annonce_malgre_des_echecs",
+        message=f"l'apply annonce errors=0 mais le journal porte {ops_en_echec} operation(s) en echec",
+        annonce={"errors": erreurs_annoncees},
+        journal={"operations_en_echec": ops_en_echec},
+    )
+
+
+def _verifier_compte_de_quarantaine(annoncee: int, comptes: Mapping[str, int]) -> Optional[Incoherence]:
+    """Le nombre de mises en quarantaine annonce contre celui inscrit."""
+    journalisee = sum(comptes.get(t, 0) for t in OPS_DE_QUARANTAINE)
+    if annoncee == journalisee:
+        return None
+    return Incoherence(
+        code="compte_de_quarantaine_diverge",
+        message=(
+            f"l'apply annonce quarantined={annoncee} mais le journal porte {journalisee} operation(s) de quarantaine"
+        ),
+        annonce={"quarantined": annoncee},
+        journal={t: comptes.get(t, 0) for t in OPS_DE_QUARANTAINE},
+        reserve=(
+            "un COMPTE egal ne prouve pas que la bonne CHOSE a bouge : #1103 "
+            "deplacait un dossier entier en une seule operation, donc 1 = 1. "
+            "Seule la photo du disque tranche ce cas."
+        ),
+    )
+
+
+def _verifier_deplacements_tus(annonce: Mapping[str, int], comptes: Mapping[str, int]) -> Optional[Incoherence]:
+    """Le sens inverse, et c'est le plus dangereux.
+
+    Un apply qui dit n'avoir rien fait alors que le journal porte des
+    deplacements laisse l'utilisateur sans aucune raison d'annuler.
+    """
+    deplacements = sum(comptes.get(t, 0) for t in OPS_DE_DEPLACEMENT)
+    if deplacements <= 0 or sum(annonce.values()) != 0:
+        return None
+    return Incoherence(
+        code="deplacements_journalises_non_annonces",
+        message=(
+            f"le journal porte {deplacements} deplacement(s) mais AUCUN des "
+            f"{len(annonce)} compteurs du payload n'est non nul"
+        ),
+        annonce={"tous_les_compteurs_d_action": 0, "compteurs_examines": sorted(annonce)},
+        journal={t: comptes.get(t, 0) for t in OPS_DE_DEPLACEMENT if comptes.get(t, 0)},
+    )
+
+
 def comparer_annonce_et_journal(
     annonce: Mapping[str, Any],
     operations: Sequence[Mapping[str, Any]],
@@ -167,30 +275,12 @@ def comparer_annonce_et_journal(
     evenements_audit: Sequence[Mapping[str, Any]] = (),
     dry_run: bool = False,
 ) -> Verdict:
-    """Compare le payload rendu a l'utilisateur au journal des operations.
-
-    DEUX SOURCES, ET IL EN FAUT DEUX
-    --------------------------------
-    Ce depot journalise l'apply a deux endroits qui ne voient PAS la meme chose,
-    et n'ont meme pas la meme forme :
-
-    - `operations` — les lignes SQLite `apply_operations`, cle `op_type` en
-      MAJUSCULES (`MOVE_FILE`). `record_apply_op` n'est appelee qu'APRES un move
-      reussi et n'a aucun parametre d'erreur : cette table dit ce qui a BOUGE,
-      presque jamais ce qui a echoue.
-    - `evenements_audit` — les lignes de `apply_audit.jsonl` (`read_apply_audit`),
-      cle `event` en minuscules (`op_move_file`), et surtout `event="error"`,
-      seule trace des echecs, ecrite en trois endroits de `apply_core`.
-
-    N'en brancher qu'une rendrait l'instrument muet sur la moitie du probleme :
-    les comptes sans les echecs, ou les echecs sans les comptes. Les echecs sont
-    donc cherches dans les DEUX, les comptes seulement dans `operations` — seule
-    source a porter un `op_type` exploitable.
+    """Compare le payload rendu a l'utilisateur aux deux journaux du batch.
 
     Args:
         annonce: le payload d'apply (`ApplyResult` aplati, ou le dict rendu).
-        operations: les lignes `apply_operations` du batch.
-        evenements_audit: les evenements `apply_audit.jsonl` du batch.
+        operations: les lignes `apply_operations` du batch (cle `op_type`).
+        evenements_audit: les evenements `apply_audit.jsonl` (cle `event`).
         dry_run: en apercu, rien n'est journalise. Les comparaisons de compte
             sont alors sans objet, et sans ce garde un dry-run leverait une
             incoherence a chaque fois — le genre de faux positif qui fait
@@ -200,7 +290,6 @@ def comparer_annonce_et_journal(
         Un `Verdict` dont chaque incoherence porte ses deux termes.
     """
     comptes = _compter_par_type(operations)
-    trouvees: List[Incoherence] = []
 
     def _entier(cle: str) -> int:
         try:
@@ -208,71 +297,23 @@ def comparer_annonce_et_journal(
         except (TypeError, ValueError):
             return 0
 
-    erreurs_annoncees = _entier("errors")
     ops_en_echec = sum(1 for op in operations or () if _en_echec(op)) + sum(
         1 for ev in evenements_audit or () if _en_echec(ev)
     )
-
-    # --- 1. UN SUCCES FRANC QUI CACHE DES ECHECS -------------------------
-    # C'est #1062 mot pour mot : « 0 fichier(s) supprime(s) » affiche en VERT
-    # alors que les 300 fichiers avaient resiste. Le payload posait son succes a
-    # la CONSTRUCTION et ne le rediscutait jamais ; les echecs vivaient dans une
-    # cle que l'ecran ne lisait pas.
-    if erreurs_annoncees == 0 and ops_en_echec > 0:
-        trouvees.append(
-            Incoherence(
-                code="succes_annonce_malgre_des_echecs",
-                message=f"l'apply annonce errors=0 mais le journal porte {ops_en_echec} operation(s) en echec",
-                annonce={"errors": erreurs_annoncees},
-                journal={"operations_en_echec": ops_en_echec},
-            )
-        )
+    trouvees = [i for i in (_verifier_succes_menteur(_entier("errors"), ops_en_echec),) if i is not None]
 
     if dry_run:
         # En apercu rien n'est journalise : comparer des comptes n'aurait aucun
         # sens. On s'arrete ici, APRES la verification ci-dessus qui reste vraie.
         return Verdict(incoherences=trouvees, comptes_journal=comptes)
 
-    # --- 2. LE COMPTE DE QUARANTAINE ------------------------------------
-    quarantaine_annoncee = _entier("quarantined")
-    quarantaine_journalisee = sum(comptes.get(t, 0) for t in OPS_DE_QUARANTAINE)
-    if quarantaine_annoncee != quarantaine_journalisee:
-        trouvees.append(
-            Incoherence(
-                code="compte_de_quarantaine_diverge",
-                message=(
-                    f"l'apply annonce quarantined={quarantaine_annoncee} mais le journal "
-                    f"porte {quarantaine_journalisee} operation(s) de quarantaine"
-                ),
-                annonce={"quarantined": quarantaine_annoncee},
-                journal={t: comptes.get(t, 0) for t in OPS_DE_QUARANTAINE},
-                reserve=(
-                    "un COMPTE egal ne prouve pas que la bonne CHOSE a bouge : #1103 "
-                    "deplacait un dossier entier en une seule operation, donc 1 = 1. "
-                    "Seule la photo du disque tranche ce cas."
-                ),
-            )
-        )
-
-    # --- 3. DES DEPLACEMENTS JOURNALISES SANS RIEN D'ANNONCE -------------
-    # Le sens inverse compte autant, et il est plus dangereux : un apply qui dit
-    # n'avoir rien fait alors que le journal porte des deplacements laisse
-    # l'utilisateur sans raison d'annuler.
-    deplacements = sum(comptes.get(t, 0) for t in OPS_DE_DEPLACEMENT)
-    total_annonce = _entier("renames") + _entier("moves") + _entier("quarantined") + _entier("collection_moves")
-    if deplacements > 0 and total_annonce == 0:
-        trouvees.append(
-            Incoherence(
-                code="deplacements_journalises_non_annonces",
-                message=f"le journal porte {deplacements} deplacement(s) mais le payload n'en annonce aucun",
-                annonce={
-                    "renames": _entier("renames"),
-                    "moves": _entier("moves"),
-                    "quarantined": quarantaine_annoncee,
-                    "collection_moves": _entier("collection_moves"),
-                },
-                journal={t: comptes.get(t, 0) for t in OPS_DE_DEPLACEMENT if comptes.get(t, 0)},
-            )
-        )
-
+    # Tous les compteurs, pas seulement ceux qu'on croit pertinents : n'en
+    # oublier qu'un fait rougir un apply sain (cf. COMPTEURS_D_ACTION_DISQUE).
+    annonce_des_deplacements = {c: _entier(c) for c in COMPTEURS_D_ACTION_DISQUE}
+    for inc in (
+        _verifier_compte_de_quarantaine(_entier("quarantined"), comptes),
+        _verifier_deplacements_tus(annonce_des_deplacements, comptes),
+    ):
+        if inc is not None:
+            trouvees.append(inc)
     return Verdict(incoherences=trouvees, comptes_journal=comptes)

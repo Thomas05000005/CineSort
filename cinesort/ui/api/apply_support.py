@@ -31,6 +31,7 @@ from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
+from cinesort.app.verdicts import comparer_annonce_et_journal
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
@@ -3083,6 +3084,81 @@ def apply_changes(
         log_context.reset_run_id(_jeton_run)
 
 
+def _payload_avec_verdict(
+    payload: Dict[str, Any],
+    *,
+    store: Any,
+    run_paths: Any,
+    dry_run: bool,
+    log_fn: Callable[[str, str], None],
+) -> Dict[str, Any]:
+    """Ferme le premier cote du triangle : ce qu'on ANNONCE contre ce qu'on a INSCRIT.
+
+    Sur la semaine du 2026-08-13, quatre defauts de la meme forme ont ete
+    trouves — a la main, apres coup, jamais par un journal : *ce que
+    l'application annonce n'est pas ce qu'elle a fait* (#1103, #1097, #1099,
+    #1062). L'invariant qui les attrape existait, mais reinvente endpoint par
+    endpoint et toujours APRES l'incident. Cette fonction le pose une fois, au
+    seul endroit ou les deux termes se rencontrent.
+
+    Les deux journaux sont lus, et il en faut deux : `apply_operations` dit ce
+    qui a BOUGE, `apply_audit.jsonl` est le seul a voir les ECHECS.
+
+    UN ECHEC NE DOIT PAS DEVENIR UN SUCCES SILENCIEUX — dans les deux sens :
+
+    - calculer le verdict ne doit jamais transformer un apply disque REUSSI en
+      HTTP 500 (ce serait re-creer le defaut F11), d'ou le `except` large ;
+    - mais un verdict qu'on n'a PAS PU calculer n'est pas un verdict vert. Il
+      part en WARN nomme, jamais en silence.
+
+    Les deux termes se lisent dans le `payload` lui-meme (`result`,
+    `apply_batch_id`) : les repasser en parametres serait offrir a ce controle
+    une source differente de celle rendue a l'utilisateur, donc la possibilite
+    de valider autre chose que ce qui est affiche.
+
+    Enrichit `payload["verdict"]` SEULEMENT en cas d'incoherence — sur le modele
+    de `journal_warning` juste au-dessus — puis rend le payload.
+    """
+    apply_batch_id = payload.get("apply_batch_id")
+    # COUT : les deux journaux sont lus INTEGRALEMENT, une fois, a la toute fin
+    # de l'apply — apres que le disque a fini de bouger. Sur un apply de 500
+    # films cela fait quelques milliers de lignes ; c'est assume.
+    #
+    # `read_apply_audit` accepte un `limit`, volontairement NON utilise : borner
+    # la lecture ferait manquer les erreurs au-dela de la borne, et un verdict
+    # calcule sur un echantillon serait un faux vert. Si le volume devenait
+    # ingerable, l'echec de lecture partirait en WARN « NON CALCULE » — un
+    # silence assume plutot qu'une conclusion fausse.
+    try:
+        operations: List[Dict[str, Any]] = []
+        evenements: List[Dict[str, Any]] = []
+        if apply_batch_id is not None:
+            operations = list(store.apply.list_apply_operations(batch_id=apply_batch_id) or [])
+            evenements = list(read_apply_audit(run_paths.run_dir, batch_id=apply_batch_id) or [])
+        verdict = comparer_annonce_et_journal(
+            dict(payload.get("result") or {}),
+            operations,
+            evenements_audit=evenements,
+            dry_run=bool(dry_run),
+        )
+    except Exception as exc:  # noqa: BLE001 - le controle ne doit jamais casser l'apply
+        # Le silence serait le vrai defaut : sans cette ligne, un journal
+        # illisible rendrait un apply indistinguable d'un apply verifie.
+        log_fn("WARN", f"Verdict annonce/journal NON CALCULE (batch={apply_batch_id}) : {exc}")
+        _log.debug("verdict annonce/journal indisponible", exc_info=True)
+        return payload
+    if verdict.coherent:
+        return payload
+    # WARN et non ERROR : l'apply lui-meme a pu reussir. C'est la COHERENCE de
+    # ce qu'on en dit qui est en cause, et c'est deja beaucoup.
+    log_fn(
+        "WARN",
+        f"INCOHERENCE annonce/journal batch={apply_batch_id} : {json.dumps(verdict.as_dict(), ensure_ascii=False)}",
+    )
+    payload["verdict"] = verdict.as_dict()
+    return payload
+
+
 def _apply_changes_estampille(
     api: Any,
     run_id: str,
@@ -3384,7 +3460,7 @@ def _apply_changes_body(
                 # Un echec de notification ne doit pas transformer un apply
                 # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
                 _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
-        return payload
+        return _payload_avec_verdict(payload, store=store, run_paths=run_paths, dry_run=dry_run, log_fn=log_fn)
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
