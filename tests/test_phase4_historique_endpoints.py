@@ -287,7 +287,10 @@ class CleanupOldRunsTests(unittest.TestCase):
         _insert_run(self.store, "recent_30", started_ts=now - 30 * 86400, ended_ts=now - 30 * 86400 + 60)
         _insert_run(self.store, "recent_5", started_ts=now - 5 * 86400, ended_ts=now - 5 * 86400 + 60)
 
-        resp = self.api.run.cleanup_old_runs(retention_days=90)
+        # `dry_run=False` EXPLICITE : ce test asserte plus bas que les runs ont
+        # DISPARU de la base. Depuis #1022, la route est en apercu par defaut
+        # comme ses jumelles destructives — un appel nu ne supprime plus rien.
+        resp = self.api.run.cleanup_old_runs(retention_days=90, dry_run=False)
         self.assertTrue(resp.get("ok"), resp)
         self.assertEqual(resp["deleted_count"], 2)
         self.assertIn("old_run_120", resp["deleted_run_ids"])
