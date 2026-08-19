@@ -25,25 +25,67 @@ from cinesort.app.verdicts import (
     comparer_annonce_et_journal,
 )
 
+#: Tous les `op_type` que l'application ECRIT reellement dans son journal,
+#: releves dans `apply_core.py`. C'est l'univers sur lequel le contrat ci-dessous
+#: interroge l'undo : sans lui, on ne saurait tester que ce qu'on a deja pense.
+OP_TYPES_ECRITS_PAR_L_APP: tuple[str, ...] = (
+    "MKDIR",
+    "MOVE_DIR",
+    "MOVE_FILE",
+    "QUARANTINE_DIR",
+    "QUARANTINE_FILE",
+    "ROLLBACK_COLLECTION_MOVE",
+    "ROLLBACK_TV_MOVE",
+    "UNDO_QUARANTINE",
+    "UNDO_RESTORE",
+)
+
 
 class LaSourceDesOpTypeNAPasDivergeTests(unittest.TestCase):
-    """La liste locale doit rester alignee sur celle de l'undo.
+    """`OPS_DE_DEPLACEMENT` doit etre EXACTEMENT ce que l'undo sait defaire.
 
-    `apply_rollback.py` refuse tout `op_type` hors de sa propre liste. Si les
-    deux divergent, ce module comptera comme « deplacement » quelque chose que
-    l'undo ne sait pas defaire — ou l'inverse, plus grave encore.
+    Ce contrat se lit dans les DEUX sens, et le second est le plus dangereux :
+
+    - un `op_type` EN TROP fait compter comme « deplacement » quelque chose que
+      l'undo ne rejouera pas ;
+    - un `op_type` MANQUANT rend l'invariant MUET sur ce type. Retirer
+      `MOVE_DIR` suffirait a ce qu'un run ayant deplace des dossiers — #1103
+      exactement — compte zero deplacement et ne leve rien.
+
+    Une premiere version de ce test cherchait les chaines dans le source de
+    `apply_rollback.py`. Elle etait unidirectionnelle : un mutant qui RETIRAIT
+    `MOVE_DIR` de la liste a SURVECU, la boucle se contentant de verifier moins
+    de choses. Elle etait aussi de la forme que `CLAUDE.md` proscrit — comparer
+    du texte de code plutot qu'un comportement.
+
+    On interroge donc l'undo lui-meme : `_revert_one_op` refuse explicitement
+    tout type hors de sa liste. Aucun fichier n'est touche — les chemins sont
+    vides, donc un type ACCEPTE tombe simplement sur le garde suivant.
     """
 
-    def test_ops_de_deplacement_est_celle_de_apply_rollback(self):
-        from pathlib import Path
+    @staticmethod
+    def _l_undo_accepte(op_type: str) -> bool:
+        from cinesort.app.apply_rollback import _revert_one_op
 
-        source = Path("cinesort/app/apply_rollback.py").read_text(encoding="utf-8")
-        for op in OPS_DE_DEPLACEMENT:
-            self.assertIn(
-                f'"{op}"',
-                source,
-                f"`{op}` n'apparait plus dans apply_rollback : les deux listes ont diverge",
-            )
+        r = _revert_one_op({"op_type": op_type, "reversible": 1, "undo_status": "PENDING"})
+        return "non revert-able" not in str(r.get("reason") or "")
+
+    def test_le_garde_de_l_undo_repond_bien(self):
+        """Sans ceci, une sonde muette rendrait le contrat vide : si
+        `_l_undo_accepte` renvoyait toujours la meme chose, le test suivant
+        serait vert quoi qu'il arrive."""
+        self.assertTrue(self._l_undo_accepte("MOVE_FILE"))
+        self.assertFalse(self._l_undo_accepte("MKDIR"))
+        self.assertFalse(self._l_undo_accepte("CE_TYPE_N_EXISTE_PAS"))
+
+    def test_ops_de_deplacement_est_EXACTEMENT_ce_que_l_undo_defait(self):
+        acceptes = {t for t in OP_TYPES_ECRITS_PAR_L_APP if self._l_undo_accepte(t)}
+        self.assertEqual(
+            acceptes,
+            set(OPS_DE_DEPLACEMENT),
+            "les deux listes ont diverge : en trop = compte des deplacements que "
+            "l'undo ne rejoue pas ; manquant = invariant MUET sur ce type",
+        )
 
     def test_la_quarantaine_est_un_sous_ensemble_strict(self):
         self.assertTrue(set(OPS_DE_QUARANTAINE) < set(OPS_DE_DEPLACEMENT))
