@@ -51,7 +51,11 @@ class _FauxStore:
 class _FauxApi:
     def __init__(self, store: _FauxStore) -> None:
         self._store = store
-        self._state_dir = "/tmp/etat"
+        # SENTINELLE, pas un chemin : `_get_or_create_infra` est surcharge
+        # ci-dessous et ignore son argument, donc rien ne touche le disque.
+        # Un `/tmp/...` en dur ferait signaler un usage de repertoire
+        # temporaire par les scanners, pour une valeur jamais lue.
+        self._state_dir = "<state-dir-de-test-jamais-ouvert>"
         self._runs_lock = mock.MagicMock()
         self._runs_lock.__enter__ = lambda *_a: None
         self._runs_lock.__exit__ = lambda *_a: False
