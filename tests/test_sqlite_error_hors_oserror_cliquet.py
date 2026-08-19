@@ -44,11 +44,14 @@ _RACINE = Path("cinesort")
 #   65 apres le passage des 3 lectures du profil qualite actif a
 #      `_ERREURS_DE_LECTURE_DU_PROFIL` (cinesort_api.py) : une base verrouillee
 #      y faisait REMONTER `sqlite3.OperationalError` au lieu du repli prevu.
+#   63 apres les deux `except` de `history_support.cleanup_old_runs` (#1022) :
+#      un verrou transitoire sortait de la fonction et abandonnait les stores
+#      SUIVANTS — une passe de retention entiere perdue pour un seul run.
 #
 # Le cliquet a signale la baisse tout seul — c'est son autre sens. Sans lui, un
 # plafond reste acquis apres un correctif et 3 sites pourraient revenir en
 # silence.
-PLAFOND = 65
+PLAFOND = 63
 
 
 def _noms_exceptions(handler: ast.ExceptHandler) -> set[str]:
