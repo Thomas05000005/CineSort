@@ -29,7 +29,7 @@ from cinesort.infra.db.sqlite_store import SQLiteStore, db_path_for_state_dir
 
 #: Requete LITTERALE. Elle etait composee par f-string depuis deux
 #: constantes : les valeurs interpolees etaient constantes, donc sans
-#: risque d'injection, mais il fallait porter un `# noqa: S608` que
+#: risque d'injection, mais il fallait porter une suppression `S608` que
 #: l'analyse statique du depot signalait quand meme. Une chaine
 #: litterale n'a besoin d'aucune suppression, et se lit mieux.
 _INSERT = (

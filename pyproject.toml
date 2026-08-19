@@ -129,7 +129,7 @@ extend-exclude = [
   ".ui_backups",
   "archive_ui_next_20260308",
   "web_next_zero",
-  # ruff 0.16.1 formate les blocs de code DANS le Markdown. Sur `docs/internal/`,
+  # ruff 0.16.3 formate les blocs de code DANS le Markdown. Sur `docs/internal/`,
   # qui archive des plans et des bilans DATES, c'est une reecriture d'archives :
   # 22 fichiers touches pour une montee de version, sans un seul .py modifie.
   #

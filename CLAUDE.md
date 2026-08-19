@@ -46,8 +46,8 @@ global est en 3.12 et produit des echecs massifs trompeurs.
   --ignore=tests/manual --ignore=tests/live --ignore=tests/stress -q
 
 # Lint et formatage — la version EXACTE compte (cf. section Pieges)
-uvx ruff@0.16.1 check .
-uvx ruff@0.16.1 format --check .
+uvx ruff@0.16.3 check .
+uvx ruff@0.16.3 format --check .
 
 # Contrats d'architecture (l'executable, PAS `python -m importlinter`)
 ./.venv/Scripts/lint-imports.exe
@@ -99,7 +99,7 @@ les supprime. Mesure : 37 re-exports effaces, 2 fichiers de tests ne collectaien
 plus, et pytest s'arretait AVANT d'executer quoi que ce soit — un « 0 echec »
 trompeur sur une batterie amputee. Les deux modules sont en `per-file-ignores`.
 
-**ruff est epingle EXACTEMENT** (`ruff==0.16.1`) en **5 endroits** qui doivent
+**ruff est epingle EXACTEMENT** (`ruff==0.16.3`) en **5 endroits** qui doivent
 rester synchrones : `pyproject.toml`, `requirements-dev.txt`,
 `.pre-commit-config.yaml` (rev du hook), `uv.lock` — et **CE FICHIER**, qui
 porte la commande que tout le monde copie. Trois versions differentes
