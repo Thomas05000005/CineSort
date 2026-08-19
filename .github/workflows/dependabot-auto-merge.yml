@@ -30,19 +30,23 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto-approve patches + minors security
-        # Conditions strictes :
-        # - patch : 1.2.3 -> 1.2.4 (toujours safe)
-        # - minor + dependency-type "indirect" ou "direct:development" (tools, pas prod)
-        # - security update sur n'importe quel type
-        if: |
-          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-          (steps.meta.outputs.update-type == 'version-update:semver-minor' && steps.meta.outputs.dependency-type == 'direct:development') ||
-          contains(steps.meta.outputs.dependency-group, 'security')
-        run: gh pr review --approve "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # L'ETAPE « Auto-approve » A ETE RETIREE le 2026-08-19, apres avoir echoue
+      # a CHAQUE execution depuis sa creation :
+      #
+      #   failed to create review: GraphQL: GitHub Actions is not permitted to
+      #   approve pull requests. (addPullRequestReview)
+      #
+      # Elle etait impossible ET inutile, deux raisons independantes :
+      #   - impossible : `can_approve_pull_request_reviews` vaut `false` sur ce
+      #     depot, et c'est un reglage d'organisation, pas du workflow ;
+      #   - inutile : la protection de `main` exige **0 revue**
+      #     (`required_approving_review_count: 0`), donc rien n'attendait cette
+      #     approbation pour fusionner.
+      #
+      # Son seul effet etait de rendre ce job ROUGE sur chaque PR Dependabot —
+      # un check rouge permanent qu'on apprend a ignorer, ce qui masque les vrais.
+      # Si une revue devient un jour requise, l'approbation devra venir d'une
+      # identite qui en a le droit (GitHub App dediee), pas de `GITHUB_TOKEN`.
 
       - name: Enable auto-merge
         if: |
