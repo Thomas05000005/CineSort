@@ -11,7 +11,7 @@ import sqlite3
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import requests
 
@@ -33,6 +33,7 @@ from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_devi
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
 from cinesort.app.verdicts import (
     comparer_annonce_et_journal,
+    verifier_granularite_des_operations,
     verifier_operations_qui_emportent_d_autres_lignes,
 )
 from cinesort.domain.conversions import to_bool as _to_bool
@@ -3087,6 +3088,46 @@ def apply_changes(
         log_context.reset_run_id(_jeton_run)
 
 
+def _granularites_observees(operations: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Regarde le DISQUE, juste ce qu'il faut : la destination est-elle un dossier ?
+
+    Un `is_dir()` par operation de deplacement, aucune lecture de contenu, aucun
+    hachage. C'est la seule E/S de tout le controle, et elle est bornee par le
+    nombre d'operations du batch — la ou une photo avant/apres du sous-arbre
+    aurait exige de parcourir la bibliotheque.
+
+    Une destination illisible (droits, disparue, chemin invalide) rend
+    `dst_est_dossier` ABSENT plutot que `False` : l'absence de mesure n'est pas
+    une mesure negative, et `verifier_granularite_des_operations` ignore ce cas.
+    """
+    observees: List[Dict[str, Any]] = []
+    for op in operations or ():
+        try:
+            op_type = str(op.get("op_type") or "")
+            dst = str(op.get("dst_path") or "")
+        except AttributeError:
+            continue
+        if not op_type.endswith("_FILE") or not dst:
+            continue
+        obs: Dict[str, Any] = {"op_type": op_type, "dst_path": dst}
+        try:  # noqa: SIM105 - contextlib.suppress ferait perdre la justification du catch
+            # Cle ABSENTE et non False : une destination illisible n'est pas une
+            # destination qui n'est pas un dossier.
+            #
+            # HONNETETE SUR LA PORTEE : aujourd'hui les deux formes produisent le
+            # MEME verdict, `verifier_granularite_des_operations` exigeant
+            # `is True` pour accuser. Le mutant qui pose `False` ici est donc
+            # EQUIVALENT PAR CONSTRUCTION, et aucun test ne peut l'attraper —
+            # c'est mesure, pas suppose. La distinction est conservee pour le
+            # lecteur du verdict, a qui « je n'ai pas pu mesurer » et « ce n'est
+            # pas un dossier » ne disent pas la meme chose.
+            obs["dst_est_dossier"] = Path(dst).is_dir()
+        except OSError:
+            pass
+        observees.append(obs)
+    return observees
+
+
 def _avec_verdict(
     payload: Dict[str, Any],
     *,
@@ -3155,6 +3196,7 @@ def _avec_verdict(
                 {str(getattr(r, "row_id", "")): str(getattr(r, "folder", "")) for r in rows or ()},
             )
         )
+        verdict.incoherences.extend(verifier_granularite_des_operations(_granularites_observees(operations)))
     except Exception as exc:  # noqa: BLE001 - le controle ne doit jamais casser l'apply
         # Le silence serait le vrai defaut : sans cette ligne, un journal
         # illisible rendrait un apply indistinguable d'un apply verifie.

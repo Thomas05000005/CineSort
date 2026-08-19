@@ -12,6 +12,7 @@ rien.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
@@ -104,14 +105,14 @@ class CablageDuVerdictTests(unittest.TestCase):
         """Si le controle lisait une autre source que le payload rendu, il
         validerait autre chose que ce qui est affiche — le defaut meme qu'il est
         cense attraper. On altere le payload et le verdict doit suivre."""
-        commun = [{"op_type": "QUARANTINE_FILE"}]
-        sain = self._appeler({"apply_batch_id": "b1", "result": {"quarantined": 1}}, commun)
+        commun = [{"op_type": "MOVE_FILE", "error_message": "boom"}]
+        sain = self._appeler({"apply_batch_id": "b1", "result": {"errors": 1, "moves": 1}}, commun)
         self.assertNotIn("verdict", sain)
         self.journal.clear()
-        menteur = self._appeler({"apply_batch_id": "b1", "result": {"quarantined": 9}}, commun)
+        menteur = self._appeler({"apply_batch_id": "b1", "result": {"errors": 0, "moves": 1}}, commun)
         self.assertIn("verdict", menteur, "le verdict ignore le payload : il ne verifie pas ce qui est affiche")
         inc = menteur["verdict"]["incoherences"][0]
-        self.assertEqual(inc["annonce"], {"quarantined": 9})
+        self.assertEqual(inc["annonce"], {"errors": 0})
 
     def test_les_EVENEMENTS_d_audit_comptent_aussi(self):
         """La seconde source. Sans elle, l'apply le plus courant — des echecs
@@ -150,6 +151,28 @@ class CablageDuVerdictTests(unittest.TestCase):
         )
         self.assertTrue(payload.get("ok"), "l'apply reussi doit rester reussi")
 
+    def test_le_dry_run_du_CABLAGE_est_bien_celui_de_l_apply(self):
+        """Le site d'appel doit transmettre le VRAI `dry_run`, pas une constante.
+
+        Mutant survivant : forcer `dry_run=True` au cablage. Aucun test ne
+        rougissait, parce que tous ceux qui attendaient un verdict s'appuyaient
+        sur un invariant INSENSIBLE au dry-run (les echecs, l'ampleur, la
+        granularite). Seul le controle des COMPTES est derriere ce garde — c'est
+        donc lui qu'il faut solliciter ici.
+        """
+        annonce_muette = {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0}}
+        deplacements = [{"op_type": "MOVE_DIR"}, {"op_type": "MOVE_FILE"}]
+
+        reel = self._appeler(dict(annonce_muette), deplacements)
+        self.assertIn(
+            "deplacements_journalises_non_annonces",
+            {i["code"] for i in reel.get("verdict", {}).get("incoherences", [])},
+            "premisse : hors dry-run ce cas DOIT lever, sinon le test suivant ne mesure rien",
+        )
+        self.journal.clear()
+        apercu = self._appeler(dict(annonce_muette), deplacements, dry_run=True)
+        self.assertNotIn("verdict", apercu, "en apercu, comparer des comptes n'a aucun sens")
+
     def test_le_DRY_RUN_ne_lit_meme_pas_le_journal(self):
         """En apercu `apply_batch_id` est None : il n'y a rien a lire, et le
         verdict ne doit rien inventer."""
@@ -160,10 +183,6 @@ class CablageDuVerdictTests(unittest.TestCase):
         )
         self.assertNotIn("verdict", payload)
         self.assertEqual(self._warns(), [])
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests(unittest.TestCase):
@@ -179,7 +198,7 @@ class LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests(unittest.TestCase):
     meme patron de harnais que `test_apply_undo_availability_payload.py`.
     """
 
-    def _payload_d_un_apply_reel(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _payload_d_un_apply_reel(self, operations: List[Dict[str, Any]], rows: Any = ()) -> Dict[str, Any]:
         from types import SimpleNamespace
 
         from cinesort.domain import core as core_mod
@@ -201,7 +220,7 @@ class LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests(unittest.TestCase):
             "_ctx": (
                 SimpleNamespace(),
                 SimpleNamespace(run_dir="run_dir_factice"),
-                [],
+                list(rows),
                 lambda niveau, message: logs.append((str(niveau), str(message))),
                 store,
                 {},
@@ -311,3 +330,155 @@ class LE_CABLAGE_DE_1103_Tests(unittest.TestCase):
             codes,
             "deux dossiers DIFFERENTS ne doivent pas passer pour partages",
         )
+
+
+class LE_CABLAGE_DE_1103_TRAVERSE_T_IL_LE_VRAI_CORPS_Tests(unittest.TestCase):
+    """La lacune que la revue adversaire a trouvee, et le test qui la ferme.
+
+    `LE_CABLAGE_DE_1103_Tests` appelle `_avec_verdict` EN DIRECT ; le seul test
+    qui executait `_apply_changes_body` lui passait une liste de rows VIDE.
+    Consequence mesuree : remplacer `rows=rows` par `rows=()` au site d'appel
+    laissait la batterie ENTIERE verte, cliquet compris. L'invariant #1103
+    n'etait donc branche par aucune preuve traversant la production.
+
+    C'est la meme lecon que W1 une passe plus tot : tester un helper en direct
+    ne dit RIEN de son site d'appel. Ici la lacune etait plus fine — l'appel
+    existait, c'est son ARGUMENT qui n'etait jamais eprouve.
+    """
+
+    def _corps(self):
+        from tests.test_verdicts_cablage_apply import (
+            LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests as Reel,
+        )
+
+        return Reel("test_un_apply_REEL_incoherent_porte_son_verdict")
+
+    def test_les_lignes_du_plan_TRAVERSENT_le_corps_d_apply(self):
+        """ROUGE si `rows=rows` devient `rows=()` au site d'appel."""
+        from types import SimpleNamespace
+
+        payload = self._corps()._payload_d_un_apply_reel(
+            [{"op_type": "QUARANTINE_FILE", "src_path": r"D:\films\Saga Rocky"}],
+            rows=[
+                SimpleNamespace(row_id="r1", folder=r"D:\films\Saga Rocky"),
+                SimpleNamespace(row_id="r2", folder=r"D:\films\Saga Rocky"),
+            ],
+        )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertIn(
+            "une_operation_emporte_plusieurs_lignes",
+            codes,
+            "le corps d'apply ne transmet pas les lignes du plan a l'invariant #1103",
+        )
+
+    def test_un_plan_SAIN_traverse_sans_rien_lever(self):
+        """Contre-test : deux dossiers distincts ne doivent pas passer pour
+        partages une fois traverse le vrai corps."""
+        from types import SimpleNamespace
+
+        payload = self._corps()._payload_d_un_apply_reel(
+            [{"op_type": "QUARANTINE_FILE", "src_path": r"D:\films\Saga Rocky"}],
+            rows=[
+                SimpleNamespace(row_id="r1", folder=r"D:\films\Saga Rocky"),
+                SimpleNamespace(row_id="r2", folder=r"D:\films\Autre"),
+            ],
+        )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertNotIn("une_operation_emporte_plusieurs_lignes", codes)
+
+
+class LE_CABLAGE_DE_LA_GRANULARITE_Tests(unittest.TestCase):
+    """L'invariant de granularite etait branche et TESTE PAR PERSONNE.
+
+    Trois mutants ont survecu a la batterie complete, tous sur ce cablage :
+    ne plus l'appeler du tout, ne plus interroger le disque, et transformer une
+    destination illisible en accusation. C'est la lecon de W1 pour la troisieme
+    fois dans cette campagne — j'avais teste la DECISION et oublie le SITE.
+
+    Ces tests-ci portent sur `_granularites_observees`, la seule E/S de tout le
+    controle, et sur le fait que son resultat atteint bien le payload.
+    """
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self._td = tempfile.mkdtemp(prefix="cinesort_gran_")
+        self.racine = Path(self._td)
+        self.addCleanup(shutil.rmtree, self._td, ignore_errors=True)
+
+    def test_le_disque_est_REELLEMENT_interroge(self):
+        """Un vrai dossier et un vrai fichier, pas une valeur fabriquee."""
+        dossier = self.racine / "Saga Rocky"
+        dossier.mkdir()
+        fichier = self.racine / "rocky.mkv"
+        fichier.write_bytes(b"x" * 8)
+
+        observees = apply_support._granularites_observees(
+            [
+                {"op_type": "QUARANTINE_FILE", "dst_path": str(dossier)},
+                {"op_type": "QUARANTINE_FILE", "dst_path": str(fichier)},
+            ]
+        )
+        self.assertEqual([o["dst_est_dossier"] for o in observees], [True, False])
+
+    def test_une_destination_ABSENTE_ne_rend_pas_une_accusation(self):
+        """`is_dir()` d'un chemin inexistant rend False — donc pas d'accusation.
+        Ce qu'on refuse, c'est d'INVENTER une mesure quand elle est impossible."""
+        observees = apply_support._granularites_observees(
+            [{"op_type": "QUARANTINE_FILE", "dst_path": str(self.racine / "jamais_creee")}]
+        )
+        self.assertIs(observees[0]["dst_est_dossier"], False)
+
+    def test_les_op_type_DIR_ne_sont_meme_pas_observes(self):
+        """Inutile de toucher le disque pour un type qui ne peut pas mentir dans
+        ce sens : on ne paie l'E/S que pour les `*_FILE`."""
+        dossier = self.racine / "X"
+        dossier.mkdir()
+        self.assertEqual(
+            apply_support._granularites_observees([{"op_type": "QUARANTINE_DIR", "dst_path": str(dossier)}]),
+            [],
+        )
+
+    def test_1103_REMONTE_jusqu_au_payload_par_la_granularite(self):
+        """ROUGE si l'appel a `verifier_granularite_des_operations` disparait,
+        ou si son resultat cesse d'etre ajoute aux incoherences."""
+        dossier = self.racine / "Saga Rocky"
+        dossier.mkdir()
+        journal = []
+        with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
+            payload = apply_support._avec_verdict(
+                {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                store=_FauxStore([{"op_type": "QUARANTINE_FILE", "dst_path": str(dossier)}]),
+                run_paths=_FauxRunPaths(),
+                rows=(),
+                dry_run=False,
+                log_fn=lambda n, m: journal.append((n, m)),
+            )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertIn(
+            "op_type_fichier_sur_un_dossier",
+            codes,
+            "la granularite n'est pas cablee : un type FICHIER sur un dossier passe",
+        )
+
+    def test_un_vrai_fichier_ne_REMONTE_rien(self):
+        """Contre-test : sans lui, accuser systematiquement satisferait le test
+        precedent."""
+        fichier = self.racine / "rocky.mkv"
+        fichier.write_bytes(b"x" * 8)
+        with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
+            payload = apply_support._avec_verdict(
+                {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                store=_FauxStore([{"op_type": "QUARANTINE_FILE", "dst_path": str(fichier)}]),
+                run_paths=_FauxRunPaths(),
+                rows=(),
+                dry_run=False,
+                log_fn=lambda n, m: None,
+            )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertNotIn("op_type_fichier_sur_un_dossier", codes)
+
+
+if __name__ == "__main__":
+    unittest.main()

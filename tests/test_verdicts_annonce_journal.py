@@ -151,20 +151,41 @@ class DefautsDeLaSemaineTests(unittest.TestCase):
 
 
 class ComptesTests(unittest.TestCase):
-    def test_un_compte_de_quarantaine_qui_diverge_est_signale(self):
+    def test_le_compte_de_quarantaine_n_est_PLUS_compare(self):
+        """L'invariant qui comparait `quarantined` aux ops `QUARANTINE_*` a ete
+        RETIRE, et ce test fige la raison pour qu'on ne le reintroduise pas.
+
+        Les deux grandeurs ne sont pas comparables. `apply_core.move_to_review_bucket`
+        journalise un `QUARANTINE_*` pour TOUT passage sous `_review` — conflits,
+        sidecars, leftovers, doublons — via une dizaine de sites d'appel qui
+        incrementent SEPT compteurs differents, dont aucun n'est `quarantined`.
+
+        Consequence mesuree : tout apply deplacant un seul leftover levait une
+        incoherence. Un faux positif SYSTEMATIQUE, sur un apply parfaitement
+        sain — exactement ce que ce module existe pour eviter.
+
+        L'appariement 1:1 n'etant pas demontrable sur les dix sites, l'invariant
+        n'est pas « repare » : il est retire. Sa part saine — « le journal bouge
+        alors que le payload n'annonce RIEN » — est deja couverte par
+        `deplacements_journalises_non_annonces`.
+        """
         v = comparer_annonce_et_journal(
-            {"errors": 0, "quarantined": 1},
+            {"errors": 0, "quarantined": 1, "renames": 0, "moves": 0},
             [{"op_type": "QUARANTINE_FILE"}, {"op_type": "QUARANTINE_DIR"}],
         )
-        inc = next(i for i in v.incoherences if i.code == "compte_de_quarantaine_diverge")
-        self.assertEqual(inc.annonce, {"quarantined": 1})
-        self.assertEqual(inc.journal, {"QUARANTINE_FILE": 1, "QUARANTINE_DIR": 1})
-        self.assertIn("#1103", inc.reserve, "la limite connue doit accompagner le verdict")
-        self.assertIn(
-            "verifier_operations_qui_emportent_d_autres_lignes",
-            inc.reserve,
-            "une reserve doit dire OU va chercher le lecteur, pas seulement qu'elle existe",
+        self.assertTrue(v.coherent, f"un compte de quarantaine ne doit plus rien lever : {v.as_dict()}")
+
+    def test_un_leftover_vers_review_ne_leve_RIEN(self):
+        """Le faux positif qui a fait retirer l'invariant, fige comme contre-test.
+
+        Un apply qui range UN leftover : le journal porte un `QUARANTINE_FILE`,
+        le payload annonce `leftovers_moved_count: 1` et `quarantined: 0`.
+        """
+        v = comparer_annonce_et_journal(
+            {"errors": 0, "quarantined": 0, "leftovers_moved_count": 1},
+            [{"op_type": "QUARANTINE_FILE", "src_path": "D:/films/x.srt"}],
         )
+        self.assertTrue(v.coherent, f"faux positif sur un rangement de leftover : {v.as_dict()}")
 
     def test_un_apply_coherent_ne_leve_RIEN(self):
         """Contre-test central : un verdict qui rougit sur du normal serait pire
@@ -183,10 +204,19 @@ class ComptesTests(unittest.TestCase):
         self.assertTrue(v.coherent, f"faux positif sur un apply sain : {v.as_dict()}")
 
     def test_le_dry_run_ne_compare_pas_les_comptes(self):
-        """En apercu rien n'est journalise. Sans ce garde, CHAQUE dry-run
-        leverait une incoherence — le faux positif qui tue l'outil."""
-        v = comparer_annonce_et_journal({"errors": 0, "quarantined": 4, "renames": 9}, [], dry_run=True)
-        self.assertTrue(v.coherent)
+        """En apercu rien n'est journalise. Sans ce garde, un dry-run leverait
+        une incoherence — le faux positif qui tue l'outil.
+
+        Le journal est NON VIDE ici, et c'est indispensable. Une premiere version
+        passait `[]` : le garde ne changeait alors rien, et le mutant qui le
+        SUPPRIMAIT survivait. Un test qui n'expose pas la garde ne la garde pas.
+        """
+        operations = [{"op_type": "MOVE_FILE"}, {"op_type": "QUARANTINE_FILE"}]
+        self.assertFalse(
+            comparer_annonce_et_journal({"errors": 0}, operations).coherent,
+            "premisse du test : hors dry-run, ce cas DOIT lever — sinon on ne mesure rien",
+        )
+        self.assertTrue(comparer_annonce_et_journal({"errors": 0}, operations, dry_run=True).coherent)
 
     def test_mais_le_dry_run_signale_QUAND_MEME_un_succes_menteur(self):
         """Le garde du dry-run ne doit pas devenir un trou : un echec journalise
@@ -217,8 +247,17 @@ class LeDetecteurNEstPasMuetTests(unittest.TestCase):
         self.assertEqual(comptes, {"MOVE_FILE": 2, "MKDIR": 1})
 
     def test_les_deux_formes_d_echec_sont_reconnues(self):
-        """`undo_status=FAILED` sur les lignes de base, cle `error` sur les
-        evenements d'audit. Les deux coexistent dans ce depot."""
+        """Les formes RELEVEES, et le rappel de celle qui etait imaginee.
+
+        Mesurees dans le code qui les ecrit : `undo_status='FAILED'` et
+        `error_message` sur `apply_operations` (ecrits par l'UNDO, cf.
+        `apply_rollback.py:467`), et `event="error"` sur `apply_audit.jsonl`.
+
+        La cle `error` NUE, elle, n'est produite par AUCUN de ces deux
+        producteurs — c'est la forme que j'avais imaginee, et le detecteur ne
+        voyait rien. Elle reste acceptee pour les payloads internes, mais ne doit
+        plus jamais etre citee comme une forme du journal.
+        """
         self.assertTrue(verdicts._en_echec({"undo_status": "FAILED"}))
         self.assertTrue(verdicts._en_echec({"error": "boom"}))
         self.assertFalse(verdicts._en_echec({"undo_status": "DONE"}))
@@ -345,7 +384,7 @@ class LaFormeSQLiteEstCELLEDuDEPOTTests(unittest.TestCase):
             [{**self.LIGNE_TYPE, "op_type": "QUARANTINE_FILE"}],
         )
         self.assertEqual(v.comptes_journal, {"QUARANTINE_FILE": 1})
-        self.assertIn("compte_de_quarantaine_diverge", {i.code for i in v.incoherences})
+        self.assertIn("deplacements_journalises_non_annonces", {i.code for i in v.incoherences})
 
 
 class LesCompteursNONTPasDeriveTests(unittest.TestCase):

@@ -17,27 +17,58 @@ endpoint par endpoint, et toujours apres l'incident : `reset_support._a_disparu`
 `test_apply_mkdirs_dryrun_parity`. Il n'en existait AUCUNE forme generique.
 C'est ce trou que ce module comble.
 
-CE QU'IL FAIT, ET CE QU'IL NE FAIT PAS
---------------------------------------
-`comparer_annonce_et_journal` compare deux des trois sommets : le PAYLOAD rendu
-a l'utilisateur et le JOURNAL des operations enregistrees. Cela attrape #1062 —
-un succes vert alors que le journal porte des echecs.
+CE QU'IL COUVRE REELLEMENT — MESURE, PAS ESPERE
+------------------------------------------------
+Une premiere redaction de ce module annoncait fermer #1062 ET #1103. C'est faux,
+et la difference compte pour qui s'y fiera :
 
-Ce cote seul ne voit PAS #1103 : une seule operation journalisee emportait tout
-un dossier, donc 1 annonce = 1 inscrit, les comptes concordent.
+    #1103  COUVERT. `verifier_operations_qui_emportent_d_autres_lignes` (le
+           dossier partage entre plusieurs lignes du plan) et
+           `verifier_granularite_des_operations` (le type dit FICHIER, la
+           destination est un DOSSIER) attrapent chacun sa moitie.
+    #1062  NON. Son payload portait `errors: 300` : il etait HONNETE. C'est
+           l'ecran qui ne lisait que `deleted`, et le correctif a ete pose cote
+           front, deliberement (« mettre ok a faux des qu'errors > 0 ferait
+           passer pour un echec une purge ou 299 fichiers sur 300 sont partis »).
+    #1099  NON. Le plan etait tronque AVANT l'apply ; en aval tout concorde.
+    #1097  NON. Ecran des reglages, route non couverte.
 
-`verifier_operations_qui_emportent_d_autres_lignes` le voit, et SANS lire le
-disque. Le plan prevoyait une photo avant/apres du sous-arbre ; les helpers
-existants (`_snapshot_tree`) hachent chaque fichier, ce qui est praticable dans
-un test et impensable sur une bibliotheque de films. Or #1103 est une question
-GEOMETRIQUE — « ce dossier abrite-t-il plusieurs lignes du plan ? » — a laquelle
-une comparaison de chemins repond, et qui reste vraie apres coup, quand la
-source n'existe plus.
+ATTEIGNABILITE DES INVARIANTS, MESUREE
+---------------------------------------
+    succes_annonce_malgre_des_echecs      INATTEIGNABLE aujourd'hui.
+        Les TROIS `audit_logger.error` d'`apply_core` (2388, 2420, 2466) sont
+        chacun precede d'un `res.errors += 1`, et `append_apply_operation` n'a
+        aucun parametre d'erreur (INSERT 'PENDING', NULL en dur). Il ne peut
+        donc pas exister d'echec journalise avec `errors == 0` a l'instant de
+        l'apply. Conserve en DEFENSE EN PROFONDEUR — un quatrieme site d'erreur
+        qui oublierait le compteur le rendrait vivant — mais il ne faut pas
+        compter dessus, et surtout pas le presenter comme le cœur du module.
+    deplacements_journalises_non_annonces ATTEIGNABLE, etroit : exige que les
+        DIX-HUIT compteurs soient nuls simultanement.
+    une_operation_emporte_plusieurs_lignes ATTEIGNABLE — c'est #1103.
+    op_type_fichier_sur_un_dossier         ATTEIGNABLE — c'est #1103 aussi.
 
-Reste hors de portee : ce qui n'est ni annonce, ni inscrit, ni deductible du
-plan — un fichier qu'un tiers deplacerait pendant l'apply, par exemple. La photo
-du disque garderait la son sens ; elle n'est simplement pas necessaire aux
-quatre defauts connus.
+CE QUI A ETE RETIRE, ET POURQUOI
+--------------------------------
+Un cinquieme invariant comparait `result.quarantined` aux operations
+`QUARANTINE_*`. Il produisait un FAUX POSITIF SYSTEMATIQUE :
+`apply_core.move_to_review_bucket` journalise `QUARANTINE_*` pour tout passage
+sous `_review` via une dizaine de sites, dont SEPT alimentent d'autres compteurs
+(leftovers, doublons, sidecars, marques pour suppression). Un seul fichier de rab
+suffisait a faire rougir un apply parfaitement sain. L'appariement 1:1 n'etant
+pas demontrable, l'invariant n'a pas ete repare : il a ete retire.
+
+CE QUI RESTE HORS DE PORTEE
+---------------------------
+Le sens ANNONCE > JOURNAL (le payload annonce plus que le journal ne porte)
+n'est verifie nulle part, et c'est la forme de #1099. Le durcissement evident —
+egalite des comptes — est refute par la mesure : il n'existe pas de bijection
+entre les dix-huit compteurs et les `op_type`, et l'exiger recreerait le faux
+positif qu'on vient de retirer.
+
+Et ce qui n'est ni annonce, ni inscrit, ni deductible du plan — un fichier qu'un
+tiers deplacerait pendant l'apply — echappe par construction. La photo du disque
+garderait la son sens ; elle n'est simplement pas necessaire aux defauts connus.
 
 DEUX JOURNAUX, ET IL EN FAUT DEUX
 ---------------------------------
@@ -48,8 +79,10 @@ n'ont meme pas la meme forme :
   `record_apply_op` n'est appelee qu'APRES un move reussi et n'a aucun parametre
   d'erreur : cette table dit ce qui a BOUGE, presque jamais ce qui a echoue.
 - `apply_audit.jsonl` (`read_apply_audit`) — cle `event` en minuscules
-  (`op_move_file`), et surtout `event="error"`, seule trace des echecs, ecrite en
-  trois endroits de `apply_core`.
+  (`op_move_file`), et surtout `event="error"`, ecrite en trois endroits de
+  `apply_core`. C'est la seule trace des echecs DE L'APPLY ; `apply_rollback`,
+  lui, ecrit bien `error_message` et `undo_status='FAILED'` dans
+  `apply_operations` — mais lors de l'UNDO, donc apres que ce verdict est rendu.
 
 N'en brancher qu'une rendrait l'instrument muet sur la moitie du probleme. Les
 echecs sont donc cherches dans les DEUX, les comptes seulement dans
@@ -241,27 +274,6 @@ def _verifier_succes_menteur(erreurs_annoncees: int, ops_en_echec: int) -> Optio
     )
 
 
-def _verifier_compte_de_quarantaine(annoncee: int, comptes: Mapping[str, int]) -> Optional[Incoherence]:
-    """Le nombre de mises en quarantaine annonce contre celui inscrit."""
-    journalisee = sum(comptes.get(t, 0) for t in OPS_DE_QUARANTAINE)
-    if annoncee == journalisee:
-        return None
-    return Incoherence(
-        code="compte_de_quarantaine_diverge",
-        message=(
-            f"l'apply annonce quarantined={annoncee} mais le journal porte {journalisee} operation(s) de quarantaine"
-        ),
-        annonce={"quarantined": annoncee},
-        journal={t: comptes.get(t, 0) for t in OPS_DE_QUARANTAINE},
-        reserve=(
-            "un COMPTE egal ne prouve pas que la bonne CHOSE a bouge : #1103 "
-            "deplacait un dossier entier en une seule operation, donc 1 = 1. "
-            "C'est `verifier_operations_qui_emportent_d_autres_lignes` qui tranche "
-            "ce cas — par la geometrie des chemins, sans lire le disque."
-        ),
-    )
-
-
 def _verifier_deplacements_tus(annonce: Mapping[str, int], comptes: Mapping[str, int]) -> Optional[Incoherence]:
     """Le sens inverse, et c'est le plus dangereux.
 
@@ -292,21 +304,71 @@ def _cle_de_chemin(chemin: Any) -> str:
     brut = str(chemin or "").strip()
     if not brut:
         return ""
-    return os.path.normcase(os.path.normpath(brut))
+    cle = os.path.normcase(os.path.normpath(brut))
+    # RETIRER le separateur final, sinon les partages RESEAU echappent.
+    #
+    # Pour un chemin UNC, `\\serveur\partage` EST la racine : `normpath` lui
+    # garde son separateur final, exactement comme a `d:\`. Or la source d'une
+    # operation arrive sans ce separateur. Les deux formes ne se rencontraient
+    # donc jamais, et une ligne du plan imbriquee sous un dossier reseau mis en
+    # quarantaine n'etait PAS vue — un trou invisible sur un poste a lettres de
+    # lecteur, qui n'ont pas ce comportement.
+    #
+    # Le repli `or cle` protege le cas degenere ou tout serait separateur.
+    return cle.rstrip("\\/") or cle
 
 
-def _est_sous(enfant: str, parent: str) -> bool:
-    """`enfant` est-il DANS `parent` (ou lui-meme) ?
+def verifier_granularite_des_operations(
+    observations: Sequence[Mapping[str, Any]],
+) -> List[Incoherence]:
+    """Un `op_type` qui dit FICHIER sur une destination qui est un DOSSIER.
 
-    Comparaison par SEGMENTS et non par prefixe de chaine : `C:/films/Rocky2`
-    commence par `C:/films/Rocky` sans etre dedans, et confondre les deux ferait
-    accuser un apply parfaitement sain.
+    C'EST LE CONTROLE QUE J'AVAIS ECARTE A TORT
+    --------------------------------------------
+    En lisant le correctif de #1103 j'avais conclu que l'`op_type` etait
+    honnete — `QUARANTINE_DIR`, un dossier — et j'en avais deduit qu'un controle
+    de granularite n'aurait rien vu. C'est FAUX, et l'issue le dit mot pour mot :
+    le dossier partage partait journalise `QUARANTINE_FILE`.
+
+    Le mecanisme l'explique : `folder / row.video` avec `row.video` vide vaut
+    `folder`, et le code poursuivait sur la branche FICHIER. Le type enregistre
+    contredisait donc la nature de ce qui bougeait — un `is_dir()` sur la
+    destination suffisait a le voir.
+
+    Cet invariant est complementaire de
+    `verifier_operations_qui_emportent_d_autres_lignes` : celui-ci attrape le cas
+    ou le dossier emporte d'AUTRES lignes du plan, celui-la le cas ou il n'en
+    emporte aucune mais reste un dossier deplace sous un type FICHIER.
+
+    L'observation `dst_est_dossier` est fournie par l'appelant : ce module reste
+    pur, et un `is_dir()` par operation est borne par le nombre d'operations.
+
+    Args:
+        observations: `{"op_type", "dst_path", "dst_est_dossier"}` par operation.
+            Une observation sans `dst_est_dossier` est IGNOREE — l'absence de
+            mesure n'est pas une mesure negative.
     """
-    if not enfant or not parent:
-        return False
-    if enfant == parent:
-        return True
-    return enfant.startswith(parent.rstrip(os.sep) + os.sep)
+    trouvees: List[Incoherence] = []
+    for obs in observations or ():
+        try:
+            op_type = str(obs.get("op_type") or "")
+            est_dossier = obs.get("dst_est_dossier")
+        except AttributeError:
+            continue
+        if not op_type.endswith("_FILE") or est_dossier is not True:
+            continue
+        trouvees.append(
+            Incoherence(
+                code="op_type_fichier_sur_un_dossier",
+                message=(
+                    f"une operation {op_type} porte sur une DESTINATION qui est un dossier "
+                    "— c'est la signature de #1103"
+                ),
+                annonce={"op_type": op_type, "granularite_declaree": "FICHIER"},
+                journal={"dst_path": str(obs.get("dst_path") or ""), "dst_est_dossier": True},
+            )
+        )
+    return trouvees
 
 
 def verifier_operations_qui_emportent_d_autres_lignes(
@@ -315,26 +377,15 @@ def verifier_operations_qui_emportent_d_autres_lignes(
 ) -> List[Incoherence]:
     """#1103 : une seule operation de quarantaine emportait TOUT un dossier.
 
-    LE COTE DISQUE, SANS LIRE LE DISQUE
-    -----------------------------------
-    Le plan prevoyait ici une photo avant/apres du sous-arbre. Les helpers
-    existants (`_snapshot_tree`, `_diff`) hachent chaque fichier : praticable
-    dans un test, impensable sur une bibliotheque de films.
+    Le mecanisme de #1103 : `quarantine_row` resolvait la video par
+    `folder / row.video`, et `PlanRow.video` « can be empty » — `folder / ""`
+    vaut `folder`. Pour tout `kind` autre que `single`, ce dossier est PARTAGE
+    entre plusieurs lignes du plan, et le mettre en quarantaine emportait les
+    films des AUTRES lignes.
 
-    Or #1103 n'a pas besoin du disque. Son mecanisme exact : `quarantine_row`
-    resolvait la video par `folder / row.video`, et `PlanRow.video` « can be
-    empty » — `folder / ""` vaut `folder`. Pour tout `kind` autre que `single`,
-    le dossier est PARTAGE entre plusieurs lignes du plan. Mettre ce dossier en
-    quarantaine emportait donc les films des AUTRES lignes.
-
-    La question devient purement geometrique : *cette operation a-t-elle deplace
-    un dossier ou vivent plusieurs lignes du plan ?* Une comparaison de chemins
-    y repond, sans une seule E/S — et elle reste vraie apres coup, quand la
-    source n'existe plus.
-
-    Une remarque qui compte : l'`op_type` etait HONNETE (`QUARANTINE_DIR`, un
-    dossier). Un controle « le type dit FILE mais c'est un DIR » n'aurait rien
-    vu. Ce qui mentait, c'etait l'AMPLEUR — 1 operation comptee, 4 films partis.
+    La question est donc GEOMETRIQUE, et une comparaison de chemins y repond sans
+    une seule E/S — elle reste vraie apres coup, quand la source n'existe plus.
+    Complementaire de `verifier_granularite_des_operations` (cf. son docstring).
 
     Args:
         operations: les lignes `apply_operations` du batch.
@@ -380,8 +431,16 @@ def verifier_operations_qui_emportent_d_autres_lignes(
         while cle:
             if cle in emportees_par_source:
                 emportees_par_source[cle].add(str(row_id))
-            parent = os.path.dirname(cle)
-            if parent == cle:  # racine atteinte : `dirname('d:\')` rend `d:\`
+            # RENORMALISER l'ancetre, sans quoi les partages RESEAU echappent.
+            #
+            # `os.path.dirname` rend une racine UNC AVEC son separateur final
+            # (`\\nas\films\`) alors que `_cle_de_chemin` d'une source la rend
+            # SANS (`\\nas\films`). Les deux ne se rencontraient donc jamais, et
+            # une ligne imbriquee sous un dossier reseau mis en quarantaine
+            # n'etait PAS vue. Les chemins a lettre de lecteur n'ont pas ce
+            # defaut, ce qui rendait le trou invisible sur un poste ordinaire.
+            parent = _cle_de_chemin(os.path.dirname(cle))
+            if parent == cle:  # racine atteinte : `dirname` s'y rend lui-meme
                 break
             cle = parent
 
@@ -452,10 +511,7 @@ def comparer_annonce_et_journal(
     # Tous les compteurs, pas seulement ceux qu'on croit pertinents : n'en
     # oublier qu'un fait rougir un apply sain (cf. COMPTEURS_D_ACTION_DISQUE).
     annonce_des_deplacements = {c: _entier(c) for c in COMPTEURS_D_ACTION_DISQUE}
-    for inc in (
-        _verifier_compte_de_quarantaine(_entier("quarantined"), comptes),
-        _verifier_deplacements_tus(annonce_des_deplacements, comptes),
-    ):
-        if inc is not None:
-            trouvees.append(inc)
+    inc = _verifier_deplacements_tus(annonce_des_deplacements, comptes)
+    if inc is not None:
+        trouvees.append(inc)
     return Verdict(incoherences=trouvees, comptes_journal=comptes)
