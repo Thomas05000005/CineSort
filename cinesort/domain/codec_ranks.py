@@ -42,7 +42,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Format : (pattern_substring, rang, label_canonique)
 # Ordre : priorite decroissante (le premier match l'emporte)
-# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC(3) > DTS/DTS-HD HRA/AC3(2) > AAC/MP3/Opus(1)
+# Atmos(6) > TrueHD(5) > DTS-HD MA(4) > EAC3/FLAC/PCM(3) > DTS/DTS-HD HRA/AC3(2) > AAC/MP3/Opus(1)
 #
 # #807 — DTS-HD HRA (High Resolution Audio) est LOSSY, contrairement a DTS-HD MA
 # (Master Audio, lossless). Les motifs HRA sont places AVANT `dts-hd`/`dtshd`
@@ -52,6 +52,16 @@ __all__ = [
 # pas un arbitrage nouveau : c'est celui que `quality_score` applique deja a HRA
 # en trois endroits (`_AUDIO_CANONICAL_RANK_ALIAS['dts-hd hra'] = 'dts'`,
 # `_hierarchy_audio_codec_token`, `_is_premium_multichannel_codec`).
+#
+# PCM / LPCM : le codec n'avait AUCUNE entree dans les deux tables, donc rang 0 —
+# soit SOUS l'AAC (1) et le MP3 (1). C'est la meme signature que les etiquettes
+# composees de l'ultra-audit 2026-08-03 et que les formes hyphenees de la revue
+# PR#854, toutes deux corrigees par un alias. Le rang 3 n'est pas un arbitrage
+# nouveau : c'est celui de FLAC, l'autre lossless de ces tables, et
+# `release_name_parser._PATTERNS_AUDIO` declare deja PCM/LPCM `lossless=True`.
+# Le motif couvre les variantes ffprobe (`pcm_s16le`, `pcm_s24le`, `pcm_bluray`,
+# `pcm_dvd`), le `Format` MediaInfo (`PCM`) et l'etiquette que le fallback par le
+# nom synthetise lui-meme (`_NAME_AUDIO_CODEC_TO_PROBE["pcm"] = "pcm"`).
 
 AUDIO_CODEC_RANK_PATTERNS: List[Tuple[str, int, str]] = [
     ("atmos", 6, "Atmos"),  # Atmos dans codec OU title
@@ -63,6 +73,7 @@ AUDIO_CODEC_RANK_PATTERNS: List[Tuple[str, int, str]] = [
     ("eac3", 3, "EAC3"),
     ("e-ac-3", 3, "EAC3"),
     ("flac", 3, "FLAC"),
+    ("pcm", 3, "PCM"),  # lossless non compresse — couvre lpcm / pcm_s24le / pcm_bluray
     ("dts", 2, "DTS"),
     ("ac3", 2, "AC3"),
     ("a_ac3", 2, "AC3"),
@@ -86,6 +97,11 @@ AUDIO_CODEC_RANK: dict[str, int] = {
     "dtshd": 4,
     "dts-hd": 4,
     "flac": 3,
+    # PCM : lossless non compresse, meme rang que FLAC (cf. le commentaire de
+    # AUDIO_CODEC_RANK_PATTERNS). Ce lookup est EXACT : les variantes ffprobe
+    # (`pcm_s24le`, `pcm_bluray`) sont ramenees a "pcm" par
+    # `quality_score._canonical_audio_codec` avant d'arriver ici.
+    "pcm": 3,
     "dts": 2,
     "ac3": 2,
     "eac3": 2,

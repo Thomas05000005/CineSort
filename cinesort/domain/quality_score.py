@@ -782,6 +782,14 @@ def _canonical_audio_codec(track: Dict[str, Any]) -> str:
     # corrigee en amont) : valeur rendue telle quelle -> l'operation est idempotente.
     if not c or any(token in c for token in _ALREADY_CANONICAL_AUDIO_TOKENS):
         return c
+    # PCM : ffprobe ne rend jamais "pcm" nu mais une variante par format d'echantillon
+    # (`pcm_s16le`, `pcm_s24le`, `pcm_bluray`, `pcm_dvd`) ; MediaInfo rend "PCM" et le
+    # fallback par le nom de release synthetise "pcm". Aucune de ces formes n'etait
+    # une cle de `AUDIO_CODEC_RANK`, donc toutes retombaient au rang 0 — SOUS l'AAC —
+    # alors que `release_name_parser` declare deja PCM/LPCM lossless. On les ramene a
+    # l'etiquette unique "pcm" ; l'operation reste idempotente ("pcm" -> "pcm").
+    if c.startswith("pcm") or c.startswith("lpcm"):
+        return "pcm"
     prof = str(track.get("profile") or "").strip().lower()
     if "truehd" in c:
         return "truehd atmos" if (bool(track.get("is_atmos")) or "atmos" in prof) else "truehd"
