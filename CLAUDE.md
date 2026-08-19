@@ -426,10 +426,13 @@ Quatre choses a savoir avant d'y toucher :
   fonction appelante, et eprouver aussi ses ARGUMENTS (passer `rows=()` au lieu
   de `rows=rows` laissait la batterie entiere verte).
 
-**Ce que la campagne n'a pas fait, ecrit plutot que tu** : `payload["verdict"]`
-n'est lu par aucun ecran. Une incoherence detectee sur le chemin destructif
-n'atteint aujourd'hui que le journal technique — le defaut meme que ce chantier
-denonce, commis par lui.
+**Ou l'incoherence atterrit** : `payload["verdict"]` n'est lu par AUCUN ecran —
+pas plus que `journal_warning` ni `undo_available`, poses par des correctifs
+anterieurs pour la meme raison. Le canal qui atteint reellement l'utilisateur est
+le CENTRE DE NOTIFICATIONS, seul a survivre a la fermeture de l'ecran d'apply.
+Un test (`LeVerdictNAtteintAUCUNEcranTests`) CONSTATE l'absence de lecteur cote
+front, pour que le jour ou un ecran le lira, quelqu'un vienne mettre ce constat
+a jour au lieu de le decouvrir.
 
 ## Conventions
 

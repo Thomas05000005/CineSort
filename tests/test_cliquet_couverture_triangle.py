@@ -206,9 +206,13 @@ class LeVerdictNAtteintAUCUNEcranTests(unittest.TestCase):
     """Ce que cette campagne n'a PAS fait, ecrit plutot que tu.
 
     `payload["verdict"]` est produit sur le chemin destructif et n'est lu par
-    aucun fichier du front. Une incoherence detectee n'atteint donc aujourd'hui
-    que le journal technique. C'est precisement le defaut que ce fichier
-    denonce, commis par la campagne qui l'ecrit.
+    aucun fichier du front — pas plus que `journal_warning` ou `undo_available`,
+    deux cles posees par des correctifs anterieurs pour la meme raison.
+
+    L'incoherence atteint donc l'utilisateur par le CENTRE DE NOTIFICATIONS
+    (`_publier_incoherence`), le seul canal qui survit a la fermeture de l'ecran
+    d'apply — et non par l'ecran qui vient de lui annoncer le resultat. C'est
+    mieux que le journal technique seul, ce n'est pas encore l'ecran.
 
     Ce test ne l'interdit pas — il le CONSTATE, pour que le jour ou un ecran le
     lira, quelqu'un vienne mettre ce constat a jour au lieu de le decouvrir.
@@ -244,8 +248,8 @@ class LeVerdictNAtteintAUCUNEcranTests(unittest.TestCase):
         self.assertEqual(
             lecteurs,
             [],
-            "un ecran lit desormais le verdict : mettre a jour ce constat et le "
-            f"docstring du module. Lecteurs : {lecteurs}",
+            "un ecran lit desormais le verdict : mettre a jour ce constat, le "
+            f"docstring du module et CLAUDE.md. Lecteurs : {lecteurs}",
         )
 
 

@@ -525,7 +525,9 @@
     "scan_done_body": "{{count}} film(s) détecté(s) en {{elapsed}}s.",
     "apply_done_body": "{{renames}} renommé(s), {{moves}} déplacé(s), {{errors}} erreur(s).",
     "undo_done_body": "{{done}} restauré(s), {{failed}} échec(s).",
-    "undo_none_body": "Aucun film restauré : {{skipped}} opération(s) ignorée(s). L'application reste annulable."
+    "undo_none_body": "Aucun film restauré : {{skipped}} opération(s) ignorée(s). L'application reste annulable.",
+    "title_incoherence_apply": "Incoherence detectee apres l'application",
+    "incoherence_apply_body": "{{nombre}} ecart(s) entre ce qui vous a ete annonce et ce qui a ete enregistre. Details dans le journal technique (batch {{batch}})."
   },
   "errors": {
     "run_not_found": "Le run demandé est introuvable.",

@@ -467,7 +467,9 @@
     "scan_done_body": "{{count}} movie(s) detected in {{elapsed}}s.",
     "apply_done_body": "{{renames}} renamed, {{moves}} moved, {{errors}} error(s).",
     "undo_done_body": "{{done}} restored, {{failed}} failed.",
-    "undo_none_body": "No movie restored: {{skipped}} operation(s) skipped. The apply is still undoable."
+    "undo_none_body": "No movie restored: {{skipped}} operation(s) skipped. The apply is still undoable.",
+    "title_incoherence_apply": "Inconsistency detected after apply",
+    "incoherence_apply_body": "{{nombre}} discrepancy(ies) between what was reported and what was recorded. Details in the technical log (batch {{batch}})."
   },
   "errors": {
     "run_not_found": "The requested run was not found.",

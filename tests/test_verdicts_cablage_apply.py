@@ -35,9 +35,29 @@ class _FauxRunPaths:
     run_dir = "run_dir_factice"
 
 
+class _FauxApi:
+    """Centre de notifications minimal : enregistre ce qui est publie.
+
+    `leve` permet d'eprouver qu'un centre CASSE ne fait pas echouer un apply
+    disque REUSSI — le defaut F11, dans l'autre sens.
+    """
+
+    def __init__(self, journal: List[tuple], *, leve: bool = False) -> None:
+        self._journal = journal
+        self._leve = leve
+        self._notify = self
+
+    def notify(self, event_type: str, titre: str, corps: str, level: str = "info") -> None:
+        self._journal.append((event_type, titre, corps, level))
+        if self._leve:
+            raise RuntimeError("centre de notifications indisponible")
+
+
 class CablageDuVerdictTests(unittest.TestCase):
     def setUp(self) -> None:
         self.journal: List[tuple[str, str]] = []
+        self.notifications: List[tuple] = []
+        self.api = _FauxApi(self.notifications)
 
     def _log(self, niveau: str, message: str) -> None:
         self.journal.append((str(niveau), str(message)))
@@ -55,6 +75,7 @@ class CablageDuVerdictTests(unittest.TestCase):
         with mock.patch.object(apply_support, "read_apply_audit", return_value=list(evenements or [])):
             return apply_support._avec_verdict(
                 payload,
+                self.api,
                 store=_FauxStore(operations, leve=leve),
                 run_paths=_FauxRunPaths(),
                 rows=rows,
@@ -296,6 +317,7 @@ class LE_CABLAGE_DE_1103_Tests(unittest.TestCase):
             return (
                 apply_support._avec_verdict(
                     {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                    _FauxApi([]),
                     store=store,
                     run_paths=_FauxRunPaths(),
                     rows=[SimpleNamespace(row_id=r, folder=f) for r, f in rows],
@@ -449,6 +471,7 @@ class LE_CABLAGE_DE_LA_GRANULARITE_Tests(unittest.TestCase):
         with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
             payload = apply_support._avec_verdict(
                 {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                _FauxApi([]),
                 store=_FauxStore([{"op_type": "QUARANTINE_FILE", "dst_path": str(dossier)}]),
                 run_paths=_FauxRunPaths(),
                 rows=(),
@@ -470,6 +493,7 @@ class LE_CABLAGE_DE_LA_GRANULARITE_Tests(unittest.TestCase):
         with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
             payload = apply_support._avec_verdict(
                 {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                _FauxApi([]),
                 store=_FauxStore([{"op_type": "QUARANTINE_FILE", "dst_path": str(fichier)}]),
                 run_paths=_FauxRunPaths(),
                 rows=(),
@@ -478,6 +502,55 @@ class LE_CABLAGE_DE_LA_GRANULARITE_Tests(unittest.TestCase):
             )
         codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
         self.assertNotIn("op_type_fichier_sur_un_dossier", codes)
+
+
+class LE_VERDICT_ATTEINT_UN_HUMAIN_Tests(unittest.TestCase):
+    """Une cle de payload que personne n'affiche serait un silence de plus.
+
+    C'est MESURE : aucun fichier du front ne lit `verdict`, ni `journal_warning`,
+    ni `undo_available`. Le centre de notifications est le seul canal qui survit
+    a la fermeture de l'ecran d'apply.
+    """
+
+    def _appeler(self, operations, resultat=None, *, notify_casse: bool = False):
+        journal: List[tuple] = []
+        api = _FauxApi(journal, leve=notify_casse)
+        with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
+            payload = apply_support._avec_verdict(
+                {"ok": True, "apply_batch_id": "b1", "result": dict(resultat or {"errors": 0})},
+                api,
+                store=_FauxStore(operations),
+                run_paths=_FauxRunPaths(),
+                rows=(),
+                dry_run=False,
+                log_fn=lambda n, m: None,
+            )
+        return payload, journal
+
+    def test_une_incoherence_est_PUBLIEE(self):
+        _, notifications = self._appeler([{"op_type": "MOVE_FILE", "error_message": "boom"}])
+        self.assertEqual(len(notifications), 1, f"rien n'a ete publie : {notifications}")
+        event_type, titre, corps, niveau = notifications[0]
+        self.assertEqual(niveau, "error")
+        self.assertNotIn("notifications.", titre, "la cle i18n n'est pas traduite — libelle fantome")
+        self.assertIn("b1", corps, "le corps doit nommer le batch, sinon l'alerte est irrattachable")
+
+    def test_un_apply_SAIN_ne_publie_RIEN(self):
+        """Contre-test : une alerte a chaque apply apprend a les ignorer.
+
+        Le payload ANNONCE bien le deplacement qu'il a journalise — sans quoi
+        l'invariant n3 leverait a juste titre, et ce test ne mesurerait pas ce
+        qu'il croit.
+        """
+        payload, notifications = self._appeler([{"op_type": "MOVE_FILE"}], {"errors": 0, "moves": 1})
+        self.assertNotIn("verdict", payload, f"premisse cassee, cet apply n'est pas sain : {payload}")
+        self.assertEqual(notifications, [])
+
+    def test_un_centre_de_notifications_CASSE_ne_casse_pas_l_apply(self):
+        """L'apply disque a REUSSI : echouer ici serait re-creer F11."""
+        payload, _ = self._appeler([{"op_type": "MOVE_FILE", "error_message": "boom"}], notify_casse=True)
+        self.assertTrue(payload.get("ok"), "un centre casse a fait echouer un apply reussi")
+        self.assertIn("verdict", payload, "le verdict doit rester dans le payload malgre l'echec de publication")
 
 
 if __name__ == "__main__":

@@ -3128,8 +3128,33 @@ def _granularites_observees(operations: Sequence[Mapping[str, Any]]) -> List[Dic
     return observees
 
 
+def _publier_incoherence(api: Any, *, nombre: int, batch_id: Any) -> None:
+    """Fait remonter l'incoherence a un HUMAIN, pas seulement au journal.
+
+    Une cle de payload que personne n'affiche serait un silence de plus — et
+    c'est MESURE, pas suppose : aucun fichier du front ne lit `verdict`, pas plus
+    qu'il ne lit `journal_warning` ni `undo_available`. Le centre de
+    notifications est le seul canal qui SURVIT a la fermeture de l'ecran
+    d'apply, et son miroir est inconditionnel ; c'est deja le choix fait plus
+    haut pour l'undo indisponible.
+
+    Un echec de publication ne doit jamais transformer un apply disque REUSSI en
+    HTTP 500 — ce serait re-creer le defaut F11.
+    """
+    try:
+        api._notify.notify(
+            "error",
+            t("notifications.title_incoherence_apply"),
+            t("notifications.incoherence_apply_body", nombre=int(nombre), batch=str(batch_id or "?")),
+            level="error",
+        )
+    except Exception:  # noqa: BLE001 - une notification ne casse jamais un apply reussi
+        _log.debug("notification 'incoherence annonce/journal' non publiee", exc_info=True)
+
+
 def _avec_verdict(
     payload: Dict[str, Any],
+    api: Any,
     *,
     store: Any,
     run_paths: Any,
@@ -3212,6 +3237,7 @@ def _avec_verdict(
         f"INCOHERENCE annonce/journal batch={apply_batch_id} : {json.dumps(verdict.as_dict(), ensure_ascii=False)}",
     )
     payload["verdict"] = verdict.as_dict()
+    _publier_incoherence(api, nombre=len(verdict.incoherences), batch_id=apply_batch_id)
     return payload
 
 
@@ -3516,7 +3542,7 @@ def _apply_changes_body(
                 # Un echec de notification ne doit pas transformer un apply
                 # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
                 _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
-        return _avec_verdict(payload, store=store, run_paths=run_paths, rows=rows, dry_run=dry_run, log_fn=log_fn)
+        return _avec_verdict(payload, api, store=store, run_paths=run_paths, rows=rows, dry_run=dry_run, log_fn=log_fn)
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]
