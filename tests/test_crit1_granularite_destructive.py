@@ -17,6 +17,17 @@ reste = video + sidecars. Plus un garde-fou : kind != "single" sans video_name
 
 Ces tests ECHOUENT avant le fix (le dossier partage entier disparait) et PASSENT
 apres.
+
+Suite 2026-08-17 — le garde-fou manquait sur la REFERENCE elle-meme.
+--------------------------------------------------------------------
+Le fix de 2026-07-13 a pris `quarantine_row` pour modele de la semantique
+correcte, puis a AJOUTE a ses deux copies un garde-fou que le modele n'avait
+pas : `kind != "single"` sans video -> WARN + skip. Or `PlanRow.video` est
+documente « can be empty » et `folder / ""` vaut `folder` : sur ce site aussi,
+une row non-single sans video expediait le DOSSIER PARTAGE entier sous
+`_review/`. C'est meme le site le plus expose des quatre — il traite les rows
+NON APPROUVEES, c'est-a-dire justement celles qu'un plan malforme laisse en
+plan. `QuarantineRowGranularityTests` ferme ce quatrieme site.
 """
 
 from __future__ import annotations
@@ -246,6 +257,98 @@ class DuplicateLoserGranularityTests(_GranularityTestBase):
         self.assertTrue((self.bucket / "F&F4 720p" / "movie.mkv").exists())
         self.assertEqual(len(self._move_ops()), 1)
         self.assertEqual(res.duplicates_user_decided_moved_count, 1)
+
+
+class QuarantineRowGranularityTests(_GranularityTestBase):
+    """quarantine_row : le QUATRIEME site de la meme famille, et le plus expose.
+
+    Il traite les rows NON APPROUVEES : une row assez malformee pour n'avoir
+    plus de `video` est precisement celle que l'utilisateur laisse en plan.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # `quarantine_row` soumet sa cible a `ensure_inside_root` : le bac vit
+        # sous la racine de la bibliotheque, comme en production
+        # (`build_apply_context` -> `cfg.root / "_review"`).
+        self.review = self.root / "_review"
+        self.review.mkdir(parents=True, exist_ok=True)
+
+    def _run(self, row: core.PlanRow) -> core.ApplyResult:
+        res = core.ApplyResult()
+        apply_core.quarantine_row(
+            self._cfg(),
+            Path(row.folder),
+            row,
+            False,  # dry_run
+            self._log,
+            res,
+            self.review,
+            record_op=self._record_op,
+        )
+        return res
+
+    def _en_quarantaine(self) -> set:
+        return {p.name for p in self.review.rglob("*") if p.is_file()}
+
+    def test_non_single_sans_video_ne_deplace_pas_le_dossier_partage(self) -> None:
+        """Sans garde : `folder / ""` == folder, et tout le dossier part en quarantaine."""
+        shared = self._make_bonus_folder()
+        row = self._row("R_CORRUPT", "extra", shared, "")
+
+        res = self._run(row)
+
+        self.assertTrue(shared.is_dir(), msg="PERTE : le dossier PARTAGE a ete deplace en entier")
+        self.assertTrue((shared / "Star Wars.mkv").exists())
+        self.assertTrue((shared / "Making Of.mkv").exists())
+        self.assertEqual(self._en_quarantaine(), set())
+        # Le compteur ne doit pas annoncer une quarantaine qui n'a pas eu lieu.
+        self.assertEqual(res.quarantined, 0)
+        warns = [msg for lvl, msg in self.logs if lvl == "WARN"]
+        self.assertTrue(
+            any("R_CORRUPT" in msg for msg in warns),
+            msg=f"un WARN doit nommer la row refusee ; logs={self.logs}",
+        )
+
+    def test_tv_episode_sans_video_ne_deplace_pas_la_saison(self) -> None:
+        """Meme garde sur le kind qui coute le plus cher : le dossier de saison entier."""
+        season = self._make_series_folder()
+        row = self._row("R_EP_VIDE", "tv_episode", season, "")
+
+        res = self._run(row)
+
+        self.assertTrue((season / "Breaking Bad S01E01.mkv").exists())
+        self.assertTrue((season / "Breaking Bad S01E03.mkv").exists())
+        self.assertEqual(self._en_quarantaine(), set())
+        self.assertEqual(res.quarantined, 0)
+
+    def test_non_single_avec_video_met_bien_la_video_en_quarantaine(self) -> None:
+        """Contre-test : le garde ne doit pas ETEINDRE le chemin nominal."""
+        shared = self._make_bonus_folder()
+        row = self._row("R_EXTRA", "extra", shared, "Making Of.mkv")
+
+        res = self._run(row)
+
+        self.assertTrue(shared.is_dir())
+        self.assertTrue((shared / "Star Wars.mkv").exists())
+        self.assertFalse((shared / "Making Of.mkv").exists())
+        self.assertIn("Making Of.mkv", self._en_quarantaine())
+        self.assertGreaterEqual(res.quarantined, 1)
+
+    def test_single_deplace_toujours_le_dossier_entier(self) -> None:
+        """Non-regression de l'extraction `_quarantine_single_folder`."""
+        folder = self.root / "Inception (2010)"
+        self._write(folder / "movie.mkv")
+        self._write(folder / "movie.nfo", b"<m></m>")
+        row = self._row("R_SINGLE", "single", folder, "movie.mkv")
+
+        res = self._run(row)
+
+        self.assertFalse(folder.exists())
+        self.assertEqual(len(list(self.review.rglob("movie.mkv"))), 1)
+        self.assertEqual(len(list(self.review.rglob("movie.nfo"))), 1)
+        self.assertEqual(res.quarantined, 1)
+        self.assertEqual([op.get("op_type") for op in self.ops], ["QUARANTINE_DIR"])
 
 
 if __name__ == "__main__":  # pragma: no cover
