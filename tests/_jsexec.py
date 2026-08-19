@@ -75,19 +75,29 @@ def require_node(test: unittest.TestCase) -> None:
         test.skipTest("node introuvable dans le PATH")
 
 
-def strip_imports(src: str) -> str:
+def strip_imports(src: str, *, autorise_zero_import: bool = False) -> str:
     """Retire les declarations d'import (remplacees par des stubs injectes).
 
     Remplace chaque import par une ligne vide pour PRESERVER la numerotation
     des lignes (les traces d'erreur Node restent exploitables).
+
+    `autorise_zero_import` : quelques modules du front sont AUTONOMES et n'ont
+    aucun import — `core/cache.js` par exemple. Sans ce drapeau, l'assertion
+    ci-dessous les refuse, et c'est VOULU : elle attrape le cas ou l'on croit
+    stubber un module alors que le harnais ne s'y applique pas. Le drapeau ne
+    l'affaiblit pas, il oblige l'appelant a DECLARER que le module est autonome
+    — un silence ne suffit pas.
     """
 
     def _blank(m: re.Match[str]) -> str:
         return "\n" * m.group(0).count("\n")
 
     out, n = _IMPORT_RE.subn(_blank, src)
-    if n == 0:
-        raise AssertionError("aucun import trouve : le harnais ne s'applique pas a ce fichier")
+    if n == 0 and not autorise_zero_import:
+        raise AssertionError(
+            "aucun import trouve : le harnais ne s'applique pas a ce fichier. "
+            "Si le module est REELLEMENT autonome, passer `autorise_zero_import=True`."
+        )
     return out
 
 
@@ -98,8 +108,8 @@ globalThis.__sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 """
 
 
-def build_module(js_path: Path, stubs: str, extra: str, out_dir: Path) -> Path:
-    src = strip_imports(js_path.read_text(encoding="utf-8"))
+def build_module(js_path: Path, stubs: str, extra: str, out_dir: Path, *, autorise_zero_import: bool = False) -> Path:
+    src = strip_imports(js_path.read_text(encoding="utf-8"), autorise_zero_import=autorise_zero_import)
     mod = out_dir / "mod.mjs"
     mod.write_text(_PRELUDE + stubs + "\n" + src + "\n" + extra + "\n", encoding="utf-8")
     return mod
@@ -112,10 +122,11 @@ def run_module_test(
     extra: str,
     driver: str,
     timeout: int = 60,
+    autorise_zero_import: bool = False,
 ) -> dict:
     with tempfile.TemporaryDirectory() as td:
         out_dir = Path(td)
-        build_module(js_path, stubs, extra, out_dir)
+        build_module(js_path, stubs, extra, out_dir, autorise_zero_import=autorise_zero_import)
         drv = out_dir / "driver.mjs"
         drv.write_text('import * as M from "./mod.mjs";\n' + driver, encoding="utf-8")
         proc = subprocess.run(

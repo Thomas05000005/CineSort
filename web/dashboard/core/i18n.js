@@ -292,31 +292,6 @@ export async function initI18n() {
   return _state.bootPromise;
 }
 
-/**
- * Fix audit 2026-05-26 (v1.5.6) Vague L (i18n-1) :
- * Force le rechargement des messages d'une locale (ou la locale active si
- * non specifiee). Reset les messages caches AVANT le fetch pour que t()
- * retombe sur les fallbacks pendant la nouvelle requete (au lieu de servir
- * potentiellement un vieux JSON corrompu/incomplet).
- *
- * @param {string} [locale] - locale a recharger ; defaut: la locale active.
- * @returns {Promise<boolean>} true si le rechargement a abouti a un objet non-vide.
- */
-export async function reloadLocale(locale) {
-  const target = String(locale || _state.locale || DEFAULT_LOCALE).trim().toLowerCase();
-  if (!SUPPORTED_LOCALES.includes(target)) {
-    console.warn(`[i18n] reloadLocale: ignored invalid locale "${locale}"`);
-    return false;
-  }
-  // Reset AVANT fetch pour que t() tombe sur les fallbacks pendant le retry.
-  _state.messages[target] = null;
-  const data = await _fetchLocale(target);
-  _state.messages[target] = data;
-  if (target === _state.locale) {
-    _notifyObservers();
-  }
-  return Boolean(data && Object.keys(data).length);
-}
 
 // Exports nommes uniquement — pas de default export pour eviter les confusions
 // avec un usage `import t from ...`.
