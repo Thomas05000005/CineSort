@@ -134,30 +134,38 @@ class TestNormalizeCompositeScoreVersion(unittest.TestCase):
 
 class TestApplySettingsDefaults(unittest.TestCase):
     """Verifie que les configs existantes (sans `composite_score_version`)
-    migrent silencieusement vers V2 (VN-B.1)."""
+    migrent silencieusement vers V2 (VN-B.1).
+
+    Ces quatre tests portaient un
+    `mock.patch("cinesort.infra.log_context.normalize_log_level_setting")`
+    qui ne s'appliquait PAS : `settings_support` importe la fonction PAR VALEUR
+    (`from ... import normalize_log_level_setting`), donc il garde sa propre
+    reference et le patch du module source ne l'atteint jamais.
+
+    Mesure avant de retirer : les quatre tests passent SANS le mock, et la
+    fonction est un normalisateur de chaine pur — il ne masquait donc aucun
+    effet de bord. Un mock qui n'agit pas est pire qu'absent : il fait croire
+    a une isolation qui n'existe pas.
+    """
 
     def test_default_injected_when_missing(self) -> None:
         """Config legacy sans le setting -> V2 injecte (pas de KeyError)."""
-        with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults({}, **_defaults_kwargs(Path(".")))
+        payload = apply_settings_defaults({}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 2)
 
     def test_existing_v1_preserved(self) -> None:
         """Kill-switch V1 explicite : on preserve la valeur utilisateur."""
-        with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults({"composite_score_version": 1}, **_defaults_kwargs(Path(".")))
+        payload = apply_settings_defaults({"composite_score_version": 1}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 1)
 
     def test_existing_v2_preserved(self) -> None:
         """V2 explicite : on preserve (idempotent vs defaut)."""
-        with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults({"composite_score_version": 2}, **_defaults_kwargs(Path(".")))
+        payload = apply_settings_defaults({"composite_score_version": 2}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 2)
 
     def test_invalid_value_falls_back(self) -> None:
         """Settings.json corrompu/manuel -> V2 silencieux (pas de crash)."""
-        with mock.patch("cinesort.infra.log_context.normalize_log_level_setting", return_value="INFO"):
-            payload = apply_settings_defaults({"composite_score_version": "garbage"}, **_defaults_kwargs(Path(".")))
+        payload = apply_settings_defaults({"composite_score_version": "garbage"}, **_defaults_kwargs(Path(".")))
         self.assertEqual(payload["composite_score_version"], 2)
 
 
