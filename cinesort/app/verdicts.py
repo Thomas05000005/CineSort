@@ -19,13 +19,25 @@ C'est ce trou que ce module comble.
 
 CE QU'IL FAIT, ET CE QU'IL NE FAIT PAS
 --------------------------------------
-Il compare deux des trois sommets : le PAYLOAD rendu a l'utilisateur et le
-JOURNAL des operations reellement enregistrees. Le troisieme sommet (l'etat du
-DISQUE) demande une photo avant/apres et fera l'objet d'une seconde passe.
+`comparer_annonce_et_journal` compare deux des trois sommets : le PAYLOAD rendu
+a l'utilisateur et le JOURNAL des operations enregistrees. Cela attrape #1062 —
+un succes vert alors que le journal porte des echecs.
 
-Consequence a connaitre, et ecrite plutot que tue : ce cote seul attrape #1062
-(un succes vert alors que le journal porte des echecs) mais PAS #1103, ou une
-seule operation journalisee emportait tout un dossier — la, seul le disque parle.
+Ce cote seul ne voit PAS #1103 : une seule operation journalisee emportait tout
+un dossier, donc 1 annonce = 1 inscrit, les comptes concordent.
+
+`verifier_operations_qui_emportent_d_autres_lignes` le voit, et SANS lire le
+disque. Le plan prevoyait une photo avant/apres du sous-arbre ; les helpers
+existants (`_snapshot_tree`) hachent chaque fichier, ce qui est praticable dans
+un test et impensable sur une bibliotheque de films. Or #1103 est une question
+GEOMETRIQUE — « ce dossier abrite-t-il plusieurs lignes du plan ? » — a laquelle
+une comparaison de chemins repond, et qui reste vraie apres coup, quand la
+source n'existe plus.
+
+Reste hors de portee : ce qui n'est ni annonce, ni inscrit, ni deductible du
+plan — un fichier qu'un tiers deplacerait pendant l'apply, par exemple. La photo
+du disque garderait la son sens ; elle n'est simplement pas necessaire aux
+quatre defauts connus.
 
 DEUX JOURNAUX, ET IL EN FAUT DEUX
 ---------------------------------
@@ -57,6 +69,7 @@ cablage se mute separement (regle du depot : muter le SITE D'APPEL a part).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -243,7 +256,8 @@ def _verifier_compte_de_quarantaine(annoncee: int, comptes: Mapping[str, int]) -
         reserve=(
             "un COMPTE egal ne prouve pas que la bonne CHOSE a bouge : #1103 "
             "deplacait un dossier entier en une seule operation, donc 1 = 1. "
-            "Seule la photo du disque tranche ce cas."
+            "C'est `verifier_operations_qui_emportent_d_autres_lignes` qui tranche "
+            "ce cas — par la geometrie des chemins, sans lire le disque."
         ),
     )
 
@@ -266,6 +280,112 @@ def _verifier_deplacements_tus(annonce: Mapping[str, int], comptes: Mapping[str,
         annonce={"tous_les_compteurs_d_action": 0, "compteurs_examines": sorted(annonce)},
         journal={t: comptes.get(t, 0) for t in OPS_DE_DEPLACEMENT if comptes.get(t, 0)},
     )
+
+
+def _cle_de_chemin(chemin: Any) -> str:
+    """Normalise un chemin pour la comparaison, SANS toucher au disque.
+
+    `resolve()` est proscrit ici : au moment ou le verdict se calcule, la source
+    a deja bouge — elle n'existe plus. `normcase`/`normpath` sont de pures
+    operations sur la chaine (separateurs, casse Windows, `..`).
+    """
+    brut = str(chemin or "").strip()
+    if not brut:
+        return ""
+    return os.path.normcase(os.path.normpath(brut))
+
+
+def _est_sous(enfant: str, parent: str) -> bool:
+    """`enfant` est-il DANS `parent` (ou lui-meme) ?
+
+    Comparaison par SEGMENTS et non par prefixe de chaine : `C:/films/Rocky2`
+    commence par `C:/films/Rocky` sans etre dedans, et confondre les deux ferait
+    accuser un apply parfaitement sain.
+    """
+    if not enfant or not parent:
+        return False
+    if enfant == parent:
+        return True
+    return enfant.startswith(parent.rstrip(os.sep) + os.sep)
+
+
+def verifier_operations_qui_emportent_d_autres_lignes(
+    operations: Sequence[Mapping[str, Any]],
+    dossiers_par_ligne: Mapping[str, str],
+) -> List[Incoherence]:
+    """#1103 : une seule operation de quarantaine emportait TOUT un dossier.
+
+    LE COTE DISQUE, SANS LIRE LE DISQUE
+    -----------------------------------
+    Le plan prevoyait ici une photo avant/apres du sous-arbre. Les helpers
+    existants (`_snapshot_tree`, `_diff`) hachent chaque fichier : praticable
+    dans un test, impensable sur une bibliotheque de films.
+
+    Or #1103 n'a pas besoin du disque. Son mecanisme exact : `quarantine_row`
+    resolvait la video par `folder / row.video`, et `PlanRow.video` « can be
+    empty » — `folder / ""` vaut `folder`. Pour tout `kind` autre que `single`,
+    le dossier est PARTAGE entre plusieurs lignes du plan. Mettre ce dossier en
+    quarantaine emportait donc les films des AUTRES lignes.
+
+    La question devient purement geometrique : *cette operation a-t-elle deplace
+    un dossier ou vivent plusieurs lignes du plan ?* Une comparaison de chemins
+    y repond, sans une seule E/S — et elle reste vraie apres coup, quand la
+    source n'existe plus.
+
+    Une remarque qui compte : l'`op_type` etait HONNETE (`QUARANTINE_DIR`, un
+    dossier). Un controle « le type dit FILE mais c'est un DIR » n'aurait rien
+    vu. Ce qui mentait, c'etait l'AMPLEUR — 1 operation comptee, 4 films partis.
+
+    Args:
+        operations: les lignes `apply_operations` du batch.
+        dossiers_par_ligne: `{row_id: folder}` pour TOUTES les lignes du plan,
+            pas seulement celles qu'on applique — c'est justement une ligne
+            qu'on n'appliquait pas qui se faisait emporter.
+
+    Returns:
+        Une incoherence par operation ayant emporte plus d'une ligne.
+    """
+    par_dossier: Dict[str, List[str]] = {}
+    for row_id, dossier in (dossiers_par_ligne or {}).items():
+        cle = _cle_de_chemin(dossier)
+        if cle:
+            par_dossier.setdefault(cle, []).append(str(row_id))
+
+    trouvees: List[Incoherence] = []
+    for op in operations or ():
+        try:
+            op_type = str(op.get("op_type") or "")
+            source = _cle_de_chemin(op.get("src_path"))
+        except AttributeError:
+            continue
+        # PERIMETRE : la quarantaine seulement.
+        #
+        # Un `MOVE_DIR` de collection deplace legitimement un dossier racine qui
+        # CONTIENT plusieurs films (`move_collection_folder`) : l'y inclure
+        # ferait rougir chaque apply de collection. La restriction est donc
+        # volontaire, et elle est la limite connue de cet invariant.
+        if op_type not in OPS_DE_QUARANTAINE or not source:
+            continue
+        emportees = sorted({rid for cle, rids in par_dossier.items() if _est_sous(cle, source) for rid in rids})
+        if len(emportees) <= 1:
+            continue
+        trouvees.append(
+            Incoherence(
+                code="une_operation_emporte_plusieurs_lignes",
+                message=(
+                    f"une seule operation {op_type} a emporte {len(emportees)} lignes du plan "
+                    f"— l'utilisateur en a vu compter UNE"
+                ),
+                annonce={"operations_comptees": 1, "op_type": op_type},
+                journal={"src_path": str(op.get("src_path") or ""), "lignes_emportees": emportees},
+                reserve=(
+                    "ne couvre QUE la quarantaine : un MOVE_DIR de collection emporte "
+                    "legitimement plusieurs lignes, l'y inclure ferait rougir chaque "
+                    "apply de collection."
+                ),
+            )
+        )
+    return trouvees
 
 
 def comparer_annonce_et_journal(

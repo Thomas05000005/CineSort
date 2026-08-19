@@ -146,7 +146,7 @@ class DefautsDeLaSemaineTests(unittest.TestCase):
         )
         self.assertTrue(
             v.coherent,
-            "tant que le cote DISQUE n'existe pas, ce cas passe — et la reserve du module doit le dire",
+            "le comptage ne peut pas voir #1103 ; c'est l'invariant d'AMPLEUR qui le voit",
         )
 
 
@@ -160,6 +160,11 @@ class ComptesTests(unittest.TestCase):
         self.assertEqual(inc.annonce, {"quarantined": 1})
         self.assertEqual(inc.journal, {"QUARANTINE_FILE": 1, "QUARANTINE_DIR": 1})
         self.assertIn("#1103", inc.reserve, "la limite connue doit accompagner le verdict")
+        self.assertIn(
+            "verifier_operations_qui_emportent_d_autres_lignes",
+            inc.reserve,
+            "une reserve doit dire OU va chercher le lecteur, pas seulement qu'elle existe",
+        )
 
     def test_un_apply_coherent_ne_leve_RIEN(self):
         """Contre-test central : un verdict qui rougit sur du normal serait pire

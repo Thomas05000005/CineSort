@@ -31,7 +31,10 @@ from cinesort.app.disk_space_check import check_disk_space_for_apply
 from cinesort.app.jellyfin_sync import restore_watched, snapshot_watched
 from cinesort.app.move_journal import RecordOpWithJournal, _rename_or_cross_device_copy, journaled_move
 from cinesort.app.quarantine_ttl import register_runs_root as _register_runs_root
-from cinesort.app.verdicts import comparer_annonce_et_journal
+from cinesort.app.verdicts import (
+    comparer_annonce_et_journal,
+    verifier_operations_qui_emportent_d_autres_lignes,
+)
 from cinesort.domain.conversions import to_bool as _to_bool
 from cinesort.domain.i18n_messages import t
 from cinesort.domain.run_models import UNDO_DEADLINE_SECONDS
@@ -3084,11 +3087,12 @@ def apply_changes(
         log_context.reset_run_id(_jeton_run)
 
 
-def _payload_avec_verdict(
+def _avec_verdict(
     payload: Dict[str, Any],
     *,
     store: Any,
     run_paths: Any,
+    rows: Any,
     dry_run: bool,
     log_fn: Callable[[str, str], None],
 ) -> Dict[str, Any]:
@@ -3140,6 +3144,16 @@ def _payload_avec_verdict(
             operations,
             evenements_audit=evenements,
             dry_run=bool(dry_run),
+        )
+        # #1103 : une operation comptee UNE qui emporte tout un dossier partage.
+        # On passe TOUTES les lignes du plan, pas seulement celles qu'on
+        # applique — c'est justement une ligne non appliquee qui se faisait
+        # emporter.
+        verdict.incoherences.extend(
+            verifier_operations_qui_emportent_d_autres_lignes(
+                operations,
+                {str(getattr(r, "row_id", "")): str(getattr(r, "folder", "")) for r in rows or ()},
+            )
         )
     except Exception as exc:  # noqa: BLE001 - le controle ne doit jamais casser l'apply
         # Le silence serait le vrai defaut : sans cette ligne, un journal
@@ -3460,7 +3474,7 @@ def _apply_changes_body(
                 # Un echec de notification ne doit pas transformer un apply
                 # disque REUSSI en HTTP 500 (ce serait re-creer le defaut F11).
                 _log.debug("notification 'undo indisponible' non publiee", exc_info=True)
-        return _payload_avec_verdict(payload, store=store, run_paths=run_paths, dry_run=dry_run, log_fn=log_fn)
+        return _avec_verdict(payload, store=store, run_paths=run_paths, rows=rows, dry_run=dry_run, log_fn=log_fn)
     # except Exception intentionnel : boundary API endpoint apply_changes
     except Exception as exc:
         apply_batch_id = batch_state[0]

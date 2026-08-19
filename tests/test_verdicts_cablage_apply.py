@@ -49,12 +49,14 @@ class CablageDuVerdictTests(unittest.TestCase):
         *,
         dry_run: bool = False,
         leve: BaseException | None = None,
+        rows: Any = (),
     ) -> Dict[str, Any]:
         with mock.patch.object(apply_support, "read_apply_audit", return_value=list(evenements or [])):
-            return apply_support._payload_avec_verdict(
+            return apply_support._avec_verdict(
                 payload,
                 store=_FauxStore(operations, leve=leve),
                 run_paths=_FauxRunPaths(),
+                rows=rows,
                 dry_run=dry_run,
                 log_fn=self._log,
             )
@@ -168,7 +170,7 @@ class LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests(unittest.TestCase):
     """Le mutant le plus grave : SUPPRIMER l'appel depuis `_apply_changes_body`.
 
     Il a d'abord SURVECU. Tous les tests ci-dessus appellent
-    `_payload_avec_verdict` en direct : retirer son unique site d'appel ne
+    `_avec_verdict` en direct : retirer son unique site d'appel ne
     faisait rougir personne. J'aurais eu un module de verdict irreprochable,
     branche sur rien — le risque exact que ce chantier existe pour eviter, et
     que ce depot a deja paye dix fois (10 journaux, ~0 lecteur).
@@ -256,3 +258,56 @@ class LE_CORPS_D_APPLY_APPELLE_VRAIMENT_LE_VERDICT_Tests(unittest.TestCase):
     def test_un_apply_REEL_coherent_ne_porte_PAS_de_verdict(self):
         payload = self._payload_d_un_apply_reel([{"op_type": "MOVE_FILE"}])
         self.assertNotIn("verdict", payload)
+
+
+class LE_CABLAGE_DE_1103_Tests(unittest.TestCase):
+    """#1103 traverse-t-il le cablage, ou reste-t-il dans le module pur ?
+
+    L'invariant d'ampleur a besoin de TOUTES les lignes du plan. Si le site
+    d'appel ne les lui transmet pas — ou lui transmet les mauvaises — il est
+    correct et inutile.
+    """
+
+    def _appeler(self, operations, rows):
+        from types import SimpleNamespace
+
+        logs = []
+        store = _FauxStore(operations)
+        with mock.patch.object(apply_support, "read_apply_audit", return_value=[]):
+            return (
+                apply_support._avec_verdict(
+                    {"ok": True, "apply_batch_id": "b1", "result": {"errors": 0, "quarantined": 1}},
+                    store=store,
+                    run_paths=_FauxRunPaths(),
+                    rows=[SimpleNamespace(row_id=r, folder=f) for r, f in rows],
+                    dry_run=False,
+                    log_fn=lambda n, m: logs.append((n, m)),
+                ),
+                logs,
+            )
+
+    def test_une_quarantaine_de_dossier_PARTAGE_remonte_jusqu_au_payload(self):
+        payload, logs = self._appeler(
+            [{"op_type": "QUARANTINE_FILE", "src_path": r"D:\films\Saga Rocky"}],
+            [("r1", r"D:\films\Saga Rocky"), ("r2", r"D:\films\Saga Rocky")],
+        )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertIn(
+            "une_operation_emporte_plusieurs_lignes",
+            codes,
+            "l'invariant #1103 n'est pas cable : les lignes du plan ne lui parviennent pas",
+        )
+
+    def test_les_lignes_transmises_sont_bien_CELLES_du_plan(self):
+        """Si le site d'appel lisait un autre attribut que `folder`, l'invariant
+        recevrait des chemins vides et se tairait pour toujours."""
+        payload, _ = self._appeler(
+            [{"op_type": "QUARANTINE_FILE", "src_path": r"D:\films\Saga Rocky"}],
+            [("r1", r"D:\films\Saga Rocky"), ("r2", r"D:\films\Autre Film")],
+        )
+        codes = {i["code"] for i in payload.get("verdict", {}).get("incoherences", [])}
+        self.assertNotIn(
+            "une_operation_emporte_plusieurs_lignes",
+            codes,
+            "deux dossiers DIFFERENTS ne doivent pas passer pour partages",
+        )
