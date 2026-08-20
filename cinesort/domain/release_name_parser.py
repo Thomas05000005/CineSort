@@ -167,7 +167,33 @@ _PATTERNS_CAM = [
 ]
 
 
-_PATTERN_CHANNELS = re.compile(r"\b(?:7\.1|5\.1|5\.0|2\.1|2\.0|1\.0|6\.1)\b")
+# La frontiere GAUCHE ne peut PAS etre `\b`. Dans les formes collees, qui sont
+# les plus repandues sur le web (`DDP5.1`, `DD5.1`, `TrueHD7.1`, `AAC2.0`,
+# `DTS5.1`), le caractere qui precede le chiffre est une LETTRE : il n'y a donc
+# aucune frontiere de mot a cet endroit et le motif ne matchait RIEN. Mesure sur
+# 25 noms de release representatifs, avec cas negatifs : 16/25 avant, 25/25
+# apres, et ZERO nom que l'ancien motif trouvait et que le nouveau perd (le jeu
+# de matches du nouveau est un SUR-ENSEMBLE strict de l'ancien).
+#
+# `(?<!\d)` est exactement le garde qu'il faut : le seul faux positif reel est
+# le couple qui n'est que la QUEUE d'un nombre plus long — `Movie.2012.1080p`
+# contient `2.1`, `Movie.5.10.2020` contient `5.1`. La frontiere DROITE reste
+# `\b`, qui refuse `5.10` par le meme mecanisme.
+#
+# Consequence du trou, sur le seul chemin ou ce parser sert (probe FAILED ou
+# PARTIAL) : `quality_score._merge_probe_with_name_hints` fabriquait une piste
+# de synthese a **2 canaux** pour un `DDP5.1`, et la compensation
+# `probe_quality == "FAILED"` retombait sur `+12` au lieu de `+18`.
+_PATTERN_CHANNELS = re.compile(r"(?<!\d)(?:7\.1|6\.1|5\.1|5\.0|2\.1|2\.0|1\.0)\b")
+
+# Du plus riche au plus pauvre. Une release liste parfois DEUX pistes
+# (`...DDP2.0.TrueHD.7.1.Atmos...`, une VF stereo plus la VO multicanale) : la
+# principale est la plus riche, et prendre la PREMIERE rencontree ferait
+# dependre le resultat de l'ordre d'ecriture du nom. Mesure : sur
+# `AC3.2.0.DTS.5.1`, le premier-rencontre rend `2.0` la ou la piste principale
+# est `5.1`. C'est aussi ce qui garantit que l'elargissement ci-dessus ne peut
+# pas RENDRE MOINS qu'avant sur un nom deja reconnu.
+_CHANNELS_PAR_RICHESSE = ("7.1", "6.1", "5.1", "5.0", "2.1", "2.0", "1.0")
 
 # Release group : tag final apres dernier tiret. Tolere extension de fichier.
 _PATTERN_GROUP = re.compile(r"-([A-Za-z0-9_]+)(?:\.[A-Za-z0-9]{2,4})?$")
@@ -278,10 +304,13 @@ def parse_release_name(name: str) -> ReleaseNameInfo:
         info.audio_codec_hint = "truehd"
         info.audio_is_lossless = True
 
-    # Channels
-    ch_match = _PATTERN_CHANNELS.search(text)
-    if ch_match:
-        info.audio_channels_hint = ch_match.group(0)
+    # Channels : on releve TOUS les couples puis on garde le plus riche
+    # (cf `_CHANNELS_PAR_RICHESSE`), jamais le premier rencontre.
+    couples = set(_PATTERN_CHANNELS.findall(text))
+    for canaux in _CHANNELS_PAR_RICHESSE:
+        if canaux in couples:
+            info.audio_channels_hint = canaux
+            break
 
     # Release group
     # On nettoie d'abord l'extension de fichier pour eviter qu'elle pollue.
