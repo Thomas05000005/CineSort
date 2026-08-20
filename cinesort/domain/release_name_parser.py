@@ -304,13 +304,10 @@ def parse_release_name(name: str) -> ReleaseNameInfo:
         info.audio_codec_hint = "truehd"
         info.audio_is_lossless = True
 
-    # Channels : on releve TOUS les couples puis on garde le plus riche
-    # (cf `_CHANNELS_PAR_RICHESSE`), jamais le premier rencontre.
+    # Channels : le plus RICHE des couples releves, jamais le premier rencontre.
+    # Pourquoi et mesures : voir `_CHANNELS_PAR_RICHESSE`.
     couples = set(_PATTERN_CHANNELS.findall(text))
-    for canaux in _CHANNELS_PAR_RICHESSE:
-        if canaux in couples:
-            info.audio_channels_hint = canaux
-            break
+    info.audio_channels_hint = next((c for c in _CHANNELS_PAR_RICHESSE if c in couples), "")
 
     # Release group
     # On nettoie d'abord l'extension de fichier pour eviter qu'elle pollue.
