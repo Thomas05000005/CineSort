@@ -519,7 +519,14 @@ class CineSortApi:
         if rid and self._is_valid_run_id(rid):
             try:
                 found = self._find_run_row(rid)
-            except (OSError, TypeError, ValueError):
+            # `sqlite3.Error` n'herite PAS de `OSError` (regle inviolable n4).
+            # `_find_run_row` interroge `store.run.get_run` sur CHAQUE store connu :
+            # un « database is locked » s'echappait donc de la fonction qui JOURNALISE
+            # les erreurs d'API, et faisait perdre a l'appelant le `return
+            # _err_response(...)` qui suit son `log_api_exception`. Le repli
+            # `found = None` est exactement celui qui existe deja pour un run
+            # introuvable : on journalise sans le contexte du run plutot que rien.
+            except (OSError, TypeError, ValueError, sqlite3.Error):
                 found = None
             if found:
                 row, found_store = found
@@ -569,7 +576,13 @@ class CineSortApi:
                     message=str(exc),
                     context=context_payload,
                 )
-            except (KeyError, OSError, TypeError, ValueError) as insert_exc:
+            # Idem : `insert_error` ECRIT dans la table `errors`, donc c'est le
+            # site le plus expose au verrou — on journalise une erreur d'API
+            # precisement quand l'application va mal. Sans `sqlite3.Error` ici,
+            # ce `logger.warning` etait INATTEIGNABLE pour un lock : l'exception
+            # sortait avant, emportant le `_err_response` de l'appelant, la
+            # notification ci-dessous et le hook `post_error`.
+            except (KeyError, OSError, TypeError, ValueError, sqlite3.Error) as insert_exc:
                 logger.warning(
                     "API_EXCEPTION_PERSIST_FAILED endpoint=%s run_id=%s err=%s",
                     endpoint,

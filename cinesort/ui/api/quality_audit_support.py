@@ -12,6 +12,7 @@ Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 import time
 import uuid
@@ -423,7 +424,16 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
                 if isinstance(res, dict) and res.get("ok") is False:
                     errors += 1
             # except Exception large : on continue en cas d'erreur sur un film
-            except (OSError, KeyError, TypeError, ValueError) as exc:
+            #
+            # `sqlite3.Error` n'herite PAS de `OSError` (regle inviolable n4), et
+            # `get_quality_report` PERSISTE son rapport. Un « database is locked »
+            # transitoire sur UN film echappait donc a ce filet per-film, remontait
+            # au `except Exception` de fin de fonction et faisait passer le job
+            # ENTIER en `failed` : les films suivants n'etaient jamais rescores.
+            # Le chemin n'est pas destructif — un rapport non recalcule se
+            # recalcule — et le compteur `errors` est deja lu par l'ecran Qualite
+            # (« X/N OK, E echec(s) », qualite.js), donc l'echec reste ANNONCE.
+            except (OSError, KeyError, TypeError, ValueError, sqlite3.Error) as exc:
                 logger.debug("recompute_worker error row_id=%s: %s", rid, exc)
                 errors += 1
             processed += 1
