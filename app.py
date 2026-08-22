@@ -120,6 +120,36 @@ def _startup_error(message: str, exc: Exception | None = None) -> None:
         print(f"Details: {crash_path}")
 
 
+def reglage_entier(settings: dict, cle: str, defaut: int) -> int:
+    """Lit un reglage entier en distinguant ABSENT de ZERO.
+
+    `int(settings.get(cle) or defaut)` confond les deux : `0 or 30` vaut 30.
+    Or **0 est une valeur signifiante** pour les deux crons destructifs demarres
+    ci-dessous — il veut dire « ne purge jamais ». C'est ecrit a cinq endroits :
+
+      - l'ecran Parametres l'affiche a l'utilisateur
+        (`web/dashboard/views/parametres.js` : « 0 = désactivé », `min: 0`) ;
+      - le validateur le borne a `[0, 3650]` et commente « 0 = OFF »
+        (`settings_support._save_section_advanced`) ;
+      - les deux demarreurs portent la garde `if days <= 0: return None` ;
+      - les commentaires de ce fichier meme disaient « 0 desactive », une ligne
+        au-dessus du `or` qui l'annulait.
+
+    La garde etait donc CORRECTE et INATTEIGNABLE : l'utilisateur qui saisissait
+    0 voyait sa quarantaine purgee a 30 jours quand meme.
+
+    Une chaine vide ou une valeur illisible retombe sur `defaut` — seul le zero
+    explicite est preserve.
+    """
+    brut = settings.get(cle)
+    if brut is None or (isinstance(brut, str) and not brut.strip()):
+        return defaut
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        return defaut
+
+
 def _is_api_mode() -> bool:
     """Check if --api flag is present in argv."""
     return "--api" in sys.argv[1:]
@@ -509,7 +539,7 @@ def main_api() -> None:
     try:
         from cinesort.app.retention_cleanup import start_retention_cron
 
-        retention_days_api = int(settings.get("history_retention_days") or 90)
+        retention_days_api = reglage_entier(settings, "history_retention_days", 90)
         start_retention_cron(api, retention_days=retention_days_api)
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
         print(f"[REST] spec 09 retention cron init echouee: {_ret_exc}", file=sys.stderr)
@@ -523,7 +553,7 @@ def main_api() -> None:
             start_quarantine_ttl_cron,
         )
 
-        quarantaine_ttl_api = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+        quarantaine_ttl_api = reglage_entier(settings, "quarantaine_ttl_days", _Q_DEFAULT_TTL)
         start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl_api)
     except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
         print(f"[REST] vq-2 quarantine ttl cron init echouee: {_qttl_exc}", file=sys.stderr)
@@ -1018,7 +1048,7 @@ def main() -> None:
                 try:
                     from cinesort.app.retention_cleanup import start_retention_cron
 
-                    retention_days = int(settings.get("history_retention_days") or 90)
+                    retention_days = reglage_entier(settings, "history_retention_days", 90)
                     start_retention_cron(api, retention_days=retention_days)
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _ret_exc:
                     _log.warning("spec 09: retention cron init echouee — %s", _ret_exc)
@@ -1033,7 +1063,7 @@ def main() -> None:
                         start_quarantine_ttl_cron,
                     )
 
-                    quarantaine_ttl = int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)
+                    quarantaine_ttl = reglage_entier(settings, "quarantaine_ttl_days", _Q_DEFAULT_TTL)
                     start_quarantine_ttl_cron(api, ttl_days=quarantaine_ttl)
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError) as _qttl_exc:
                     _log.warning("vq-2: quarantine ttl cron init echouee — %s", _qttl_exc)
