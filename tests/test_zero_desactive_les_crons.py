@@ -81,7 +81,9 @@ class ReglageEntierTests(unittest.TestCase):
     def test_une_valeur_normale_passe_inchangee(self) -> None:
         """CONTRE-EPREUVE : le cas nominal ne bouge pas."""
         self.assertEqual(45, self.app_module.reglage_entier({"quarantaine_ttl_days": 45}, "quarantaine_ttl_days", 30))
-        self.assertEqual(7, self.app_module.reglage_entier({"history_retention_days": "7"}, "history_retention_days", 90))
+        self.assertEqual(
+            7, self.app_module.reglage_entier({"history_retention_days": "7"}, "history_retention_days", 90)
+        )
 
 
 class LeZeroATTEINTLeCronTests(unittest.TestCase):
