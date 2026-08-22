@@ -10,7 +10,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
-import os
 import platform
 import re
 import sqlite3
@@ -678,9 +677,16 @@ def _repo_root() -> Path:
 
 
 def _logs_dir() -> Path:
-    """Chemin standard du dossier logs (%LOCALAPPDATA%/CineSort/logs)."""
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "CineSort" / "logs"
+    """Chemin standard du dossier logs (%LOCALAPPDATA%/CineSort/logs).
+
+    Passe par `state.default_state_dir()`, qui est aussi ce que `app.py` donne
+    a `install_rotating_log` : lecteur et ECRIVAIN partagent donc une seule
+    source. Le repli maison `~/AppData/Local` etait bien absolu, mais il
+    divergeait du repli de `default_state_dir()` (`~/CineSort`) des que
+    `LOCALAPPDATA` manquait — la visionneuse lisait alors un dossier ou
+    personne n'ecrit.
+    """
+    return state.default_state_dir() / "logs"
 
 
 def _settings_file_path(api: Any) -> Path:
