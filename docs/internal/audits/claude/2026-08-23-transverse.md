@@ -343,6 +343,38 @@ pas), pas un defaut atteignable — d'ou la severite 1 et l'absence d'issue.
 
 ---
 
+## Piege d'outillage mesure ce jour — le titre de PR et le guillemet francais
+
+La PR #1136 a d'abord ete ouverte sous le titre :
+
+```
+fix(ui): « Supprimer ce run » detruisait le journal d'undo en annoncant l'inverse
+```
+
+`Validate PR title` **a echoue**. La cause n'est ni le type ni la portee : le
+`subjectPattern` de `.github/workflows/pr-title-lint.yml` vaut
+
+```
+^[A-Za-z0-9_À-ɏ].+$
+```
+
+Le sujet doit donc commencer par une lettre ou un chiffre. Le guillemet ouvrant
+francais est **U+00AB**, en dessous de la plage `À-ɏ` ouverte pour les
+accents : un titre qui commence par « ... » est recale.
+
+**Mesure, pas deduction** : titre d'origine → `FAILURE` ; titre reecrit pour
+commencer par une lettre → `SUCCESS`, sans autre changement.
+
+Cela compte pour ce bot en particulier : il ecrit ses titres en francais et cite
+volontiers l'ecran entre guillemets. Le check **ne bloque pas** la fusion (il ne
+fait pas partie des 7 requis), mais le titre devient le message de commit au
+squash et alimente Release Drafter — un titre recale y perd sa categorie.
+
+Le commentaire en tete du workflow affirme d'ailleurs l'inverse (« Si non
+conforme : la PR ne peut pas etre mergee (status check fail) ») ; c'est la meme
+divergence entre la promesse et la protection de branche que le `/CLAUDE.md`
+consigne deja.
+
 ## Verifications negatives — ne pas les re-instruire
 
 Chacune a coute du temps ce jour ; les consigner evite de le repayer.
