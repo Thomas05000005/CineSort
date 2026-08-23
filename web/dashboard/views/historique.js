@@ -1587,6 +1587,30 @@ async function _genererLesNfo(runId, btn) {
   });
 }
 
+// Ce que la modale de « Supprimer ce run » doit dire, et qu'elle ne disait pas.
+//
+// `run/delete_run` ne deplace AUCUN fichier video — c'est vrai, et l'ancienne
+// phrase s'arretait la : « Aucune modification sur les fichiers vidéo du
+// disque. » Mais la suppression emporte `apply_batches` et, par CASCADE,
+// `apply_operations` (`infra/db/repositories/run.py`, purge dediee du batch) :
+// le journal grace auquel `run/undo_last_apply` remet les dossiers a leur place.
+// `build_undo_preview_payload` echoue alors DEUX fois — `_find_run_row` ne
+// trouve plus la ligne `runs`, et `get_last_reversible_apply_batch` plus le
+// batch.
+//
+// La phrase rassurait donc exactement la ou la perte a lieu, et le bouton
+// « ↺ Annuler l'apply » est rendu juste au-dessus, pour le MEME run. La regle
+// n3 du depot exige que la modale annonce LA CONSEQUENCE : la voici.
+//
+// Formulation inconditionnelle a dessein : le handler ne dispose que du
+// `run_id`, et un run sans apply n'a pas de journal a perdre — la phrase reste
+// vraie, seulement sans objet.
+const _CONSEQUENCE_SUPPRESSION_RUN =
+  "Le run + son plan + son log seront supprimés définitivement. " +
+  "Les fichiers vidéo du disque ne sont pas déplacés — mais le journal " +
+  "d'annulation de ce run est détruit : si un apply a déjà eu lieu, " +
+  "« Annuler l'apply » ne sera plus possible. Action NON réversible.";
+
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
   const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
@@ -1645,9 +1669,7 @@ function _onActionClick(ev) {
       dangerConfirmModal({
         title: `Supprimer le run ${runId} de l'historique ?`,
         items: [`Run ${runId}`],
-        consequence:
-          "Le run + son plan + son log seront supprimés définitivement. " +
-          "Aucune modification sur les fichiers vidéo du disque. Action NON réversible.",
+        consequence: _CONSEQUENCE_SUPPRESSION_RUN,
         countdownSeconds: 3,
         confirmLabel: "✗ Supprimer le run",
         onConfirm: () => _doDeleteRun(runId),
