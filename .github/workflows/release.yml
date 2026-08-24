@@ -197,13 +197,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
 
       - name: Telecharger artefact PyInstaller
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: CineSort-pyinstaller
           path: ./release-assets
 
       - name: Telecharger artefact Nuitka (optionnel)
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: CineSort-nuitka
           path: ./release-assets
