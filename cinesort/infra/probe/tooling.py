@@ -207,7 +207,21 @@ def _probe_version(
         if rc == 0:
             return _extract_first_non_empty_line(out)
         return _extract_first_non_empty_line(err)
-    except OSError:
+    # `subprocess.TimeoutExpired` DOIT etre nomme : il derive de `SubprocessError`,
+    # donc d'`Exception`, et PAS d'`OSError` — meme piege que la regle 4 du
+    # CLAUDE.md sur `sqlite3.Error`. Or c'est `default_runner`, dans ce meme
+    # fichier, qui sert ce `runner` : `retry_with_backoff` classe le timeout
+    # transitoire, le rejoue, puis le RE-LEVE tel quel une fois les tentatives
+    # epuisees — sa propre docstring le dit.
+    #
+    # Sans cette entree, l'exception traversait `get_tools_status`,
+    # `ProbeService._get_tools_cached` puis `probe_file`, et ses appelants ne la
+    # retenaient pas non plus (`probe_support.recheck_probe_for_row` et
+    # `app/runtime_probe_check` attrapent `(OSError, KeyError, TypeError,
+    # ValueError)`). ITER13 avait ferme cette famille sur la sonde de FICHIER
+    # (`ffprobe_backend`, `mediainfo_backend`, branche parallele de
+    # `probe_files`) ; la sonde de VERSION etait restee dehors.
+    except (OSError, subprocess.TimeoutExpired):
         return ""
 
 
