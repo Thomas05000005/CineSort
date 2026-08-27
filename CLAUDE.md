@@ -151,15 +151,42 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
-3. **Le `WinError 5` lui-meme reste INEXPLIQUE (#965)** — et c'est la SEULE
-   cause connue de cette signature. Il se reproduit a **33 %** dans un `%TEMP%`
-   neuf et vide, sur `apply` (renommage d'un DOSSIER de film), y compris sur le
-   garde anti-destruction de la racine de bibliotheque. Ce n'est donc ni un
-   defaut d'`undo`, ni un effet de la charge, ni un effet de la saturation.
+3. **Le `WinError 5` est CARACTERISE et MITIGE (#965, #973).** Ce paragraphe l'a
+   longtemps dit « INEXPLIQUE » et commandait de l'instrumenter : c'est perime
+   depuis le 2026-08-06, et le travail a bien ete fait. Il se reproduit a
+   **33 %** dans un `%TEMP%` neuf et vide, sur `apply` (renommage d'un DOSSIER
+   de film), y compris sur le garde anti-destruction de la racine de
+   bibliotheque : ni un defaut d'`undo`, ni un effet de la charge, ni un effet
+   de la saturation.
 
-   Deja ecarte par lecture, ne pas y revenir : `sha1_quick` ferme son handle
-   (`with`), et les deux `os.scandir` sans context manager sont fermes en
-   `finally`. Reste a instrumenter quel handle est ouvert a l'instant du rename.
+   **Ce qui a tranche** — mesure sur `main`, `%TEMP%` neuf, machine au repos :
+
+   ```
+   sans instrumentation                          : 8 echecs / 20
+   avec une simple enveloppe Python sur `rename` : 0 echec  / 20
+   Fisher exact bilateral                        : p ~ 0,004
+   ```
+
+   Le seul fait d'ajouter un appel de fonction Python AVANT le renommage fait
+   disparaitre l'echec : la fenetre de course se compte donc en **microsecondes**
+   — un handle est en cours de liberation sur un ENFANT du dossier (sous
+   Windows, un fichier ouvert sans `FILE_SHARE_DELETE` empeche le renommage de
+   son parent), et l'appel arrive juste avant que la fermeture ne soit
+   effective. Remede en place : `move_journal.renommer_avec_reprise`, six
+   paliers plafonnes a ~0,3 s, generalise par #973 aux **9** renommages de
+   dossier (doublons ecartes, marques pour suppression, collection, quarantaine,
+   nettoyage, rollback, undo). Il ne MASQUE pas un vrai verrou : un dossier tenu
+   par un autre processus epuise les paliers et l'exception d'origine est
+   relancee telle quelle.
+
+   Trois causes ECARTEES par la mesure, ne pas y revenir : la saturation de
+   `%TEMP%` (p = 0,38, cf. point 1) ; un cycle de references retenant un objet
+   fichier (`gc.collect()` avant chaque renommage ne previent rien — 3/25 contre
+   4/25) ; et `sha1_quick`, qui ferme son handle (`with`), les deux `os.scandir`
+   sans context manager etant fermes en `finally`.
+
+   **Ce qui reste ouvert** : QUEL handle, precisement. Le mecanisme est etabli,
+   son porteur ne l'est pas — d'ou la piste des processus de session, plus bas.
 
    **« Rejouer en isolation » ne prouve RIEN sur cette famille** : le meme
    fichier est vert seul et rouge en suite complete, et le cas de #965 est rouge
@@ -367,7 +394,8 @@ la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
 lance en session doit avoir une condition d'arret, et une fin de campagne doit
 inclure son extinction. Un `Get-Process python` en debut de session longue les
 revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
-non encore mesuree, pour le `WinError 5` du point 3.
+non encore mesuree, pour le PORTEUR du handle du point 3 (le mecanisme, lui, est
+etabli et mitige).
 
 ### Le triangle : annonce / journal / disque
 
