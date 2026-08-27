@@ -88,7 +88,9 @@ plus de `web/views/` ni `web/components/` de premier niveau — ne pas chercher 
 duplication desktop/dashboard, elle n'existe plus.
 
 **API REST** : `POST /api/<facade>/<methode>`. Les chemins historiques
-`/api/<methode>` renvoient 404.
+`/api/<methode>` renvoient **410 Gone** (`rest_server.py:1341`), avec un message
+qui guide vers la facade. Ce fichier a longtemps dit 404 : un 410 se distingue
+d'un 404 pour un client, et `docs/internal/CLAUDE.md:190` disait deja 410.
 
 ## Pieges qui ont deja coute cher
 
@@ -151,15 +153,26 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
-3. **Le `WinError 5` lui-meme reste INEXPLIQUE (#965)** — et c'est la SEULE
-   cause connue de cette signature. Il se reproduit a **33 %** dans un `%TEMP%`
-   neuf et vide, sur `apply` (renommage d'un DOSSIER de film), y compris sur le
-   garde anti-destruction de la racine de bibliotheque. Ce n'est donc ni un
-   defaut d'`undo`, ni un effet de la charge, ni un effet de la saturation.
+3. **Le `WinError 5` est MITIGE et son issue est CLOSE (#965, PR #969 fusionnee
+   le 2026-08-05)** — mais la cause profonde reste inconnue. Distinguer les deux,
+   ce paragraphe a longtemps presente le defaut comme ouvert et a corriger :
 
-   Deja ecarte par lecture, ne pas y revenir : `sha1_quick` ferme son handle
-   (`with`), et les deux `os.scandir` sans context manager sont fermes en
-   `finally`. Reste a instrumenter quel handle est ouvert a l'instant du rename.
+   - **corrige** : `renommer_avec_reprise` (`app/move_journal.py`) rend **0 echec
+     sur 25** la ou `main` nu en donnait 8/20. Bras alternes : 10/20 contre 0/20,
+     Fisher `p ~ 0,0003`. Il ne se reproduit plus a 33 % : il ne se reproduit plus.
+   - **toujours inconnu** : **QUEL** handle. La fenetre se compte en microsecondes
+     — la seule presence d'une enveloppe Python autour de `Path.rename` suffisait
+     deja a faire disparaitre l'echec. La reprise ferme la consequence, pas la
+     question, et elle ne masque rien : un verrou REEL epuise les paliers et
+     l'exception d'origine remonte.
+
+   Deja ECARTE PAR LA MESURE, ne pas y revenir : la saturation de `%TEMP%`
+   (10/30 a vide contre 6/30 sature, `p = 0,38`) ; un cycle de references
+   (`gc.collect()` force : 3/25 contre 4/25) ; `sha1_quick` (ferme son handle via
+   `with`) et les deux `os.scandir` (fermes en `finally`).
+
+   **Si la signature revient MALGRE la reprise**, c'est un verrou *persistant* —
+   une bete differente — et il faut rouvrir #965 avec cette information.
 
    **« Rejouer en isolation » ne prouve RIEN sur cette famille** : le meme
    fichier est vert seul et rouge en suite complete, et le cas de #965 est rouge
@@ -366,8 +379,67 @@ la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
 `gh pr update-branch` : elle agissait **encore seule sur le depot**. Tout demon
 lance en session doit avoir une condition d'arret, et une fin de campagne doit
 inclure son extinction. Un `Get-Process python` en debut de session longue les
-revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
-non encore mesuree, pour le `WinError 5` du point 3.
+revele — ils tiennent aussi des handles. (Cette piste visait le `WinError 5` du
+point 3, desormais mitige : elle ne vaut plus que si la signature revient.)
+
+**UN SECRET EN PROSE ECHAPPE A GITLEAKS, ET LE SCRUBBER EST BORGNE SUR
+`ntoken=`.** Le 2026-08-26 : le jeton Bearer REST **actif** de l'utilisateur
+etait en clair dans `docs/internal/BILAN_ITER4_2026-06-08.md:272` et
+`BILAN_ITER13_2026-06-08.md:1174`, suivis a HEAD d'un depot **PUBLIC**, depuis
+67 jours. Trois gardes verts l'ont laisse passer, chacun pour une raison propre :
+
+- **gitleaks ne l'a jamais vu.** Le secret est ecrit en prose entre backticks,
+  sans operateur d'affectation — la regle generique en exige un. Il n'etait
+  **pas** dans `.gitleaksignore` : ce n'etait donc pas une exemption assumee mais
+  une **non-detection**. Un fichier d'exemptions fait croire que ce qui n'y
+  figure pas a ete examine.
+- **`log_scrubber.py:41` ne redige pas `ntoken=`.** Son motif porte un `\b` en
+  amont, ajoute deliberement « pour eviter de matcher `mytoken=` ». Or le boot
+  desktop passe le jeton sous ce nom exact (`app.py:846`), et
+  `rest_server.py:543` journalise la ligne de requete brute. Demonstration avec
+  la regex reelle : `?token=X` -> redige, `?ntoken=X` -> **intact**. La
+  precaution anti-faux-positif d'une garde est ce qui aveugle l'autre.
+- **TROIS des SEPT checks REQUIS ne peuvent pas echouer** : `bandit.yml:89` et
+  `mypy.yml:92` finissent par `|| true`, `pip-audit.yml:87` porte
+  `continue-on-error: true`. La protection de `main` en annonce sept ; quatre
+  mordent. **Lire la COMMANDE d'un check requis, jamais son nom dans la liste.**
+
+**Un secret en query string fuit cote CLIENT.** Sur 129 889 fichiers balayes
+sous `%LOCALAPPDATA%/CineSort`, **24** portaient la valeur : 6 `settings.json.bak*`,
+13 sauvegardes SQLite, le journal, et **4 artefacts WebView2** (`History`,
+`Top Sites`, `Favicons`, `Local Storage/leveldb`). Chiffrer le stockage (DPAPI
+sur `rest_api_token_secret`, SEC-2) ne dit RIEN sur le transit. Et trois de ces
+sauvegardes sont hors rotation pour un caractere : `SETTINGS_BACKUP_PREFIX` vaut
+`.bak.` et elles s'appellent `.bak_ITER7_pre`.
+
+(Ma premiere sonde avait rendu **0** : j'avais exclu les dossiers `cache` et
+limite les extensions. Chercher un secret par sa VALEUR, sans perimetre choisi.)
+
+**UN RUN DE WORKFLOW PEUT EXISTER SANS JAMAIS TOURNER.** Le 2026-08-26, sept PR
+etaient BLOCKED avec **0 des 7 checks requis** — non pas rouges, **absents**.
+Leurs 10 a 44 runs existaient, parques en `conclusion=action_required`.
+Discriminant mesure : le **`triggering_actor` du push**. L'evenement `opened` a
+pour acteur `claude[bot]` et demarre ; chaque `synchronize` suivant a pour acteur
+`github-actions[bot]` et se fait parquer.
+
+Trois pieges de lecture, tous payes ce jour-la :
+
+- **`mergeable: MERGEABLE` ne parle QUE des conflits de fichiers**, jamais des
+  checks. Lire `mergeStateStatus`.
+- **`gh pr checks` dedoublonne les check-runs cote client**, et
+  `statusCheckRollup.state` rend `SUCCESS` interroge seul et `FAILURE` interroge
+  avec `contexts(first:100)` — **sur le meme commit**. Seul le rendu HTML a
+  tranche.
+- **Une premiere lecture accusait le NOMBRE DE COMMITS** et se verifiait 15/15…
+  sur un echantillon CHOISI (les PR >= #1124). Elargi, il rend sept
+  contre-exemples (#1099, #1104…). Le remede qu'elle dictait — squasher, ou
+  fermer/rouvrir — visait le mauvais mecanisme. **La cause racine reste non
+  mesuree** : l'API n'expose pas le reglage d'approbation.
+
+**`stale.yml` porte `delete-branch: true`** (30 j -> stale, +7 j -> close). Cinq
+des sept PR gelees sont des rapports d'audit qui n'existent QUE sur leur branche
+— le motif exact de #1089. `exempt-pr-labels` contient deja `blocked` : poser ce
+label est la parade.
 
 ### Le triangle : annonce / journal / disque
 
@@ -516,7 +588,9 @@ ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9131 tests**
 pas — et il se remesure **par la meme commande**, sinon on compare un compte
 d'items (`--collect-only`) a un compte de `passed`.
 
-Le TOTAL d'items est stable (9140) mais la repartition passed/skipped **depend de
+Le TOTAL d'items vaut **9276** (`--collect-only -q`, mesure du 2026-08-26 ; il
+disait 9140 le 2026-08-16, donc il n'est pas « stable », il croit). La
+repartition passed/skipped **depend de
 la machine** : plusieurs `skipUnless` portent sur l'environnement (`fpcalc.exe`
 present, `CINESORT_API_TOKEN` pose, rapport Lighthouse deja genere, symlinks
 sur Windows non eleve). Un ecart de quelques unites entre deux postes ne signale
@@ -809,6 +883,22 @@ l'artefact frere `CineSort-exe` de `ci.yml` qui porte le MEME binaire.
 permanent d'environ **36 Go**. Si ce poste redevient genant, la variable a
 regarder est le NOMBRE de runs, pas la duree.
 
+Remesure du 2026-08-26 : **41,05 Go vivants** sur 1 892 artefacts, dont 39,61 Go
+pour 188 `windows-build-artifacts`. Le chiffre ci-dessus tient donc. **Et la
+retention n'est PAS retroactive** : elle est fixee A L'UPLOAD. Les artefacts
+anterieurs a #1087 gardent leurs 90 jours quoi qu'on regle aujourd'hui — la
+majeure partie de ces 39,6 Go date du 9 au 15 aout et vivra jusqu'a mi-novembre.
+Aucun reglage ne les touchera ; seule une suppression explicite le ferait.
+(Une revue automatisee a rendu ici « 3,18 Go », faux d'un facteur 13, et a
+propose de corriger ce paragraphe : c'est LUI qui avait raison. Remesurer avant
+de « corriger » un chiffre qui derange.)
+
+**`git branch -r` MENT sur ce poste** : il rend **620** refs remote-tracking
+locales pour **63** branches reellement presentes sur `origin`
+(`git ls-remote --heads origin | wc -l`, 2026-08-26). Les refs perimees ne sont
+jamais elaguees. Toute remesure du rangement ci-dessous faite avec `git branch -r`
+compte donc dix fois trop — `git fetch --prune` d'abord, ou interroger `origin`.
+
 **Branches conservees.** 105 -> 41 distantes, 444 -> 84 locales. Ce qui reste
 n'est pas du residu : **4 branches portent un correctif absent de `main`** et
 qui s'y applique encore — `fix/audit-2026-05-30-core-min-vs-sorted`,
@@ -851,8 +941,11 @@ Mesure du 2026-08-03 : **230 fichiers Python, 91 224 LOC**. Les regles ruff
 tolerees (hors barriere CI) donnent la forme de la dette : `PLR2004` 394
 (constantes magiques), `RUF100` 185 (noqa devenus inutiles), `C901` 168
 (complexite), `PLR0913` 153 (trop de parametres), `BLE001` 41 (except nu).
-Neuf modules depassent 1 000 lignes, tous dans `ui/api/` et `app/` — c'est la
-que la refonte paie le plus. Le plan associe est
+**Dix-neuf** modules depassent 1 000 lignes (dont **onze** au-dela de 1 500),
+et pas seulement dans `ui/api/` et `app/` — mesure du 2026-08-26, contre « neuf,
+tous dans ui/api et app » ecrit ici. Les FONCTIONS sont bornees par un cliquet
+depuis #778 ; les MODULES ne le sont par rien, et aucun n'a diminue. Le plan
+associe est
 `docs/internal/audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md`.
 
 `tests/test_doc_consistency.py` verifie que cette section reste presente et que
