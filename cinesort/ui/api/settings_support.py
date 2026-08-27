@@ -69,7 +69,14 @@ def _coerce_int_with_default(value: Any, default: int) -> int:
 
     - None, "", _MISSING -> default
     - "0", 0, 0.0 -> 0 (legitime)
-    - ValueError/TypeError -> default
+    - ValueError/TypeError/OverflowError -> default
+
+    `OverflowError` est dans les tuples parce qu'il derive d'`ArithmeticError` et
+    PAS de `ValueError` — meme piege que la regle 4 du CLAUDE.md sur
+    `sqlite3.Error`. `int(float("inf"))` le leve, et la valeur est atteignable :
+    `json.loads` accepte `Infinity` par defaut, donc un corps REST suffit. Sans
+    lui, ce helper contredisait son propre contrat en laissant l'exception
+    remonter au lieu de rendre `default`.
     """
     if value is None or value is _MISSING:
         return default
@@ -81,15 +88,17 @@ def _coerce_int_with_default(value: Any, default: int) -> int:
         if not cleaned:
             return default
         try:
+            # `int("inf")` leve ValueError : OverflowError est impossible ici,
+            # il ne le devient qu'apres le passage par `float`.
             return int(cleaned)
         except (TypeError, ValueError):
             try:
                 return int(float(cleaned))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 return default
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
