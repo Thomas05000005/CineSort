@@ -206,9 +206,14 @@ def clear_disk_cache() -> int:
 
     Best-effort : les fichiers en cours d'utilisation (lock Windows) sont
     ignores silencieusement.
+
+    NE consulte PAS `_disk_cache_enabled()`, contrairement a `get_disk_cache` et
+    `upsert_disk_cache` : le drapeau gouverne la PRODUCTION d'entrees, pas leur
+    nettoyage. `CINESORT_PROBE_DISK_CACHE=0` est precisement pose par quelqu'un
+    qui ne veut plus de ce cache — lui refuser d'effacer ce qu'il a deja produit
+    inverse l'intention du reglage, et rendait `0` (« rien a supprimer ») sur un
+    repertoire plein.
     """
-    if not _disk_cache_enabled():
-        return 0
     removed = 0
     try:
         cache_dir = _cache_dir()
@@ -234,9 +239,10 @@ def prune_disk_cache(*, retention_days: int = 90) -> int:
     """Supprime les entrees cache disque non-touchees depuis `retention_days`.
 
     Symetrique de `ProbeRepository.prune_probe_cache` cote DB. Best-effort.
+
+    Comme `clear_disk_cache`, ne consulte PAS `_disk_cache_enabled()` : un
+    nettoyage doit pouvoir nettoyer meme quand le cache est desactive.
     """
-    if not _disk_cache_enabled():
-        return 0
     retention = max(1, int(retention_days))
     cutoff = time.time() - (retention * 24 * 3600)
     removed = 0

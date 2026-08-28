@@ -24,6 +24,7 @@ import cinesort.domain.core as core
 import cinesort.infra.jellyfin_client as _jellyfin_mod
 import cinesort.infra.network_utils as _network_utils_mod
 import cinesort.infra.plex_client as _plex_mod
+import cinesort.infra.probe.disk_cache as _probe_disk_cache
 import cinesort.infra.radarr_client as _radarr_mod
 import cinesort.infra.rest_server as _rest_server_mod
 import cinesort.infra.state as state
@@ -2031,9 +2032,33 @@ class CineSortApi:
     def _purge_probe_cache_impl(self) -> Dict[str, Any]:
         """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
 
-        Utile quand un settings.json obsolete a pollue le cache avec des
-        resultats FAILED dus a un path ffprobe/mediainfo introuvable. Apres
-        purge, le prochain scan relance toutes les probes proprement.
+        Apres purge, le prochain scan relance toutes les probes proprement.
+
+        Le motif d'origine — « un settings.json obsolete a pollue le cache avec
+        des resultats FAILED dus a un path ffprobe/mediainfo introuvable » — n'est
+        plus atteignable depuis le FIX 4 de la meme vague : `probe_file` saute
+        l'ecriture du cache quand `_is_tool_unavailable_failure` est vrai
+        (`service.py`). Les motifs qui restent sont ceux ou l'entree est valide
+        mais qu'on veut re-sonder : un outil de sonde AJOUTE apres coup (la cle
+        de cache porte le REGLAGE `probe_backend`, pas la liste des binaires
+        reellement trouves), une montee de version de ffprobe/MediaInfo, ou un
+        simple « repartir propre ».
+
+        LE CACHE PROBE A DEUX MOITIES, et cette route n'en vidait qu'une (audit
+        2026-08-28). `ProbeService._upsert_probe_cache_combined` ecrit la MEME
+        entree dans la base ET dans `<state_dir>/cache/probe/<hash>.json` ; en
+        lecture, `_get_probe_cache_combined` interroge la base PUIS retombe sur
+        le disque. Vider la seule base ne purgeait donc rien de durable : au
+        premier acces suivant, le miss base faisait repondre le disque, qui
+        RE-PROMOUVAIT l'entree en base (`service.py`, warm-up). La purge etait
+        annulee entree par entree, et « relance un scan pour re-probe » etait
+        faux — le scan relisait le disque au lieu de re-sonder.
+
+        Les deux moities sont donc purgees ici, et le compte rendu les
+        distingue : `entries_deleted` reste le compte BASE (des lecteurs
+        existants s'en servent), `disk_entries_deleted` porte le disque.
+        L'echec du disque ne fait pas echouer la route — la purge base a deja
+        eu lieu, et mentir sur elle serait le defaut inverse.
         """
         _log = logging.getLogger(__name__)
         try:
@@ -2056,11 +2081,22 @@ class CineSortApi:
                 level="error",
                 log_module=__name__,
             )
-        _log.info("api: purge_probe_cache entries_deleted=%d", deleted)
+        try:
+            disk_deleted = int(_probe_disk_cache.clear_disk_cache())
+        except Exception:  # noqa: BLE001 - le miroir disque ne doit pas invalider la purge base deja faite
+            _log.exception("api: purge_probe_cache echec purge du miroir disque")
+            disk_deleted = 0
+        total = deleted + disk_deleted
+        _log.info(
+            "api: purge_probe_cache entries_deleted=%d disk_entries_deleted=%d",
+            deleted,
+            disk_deleted,
+        )
         return {
             "ok": True,
             "entries_deleted": deleted,
-            "message": (f"Cache probe purge : {deleted} entrees supprimees. Relance un scan pour re-probe les films."),
+            "disk_entries_deleted": disk_deleted,
+            "message": f"Cache probe purge : {total} entrees supprimees. Relance un scan pour re-probe les films.",
         }
 
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
