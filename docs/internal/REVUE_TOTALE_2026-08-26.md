@@ -55,7 +55,8 @@ public (le dépôt a un fork, et les caches GitHub existent).
 
 ---
 
-## LOT 1 — Débloquer la file (12 PR sur 22 sont infusionnables)
+## LOT 1 — Débloquer la file (au 2026-08-26 : 12 infusionnables sur 22 ; remesuré le
+2026-08-28 : **17 sur 28** — 16 BLOCKED + 1 UNSTABLE)
 
 - [ ] **T-CI-1 · Éprouver le remède sur UNE seule PR.** Sept PR (#1125 #1128 #1130 #1133 #1134
   #1137 #1148) portent **0 des 7 checks requis** : leurs 10 à 44 runs sont parqués en
@@ -66,10 +67,33 @@ public (le dépôt a un fork, et les caches GitHub existent).
   ⚠️ **Ne PAS fermer/rouvrir, ne PAS squasher** : une première lecture accusait le *nombre de
   commits*, réfutée par 7 contre-exemples (#1099, #1104…). Ces remèdes visent le mauvais mécanisme
   — et le finding `a3610492` de PR #1148 les recommande **à tort, avec une confiance de 0,95**.
-- [ ] **T-CI-2 · Poser le label `blocked` sur les 7 PR gelées.** `stale.yml` porte
-  `delete-branch: true` (30 j → stale, +7 j → close). Cinq de ces PR sont des rapports d'audit qui
-  n'existent **QUE** sur leur branche — motif exact de #1089. `exempt-pr-labels` contient déjà
-  `blocked`. **Échéance : fin septembre.**
+- [x] **T-CI-2 · FAIT le 2026-08-28 — et la parade n'était PAS d'une ligne.** Le label `blocked`
+  **n'existait pas dans le dépôt** : la commande prescrite échouait. Témoin à réponse connue :
+  `gh pr edit --add-label 'zzz-temoin-inexistant'` rend `not found` et ne crée rien. `stale.yml`
+  *déclarait* `blocked` dans `exempt-pr-labels` ; le dépôt ne le *définissait* pas. **Lire un
+  fichier de configuration ne dit rien de l'existence de ce qu'il nomme.**
+  Label créé (`#B60205`) puis posé sur **8** PR, pas 7 : `#1125 #1128 #1130 #1133 #1134 #1137
+  #1148 #1152` (#1152, rapport du 27, a rejoint le lot). **Zéro run CI déclenché** (32 572 runs
+  avant et après ; `grep -rn labeled .github/workflows/` rend 0). Les 8 `updatedAt` repoussés à
+  aujourd'hui : marquage ~27 septembre, fermeture ~4 octobre. C'est un sursis, pas la parade.
+  **Deux mesures rectifiées.** « Cinq de ces PR sont des rapports d'audit » était faux sur les 7
+  d'origine — il y en avait **quatre** (#1130 #1134 #1137 #1148) ; cinq aujourd'hui avec #1152.
+  Et l'enjeu est plus large que les rapports : comparées à `origin/main` fichier par fichier,
+  **les 8 portent au moins un fichier absent de `main`**, #1125 #1128 #1133 portant chacune un
+  **fichier de test unique**. Une suppression de branche détruirait **13 fichiers**, pas 5.
+  ⚠️ **Non éprouvé, et non éprouvable aujourd'hui** : que l'exemption se *déclenche*. `stale.yml`
+  n'a pas de `debug-only`, et un `workflow_dispatch` ne traiterait rien tant qu'aucune PR
+  n'atteint son seuil (max 8 j pour 30). Seules les **trois préconditions** sont vérifiées : le
+  label existe, son nom est identique octet pour octet (`cat -A` → `blocked$`), il est attaché
+  aux 8.
+- [ ] **T-CI-19 · Quatre des cinq exemptions PR de `stale.yml` sont des labels FANTÔMES.**
+  `exempt-pr-labels: "pinned,security,wip,work-in-progress,blocked"` — mesuré le 2026-08-28 sur
+  les 32 labels réels du dépôt : seul **`security`** existait (`blocked` créé depuis, cf. T-CI-2).
+  `pinned`, `wip` et `work-in-progress` ne peuvent **structurellement** jamais s'appliquer. Côté
+  issues, `exempt-issue-labels` en nomme 7 dont **2 fantômes** (`pinned`, `good-first-issue`).
+  Une liste d'exemptions qui nomme des labels inexistants donne l'illusion d'un filet — c'est le
+  motif de #1096 (la règle absolue impossible), appliqué à une garde. Trancher : créer les
+  labels, ou élaguer la liste à ce qui existe.
 - [ ] **T-CI-3 · #1133 en priorité dans le lot** : elle rétablit le « 0 = désactivé » d'un cron
   **destructif** (cf. T-PROD-2).
 - [ ] **T-CI-4 · Fusionner #1145 et #1142 ensemble.** Dependabot a coupé une modification
