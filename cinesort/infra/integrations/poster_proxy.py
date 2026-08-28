@@ -563,11 +563,33 @@ def content_type_from_ext(ext: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _purge_stale_extensions(cache_root: Path, size: str, tmdb_id: int, *, keep: Optional[Path]) -> None:
+    """Efface les cache files d'un `(id, size)` autres que celui qu'on vient d'ecrire.
+
+    Necessaire apres un refresh force : `resolve_cache_file` rend la PREMIERE
+    extension trouvee dans `POSTER_EXT_WHITELIST` (`jpg`, puis `png`, puis
+    `webp`). Si TMDb renvoie desormais un `webp` la ou le cache portait un `jpg`,
+    l'ancien serait resservi indefiniment (Cache-Control immuable 30 j).
+
+    Best-effort : un unlink qui echoue laisse au pire un fichier de trop, jamais
+    l'absence de jaquette.
+    """
+    try:
+        for stale in (cache_root / size).glob(f"{tmdb_id}.*"):
+            if keep is not None and stale == keep:
+                continue
+            stale.unlink()
+    except (OSError, ValueError) as exc:
+        logger.debug("poster_proxy purge ext obsoletes id=%d size=%s err=%s", tmdb_id, size, exc)
+
+
 def get_or_fetch(
     tmdb_client: Any,
     cache_root: Path,
     tmdb_id: int,
     size: str,
+    *,
+    force: bool = False,
 ) -> Tuple[Optional[Path], Optional[str], Optional[str]]:
     """Orchestre cache lookup + fetch TMDb si miss.
 
@@ -581,6 +603,10 @@ def get_or_fetch(
         Identifiant TMDb deja valide (cf `validate_request`).
     size : str
         Taille TMDb deja validee.
+    force : bool
+        Refresh demande par l'utilisateur (« Recuperer jaquettes », `force=1`).
+        Le cache disque est IGNORE en lecture, mais il n'est PAS efface avant le
+        fetch — cf. la note ci-dessous.
 
     Returns
     -------
@@ -594,19 +620,31 @@ def get_or_fetch(
     -----
     Cas fallback graceful : si fetch TMDb echoue (`ERR_OFFLINE`/`ERR_UPSTREAM_ERROR`)
     mais qu'un cache disque existe (meme ancien), on sert le cache.
-    """
-    # 1. Cache hit ?
-    hit = resolve_cache_file(cache_root, size, tmdb_id)
-    if hit is not None:
-        cache_file, ext = hit
-        content_type = content_type_from_ext(ext)
-        logger.debug("poster_proxy cache hit id=%d size=%s ext=%s", tmdb_id, size, ext)
-        return cache_file, content_type, None
 
-    # 2. Cache miss -> fetch TMDb.
-    logger.debug("poster_proxy cache miss id=%d size=%s", tmdb_id, size)
+    C'est ce filet qui impose l'ordre du refresh force. `serve_poster` effacait le
+    cache AVANT d'appeler cette fonction : un « Recuperer jaquettes » lance hors
+    ligne detruisait donc la jaquette existante puis rendait 503, et le repli
+    ci-dessus ne trouvait plus rien a servir — l'utilisateur perdait ses
+    jaquettes en cliquant sur un bouton de rafraichissement. On NE DETRUIT donc
+    qu'apres avoir obtenu le remplacant, et seulement les extensions devenues
+    obsoletes (`_purge_stale_extensions`).
+    """
+    # 1. Cache hit ? (saute sur refresh force : c'est tout ce que `force` change
+    #    en lecture — le fichier reste en place tant qu'il n'est pas remplace.)
+    if not force:
+        hit = resolve_cache_file(cache_root, size, tmdb_id)
+        if hit is not None:
+            cache_file, ext = hit
+            content_type = content_type_from_ext(ext)
+            logger.debug("poster_proxy cache hit id=%d size=%s ext=%s", tmdb_id, size, ext)
+            return cache_file, content_type, None
+
+    # 2. Cache miss (ou refresh force) -> fetch TMDb.
+    logger.debug("poster_proxy cache miss id=%d size=%s force=%s", tmdb_id, size, force)
     cache_file, content_type, error_code = fetch_and_cache(tmdb_client, cache_root, tmdb_id, size)
     if error_code is None:
+        if force:
+            _purge_stale_extensions(cache_root, size, tmdb_id, keep=cache_file)
         return cache_file, content_type, None
 
     # 3. Fetch failed mais cache disque existe (cas tres improbable apres miss,
@@ -703,19 +741,18 @@ def serve_poster(
             _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
             return
 
-        # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
+        # AUDIT 2026-06-14 (R7-8) : `force` -> ignorer le cache disque pour
         # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
         # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
         # reservi tel quel -> le refresh n'avait aucun effet visuel.
-        if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
-            try:
-                for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
-                    _f.unlink()
-            except (OSError, ValueError):
-                pass
+        #
+        # AUDIT 2026-08-28 : le drapeau est TRANSMIS, il n'efface plus le cache
+        # ICI — effacer avant le fetch detruisait la jaquette hors ligne et
+        # privait de sa matiere le repli de `get_or_fetch` (voir sa docstring).
+        force = str(query.get("force") or "").strip().lower() in ("1", "true", "yes")
 
         # 3. Orchestrer cache hit / fetch.
-        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
+        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size, force=force)
         if error_code is not None:
             status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
             _respond_error_json(handler, status, category, message)
