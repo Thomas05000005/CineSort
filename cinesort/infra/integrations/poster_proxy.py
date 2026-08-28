@@ -698,28 +698,54 @@ def serve_poster(
         # 2. Resoudre le TmdbClient (lazy depuis settings.json).
         tmdb_client = _build_or_get_tmdb_client(state_dir)
         if tmdb_client is None:
-            # Pas de cle API configuree -> on retourne 503 (proxy non operationnel)
-            # plutot que 502 (qui suggererait une erreur TMDb).
-            _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
-            return
+            # Pas de cle API : le proxy ne peut plus rien ALLER CHERCHER, mais ce
+            # qui est DEJA en cache reste parfaitement servable.
+            #
+            # 2026-08-28 : cette branche sortait en 503 AVANT de consulter le
+            # cache. Deux consequences, toutes deux mesurees en bac a sable :
+            #
+            #   - PRODUIT. Des que la cle devient illisible (effacee, ou blob
+            #     DPAPI non dechiffrable sur un profil neuf), les jaquettes de
+            #     TOUT le dashboard passaient en erreur alors que chaque image
+            #     etait sur le disque. `/api/poster` alimente 9 sites du front :
+            #     grille bibliotheque (w185), fiche film (w342) et le
+            #     constructeur d'URL de `core/dom.js`.
+            #   - ASYMETRIE. Sur le MEME id en cache, l'appelant loopback
+            #     recevait 503 tandis que l'appelant cross-site — passe par la
+            #     branche `allow_fetch=False` ci-dessus, qui lit le cache
+            #     d'abord — recevait l'image. L'appelant le moins fiable etait
+            #     le mieux servi.
+            #
+            # On ne retombe PAS sur la branche cache-seul (`allow_fetch=False`)
+            # : elle rend 404 sur un miss, ce qui perdrait le message
+            # « Proxy TMDb non configure » que l'ecran sait afficher.
+            hit = resolve_cache_file(cache_root, size, tmdb_id)
+            if hit is None:
+                # Rien en cache ET pas de cle : le proxy est reellement
+                # inoperant. 503 (config) plutot que 502, qui suggererait une
+                # erreur TMDb.
+                _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
+                return
+            cache_file, _ext_sans_cle = hit
+            content_type = content_type_from_ext(_ext_sans_cle)
+        else:
+            # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
+            # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
+            # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
+            # reservi tel quel -> le refresh n'avait aucun effet visuel.
+            if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
+                try:
+                    for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
+                        _f.unlink()
+                except (OSError, ValueError):
+                    pass
 
-        # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
-        # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
-        # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
-        # reservi tel quel -> le refresh n'avait aucun effet visuel.
-        if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
-            try:
-                for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
-                    _f.unlink()
-            except (OSError, ValueError):
-                pass
-
-        # 3. Orchestrer cache hit / fetch.
-        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
-        if error_code is not None:
-            status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
-            _respond_error_json(handler, status, category, message)
-            return
+            # 3. Orchestrer cache hit / fetch.
+            cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
+            if error_code is not None:
+                status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
+                _respond_error_json(handler, status, category, message)
+                return
 
     assert cache_file is not None and content_type is not None
 
