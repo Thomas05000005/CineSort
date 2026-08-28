@@ -36,9 +36,34 @@ _SECRET_PATTERNS: List[Pattern[str]] = [
     #   - apikey=  (OMDb, ce qui leakait avant le fix)
     #   - api-key= (variante REST occasionnelle)
     #   - token=   (generique Bearer/REST)
-    # Le `\b` en amont evite de matcher des fragments comme `xapikey=` ou
-    # `mytoken=` (qui pourraient appartenir a un nom de variable parent).
-    re.compile(r"\b((?:api[_-]?key|apikey|token)=)([^&\s\"'>]+)", re.IGNORECASE),
+    #
+    # 2026-08-28 — LE `\b` EN AMONT EST RETIRE. Il avait ete pose pour ne pas
+    # mordre `xapikey=` ou `mytoken=`, « qui pourraient appartenir a un nom de
+    # variable parent ». Mais `\b` ne matche pas ENTRE DEUX caracteres de mot, et
+    # `_` en est un : tout nom compose etait donc desarme. Mesure sur 18 noms de
+    # parametre standards : 12 fuyaient, dont `access_token`, `refresh_token`,
+    # `auth_token` et `id_token` — les plus courants de l'industrie.
+    #
+    # Et le PRODUIT lui-meme emploie l'un d'eux : le boot desktop passe le jeton
+    # REST sous `?ntoken=` (app.py:846), et `log_message` journalise la ligne de
+    # requete brute. Fuite reproduite de bout en bout jusqu'au fichier de log, le
+    # temoin `?token=` etant redige sur la ligne voisine.
+    #
+    # La precaution anti-faux-positif contredisait la politique declaree en tete
+    # de ce module : « faux positifs benins, faux negatifs evites ». Le prefixe
+    # n'entre PAS dans le match, mais il est laisse intact dans le texte, donc le
+    # nom du parametre reste lisible (`ntoken=[REDACTED]`) : on perd la valeur,
+    # jamais le contexte de diagnostic.
+    #
+    # NE PAS « ameliorer » ce motif en prefixant `[\w-]*` pour englober le nom
+    # complet. Mesure du 2026-08-28 sur 40 000 caracteres sans correspondance :
+    #   sans prefixe        0,91 ms
+    #   `[\w-]{0,64}`      76,6 ms
+    #   `[\w-]*`       24 338,55 ms   <- ReDoS
+    # La sortie redigee est IDENTIQUE dans les trois cas : le prefixe n'apporte
+    # rien et ce filtre traite des lignes de requete, donc du texte que
+    # l'appelant controle. Garde : `test_motif_de_query_string_ne_redose_pas`.
+    re.compile(r"((?:api[_-]?key|apikey|token)=)([^&\s\"'>]+)", re.IGNORECASE),
     # Jellyfin header : Authorization: MediaBrowser Token="xxx"
     re.compile(r'(MediaBrowser Token=")([^"]+)(")', re.IGNORECASE),
     # Bearer token generique (REST CineSort, beaucoup d'API)
