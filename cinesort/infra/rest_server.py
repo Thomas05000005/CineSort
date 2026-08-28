@@ -535,9 +535,16 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # V6-01 : root des fichiers locales/. Initialise par RestApiServer (cf
     # `locales_root = _resolve_locales_root()` plus bas).
     locales_root: Optional[Path] = None
-    # 2026-06-08 : adresse de bind effective ("127.0.0.1" ou "0.0.0.0"). Utilisee
-    # par _check_auth pour decider si le bypass d'auth localhost est sur (cf
-    # plus bas). Initialisee par RestApiServer.start() depuis self._host.
+    # Adresse de bind effective ("127.0.0.1" ou "0.0.0.0"), posee par
+    # RestApiServer.start() depuis self._host.
+    #
+    # ATTRIBUT MORT depuis le retrait du bypass loopback (2026-08-07) : il est
+    # ECRIT (ici et au montage du handler) et LU PAR PERSONNE — mesure du
+    # 2026-08-28, `grep -rn bind_host` rend 2 ecritures et 0 lecture en
+    # production. Le commentaire disait qu'il servait a `_check_auth` « pour
+    # decider si le bypass d'auth localhost est sur » : ce bypass n'existe plus.
+    # Conserve pour l'instant (il documente le bind au point de montage) ; le
+    # supprimer est un arbitrage a part.
     bind_host: str = "127.0.0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -1182,13 +1189,29 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # Iter12 / ETAPE 1b : proxy poster TMDb avec validation stricte
         # anti-SSRF/anti-open-relay + cache disque local.
         # Cf cinesort/infra/integrations/poster_proxy.py (whitelist sizes,
-        # regex id, scrub cle API). Pas d'auth Bearer requise sur cette
-        # route : sert directement <img src="/api/poster?id=...&size=..."> et
-        # le bypass loopback du _check_auth de cette classe couvre deja le
-        # cas pywebview natif. Note : on n'invoque PAS self._check_auth ici
-        # car le navigateur ne peut pas mettre d'header Authorization sur
-        # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
-        # serait de toute facon active.
+        # regex id, scrub cle API).
+        #
+        # PAS d'auth Bearer sur cette route, et la RAISON A CHANGE. Ce
+        # commentaire invoquait « le bypass loopback du _check_auth de cette
+        # classe », en concluant qu'en bind 127.0.0.1 le bypass serait de toute
+        # facon actif. CE BYPASS A ETE RETIRE LE 2026-08-07 (cf. _check_auth,
+        # qui porte les mesures du retrait) : la justification etait morte
+        # depuis trois semaines quand elle a ete relue le 2026-08-28.
+        #
+        # La raison qui TIENT est la seule seconde : un navigateur ne peut pas
+        # poser d'en-tete Authorization sur un <img src=...>. La route reste
+        # donc ouverte, et c'est `_poster_trusted_caller` qui porte la defense,
+        # pas l'authentification.
+        #
+        # SURFACE MESUREE le 2026-08-28 (bac a sable, port ephemere) :
+        #   POST /api/run/get_status sans Bearer   -> 401   (temoin)
+        #   GET  /api/poster?id=... sans Bearer    -> jamais 401
+        #   GET  /api/poster?id=<en cache>  cross-site -> 200 image/jpeg
+        #   GET  /api/poster?id=<pas en cache> cross-site -> 404
+        # Les deux dernieres lignes forment un ORACLE D'APPARTENANCE : une page
+        # tierce peut, sans credential, tester id par id ce que le cache
+        # contient, donc enumerer la bibliotheque. C'est le prix assume de
+        # servir le <img> ; le noter ici pour que personne ne le redecouvre.
         if clean == "/api/poster":
             from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
             from cinesort.infra.state import default_state_dir  # noqa: PLC0415
@@ -1621,9 +1644,11 @@ class RestApiServer:
                 "dashboard_root": dashboard_root,
                 "shared_root": shared_root,
                 "locales_root": locales_root,
-                # 2026-06-08 : expose le bind effectif au handler pour que
-                # _check_auth puisse decider si le bypass localhost est sur
-                # (uniquement vrai bind 127.0.0.1, pas 0.0.0.0 expose LAN).
+                # Expose le bind effectif au handler. Le commentaire d'origine
+                # disait « pour que _check_auth puisse decider si le bypass
+                # localhost est sur » : ce bypass est RETIRE depuis le
+                # 2026-08-07 et plus rien ne lit cet attribut (cf. sa
+                # declaration).
                 "bind_host": self._host,
             },
         )
