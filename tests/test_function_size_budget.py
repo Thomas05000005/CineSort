@@ -190,7 +190,6 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/infra/jellyfin_client.py", "get_all_movies"): 128,
     ("cinesort/ui/api/tmdb_support.py", "search_tmdb"): 128,
     ("cinesort/app/plan_support_core.py", "_classify_and_plan_folder"): 127,
-    ("cinesort/infra/rest_server.py", "_handle_get"): 125,
     ("cinesort/app/quarantine_ttl.py", "purge_review_bucket"): 123,
     ("cinesort/domain/perceptual/av1_grain_metadata.py", "extract_av1_film_grain_params"): 123,
     ("cinesort/domain/core.py", "build_candidates_from_tmdb"): 122,
@@ -207,7 +206,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/domain/scene_parser.py", "parse_scene_title"): 117,
     ("cinesort/domain/duplicate_compare.py", "compare_by_criteria"): 116,
     ("cinesort/domain/video_hash.py", "extract_video_thumbnails"): 116,
-    ("cinesort/infra/integrations/poster_proxy.py", "serve_poster"): 114,
+    # 114 -> 108 : la route jaquettes a ete documentee et durcie le 2026-08-29,
+    # ce qui l'a fait deborder (140). Plutot que monter le plafond, trois blocs
+    # ont ete extraits (`_force_demande`, `_invalider_le_cache`,
+    # `_servir_sans_cle_tmdb`). Le plafond est resserre sur la taille obtenue.
+    ("cinesort/infra/integrations/poster_proxy.py", "serve_poster"): 108,
     # 114 -> 172 : un undo qui n'a restaure AUCUN fichier ne consomme plus
     # l'annulation. Le cas et sa justification tiennent en une trentaine de
     # lignes de commentaire — c'est le prix pour que personne ne les reperde.

@@ -716,6 +716,77 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
         return bool(sec_fetch_site) and sec_fetch_site != "same-origin"
 
+    def _servir_jaquette(self, _t0: float) -> None:
+        """Route `GET /api/poster` : proxy TMDb avec cache disque local.
+
+        Extraite de `_handle_get` le 2026-08-29 : le cliquet de taille des
+        fonctions compte le span brut, et documenter correctement cette route
+        faisait deborder son hote. Sortir le bloc vaut mieux que monter un
+        plafond — c'est ce que dit le message d'echec du cliquet lui-meme.
+
+        Cette route n'est PAS authentifiee : un navigateur ne peut pas poser
+        d'en-tete `Authorization` sur un `<img src=...>`. La defense est portee
+        par `_poster_navigateur_etranger` (qui ferme l'oracle d'enumeration) et
+        `_poster_trusted_caller` (qui gate les effets de bord), pas par
+        `_check_auth`. Voir `tests/test_poster_frontiere_origine.py`.
+        """
+        from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
+        from cinesort.infra.state import default_state_dir  # noqa: PLC0415
+
+        # Resoudre state_dir : preferer l'API si disponible, sinon
+        # default_state_dir() (compat tests sans API monte).
+        api = getattr(self, "api", None)
+        state_dir = None
+        if api is not None:
+            get_state = getattr(api, "_get_state_dir", None)
+            if callable(get_state):
+                try:
+                    state_dir = get_state()
+                except Exception:  # noqa: BLE001 — boundary
+                    state_dir = None
+        if state_dir is None:
+            state_dir = default_state_dir()
+        cache_root = Path(state_dir) / "cache" / "posters"
+        # Parser la query string (premier raw seulement, jamais liste).
+        raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        parsed = parse_qs(raw_query, keep_blank_values=True)
+        flat_query: Dict[str, str] = {}
+        for key, values in parsed.items():
+            if values:
+                flat_query[key] = values[0]
+        # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
+        # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
+        # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
+        # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
+        # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
+        # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
+        # Un navigateur qui n'est pas same-origin n'est jamais un
+        # consommateur legitime : on lui rend une reponse UNIFORME, pour que
+        # le statut ne trahisse pas le contenu du cache. Corps identique a
+        # celui d'un cache miss (`poster_proxy._respond_error_json`), pour
+        # que les deux cas soient indiscernables jusqu'a l'octet.
+        if self._poster_navigateur_etranger():
+            self._respond_json(404, {"ok": False, "category": "resource", "message": "Poster not available"})
+            return
+        poster_trusted = self._poster_trusted_caller()
+        if "force" in flat_query and not poster_trusted:
+            flat_query.pop("force", None)
+            logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
+        try:
+            # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
+            # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
+            poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+            logger.debug(
+                "REST GET /api/poster client disconnect (%s, %.0fms)",
+                type(exc).__name__,
+                (time.monotonic() - _t0) * 1000,
+            )
+        except Exception as exc:  # noqa: BLE001 — boundary
+            logger.exception("REST 500 /api/poster: %s", exc)
+            with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
+
     def _send_cors_headers(self) -> None:
         # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
         # On reflete uniquement une origine autorisee (localhost / same-origin /
@@ -1260,62 +1331,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # contient, donc enumerer la bibliotheque. C'est le prix assume de
         # servir le <img> ; le noter ici pour que personne ne le redecouvre.
         if clean == "/api/poster":
-            from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
-            from cinesort.infra.state import default_state_dir  # noqa: PLC0415
-
-            # Resoudre state_dir : preferer l'API si disponible, sinon
-            # default_state_dir() (compat tests sans API monte).
-            api = getattr(self, "api", None)
-            state_dir = None
-            if api is not None:
-                get_state = getattr(api, "_get_state_dir", None)
-                if callable(get_state):
-                    try:
-                        state_dir = get_state()
-                    except Exception:  # noqa: BLE001 — boundary
-                        state_dir = None
-            if state_dir is None:
-                state_dir = default_state_dir()
-            cache_root = Path(state_dir) / "cache" / "posters"
-            # Parser la query string (premier raw seulement, jamais liste).
-            raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            parsed = parse_qs(raw_query, keep_blank_values=True)
-            flat_query: Dict[str, str] = {}
-            for key, values in parsed.items():
-                if values:
-                    flat_query[key] = values[0]
-            # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
-            # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
-            # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
-            # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
-            # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
-            # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
-            # Un navigateur qui n'est pas same-origin n'est jamais un
-            # consommateur legitime : on lui rend une reponse UNIFORME, pour que
-            # le statut ne trahisse pas le contenu du cache. Corps identique a
-            # celui d'un cache miss (`poster_proxy._respond_error_json`), pour
-            # que les deux cas soient indiscernables jusqu'a l'octet.
-            if self._poster_navigateur_etranger():
-                self._respond_json(404, {"ok": False, "category": "resource", "message": "Poster not available"})
-                return
-            poster_trusted = self._poster_trusted_caller()
-            if "force" in flat_query and not poster_trusted:
-                flat_query.pop("force", None)
-                logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
-            try:
-                # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
-                # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
-                poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
-            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
-                logger.debug(
-                    "REST GET /api/poster client disconnect (%s, %.0fms)",
-                    type(exc).__name__,
-                    (time.monotonic() - _t0) * 1000,
-                )
-            except Exception as exc:  # noqa: BLE001 — boundary
-                logger.exception("REST 500 /api/poster: %s", exc)
-                with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
-                    self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
+            self._servir_jaquette(_t0)
             return
 
         # Fichiers statiques du dashboard distant

@@ -640,6 +640,66 @@ _HTTP_ERROR_MAP: Dict[str, Tuple[int, str, str]] = {
 }
 
 
+def _force_demande(query: Dict[str, str]) -> bool:
+    """True si la query string demande un rafraichissement force."""
+    return str(query.get("force") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _invalider_le_cache(cache_root: Path, size: str, tmdb_id: int) -> None:
+    """Supprime le fichier cache d'un (id, size) pour forcer un re-telechargement.
+
+    AUDIT 2026-06-14 (R7-8) : sans cela, le fichier cache — immuable et servi
+    avec `Cache-Control` 30 j — etait reservi tel quel, et le bouton « Recuperer
+    jaquettes » n'avait aucun effet visuel.
+
+    Best-effort : un fichier verrouille ou un chemin invalide ne doit pas faire
+    echouer la requete, le re-telechargement suivant le remplacera.
+    """
+    try:
+        for fichier in (cache_root / size).glob(f"{tmdb_id}.*"):
+            fichier.unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def _servir_sans_cle_tmdb(
+    handler: Any,
+    cache_root: Path,
+    size: str,
+    tmdb_id: int,
+) -> Optional[Tuple[Path, str]]:
+    """Repli quand aucune cle TMDb n'est lisible : servir le cache, ou 503.
+
+    Rend `(cache_file, content_type)` s'il y a un hit, sinon repond 503 et rend
+    `None` — au caller de sortir.
+
+    2026-08-28 : cette situation sortait en 503 AVANT de consulter le cache.
+    Deux consequences, toutes deux mesurees en bac a sable :
+
+      - PRODUIT. Des que la cle devient illisible (effacee, ou blob DPAPI non
+        dechiffrable sur un profil neuf), les jaquettes de TOUT le dashboard
+        passaient en erreur alors que chaque image etait sur le disque.
+        `/api/poster` alimente 9 sites du front : grille bibliotheque (w185),
+        fiche film (w342) et le constructeur d'URL de `core/dom.js`.
+      - ASYMETRIE. Sur le MEME id en cache, l'appelant loopback recevait 503
+        tandis que l'appelant non fiable — passe par la branche cache-seul, qui
+        lit le cache d'abord — recevait l'image. L'appelant le moins fiable
+        etait le mieux servi.
+
+    On ne retombe PAS sur la branche cache-seul : elle rend 404 sur un miss, ce
+    qui perdrait le message « Proxy TMDb non configure » que l'ecran sait
+    afficher. Contre-test : `test_sans_cle_tmdb_et_sans_cache_reste_503`.
+    """
+    hit = resolve_cache_file(cache_root, size, tmdb_id)
+    if hit is None:
+        # Rien en cache ET pas de cle : le proxy est reellement inoperant.
+        # 503 (config) plutot que 502, qui suggererait une erreur TMDb.
+        _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
+        return None
+    cache_file, ext = hit
+    return cache_file, content_type_from_ext(ext)
+
+
 def serve_poster(
     handler: Any,
     state_dir: Path,
@@ -698,47 +758,15 @@ def serve_poster(
         # 2. Resoudre le TmdbClient (lazy depuis settings.json).
         tmdb_client = _build_or_get_tmdb_client(state_dir)
         if tmdb_client is None:
-            # Pas de cle API : le proxy ne peut plus rien ALLER CHERCHER, mais ce
-            # qui est DEJA en cache reste parfaitement servable.
-            #
-            # 2026-08-28 : cette branche sortait en 503 AVANT de consulter le
-            # cache. Deux consequences, toutes deux mesurees en bac a sable :
-            #
-            #   - PRODUIT. Des que la cle devient illisible (effacee, ou blob
-            #     DPAPI non dechiffrable sur un profil neuf), les jaquettes de
-            #     TOUT le dashboard passaient en erreur alors que chaque image
-            #     etait sur le disque. `/api/poster` alimente 9 sites du front :
-            #     grille bibliotheque (w185), fiche film (w342) et le
-            #     constructeur d'URL de `core/dom.js`.
-            #   - ASYMETRIE. Sur le MEME id en cache, l'appelant loopback
-            #     recevait 503 tandis que l'appelant cross-site — passe par la
-            #     branche `allow_fetch=False` ci-dessus, qui lit le cache
-            #     d'abord — recevait l'image. L'appelant le moins fiable etait
-            #     le mieux servi.
-            #
-            # On ne retombe PAS sur la branche cache-seul (`allow_fetch=False`)
-            # : elle rend 404 sur un miss, ce qui perdrait le message
-            # « Proxy TMDb non configure » que l'ecran sait afficher.
-            hit = resolve_cache_file(cache_root, size, tmdb_id)
-            if hit is None:
-                # Rien en cache ET pas de cle : le proxy est reellement
-                # inoperant. 503 (config) plutot que 502, qui suggererait une
-                # erreur TMDb.
-                _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
+            # Pas de cle API : on ne peut plus rien ALLER CHERCHER, mais ce qui
+            # est deja en cache reste servable (cf. `_servir_sans_cle_tmdb`).
+            servi = _servir_sans_cle_tmdb(handler, cache_root, size, tmdb_id)
+            if servi is None:
                 return
-            cache_file, _ext_sans_cle = hit
-            content_type = content_type_from_ext(_ext_sans_cle)
+            cache_file, content_type = servi
         else:
-            # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
-            # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
-            # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
-            # reservi tel quel -> le refresh n'avait aucun effet visuel.
-            if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
-                try:
-                    for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
-                        _f.unlink()
-                except (OSError, ValueError):
-                    pass
+            if _force_demande(query):
+                _invalider_le_cache(cache_root, size, tmdb_id)
 
             # 3. Orchestrer cache hit / fetch.
             cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
