@@ -533,7 +533,17 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
   (`plan_support_core.py:264`, correctif trivial `usedforsecurity=False`), B310 `urlopen`
   (`updater.py:220`), et les 27 B608 (SQL par construction de chaîne) probablement faux
   positifs à vérifier un par un.
-- [ ] **T-DOM-1 · 27 pistes non vérifiées** issues d'un audit de `cinesort/domain/` et `web/`
+- [~] **T-DOM-1 · 27 pistes** — UNE traitée le 2026-08-29 (`scene_parser`), et un constat
+  préalable : **le détail des 27 n'existe nulle part sur disque.** Seul le résumé ci-dessous
+  les évoque, et il n'en NOMME que six. Les autres ne sont pas vérifiables faute de source.
+  ✅ **`scene_parser` — CONFIRMÉE et bien pire qu'annoncé.** Sept mots de `_NOISE_RE` sont de
+  vrais titres : `Cam (2018)` et `Opus (2025)` rendaient une chaîne **VIDE**, `Internal Affairs`
+  rendait `Affairs`, `Complete Unknown` rendait `Unknown`. Cause : `_NOISE_RE` (étape 3)
+  s'applique PARTOUT, y compris avant l'année, et s'exécute quatre étapes AVANT le traitement
+  position-aware (étape 7). `cam`, `proper` et `repack` figuraient dans les DEUX listes —
+  la première les consommait, la seconde ne les voyait jamais. 6 mutants, 6 morts, dont un
+  survivant qui a révélé que ma propre correction recréait la redondance.
+- [ ] ~~**T-DOM-1 · 27 pistes non vérifiées**~~ issues d'un audit de `cinesort/domain/` et `web/`
   (5 lecteurs + 5 réfutateurs). **Ce sont des PISTES, pas des constats** : une seule a été
   remesurée à la main et livrée (T-PROD-10). Les autres portent sur le score qualité (plafond
   SD inatteignable, rétro-compat legacy morte, `enable_4k_light` qui allège au lieu de pénaliser,
