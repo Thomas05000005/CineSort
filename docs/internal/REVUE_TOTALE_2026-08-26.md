@@ -32,17 +32,34 @@ public (le dépôt a un fork, et les caches GitHub existent).
   `%LOCALAPPDATA%/CineSort` : 6 `settings.json.bak*`, 13 `db/cinesort.sqlite.bak_ITER*`,
   `logs/cinesort.log`, et **4 artefacts WebView2** (`History`, `Top Sites`, `Favicons`,
   `Local Storage/leveldb`) — le jeton voyage en query string, le navigateur embarqué l'archive.
-- [ ] **T-SEC-4 · Boucher le scrubber.** `infra/log_scrubber.py:41` ne rédige pas `ntoken=` : son
-  `\b` amont a été ajouté pour éviter `mytoken=`, et le boot desktop passe le jeton sous ce nom
-  exact (`app.py:846`), journalisé brut par `rest_server.py:543`. Couvrir `ntoken=` et tout
-  `*token=` en query string, avec un test **vu rouge**.
+- [x] **T-SEC-4 · FAIT le 2026-08-29** (`sec(logs)`, commit local `51ca9bca`). Le constat était
+  juste et **plus large** : mesure sur 18 noms de paramètre standards, **12 fuyaient** — dont
+  `access_token`, `refresh_token`, `auth_token`, `id_token`. Cause : `\b` ne matche pas *entre
+  deux caractères de mot*, et `_` en est un. Fuite reproduite **de bout en bout jusqu'au fichier
+  de log** par la chaîne de production, le témoin `?token=` étant rédigé sur la ligne voisine.
+  ⚠️ **Le premier correctif était pire que le défaut.** Préfixer le motif par `[\w-]*` rend une
+  sortie *strictement identique* mais fait passer 40 000 caractères sans correspondance de
+  **0,91 ms à 24 338 ms** — un ReDoS (CWE-1333) dans un filtre qui traite des lignes de requête,
+  donc du texte contrôlé par l'appelant. Il a **bloqué la batterie** des 12 fichiers liés :
+  371 s de CPU pour 439 s écoulées, sans terminer. Aucun test ne pouvait le voir : les quatre
+  variantes de motif sont fonctionnellement vertes. D'où le garde
+  `test_motif_de_query_string_ne_redose_pas` (budget 2 s pour un échec à 24 s).
+  Correctif retenu : **retirer le `\b`, rien d'autre**. 5 tests ajoutés au garde EXISTANT
+  (33 → 34). Mutation composée : `\b` remis tue les 3 fonctionnels, `[\w-]*` tue le garde ReDoS
+  **seul**, motif neutralisé tue 3 + 6 préexistants, `=` rendu optionnel tue le contre-test.
 - [ ] **T-SEC-5 · Cesser de faire transiter le jeton dans l'URL.** C'est la cause amont de T-SEC-3
   et T-SEC-4. `app.py:854` tronque déjà volontairement le jeton pour son propre log : le serveur,
   lui, journalise la ligne de requête entière.
-- [ ] **T-SEC-6 · Réparer la rotation des sauvegardes.** `SETTINGS_BACKUP_PREFIX` vaut `.bak.` donc
-  le glob est `settings.json.bak.*` : trois sauvegardes nommées `.bak_ITER7_pre`,
-  `.bak_iter13_s2`, `.bak_ITER13_S5_*` sont hors champ de `_rotate_settings_backups` depuis juin
-  et n'en sortiront jamais.
+- [~] **T-SEC-6 · RÉFUTÉE le 2026-08-29 — et son remède aurait été nuisible.** Le fait est exact
+  (glob `settings.json.bak.*`, les `.bak_ITER*` hors champ) mais ce **n'est pas un défaut de la
+  rotation**. Mesuré : l'écrivain de sauvegardes du produit (`settings_support.py:157`) n'emploie
+  QUE `.bak.` — tout ce qu'il crée entre dans la rotation ; et **rien sous `cinesort/` ne produit
+  de `.bak_ITER*`**. Le seul producteur de `.bak_` du dépôt est `scripts/observe.py:313`, un
+  script de diagnostic, qui sauvegarde la **base**, pas les réglages. Ces fichiers sont donc
+  étrangers au produit.
+  Élargir le glob ferait **supprimer silencieusement au produit des fichiers qu'il n'a jamais
+  créés**, sauvegarde manuelle de l'utilisateur comprise — la règle inviolable n°3 prise à
+  revers. Le bon remède est la purge locale (T-SEC-3), qui appartient à Thomas.
 - [ ] **T-SEC-7 · Retirer les `|| true` des trois checks REQUIS** — ou les sortir de la liste des
   requis. `bandit.yml:89`, `mypy.yml:92`, `pip-audit.yml:87` (`continue-on-error`). La protection
   de `main` en annonce sept ; **quatre mordent**.
@@ -50,8 +67,49 @@ public (le dépôt a un fork, et les caches GitHub existent).
   Le secret n'était **pas** dans `.gitleaksignore` : ce n'était pas une exemption assumée, c'était
   une non-détection. Corriger aussi `CLAUDE.md:658` et l'en-tête de `gitleaks.yml`, qui affirment
   « 56 détections, ZÉRO secret réel ».
-- [ ] **T-SEC-9 · `GET /api/poster` n'est pas authentifiée** (`rest_server.py:1183-1191`) et sa
-  justification écrite est morte : elle invoque un « bypass loopback de `_check_auth` » supprimé.
+- [x] **T-SEC-9 · FAIT le 2026-08-29** (`docs(rest)`, commit local `985bae18`) — confirmée sur la
+  doc, **très réduite** sur la sécurité, et elle a ouvert deux constats neufs.
+  La justification morte est réelle : trois commentaires invoquaient le bypass retiré le
+  2026-08-07 (`/api/poster`, et **deux** sur `bind_host`, mesuré MORT — 2 écritures, 0 lecture).
+  Corrigés ; couvre aussi T-DOC-14.
+  Mais la route n'est pas nue : `_poster_trusted_caller` limite les appelants non fiables à la
+  lecture du cache. Mesuré en bac à sable (témoin : `POST` sans jeton → **401**) : `/api/poster`
+  ne rend **jamais** 401, mais la défense en couches tient.
+
+- [x] **T-SEC-10 · NEUF, FAIT le 2026-08-29 — la route jaquettes se gardait par le SITE, pas par
+  l'ORIGINE** (`sec(poster)`, commit local `ce5eaaf8`). CWE-200 + CWE-346.
+  `_poster_trusted_caller` acceptait `Sec-Fetch-Site: same-site` comme fiable. Or le « site » au
+  sens Fetch Metadata est le domaine enregistrable : **le port n'en fait pas partie**. Sur
+  `127.0.0.1`, tout autre service web local est donc `same-site`.
+  **Mesuré au navigateur réel**, deux serveurs locaux (18801/18802) : une image demandée à un
+  AUTRE PORT porte `same-site`, jamais `cross-site`. Puis contre CineSort en bac à sable : une
+  page servie sur 18801 obtenait la jaquette en cache de l'instance du 18742 (**image chargée,
+  1×1**) et un refus sur un id absent. Deux conséquences : un **oracle d'énumération de la
+  bibliothèque** sans aucun credential, et le **privilège** `force=1` + fetch TMDb.
+  ⚠️ **Le repli par IP était la seconde moitié du défaut, et seule l'ÉCRITURE DU TEST l'a
+  révélée** : exiger `same-origin` sans y toucher aurait laissé un navigateur `same-site` sur la
+  boucle locale retomber sur `_LOCAL_CLIENT_IPS` et redevenir fiable.
+  **Pourquoi personne ne l'avait vu** : `_poster_trusted_caller` et `Sec-Fetch-Site`
+  n'apparaissaient dans **aucun** fichier de `tests/`. Leur unique exercice est
+  `docs/internal/r8/r8_f3_poster_trusted_diff.py`, un script que nul workflow ne lance, dont la
+  table couvre `same-origin` et `cross-site` — **jamais `same-site`**. L'en-tête a quatre
+  valeurs ; la preuve en énumérait deux, les deux extrêmes.
+  Vérifié **dans un vrai navigateur** après correctif : la page tierce n'obtient plus rien (les
+  deux réponses devenues identiques), le dashboard charge toujours sa jaquette. Garde neuf :
+  `tests/test_poster_frontiere_origine.py`, 7 tests dont **4 contre-tests**.
+
+- [x] **T-SEC-11 · NEUF, périmètre balayé le 2026-08-29 : le défaut de frontière est PROPRE à la
+  route jaquettes.** Mesuré, pas déduit — le chemin POST refuse une origine d'un autre port local
+  avec **403, jeton valide compris**, y compris sur `settings.reset_database` : `_allowed_origin`
+  contraint bien le port. Les 6 routes GET n'appellent aucune authentification, mais aucune ne
+  sert de donnée utilisateur — les trois racines statiques pointent vers `web/dashboard`,
+  `web/shared` et `locales`. Traversée de chemin éprouvée sur les trois : **contenue** (le seul
+  200, `/shared/../dashboard/index.html`, atteint un fichier déjà public ; toute sortie de `web/`
+  rend 404).
+  **Reste ouvert, non corrigé** : `GET /api/spec` rend **80 182 octets** de spécification OpenAPI
+  complète sans jeton — la carte des 172 endpoints, routes destructives comprises. Non lisible
+  *cross-site* (aucun en-tête `Access-Control-Allow-Origin` n'est émis pour une origine tierce),
+  donc exploitable seulement par un processus local, ou en LAN sous `--public`. À arbitrer.
 
 ---
 
