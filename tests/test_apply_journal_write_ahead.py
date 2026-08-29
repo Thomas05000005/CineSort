@@ -312,6 +312,57 @@ class LiberationSurPreuveTests(unittest.TestCase):
             "le seul moment ou elle avait une chance de servir.",
         )
 
+    def test_une_cible_ILLISIBLE_n_est_pas_une_cible_absente(self) -> None:
+        """« Absent » et « je n'ai pas pu lire » ne sont pas la meme reponse.
+
+        `Path.exists()` ne re-leve PAS toutes les `OSError` : il en avale une
+        liste, mesuree sur le Python de ce depot (3.13) —
+        `_IGNORED_ERRNOS = ENOENT, ENOTDIR, EBADF, WSAELOOP` et
+        `_IGNORED_WINERRORS = [21, 123, 1921]`. Le **21** est `ERROR_NOT_READY` :
+        le peripherique n'est pas pret. C'est le mode d'echec d'un partage SMB
+        tombe, c'est-a-dire l'environnement meme de ce produit.
+
+        Source locale, destination sur un partage qui vient de tomber :
+        `src.exists()` rend True, `dst.exists()` rend False SANS erreur, et la
+        liberation conclut que rien n'a bouge alors qu'elle n'en sait rien.
+
+        Signale par une revue automatique dont la cause citee (`EACCES`) est
+        FAUSSE — une erreur d'acces fait bien remonter l'exception — mais dont le
+        mecanisme etait juste. Verifier l'exemple, le trouver faux et classer le
+        signal aurait laisse le trou en place.
+        """
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+
+        vrai_stat = Path.stat
+
+        def stat_illisible(self_path, *a, **k):
+            if self_path == dst:
+                exc = OSError("peripherique non pret")
+                exc.winerror = 21  # ERROR_NOT_READY, avale par Path.exists()
+                raise exc
+            return vrai_stat(self_path, *a, **k)
+
+        with mock.patch.object(Path, "stat", stat_illisible):
+            self.assertFalse(dst.exists(), "le temoin ne reproduit pas l'avalement")
+            with self.assertRaises(PermissionError):
+                with journal_pose_autour(
+                    self.record_op,
+                    src=src,
+                    dst=dst,
+                    op_type="MOVE_DIR",
+                    liberer_si_rien_n_a_bouge=True,
+                ):
+                    raise PermissionError("echec du renommage")
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            1,
+            "la cible etait ILLISIBLE, pas absente : le disque ne prouve rien, "
+            "et l'entree vient d'etre liberee sur une lecture qui a echoue.",
+        )
+
     def test_sans_l_option_le_comportement_conservateur_est_inchange(self) -> None:
         src = self._tmp / "source"
         src.mkdir()

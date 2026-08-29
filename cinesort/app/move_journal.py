@@ -391,6 +391,26 @@ def journal_pose_autour(
         raise
 
 
+def _present(chemin: Union[Path, str]) -> Optional[bool]:
+    """True / False si le disque a REPONDU, None s'il n'a pas pu.
+
+    Trois reponses, pas deux. `Path.exists()` n'en rend que deux et fait passer
+    une partie des echecs de lecture pour une absence — cf. le commentaire dans
+    `_liberer_si_le_disque_le_prouve`.
+
+    `FileNotFoundError` et `NotADirectoryError` sont les seules a signifier
+    reellement « absent » : un parent qui n'est pas un dossier place le chemin
+    hors du systeme de fichiers aussi surement qu'une absence.
+    """
+    try:
+        Path(chemin).stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return None
+    return True
+
+
 def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: Union[Path, str]) -> None:
     """Retire l'entree pending SI le disque prouve que rien n'a bouge.
 
@@ -412,11 +432,15 @@ def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: U
     La condition est alors fausse, l'entree reste, et la reconciliation tranche —
     le comportement conservateur, celui d'avant.
     """
-    try:
-        rien_n_a_bouge = Path(src).exists() and not Path(dst).exists()
-    except OSError:  # chemin devenu illisible : on ne sait pas, donc on garde
-        return
-    if not rien_n_a_bouge:
+    # `Path.exists()` ne convient PAS ici : il AVALE une partie des OSError et
+    # rend False, ce qui confond « absent » et « je n'ai pas pu lire ». Mesure
+    # sur le Python de ce depot (3.13) : `_IGNORED_ERRNOS = ENOENT, ENOTDIR,
+    # EBADF, WSAELOOP` et `_IGNORED_WINERRORS = [21, 123, 1921]`. Le 21 est
+    # ERROR_NOT_READY — le mode d'echec d'un partage SMB tombe, c'est-a-dire
+    # l'environnement meme de ce produit. Source locale + destination sur un
+    # partage qui vient de tomber : la source repond True, la cible False sans
+    # erreur, et on libererait sur une lecture qui n'a jamais abouti.
+    if _present(src) is not True or _present(dst) is not False:
         return
     for entree in store.apply.list_pending_moves():
         if entree.get("src_path") == str(src) and entree.get("dst_path") == str(dst):
