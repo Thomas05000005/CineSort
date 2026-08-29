@@ -258,9 +258,15 @@ public (le dépôt a un fork, et les caches GitHub existent).
   sur le journal vide — un batch existant et vide peut avoir une cause légitime, un batch
   jamais créé n'en a aucune. 4 mutants, 4 morts, dont le retrait du câblage.
   Mesuré avec témoin : un apply sain (12 annoncés / 12 journalisés) reste vert.
-- [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
-  chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
-  produit aucun.
+- [x] **T-PROD-7** — FAIT le 2026-08-29. Constat exact : `_avec_verdict` n'avait qu'UN site
+  d'appel, le retour nominal. C'est pourtant le cas le plus grave du produit — 300 films ont
+  bougé, la finalisation casse, et l'utilisateur lit « Échec application » sans apprendre que
+  son disque a changé ni que l'annulation est disponible.
+  **Aucun invariant nouveau n'a été nécessaire.** Un `_err_response` ne porte aucun compteur
+  d'action disque non nul — précisément la précondition de `_verifier_deplacements_tus`, écrit
+  pour « le journal porte des déplacements, le payload n'en annonce aucun ». L'invariant juste
+  existait déjà ; il n'était pas appelé là. 2 mutants, 2 morts, plus un témoin (un apply qui
+  casse AVANT tout déplacement ne doit porter aucun verdict).
 - [ ] **T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
   et la migration de la racine de collection ne passent pas par `move_journal.atomic_move` : elles
   renomment puis appellent `record_apply_op`. Le **journal write-ahead n'est pas posé**, et c'est

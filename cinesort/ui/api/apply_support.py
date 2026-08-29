@@ -3297,6 +3297,57 @@ def _apply_changes_estampille(
         )
 
 
+def _payload_d_echec_avec_verdict(
+    api: Any,
+    *,
+    store: Any,
+    run_paths: Any,
+    rows: Any,
+    dry_run: bool,
+    log_fn: Callable[[str, str], None],
+    apply_batch_id: Optional[str],
+    atomic_rollback_summary: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Le payload rendu quand l'apply casse, verdict compris.
+
+    Extrait de `_apply_changes_body` le 2026-08-29 : y brancher le verdict
+    (T-PROD-7) la portait de 386 a 406 lignes pour un plafond gele a 386. Le
+    cliquet demande de DECOUPER plutot que de monter le plafond, et le bloc
+    formait deja une unite — construire l'annonce d'echec, puis la confronter
+    aux journaux.
+    """
+    err_payload = _err_response(
+        t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__
+    )
+    # AC-1 : on ENRICHIT le payload {ok: False, ...} avec la synthese
+    # du rollback sans casser la signature (champ optionnel).
+    if atomic_rollback_summary is not None:
+        err_payload["atomic_rollback"] = atomic_rollback_summary
+    if apply_batch_id is not None:
+        err_payload["apply_batch_id"] = apply_batch_id
+    # T-PROD-7 : le verdict n'etait calcule que sur le retour NOMINAL. Or le
+    # cas le plus grave du produit est ici — trois cents films ont bouge, la
+    # finalisation casse, et l'utilisateur lit « Echec application » sans
+    # apprendre que son disque a change ni que l'annulation est disponible.
+    #
+    # Aucun invariant nouveau n'a ete necessaire : un `_err_response` ne
+    # porte aucun compteur d'action disque non nul, ce qui est exactement la
+    # precondition de `_verifier_deplacements_tus`. L'invariant juste
+    # existait deja ; il n'etait pas appele la.
+    #
+    # `_avec_verdict` avale ses propres erreurs : il ne peut pas transformer
+    # ce chemin d'erreur en une exception d'un autre genre.
+    return _avec_verdict(
+        err_payload,
+        api,
+        store=store,
+        run_paths=run_paths,
+        rows=rows,
+        dry_run=bool(dry_run),
+        log_fn=log_fn,
+    )
+
+
 def _apply_changes_body(
     api: Any,
     run_id: str,
@@ -3673,16 +3724,16 @@ def _apply_changes_body(
                 rs.apply_end(error=str(exc))
             except Exception:
                 _log.debug("apply_end KO a echoue", exc_info=True)
-        err_payload = _err_response(
-            t("errors.cannot_apply_changes"), category="state", level="warning", log_module=__name__
+        return _payload_d_echec_avec_verdict(
+            api,
+            store=store,
+            run_paths=run_paths,
+            rows=rows,
+            dry_run=bool(dry_run),
+            log_fn=log_fn,
+            apply_batch_id=apply_batch_id,
+            atomic_rollback_summary=atomic_rollback_summary,
         )
-        # AC-1 : on ENRICHIT le payload {ok: False, ...} avec la synthese
-        # du rollback sans casser la signature (champ optionnel).
-        if atomic_rollback_summary is not None:
-            err_payload["atomic_rollback"] = atomic_rollback_summary
-        if apply_batch_id is not None:
-            err_payload["apply_batch_id"] = apply_batch_id
-        return err_payload
     # Fix audit 2026-05-25 (v1.5.3) Vague H : plus de `finally:
     # api._release_apply_slot(run_id)` ici — gere par `_apply_slot_guard`
     # dans `apply_changes`.
