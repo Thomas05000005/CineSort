@@ -31,6 +31,7 @@ serait un second defaut a la place du premier.
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 import unittest
@@ -78,10 +79,12 @@ class ApplyJournalWriteAheadTests(unittest.TestCase):
         }
 
     def tearDown(self) -> None:
-        try:
+        # `suppress`, pas un `except ... : pass` nu : un `store.close()` qui echoue
+        # signifie, sous Windows, un fichier SQLite reste VERROUILLE — donc le
+        # `rmtree` qui suit echouera en silence et le test laissera une base
+        # derriere lui a chaque execution. On tolere l'echec, on ne le maquille pas.
+        with contextlib.suppress(Exception):
             self.store.close()
-        except Exception:
-            pass
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _record_op(self) -> RecordOpWithJournal:
@@ -186,10 +189,12 @@ class LiberationSurPreuveTests(unittest.TestCase):
         self.record_op = RecordOpWithJournal(lambda payload: None, store=self.store, batch_id="lot")
 
     def tearDown(self) -> None:
-        try:
+        # `suppress`, pas un `except ... : pass` nu : un `store.close()` qui echoue
+        # signifie, sous Windows, un fichier SQLite reste VERROUILLE — donc le
+        # `rmtree` qui suit echouera en silence et le test laissera une base
+        # derriere lui a chaque execution. On tolere l'echec, on ne le maquille pas.
+        with contextlib.suppress(Exception):
             self.store.close()
-        except Exception:
-            pass
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_echec_avec_source_intacte_libere_l_entree(self) -> None:
