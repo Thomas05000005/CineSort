@@ -239,6 +239,50 @@ class LiberationSurPreuveTests(unittest.TestCase):
             "T-PROD-8 vient de fermer.",
         )
 
+    def test_la_liberation_ne_touche_QUE_sa_propre_entree(self) -> None:
+        """Un echec d'aujourd'hui ne doit pas effacer la trace d'un crash d'hier.
+
+        `list_pending_moves()` rend TOUS les orphelins, sans distinction d'age :
+        une entree laissee par un run precedent qui a reellement plante y figure
+        au meme titre que celle qu'on vient de poser. Liberer sans apparier
+        src/dst detruirait la seule preuve qu'un deplacement est reste en
+        suspens — et la reconciliation du prochain demarrage n'aurait plus rien
+        a reconcilier.
+
+        Ce test est ne d'un mutant SURVIVANT : retirer l'appariement laissait la
+        batterie entierement verte, parce qu'aucun test n'avait jamais plus
+        d'une entree en base.
+        """
+        veille = self.store.apply.insert_pending_move(
+            op_type="MOVE_DIR",
+            src_path=str(self._tmp / "run-precedent-source"),
+            dst_path=str(self._tmp / "run-precedent-cible"),
+            batch_id="lot-de-la-veille",
+        )
+        self.assertIsNotNone(veille, "le pending temoin n'a pas ete insere")
+
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+
+        with self.assertRaises(PermissionError):
+            with journal_pose_autour(
+                self.record_op,
+                src=src,
+                dst=dst,
+                op_type="MOVE_DIR",
+                liberer_si_rien_n_a_bouge=True,
+            ):
+                raise PermissionError("WinError 5")
+
+        restantes = self.store.apply.list_pending_moves()
+        self.assertEqual(
+            [e["src_path"] for e in restantes],
+            [str(self._tmp / "run-precedent-source")],
+            "la liberation a emporte une entree qui ne lui appartenait pas : "
+            "c'est la trace d'un crash anterieur qui vient de disparaitre.",
+        )
+
     def test_sans_l_option_le_comportement_conservateur_est_inchange(self) -> None:
         src = self._tmp / "source"
         src.mkdir()
