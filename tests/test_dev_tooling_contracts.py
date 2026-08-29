@@ -20,6 +20,129 @@ class DevToolingContractsTests(unittest.TestCase):
         cls.dev_readme = (root / "docs" / "README_DEV.md").read_text(encoding="utf-8")
         cls.ci_workflow = (root / ".github" / "workflows" / "windows-ci.yml").read_text(encoding="utf-8")
         cls.sign_script = (root / "scripts" / "sign_windows_release.ps1").read_text(encoding="utf-8")
+        cls.coderabbit_raw = (root / ".coderabbit.yaml").read_text(encoding="utf-8")
+
+    #: Cles acceptees A LA RACINE par le schema CodeRabbit v2, relevees le
+    #: 2026-08-29 sur
+    #: https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+    #: (297 chemins au total). Figees ici plutot que telechargees : un garde qui
+    #: depend du reseau devient un faux rouge des que le reseau tousse.
+    _CODERABBIT_RACINE = frozenset(
+        {
+            "chat",
+            "code_generation",
+            "early_access",
+            "enable_free_tier",
+            "inheritance",
+            "issue_enrichment",
+            "knowledge_base",
+            "language",
+            "reviews",
+            "tone_instructions",
+        }
+    )
+
+    #: Sous-cles de `reviews` employees par ce depot, et leur existence au schema.
+    _CODERABBIT_REVIEWS = frozenset({"profile", "auto_review", "path_filters", "path_instructions"})
+
+    #: Sous-cles de `reviews.auto_review` (schema v2, relevees le 2026-08-29).
+    #: Sans ce niveau, le garde laissait passer `incremental_review` — l'ancien
+    #: nom, invalide — a la place d'`auto_incremental_review` : mutant SURVIVANT,
+    #: constate puis ferme le jour meme.
+    _CODERABBIT_AUTO_REVIEW = frozenset(
+        {
+            "auto_incremental_review",
+            "auto_pause_after_reviewed_commits",
+            "base_branches",
+            "description_keyword",
+            "drafts",
+            "enabled",
+            "ignore_title_keywords",
+            "ignore_usernames",
+            "labels",
+        }
+    )
+
+    #: Cles d'un element de `reviews.path_instructions`.
+    _CODERABBIT_PATH_INSTR = frozenset({"path", "instructions"})
+
+    _CODERABBIT_PROFILS = frozenset({"quiet", "chill", "assertive"})
+
+    def test_coderabbit_config_utilise_des_cles_reconnues(self) -> None:
+        """Une cle inconnue est jetee EN SILENCE, avec tout ce qu'elle porte.
+
+        Le 2026-08-29, ce fichier etait ignore a 90 % : tout vivait sous une cle
+        racine `review:` (SINGULIER) plus deux cles racine `path_filters:` et
+        `path_instructions:`. Aucune des trois n'existe au schema. Partaient donc
+        a la poubelle le profil `assertive`, l'exclusion de `docs/internal/**` et
+        les quatre instructions par type de fichier.
+
+        Le symptome etait affiche sur CHAQUE PR depuis des mois sans etre lu :
+        « Review profile: CHILL », c'est-a-dire le DEFAUT du schema.
+
+        Meme famille que les `|| true` sur un check requis et que les labels
+        d'exemption de `stale.yml` qui n'existaient pas dans le depot : un
+        dispositif qui ne peut structurellement rien faire rend le meme silence
+        qu'un dispositif dont on n'a jamais eu besoin.
+        """
+        import yaml  # noqa: PLC0415 — dependance de test, pas du produit
+
+        cfg = yaml.safe_load(self.coderabbit_raw)
+        self.assertIsInstance(cfg, dict, "`.coderabbit.yaml` doit etre un mapping")
+
+        inconnues = sorted(set(cfg) - self._CODERABBIT_RACINE)
+        self.assertEqual(
+            inconnues,
+            [],
+            f"cle(s) racine inconnue(s) du schema CodeRabbit : {inconnues}. "
+            "Elles sont IGNOREES en silence, avec tout ce qu'elles portent. "
+            "Cf. https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json",
+        )
+
+        reviews = cfg.get("reviews")
+        self.assertIsInstance(reviews, dict, "la configuration de review vit sous `reviews:` (PLURIEL)")
+
+        sous_inconnues = sorted(set(reviews) - self._CODERABBIT_REVIEWS)
+        self.assertEqual(
+            sous_inconnues,
+            [],
+            f"sous-cle(s) de `reviews` inconnue(s) : {sous_inconnues}. "
+            "Trois pieges deja payes ici : `incremental_review` (le vrai nom est "
+            "`auto_review.auto_incremental_review`), `auto_resolve_review_threads` "
+            "et `review_comments` n'existent pas du tout.",
+        )
+
+        self.assertIn(
+            reviews.get("profile"),
+            self._CODERABBIT_PROFILS,
+            f"profil inconnu : {reviews.get('profile')!r} (attendu {sorted(self._CODERABBIT_PROFILS)})",
+        )
+
+        auto = reviews.get("auto_review") or {}
+        auto_inconnues = sorted(set(auto) - self._CODERABBIT_AUTO_REVIEW)
+        self.assertEqual(
+            auto_inconnues,
+            [],
+            f"sous-cle(s) de `reviews.auto_review` inconnue(s) : {auto_inconnues}. "
+            "Piege connu : le nom est `auto_incremental_review`, pas "
+            "`incremental_review`.",
+        )
+
+        for i, entree in enumerate(reviews.get("path_instructions") or []):
+            mauvaises = sorted(set(entree) - self._CODERABBIT_PATH_INSTR)
+            self.assertEqual(
+                mauvaises,
+                [],
+                f"path_instructions[{i}] porte des cles inconnues : {mauvaises}",
+            )
+
+        # La ligne `$schema` fait valider le fichier par l'editeur, AVANT la CI.
+        self.assertIn(
+            "yaml-language-server: $schema=",
+            self.coderabbit_raw.split("\n", 1)[0],
+            "la premiere ligne doit porter la directive `$schema` pour que "
+            "l'editeur signale une cle inconnue au moment de l'ecrire",
+        )
 
     def test_requirements_dev_pins_quality_toolchain(self) -> None:
         self.assertIn("-r requirements.txt", self.requirements_dev)
