@@ -258,9 +258,15 @@ public (le dépôt a un fork, et les caches GitHub existent).
   sur le journal vide — un batch existant et vide peut avoir une cause légitime, un batch
   jamais créé n'en a aucune. 4 mutants, 4 morts, dont le retrait du câblage.
   Mesuré avec témoin : un apply sain (12 annoncés / 12 journalisés) reste vert.
-- [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
-  chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
-  produit aucun.
+- [x] **T-PROD-7** — FAIT le 2026-08-29. Constat exact : `_avec_verdict` n'avait qu'UN site
+  d'appel, le retour nominal. C'est pourtant le cas le plus grave du produit — 300 films ont
+  bougé, la finalisation casse, et l'utilisateur lit « Échec application » sans apprendre que
+  son disque a changé ni que l'annulation est disponible.
+  **Aucun invariant nouveau n'a été nécessaire.** Un `_err_response` ne porte aucun compteur
+  d'action disque non nul — précisément la précondition de `_verifier_deplacements_tus`, écrit
+  pour « le journal porte des déplacements, le payload n'en annonce aucun ». L'invariant juste
+  existait déjà ; il n'était pas appelé là. 2 mutants, 2 morts, plus un témoin (un apply qui
+  casse AVANT tout déplacement ne doit porter aucun verdict).
 - [ ] **T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
   et la migration de la racine de collection ne passent pas par `move_journal.atomic_move` : elles
   renomment puis appellent `record_apply_op`. Le **journal write-ahead n'est pas posé**, et c'est
@@ -567,7 +573,17 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
      sans perte » dans le depot. Non touche ici : autre sous-systeme, et le malus a ses propres
      implications a mesurer d'abord.
 
-- [ ] **T-DOM-1 · 27 pistes non vérifiées** issues d'un audit de `cinesort/domain/` et `web/`
+- [~] **T-DOM-1 · 27 pistes** — UNE traitée le 2026-08-29 (`scene_parser`), et un constat
+  préalable : **le détail des 27 n'existe nulle part sur disque.** Seul le résumé ci-dessous
+  les évoque, et il n'en NOMME que six. Les autres ne sont pas vérifiables faute de source.
+  ✅ **`scene_parser` — CONFIRMÉE et bien pire qu'annoncé.** Sept mots de `_NOISE_RE` sont de
+  vrais titres : `Cam (2018)` et `Opus (2025)` rendaient une chaîne **VIDE**, `Internal Affairs`
+  rendait `Affairs`, `Complete Unknown` rendait `Unknown`. Cause : `_NOISE_RE` (étape 3)
+  s'applique PARTOUT, y compris avant l'année, et s'exécute quatre étapes AVANT le traitement
+  position-aware (étape 7). `cam`, `proper` et `repack` figuraient dans les DEUX listes —
+  la première les consommait, la seconde ne les voyait jamais. 6 mutants, 6 morts, dont un
+  survivant qui a révélé que ma propre correction recréait la redondance.
+- [ ] ~~**T-DOM-1 · 27 pistes non vérifiées**~~ issues d'un audit de `cinesort/domain/` et `web/`
   (5 lecteurs + 5 réfutateurs). **Ce sont des PISTES, pas des constats** : une seule a été
   remesurée à la main et livrée (T-PROD-10). Les autres portent sur le score qualité (plafond
   SD inatteignable, rétro-compat legacy morte, `enable_4k_light` qui allège au lieu de pénaliser,
