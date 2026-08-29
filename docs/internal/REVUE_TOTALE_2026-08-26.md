@@ -251,6 +251,19 @@ public (le dépôt a un fork, et les caches GitHub existent).
 - [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
   chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
   produit aucun.
+- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`** — CONSTAT NEUF
+  du 2026-08-29, issu d'une revue automatique sur la PR T-PROD-8 et VERIFIE.
+  `journaled_move` supprime l'entree pending des que le bloc de deplacement se termine, donc
+  AVANT le `record_apply_op` de l'appelant. Si le processus meurt dans cet intervalle, les
+  octets ont bouge et ni l'entree pending ni l'operation d'apply n'existent :
+  `reconcile_pending_moves()` n'a rien a reconcilier.
+  **Ce n'est PAS un defaut de T-PROD-8** : c'est le contrat de `journaled_move` (« DELETE
+  pending move si le with se termine sans exception »), donc TOUS les appelants d'`atomic_move`
+  le portent depuis l'origine. T-PROD-8 RETRECIT la fenetre — avant, le deplacement entier
+  n'etait pas trace ; apres, seul l'intervalle final l'est.
+  **Remede** : que la suppression du pending et l'insertion de l'operation d'apply partagent une
+  meme transaction. Changement de frontiere transactionnelle touchant tous les call sites du
+  journal — a instruire, pas a bricoler en passant.
 - [x] **T-PROD-8 · `apply_core.py:2817` et `:775`** — FAIT le 2026-08-29 (PR à ouvrir).
   Constat vérifié dans le code : les deux sites renomment puis appellent `record_apply_op`,
   et la docstring d'`atomic_move` décrit mot pour mot ce que cela coûte. Le remède n'est PAS
