@@ -660,14 +660,61 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         NON trusted : navigateur cross-site (amplification CSRF, cf
         `_is_cross_site_get`) ET client LAN non-navigateur (curl distant en bind
         0.0.0.0, sans Origin ni Sec-Fetch -> ne doit pas bruler le quota TMDb).
-        Les appelants non fiables n'obtiennent QUE la lecture du cache.
+
+        2026-08-29 : `same-site` N'EST PLUS FIABLE, et l'IP ne rattrape plus un
+        navigateur.
+
+        Le « site » au sens Fetch Metadata est le domaine enregistrable : LE PORT
+        N'EN FAIT PAS PARTIE. Sur `127.0.0.1`, tout autre service web local est
+        donc `same-site`. Mesure au navigateur reel (deux serveurs locaux,
+        18801/18802) : une image demandee a un autre PORT porte
+        `Sec-Fetch-Site: same-site`, jamais `cross-site`. Contre CineSort en bac
+        a sable, une page servie sur 18801 obtenait la jaquette en cache de
+        l'instance du 18742 — et, `same-site` etant classe fiable, aussi
+        `force=1` et le fetch TMDb.
+
+        Le reste de l'API ne connait pas ce trou : il se garde par `Origin` via
+        `_allowed_origin`, qui CONTRAINT le port. Cette route ne le peut pas —
+        un `<img>` n'envoie pas d'`Origin` — d'ou le recours a `Sec-Fetch-Site`.
+        La valeur qui porte la meme frontiere que `_allowed_origin` est
+        `same-origin`, pas `same-site`.
+
+        Et le repli par IP etait la seconde moitie du defaut : exiger
+        `same-origin` sans lui aurait laisse un navigateur `same-site` sur la
+        boucle locale retomber sur `_LOCAL_CLIENT_IPS` et redevenir fiable. Des
+        lors qu'un `Sec-Fetch-Site` est present, l'appelant EST un navigateur et
+        se prononce lui-meme ; le repli ne sert plus qu'aux clients
+        non-navigateurs (pywebview natif, curl local), qui n'envoient rien.
+
+        `Sec-Fetch-Site` est un en-tete interdit : une page ne peut ni le forger
+        ni le supprimer. Garde : `tests/test_poster_frontiere_origine.py`.
         """
         if self._is_cross_site_get():
             return False
         sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
-        if sec_fetch_site in {"same-origin", "same-site"}:
-            return True
+        if sec_fetch_site:
+            return sec_fetch_site == "same-origin"
         return self._client_ip() in _LOCAL_CLIENT_IPS
+
+    def _poster_navigateur_etranger(self) -> bool:
+        """True si l'appelant est un NAVIGATEUR dont l'origine n'est pas la notre.
+
+        Le seul consommateur legitime de `/api/poster` est le dashboard, servi
+        par CE serveur : il est donc `same-origin`. Tout autre navigateur —
+        `same-site` (autre service local), `cross-site` (site tiers) ou `none`
+        (URL tapee) — n'a aucune raison d'y acceder.
+
+        Sert a rendre une reponse UNIFORME a ces appelants. Sans cela, 200 sur
+        un id en cache et 404 sur un id absent forment un ORACLE : une page
+        tierce teste id par id ce que le cache contient, donc enumere la
+        bibliotheque, sans aucun credential.
+
+        Un client sans `Sec-Fetch-Site` n'est pas un navigateur moderne : il
+        garde le regime actuel, pour ne casser ni pywebview, ni curl, ni un
+        navigateur trop ancien pour poser l'en-tete.
+        """
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        return bool(sec_fetch_site) and sec_fetch_site != "same-origin"
 
     def _send_cors_headers(self) -> None:
         # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
@@ -1243,6 +1290,14 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
             # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
             # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
+            # Un navigateur qui n'est pas same-origin n'est jamais un
+            # consommateur legitime : on lui rend une reponse UNIFORME, pour que
+            # le statut ne trahisse pas le contenu du cache. Corps identique a
+            # celui d'un cache miss (`poster_proxy._respond_error_json`), pour
+            # que les deux cas soient indiscernables jusqu'a l'octet.
+            if self._poster_navigateur_etranger():
+                self._respond_json(404, {"ok": False, "category": "resource", "message": "Poster not available"})
+                return
             poster_trusted = self._poster_trusted_caller()
             if "force" in flat_query and not poster_trusted:
                 flat_query.pop("force", None)
