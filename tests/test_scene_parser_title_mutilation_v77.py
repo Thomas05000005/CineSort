@@ -153,6 +153,27 @@ class MotsAmbigusDeLaListeINCONDITIONNELLETests(unittest.TestCase):
             with self.subTest(fichier=fichier):
                 self.assertEqual(parse_scene_title(fichier), "Movie 2019")
 
+    def test_un_mot_ambigu_AU_MILIEU_du_titre_est_intouchable(self) -> None:
+        """L'ancrage `$` de `_TRAILING_AMBIGU_RE`, ne dependant d'aucun autre test.
+
+        Sans ce garde, « A Complete Unknown » (2024, le biopic Dylan) devient
+        « A Unknown » : le jeton est precede d'un caractere non blanc, donc la
+        garde « pas le seul jeton » le laisse passer, et seule la fin de chaine
+        l'arrete.
+
+        Ce test est ne d'un mutant SURVIVANT : retirer le `$` laissait toute la
+        batterie verte, parce qu'aucun cas n'avait de jeton ambigu AILLEURS
+        qu'en fin de nom.
+        """
+        cas = {
+            "A.Complete.Unknown.2024.1080p.WEB-DL.mkv": "A Complete Unknown 2024",
+            "The.Internal.Affairs.1990.1080p.mkv": "The Internal Affairs 1990",
+            "Une.Limited.Histoire.2011.720p.mkv": "Une Limited Histoire 2011",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
     def test_les_tags_NON_ambigus_restent_inconditionnels(self) -> None:
         """Temoin : le gros de `_NOISE_RE` ne doit pas bouger.
 
