@@ -158,11 +158,18 @@ _AFTER_YEAR_NOISE = (
     r"director'?s?|extended|theatrical|unrated|remastered|restored|"
     r"criterion|edition|version|cut|special|imax|final|ultimate|"
     r"hdlight|4klight|hdr|hdr10\+?|sdr|uhd|"
-    r"web|bd|br|tv|cam|tc|repack|proper|"
-    # T-DOM-1 : ces cinq-la vivaient dans `_NOISE_RE`, qui s'applique PARTOUT.
-    # « Internal Affairs » rendait « Affairs », « Complete Unknown » rendait
-    # « Unknown », et « Cam » ou « Opus » rendaient une chaine VIDE.
-    r"internal|limited|complete|hybrid|opus)"
+    # UN JETON, UNE LISTE. `cam`, `proper` et `repack` vivaient ici ET dans
+    # `_NOISE_RE` — qui s'execute quatre etapes plus tot et les consommait, si
+    # bien que leur presence ici ne faisait rien. Les jetons AMBIGUS sont
+    # desormais traites au seul endroit ou ils peuvent l'etre correctement :
+    # `_TRAILING_AMBIGU_RE`, qui sait distinguer « le jeton SUIT quelque chose »
+    # de « le jeton EST tout le nom ».
+    #
+    # Une redondance ici serait indetectable : les deux motifs sont ancres sur
+    # `$` et le trailing est strictement plus permissif (il n'exige pas
+    # d'annee). C'est un mutant SURVIVANT qui l'a etabli — le mutant ne disait
+    # pas « ton test est faible », il disait « ce code ne sert a rien ».
+    r"web|bd|br|tv|tc)"
 )
 
 # Pattern : (annee)(tokens noise apres)*$ → on remplace par juste l'annee.
