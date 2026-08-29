@@ -246,8 +246,18 @@ public (le dépôt a un fork, et les caches GitHub existent).
   n'en a inscrit que 3 » — absurde — et **une notification d'erreur publiée**. Chaque `move` crée
   le dossier parent de sa destination (`apply_core.py:1005`) : c'est l'undo **ORDINAIRE**.
   Le test `tests/test_verdicts_undo.py:274` mocke `_undo_mkdir_ops` à `0` : il ne pouvait pas le voir.
-- [ ] **T-PROD-6 · `apply_support.py:3262-3266`** — un apply réel dont `insert_apply_batch` a
-  échoué (`apply_batch_id = None`, mode dégradé documenté) échappe au verdict.
+- [x] **T-PROD-6** — FAIT le 2026-08-29 (les lignes du constat ont dérivé ; le mécanisme, lui,
+  a été mesuré). ⚠ **Le constat était vrai, mais PAS par le mécanisme annoncé.** Le verdict
+  n'« échappe » pas : il EST calculé, et il rend `coherent=True`. Ce n'est pas une évasion,
+  c'est un **faux vert** — et la distinction change le remède.
+  Cause réelle : `_verifier_deplacements_tus` ne couvre qu'UN sens (le journal porte des
+  déplacements, le payload n'en annonce aucun). Le sens inverse — le payload annonce
+  12 rangements, le journal est vide — n'était couvert par rien, et il ment plus fort :
+  l'utilisateur voit « 12 films rangés » et un bouton *Annuler* qui ne fera rien.
+  Remède : `_verifier_journal_absent`, déclenché sur le journal **JAMAIS OUVERT** et non
+  sur le journal vide — un batch existant et vide peut avoir une cause légitime, un batch
+  jamais créé n'en a aucune. 4 mutants, 4 morts, dont le retrait du câblage.
+  Mesuré avec témoin : un apply sain (12 annoncés / 12 journalisés) reste vert.
 - [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
   chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
   produit aucun.

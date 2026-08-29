@@ -294,6 +294,46 @@ def _verifier_deplacements_tus(annonce: Mapping[str, int], comptes: Mapping[str,
     )
 
 
+def _verifier_journal_absent(annonce: Mapping[str, int], journal_ouvert: bool) -> Optional[Incoherence]:
+    """Le sens qui manquait a `_verifier_deplacements_tus`, et il ment plus fort.
+
+    Celui du dessus attrape « le journal porte des deplacements, le payload n'en
+    annonce aucun » : l'utilisateur n'a alors aucune raison d'annuler. Celui-ci
+    attrape l'inverse — le payload annonce douze rangements et AUCUN journal n'a
+    ete ouvert. L'utilisateur voit « 12 films ranges » et un bouton *Annuler*
+    qui ne fera rien.
+
+    Cas reel, documente dans `apply_support.py` : quand `insert_apply_batch`
+    echoue, `apply_batch_id` reste `None`, `record_apply_op` sort immediatement,
+    et l'apply s'execute quand meme. Le mode degrade etait ecrit ; ce qui ne
+    l'etait pas, c'est qu'il rendait un verdict VERT.
+
+    Le critere est le journal JAMAIS OUVERT, pas le journal vide. La difference
+    porte tout : un batch qui existe et ne contient rien peut avoir une cause
+    legitime — un compteur qui n'ecrit pas d'operation — et le signaler serait un
+    faux positif, l'espece qui fait desapprendre a lire les verdicts. Un batch
+    jamais cree, lui, ne laisse aucune place au doute.
+    """
+    if journal_ouvert:
+        return None
+    total = sum(annonce.values())
+    if total <= 0:
+        return None
+    return Incoherence(
+        code="journal_absent_malgre_des_actions_annoncees",
+        message=(
+            f"le payload annonce {total} action(s) disque mais AUCUN journal "
+            "d'apply n'a ete ouvert : ces deplacements ne sont pas annulables"
+        ),
+        annonce={c: v for c, v in annonce.items() if v},
+        journal={"batch": None},
+        reserve=(
+            "ne dit PAS ce qui a bouge — sans journal, le detail est perdu. "
+            "Dit seulement que l'annonce ne repose sur rien d'enregistre."
+        ),
+    )
+
+
 def _cle_de_chemin(chemin: Any) -> str:
     """Normalise un chemin pour la comparaison, SANS toucher au disque.
 
@@ -475,6 +515,7 @@ def comparer_annonce_et_journal(
     *,
     evenements_audit: Sequence[Mapping[str, Any]] = (),
     dry_run: bool = False,
+    journal_ouvert: bool = True,
 ) -> Verdict:
     """Compare le payload rendu a l'utilisateur aux deux journaux du batch.
 
@@ -482,6 +523,10 @@ def comparer_annonce_et_journal(
         annonce: le payload d'apply (`ApplyResult` aplati, ou le dict rendu).
         operations: les lignes `apply_operations` du batch (cle `op_type`).
         evenements_audit: les evenements `apply_audit.jsonl` (cle `event`).
+        journal_ouvert: False quand `insert_apply_batch` a echoue et que le
+            batch n'a JAMAIS ete cree. Par defaut True : sans ce defaut, tous
+            les appelants existants rougiraient des la pose, et un garde qui
+            mord tout le monde se fait desarmer dans l'heure.
         dry_run: en apercu, rien n'est journalise. Les comparaisons de compte
             sont alors sans objet, et sans ce garde un dry-run leverait une
             incoherence a chaque fois — le genre de faux positif qui fait
@@ -511,7 +556,10 @@ def comparer_annonce_et_journal(
     # Tous les compteurs, pas seulement ceux qu'on croit pertinents : n'en
     # oublier qu'un fait rougir un apply sain (cf. COMPTEURS_D_ACTION_DISQUE).
     annonce_des_deplacements = {c: _entier(c) for c in COMPTEURS_D_ACTION_DISQUE}
-    inc = _verifier_deplacements_tus(annonce_des_deplacements, comptes)
-    if inc is not None:
-        trouvees.append(inc)
+    for inc in (
+        _verifier_deplacements_tus(annonce_des_deplacements, comptes),
+        _verifier_journal_absent(annonce_des_deplacements, journal_ouvert),
+    ):
+        if inc is not None:
+            trouvees.append(inc)
     return Verdict(incoherences=trouvees, comptes_journal=comptes)
