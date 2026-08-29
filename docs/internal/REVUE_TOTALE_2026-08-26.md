@@ -251,7 +251,10 @@ public (le dépôt a un fork, et les caches GitHub existent).
 - [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
   chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
   produit aucun.
-- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`** — CONSTAT NEUF
+- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`**
+  → suivi dans l'issue **#1166** (« Close crash-consistency window between pending move
+  cleanup and record_apply_op »), ouverte par la revue automatique depuis cette entree.
+  CONSTAT NEUF
   du 2026-08-29, issu d'une revue automatique sur la PR T-PROD-8 et VERIFIE.
   `journaled_move` supprime l'entree pending des que le bloc de deplacement se termine, donc
   AVANT le `record_apply_op` de l'appelant. Si le processus meurt dans cet intervalle, les
