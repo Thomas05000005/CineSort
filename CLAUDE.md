@@ -153,23 +153,42 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
-3. **Le `WinError 5` est MITIGE et son issue est CLOSE (#965, PR #969 fusionnee
-   le 2026-08-05)** — mais la cause profonde reste inconnue. Distinguer les deux,
-   ce paragraphe a longtemps presente le defaut comme ouvert et a corriger :
+3. **Le `WinError 5` est CARACTERISE et MITIGE (#965, #973).** Ce paragraphe l'a
+   longtemps dit « INEXPLIQUE » et commandait de l'instrumenter : c'est perime
+   depuis le 2026-08-06, et le travail a bien ete fait. Il se reproduit a
+   **33 %** dans un `%TEMP%` neuf et vide, sur `apply` (renommage d'un DOSSIER
+   de film), y compris sur le garde anti-destruction de la racine de
+   bibliotheque : ni un defaut d'`undo`, ni un effet de la charge, ni un effet
+   de la saturation.
 
-   - **corrige** : `renommer_avec_reprise` (`app/move_journal.py`) rend **0 echec
-     sur 25** la ou `main` nu en donnait 8/20. Bras alternes : 10/20 contre 0/20,
-     Fisher `p ~ 0,0003`. Il ne se reproduit plus a 33 % : il ne se reproduit plus.
-   - **toujours inconnu** : **QUEL** handle. La fenetre se compte en microsecondes
-     — la seule presence d'une enveloppe Python autour de `Path.rename` suffisait
-     deja a faire disparaitre l'echec. La reprise ferme la consequence, pas la
-     question, et elle ne masque rien : un verrou REEL epuise les paliers et
-     l'exception d'origine remonte.
+   **Ce qui a tranche** — mesure sur `main`, `%TEMP%` neuf, machine au repos :
 
-   Deja ECARTE PAR LA MESURE, ne pas y revenir : la saturation de `%TEMP%`
-   (10/30 a vide contre 6/30 sature, `p = 0,38`) ; un cycle de references
-   (`gc.collect()` force : 3/25 contre 4/25) ; `sha1_quick` (ferme son handle via
-   `with`) et les deux `os.scandir` (fermes en `finally`).
+   ```
+   sans instrumentation                          : 8 echecs / 20
+   avec une simple enveloppe Python sur `rename` : 0 echec  / 20
+   Fisher exact bilateral                        : p ~ 0,004
+   ```
+
+   Le seul fait d'ajouter un appel de fonction Python AVANT le renommage fait
+   disparaitre l'echec : la fenetre de course se compte donc en **microsecondes**
+   — un handle est en cours de liberation sur un ENFANT du dossier (sous
+   Windows, un fichier ouvert sans `FILE_SHARE_DELETE` empeche le renommage de
+   son parent), et l'appel arrive juste avant que la fermeture ne soit
+   effective. Remede en place : `move_journal.renommer_avec_reprise`, six
+   paliers plafonnes a ~0,3 s, generalise par #973 aux **9** renommages de
+   dossier (doublons ecartes, marques pour suppression, collection, quarantaine,
+   nettoyage, rollback, undo). Il ne MASQUE pas un vrai verrou : un dossier tenu
+   par un autre processus epuise les paliers et l'exception d'origine est
+   relancee telle quelle.
+
+   Trois causes ECARTEES par la mesure, ne pas y revenir : la saturation de
+   `%TEMP%` (p = 0,38, cf. point 1) ; un cycle de references retenant un objet
+   fichier (`gc.collect()` avant chaque renommage ne previent rien — 3/25 contre
+   4/25) ; et `sha1_quick`, qui ferme son handle (`with`), les deux `os.scandir`
+   sans context manager etant fermes en `finally`.
+
+   **Ce qui reste ouvert** : QUEL handle, precisement. Le mecanisme est etabli,
+   son porteur ne l'est pas — d'ou la piste des processus de session, plus bas.
 
    **Si la signature revient MALGRE la reprise**, c'est un verrou *persistant* —
    une bete differente — et il faut rouvrir #965 avec cette information.
@@ -379,8 +398,9 @@ la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
 `gh pr update-branch` : elle agissait **encore seule sur le depot**. Tout demon
 lance en session doit avoir une condition d'arret, et une fin de campagne doit
 inclure son extinction. Un `Get-Process python` en debut de session longue les
-revele — ils tiennent aussi des handles. (Cette piste visait le `WinError 5` du
-point 3, desormais mitige : elle ne vaut plus que si la signature revient.)
+revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
+non encore mesuree, pour le PORTEUR du handle du point 3 (le mecanisme, lui, est
+etabli et mitige).
 
 **UN SECRET EN PROSE ECHAPPE A GITLEAKS, ET LE SCRUBBER EST BORGNE SUR
 `ntoken=`.** Le 2026-08-26 : le jeton Bearer REST **actif** de l'utilisateur
@@ -402,8 +422,16 @@ etait en clair dans `docs/internal/BILAN_ITER4_2026-06-08.md:272` et
 - **DEUX des SEPT checks REQUIS ne pouvaient pas echouer** : `bandit.yml` et
   `mypy.yml` finissaient par `|| true`. **Lire la COMMANDE d'un check requis,
   jamais son nom dans la liste.** Corrige le 2026-08-29 par un cliquet sur le
-  COMPTE (33 findings bandit, 70 erreurs mypy) : la montee echoue, la baisse
-  aussi — un gain non verrouille se reperd.
+  COMPTE : la montee echoue, la baisse aussi — un gain non verrouille se reperd.
+
+  **Et le plafond se mesure DANS LES CONDITIONS DU JOB.** Celui de mypy a
+  d'abord ete pose a 70, mesure en local ; le cliquet a rougi des sa premiere
+  execution reelle a 75. Trois instruments, trois reponses : `mypy` nu sur
+  Windows rend 70, avec les deps de production 59, et avec `--platform linux`
+  75 — parce que ce produit est truffe de branches `sys.platform == "win32"`
+  que mypy elague selon la CIBLE. La commande exacte est ecrite dans
+  `mypy.yml`. bandit, lui, est AST-pur : ni deps ni plateforme, son 33 etait
+  bon du premier coup.
 
   Ce paragraphe a longtemps dit **TROIS**, en comptant `pip-audit.yml:87`. FAUX,
   et la facon dont l'erreur a survecu compte plus que l'erreur : verifier que la

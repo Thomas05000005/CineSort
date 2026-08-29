@@ -106,6 +106,14 @@ def clamp_non_negative_int(value: Any, default: int = 0) -> int:
     negatif (-1), ou None. Ce helper normalise vers `int(value or default)`
     en garantissant >= 0.
 
+    `OverflowError` est dans le tuple pour la meme raison que `clamp_timeout`
+    filtre `inf` dix lignes plus haut : il derive d'`ArithmeticError` et PAS de
+    `ValueError` (regle 4 du CLAUDE.md, transposee aux conversions), donc
+    `int(float("inf"))` traversait ce helper alors qu'il promet « un int >= 0 ».
+    La valeur est atteignable depuis un corps REST : `json.loads` accepte
+    `Infinity` par defaut. Sans cette entree, les deux helpers du MEME fichier
+    traitaient l'infini de deux facons opposees.
+
     Args:
         value: la valeur brute (None, str, int, float, etc.).
         default: valeur de repli (defaut 0).
@@ -115,7 +123,7 @@ def clamp_non_negative_int(value: Any, default: int = 0) -> int:
     """
     try:
         parsed = int(float(value)) if value is not None else int(default)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         parsed = int(default)
     return max(0, parsed)
 

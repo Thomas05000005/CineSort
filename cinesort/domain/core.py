@@ -956,9 +956,26 @@ _NFO_DECLARE_DES_ENTITES = re.compile(r"<!ENTITY\b", re.IGNORECASE)
 
 def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
     """Parse a Kodi-style .nfo XML file and return structured metadata, or None on failure."""
-    # Lire avec encodage UTF-8, fallback Latin-1 (NFO Kodi souvent mal encodes)
+    # ORDRE CRITIQUE : cp1252 AVANT latin-1, jamais l'inverse.
+    #
+    # `latin-1` mappe les 256 valeurs d'octet, donc il ne leve JAMAIS
+    # `UnicodeDecodeError` : place avant `cp1252`, il le rendait INATTEIGNABLE.
+    # Le troisieme element de ce tuple etait du code mort, et le repli reel
+    # etait latin-1 pour tous les NFO non-UTF-8.
+    #
+    # Ce n'est pas cosmetique : les deux jeux ne different que sur 0x80-0x9F,
+    # et c'est exactement la que Windows range la ponctuation typographique
+    # (0x92 = ’, 0x93/0x94 = “ ”, 0x96 = –, 0x80 = €). Un NFO ecrit sous
+    # Windows — le cas courant — rendait donc « L\x92Auberge espagnole », un
+    # caractere de controle C1 la ou il fallait une apostrophe. Ce titre part
+    # ensuite en `Candidate(score=0.90)` puis dans le nom de DOSSIER :
+    # `path_utils.windows_safe` ne retire que `[\x00-\x1f\x7f]`, pas la plage
+    # C1, donc le controle survit jusque sur le disque. Regle 2 du CLAUDE.md.
+    #
+    # `latin-1` reste en dernier et reste ATTEIGNABLE : cp1252 laisse cinq
+    # octets indefinis (0x81, 0x8D, 0x8F, 0x90, 0x9D) sur lesquels il leve.
     content = None
-    for enc in ("utf-8", "latin-1", "cp1252"):
+    for enc in ("utf-8", "cp1252", "latin-1"):
         try:
             content = nfo_path.read_text(encoding=enc)
             break
