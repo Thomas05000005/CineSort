@@ -569,7 +569,14 @@ class CineSortApi:
                     message=str(exc),
                     context=context_payload,
                 )
-            except (KeyError, OSError, TypeError, ValueError) as insert_exc:
+            # `sqlite3.Error` n'herite PAS d'`OSError`. Ici le cout est maximal :
+            # ce bloc est DANS un gestionnaire d'erreur (18 appelants, tous dans un
+            # `except`). Une base verrouillee faisait echapper l'OperationalError de
+            # `insert_error`, qui REMPLACAIT alors l'exception d'origine — celle
+            # qu'on essayait justement de tracer. Mesure du 2026-08-29 : sous un
+            # `BEGIN IMMEDIATE` concurrent, `insert_error` leve bien
+            # `OperationalError: database is locked`.
+            except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as insert_exc:
                 logger.warning(
                     "API_EXCEPTION_PERSIST_FAILED endpoint=%s run_id=%s err=%s",
                     endpoint,

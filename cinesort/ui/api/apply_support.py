@@ -3034,7 +3034,12 @@ def _restore_jellyfin_watched(
         if result.errors > 0:
             log_fn("WARN", f"Jellyfin sync : {result.errors} erreur(s) lors de la restauration.")
     # BUG-1 (v7.8.0) : IntegrationError remplace except Exception annote intentionnel.
-    except (IntegrationError, OSError, requests.RequestException) as exc:
+    # `sqlite3.Error` n'herite PAS d'`OSError` (regle inviolable n4). Sans lui,
+    # une base verrouillee pendant la lecture du journal d'apply (L3018,
+    # `store.apply.list_apply_operations`) faisait ECHAPPER l'OperationalError :
+    # un apply INTEGRALEMENT reussi sur disque etait alors annonce en echec.
+    # Chemin best-effort, non destructif — on journalise et on continue.
+    except (IntegrationError, OSError, sqlite3.Error, requests.RequestException) as exc:
         _log.warning("Jellyfin restore watched échoué: %s", exc)
         log_fn("WARN", f"Jellyfin sync : échec restauration — {exc}")
 
