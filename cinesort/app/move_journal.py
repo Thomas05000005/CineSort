@@ -321,19 +321,60 @@ def atomic_move(
     deplacement et le `record_apply_op` du call site.
     """
     move_fn = shutil.move if allow_copy_fallback else _rename_or_cross_device_copy
-    store = getattr(record_op, "journal_store", None)
-    batch_id = getattr(record_op, "journal_batch_id", None)
-    if store is None:
+    with journal_pose_autour(
+        record_op,
+        src=src,
+        dst=dst,
+        op_type=op_type,
+        src_sha1=src_sha1,
+        src_size=src_size,
+        row_id=row_id,
+    ):
         move_fn(str(src), str(dst))
+
+
+@contextmanager
+def journal_pose_autour(
+    record_op: Any,
+    *,
+    src: Union[Path, str],
+    dst: Union[Path, str],
+    op_type: str,
+    src_sha1: Optional[str] = None,
+    src_size: Optional[int] = None,
+    row_id: Optional[str] = None,
+) -> Iterator[Optional[int]]:
+    """Pose le journal write-ahead autour d'un deplacement fait par L'APPELANT.
+
+    `atomic_move` convient quand le deplacement est un `shutil.move` ordinaire.
+    Certains call sites n'en sont pas : `apply_single` passe par
+    `renommer_avec_reprise` (reprise sur la course Windows de quelques
+    microsecondes, #965) ou par `_case_only_rename_with_rollback` (renommage a
+    casse seule, en deux temps, avec retour arriere). Les faire passer par
+    `atomic_move` ETEINDRAIT ces comportements.
+
+    Ce gestionnaire separe donc les deux roles : il fournit le journal, et
+    laisse l'appelant deplacer comme il sait le faire.
+
+    Sans store (record_op nu, cas des tests), il devient un no-op transparent —
+    meme tolerance que `atomic_move`, dont il est desormais l'implementation.
+
+    Usage :
+        with journal_pose_autour(record_op, src=a, dst=b, op_type="MOVE_DIR"):
+            renommer_avec_reprise(a, b)
+    """
+    store = getattr(record_op, "journal_store", None)
+    if store is None:
+        yield None
         return
     with journaled_move(
         store,
         src=src,
         dst=dst,
         op_type=op_type,
-        batch_id=batch_id,
+        batch_id=getattr(record_op, "journal_batch_id", None),
         src_sha1=src_sha1,
         src_size=src_size,
         row_id=row_id,
-    ):
-        move_fn(str(src), str(dst))
+    ) as pending_id:
+        yield pending_id
