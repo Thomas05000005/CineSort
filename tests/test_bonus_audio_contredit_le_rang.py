@@ -60,8 +60,7 @@ class UnLosslessNeVautJamaisMoinsQuUnLossyTests(unittest.TestCase):
         self.assertEqual(
             fautes,
             [],
-            "la table des bonus contredit la hierarchie des codecs : "
-            + " ; ".join(fautes),
+            "la table des bonus contredit la hierarchie des codecs : " + " ; ".join(fautes),
         )
 
     def test_les_formes_brutes_de_pcm_aboutissent_au_meme_bonus(self) -> None:
