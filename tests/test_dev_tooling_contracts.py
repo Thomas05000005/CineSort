@@ -158,6 +158,31 @@ class DevToolingContractsTests(unittest.TestCase):
         self.assertIn("coverage>=", self.requirements_dev)
         self.assertIn("pre-commit>=", self.requirements_dev)
 
+    def test_pyyaml_est_DECLARE_et_pas_seulement_transitif(self) -> None:
+        """Deux tests de contrat parsent du YAML ; aucun ne le declarait.
+
+        `PyYAML` n'arrivait ici que par `pre_commit`, qui en depend. Le paquet
+        etait donc present par ACCIDENT : le jour ou pre-commit change de
+        resolveur ou disparait des dependances de dev, deux gardes s'eteignent.
+
+        Et ils s'eteignent EN SILENCE. `test_github_community_templates` porte
+        un `skipTest("PyYAML non installe (CI a yaml)")` — le commentaire dit
+        « CI a yaml », c'est-a-dire une SUPPOSITION la ou il faut une
+        declaration. Un test qui se met en skip rend le meme vert qu'un test qui
+        passe, dans une sortie qu'on lit en diagonale.
+
+        Signale par une revue automatique sur la PR qui a ajoute le second de
+        ces deux tests, puis verifie a la main : `pip show pyyaml` le donne
+        installe, et le seul paquet declare qui l'exige est `pre_commit`.
+        """
+        self.assertRegex(
+            self.requirements_dev,
+            r"(?im)^\s*pyyaml\s*[>=<]",
+            "PyYAML doit etre DECLARE dans requirements-dev.txt. Sans cela il "
+            "n'arrive que par pre-commit, et deux tests de contrat dependent "
+            "d'un paquet que rien ne garantit.",
+        )
+
     def test_le_plugin_pytest_playwright_accompagne_la_bibliotheque(self) -> None:
         """La fixture `page` vient du PLUGIN, pas de la bibliotheque `playwright`.
 

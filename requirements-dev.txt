@@ -36,3 +36,9 @@ hypothesis>=6.152.9,<7
 # (domain ne doit pas importer app/infra/ui). Configuration dans .importlinter.
 # Lance en CI via `python -m importlinter`.
 import-linter>=2.0,<3
+# PyYAML : deux tests de CONTRAT parsent du YAML (`.coderabbit.yaml` et les
+# gabarits GitHub). Il n'arrivait ici que par `pre_commit`, qui en depend —
+# donc par accident. Signale par une revue automatique, puis verifie :
+# `pre_commit` etait le SEUL paquet declare a l'exiger. Un test qui se met en
+# skip faute de dependance rend le meme vert qu'un test qui passe.
+PyYAML>=6.0,<7
