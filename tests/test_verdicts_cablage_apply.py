@@ -86,6 +86,38 @@ class CablageDuVerdictTests(unittest.TestCase):
     def _warns(self) -> List[str]:
         return [m for niveau, m in self.journal if niveau == "WARN"]
 
+    # --- T-PROD-6 : le mode degrade -------------------------------------
+    def test_un_apply_en_mode_DEGRADE_porte_son_verdict(self):
+        """`apply_batch_id` absent du payload = le batch n'a jamais ete cree.
+
+        C'est le mode degrade documente dans `apply_support.py` : quand
+        `insert_apply_batch` echoue, l'apply s'execute quand meme, `record_apply_op`
+        sort immediatement, et rien n'est annulable. Le verdict etait VERT parce
+        que deux journaux vides ne contredisent rien.
+
+        Ce test porte sur le CABLAGE, pas sur la fonction pure : sans lui,
+        retirer `journal_ouvert=apply_batch_id is not None` du site d'appel
+        laisserait toute la batterie verte.
+        """
+        payload = self._appeler({"result": {"applied_count": 12, "errors": 0}}, [])
+        self.assertIn("verdict", payload, f"aucun verdict rendu : journal={self.journal}")
+        self.assertIn(
+            "journal_absent_malgre_des_actions_annoncees",
+            [inc["code"] for inc in payload["verdict"]["incoherences"]],
+        )
+
+    def test_un_apply_NORMAL_ne_declenche_pas_ce_verdict(self):
+        """Temoin : avec un batch_id, l'invariant du mode degrade se tait.
+
+        Sans ce temoin, le test ci-dessus serait indistinguable d'un invariant
+        qui mord tout le monde.
+        """
+        payload = self._appeler(
+            {"apply_batch_id": "b-42", "result": {"applied_count": 1, "errors": 0}},
+            [{"op_type": "MOVE_DIR"}],
+        )
+        self.assertNotIn("verdict", payload, f"faux positif : {payload.get('verdict')}")
+
     # --- le cablage est-il VIVANT ? -------------------------------------
     def test_1062_de_bout_en_bout_le_payload_PORTE_l_incoherence(self):
         """Le cas reel : `errors: 0` annonce, des echecs inscrits au journal."""

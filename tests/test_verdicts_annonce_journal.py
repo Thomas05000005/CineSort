@@ -454,3 +454,77 @@ class LesCompteursNONTPasDeriveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeJournalJAMAISOUVERTTests(unittest.TestCase):
+    """T-PROD-6 : le sens qui manquait, et c'est celui qui ment a l'utilisateur.
+
+    `_verifier_deplacements_tus` couvre un sens : le journal porte des
+    deplacements, le payload n'en annonce aucun — l'utilisateur n'a alors aucune
+    raison d'annuler. Le sens INVERSE n'etait couvert par rien : le payload
+    annonce douze rangements, le journal est vide. L'utilisateur voit « 12 films
+    ranges » et un bouton *Annuler* qui ne fera rien.
+
+    Ce n'est pas un cas theorique : quand `insert_apply_batch` echoue,
+    `apply_batch_id` reste `None`, `record_apply_op` sort immediatement, et
+    l'apply s'execute quand meme. Le mode degrade est documente dans
+    `apply_support.py` ; ce qui ne l'etait pas, c'est qu'il rendait un verdict
+    VERT.
+
+    Le critere est le journal JAMAIS OUVERT, pas le journal vide. La difference
+    est essentielle : si le batch existe et qu'aucune ligne n'y figure, la cause
+    peut etre un compteur qui n'ecrit legitimement pas d'operation, et le
+    signaler serait un faux positif. Un batch qui n'a jamais ete cree, lui, ne
+    laisse aucune place au doute.
+    """
+
+    def test_journal_jamais_ouvert_avec_des_actions_annoncees(self) -> None:
+        verdict = comparer_annonce_et_journal(
+            {"applied_count": 12, "errors": 0},
+            [],
+            evenements_audit=[],
+            dry_run=False,
+            journal_ouvert=False,
+        )
+        self.assertFalse(
+            verdict.coherent,
+            "12 rangements annonces, aucun journal ouvert : l'apply n'est PAS "
+            "annulable et l'utilisateur ne l'apprend nulle part.",
+        )
+        self.assertIn(
+            "journal_absent_malgre_des_actions_annoncees",
+            [inc.code for inc in verdict.incoherences],
+        )
+
+    def test_journal_jamais_ouvert_mais_RIEN_annonce_reste_coherent(self) -> None:
+        """Un apply qui n'a rien fait n'a rien a journaliser."""
+        verdict = comparer_annonce_et_journal(
+            {"applied_count": 0, "errors": 0},
+            [],
+            evenements_audit=[],
+            dry_run=False,
+            journal_ouvert=False,
+        )
+        self.assertTrue(verdict.coherent, f"faux positif : {[i.code for i in verdict.incoherences]}")
+
+    def test_apercu_ne_declenche_jamais_ce_verdict(self) -> None:
+        """En dry_run rien n'est journalise : le batch n'existe pas, c'est normal."""
+        verdict = comparer_annonce_et_journal(
+            {"applied_count": 12, "errors": 0},
+            [],
+            evenements_audit=[],
+            dry_run=True,
+            journal_ouvert=False,
+        )
+        self.assertTrue(verdict.coherent, f"faux positif en apercu : {[i.code for i in verdict.incoherences]}")
+
+    def test_le_defaut_par_defaut_est_le_comportement_ACTUEL(self) -> None:
+        """Sans le parametre, rien ne change pour les appelants existants.
+
+        Le contraire ferait rougir tous les appels deja en place, et un garde
+        qui mord tout le monde des sa pose se fait desarmer dans l'heure.
+        """
+        verdict = comparer_annonce_et_journal(
+            {"applied_count": 12, "errors": 0}, [], evenements_audit=[], dry_run=False
+        )
+        self.assertTrue(verdict.coherent)

@@ -3213,6 +3213,12 @@ def _avec_verdict(
         verdict = comparer_annonce_et_journal(
             dict(payload.get("result") or {}),
             operations,
+            # T-PROD-6 : un apply reel dont `insert_apply_batch` a echoue tourne
+            # en mode degrade — `apply_batch_id` reste None, `record_apply_op`
+            # sort immediatement, et les deplacements ne sont pas annulables.
+            # Le verdict etait VERT : les deux journaux vides ne contredisaient
+            # rien, faute d'un invariant dans ce sens-la.
+            journal_ouvert=apply_batch_id is not None,
             evenements_audit=evenements,
             dry_run=bool(dry_run),
         )
