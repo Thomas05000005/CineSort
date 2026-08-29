@@ -948,6 +948,12 @@ def _parse_nfo_runtime(root: ET.Element) -> Optional[int]:
     return None
 
 
+#: Declaration d'entite XML dans un `.nfo`. Voir `parse_movie_nfo` : ce motif
+#: est le vecteur d'amplification (x10 par niveau), et aucun outil qui ecrit des
+#: NFO n'en produit.
+_NFO_DECLARE_DES_ENTITES = re.compile(r"<!ENTITY\b", re.IGNORECASE)
+
+
 def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
     """Parse a Kodi-style .nfo XML file and return structured metadata, or None on failure."""
     # Lire avec encodage UTF-8, fallback Latin-1 (NFO Kodi souvent mal encodes)
@@ -960,14 +966,34 @@ def parse_movie_nfo(nfo_path: Path) -> Optional[NfoInfo]:
             continue
     if not content:
         return None
+    # 2026-08-29 : un `.nfo` arrive AVEC le torrent — son contenu est ecrit par
+    # le releaser, pas par l'utilisateur. Le commentaire qui vivait ici affirmait
+    # l'inverse (« pas un input reseau venant d'un attaquant ») et concluait qu'il
+    # n'y avait rien a faire. Sa conclusion tenait pour XXE, jamais pour
+    # l'amplification d'entites.
+    #
+    # MESURES DU JOUR, sur cette fonction meme :
+    #   - XXE : `ET.fromstring` REFUSE une entite externe (`ParseError: undefined
+    #     entity`), et le `except` ci-dessous l'attrape. Rien a corriger la ;
+    #   - AMPLIFICATION : les entites INTERNES sont bien expandues, a raison de
+    #     x10 par niveau. Mesure : 226 o -> ~0 Mo, 336 o -> 0,7 Mo, 391 o ->
+    #     6,6 Mo. Un fichier d'environ 550 octets viserait plusieurs Go.
+    #
+    # Aucun `.nfo` legitime ne declare d'entites : Kodi, Jellyfin et
+    # tinyMediaManager ecrivent du XML plat (zero occurrence de `<!ENTITY` dans
+    # tout le depot). On refuse donc la declaration, pas le DOCTYPE — c'est
+    # `<!ENTITY` qui amplifie, et un garde plus large refuserait un fichier
+    # inoffensif (contre-test `test_un_doctype_sans_entite_reste_lu`).
+    if _NFO_DECLARE_DES_ENTITES.search(content):
+        logger.warning(
+            "NFO ignore : il declare des entites XML (amplification possible) - %s",
+            nfo_path.name,
+        )
+        return None
     try:
-        # Bandit B314 : ET.fromstring peut etre vulnerable a XXE (XML External
-        # Entity). Python 3.12+ ne resout plus les entites externes par defaut
-        # mais on documente le contexte safe : le NFO est un fichier local du
-        # filesystem utilisateur (cree par Kodi/Jellyfin/manual), pas un input
-        # reseau venant d'un attaquant. Single-user desktop = pas de privilege
-        # escalation possible.
-        root = ET.fromstring(content)  # noqa: S314
+        # `ET.fromstring` ne resout pas les entites EXTERNES (mesure ci-dessus),
+        # et les internes sont desormais refusees en amont.
+        root = ET.fromstring(content)  # noqa: S314  # nosec B314
     except (ET.ParseError, ValueError):
         return None
 
