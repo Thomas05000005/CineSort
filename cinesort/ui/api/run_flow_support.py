@@ -2150,7 +2150,11 @@ def rescan_row(api: Any, run_id: str, row_id: str) -> Dict[str, Any]:
                 "DELETE FROM perceptual_reports WHERE run_id=? AND row_id=?",
                 (str(run_id), rid_s),
             )
-    except (OSError, KeyError, TypeError, ValueError, AttributeError) as exc:
+    # `sqlite3.Error` n'herite PAS d'`OSError` : sans lui, un verrou pendant
+    # l'invalidation de cache remontait en HTTP 500. Les lignes supprimees ici
+    # (quality_reports, perceptual_reports) sont RECALCULABLES — chemin
+    # best-effort, non destructif au sens de la regle n3.
+    except (OSError, KeyError, sqlite3.Error, TypeError, ValueError, AttributeError) as exc:
         _logger.warning("rescan_row: cache invalidation failed (%s)", exc)
 
     # 2. Re-execute la pipeline quality (probe + score)

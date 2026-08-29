@@ -233,6 +233,97 @@ class RollbackForwardMoveFileTests(unittest.TestCase):
         # Log d'audit emis
         self.assertTrue(any("dst manquant" in msg for _, msg in audit_calls))
 
+    def test_volume_injoignable_n_est_pas_annonce_comme_un_succes(self) -> None:
+        """Un rollback qui n'a RIEN restaure ne doit pas rendre `ok=True`.
+
+        `Path.exists()` rend False dans deux situations que le code confondait :
+
+          - le fichier a bouge ou a ete supprime, mais son DOSSIER est la : il
+            n'y a rien a restaurer, sauter est legitime ;
+          - le dossier PARENT lui-meme est injoignable — partage reseau tombe
+            (winerror 53 -> ENOENT), lecteur non pret (winerror 21), UNC mort :
+            on ne SAIT PAS ce qu'il y aurait a restaurer.
+
+        Mesure du 2026-08-29 sur les trois cas, dont un UNC reellement
+        injoignable : `dst.exists()` rend False partout, `dst.parent.is_dir()`
+        rend True au premier et False aux deux autres. C'est le discriminant.
+
+        Chaine reproduite AVANT correctif, avec la fonction de production et
+        trois ops dont le volume de destination n'existe pas :
+
+            ok               : True
+            rollback_status  : ROLLED_BACK_BY_ATOMIC
+            counts           : done=0, skipped=3, failed=0
+            message          : « 0 revert / 3 skipped »
+
+        Trois films non restaures, annonces comme un succes franc. La cause
+        n'est PAS celle qu'on pourrait croire : `ROLLBACK_PARTIAL` existe et est
+        atteignable (`failed>0 et done>0`). Le defaut est qu'un `SKIPPED` n'entre
+        dans aucun des deux compteurs qui font basculer le verdict.
+        """
+        batch_id = self.store.apply.insert_apply_batch(
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
+        )
+        volume_mort = self._tmp / "volume_reseau_injoignable"  # jamais cree
+        for i in range(1, 4):
+            self.store.apply.append_apply_operation(
+                batch_id=batch_id,
+                op_index=i,
+                op_type="MOVE_FILE",
+                src_path=str(self.src_root / f"film{i}.mkv"),
+                dst_path=str(volume_mort / f"film{i}.mkv"),
+                reversible=True,
+            )
+
+        result = rollback_forward(self.store, batch_id)
+
+        self.assertEqual(result["counts"]["done"], 0)
+        self.assertFalse(
+            result["ok"],
+            f"aucun fichier restaure ne peut rendre ok=True : {result}",
+        )
+        self.assertNotEqual(
+            result["rollback_status"],
+            ROLLBACK_DONE,
+            f"un volume injoignable n'est pas un rollback termine : {result}",
+        )
+
+    def test_un_fichier_disparu_dans_un_dossier_PRESENT_reste_un_saut(self) -> None:
+        """CONTRE-TEST : distinguer les deux cas, pas durcir les deux.
+
+        Le dossier de destination existe, seul le fichier manque — il a ete
+        deplace ou supprime en dehors de l'application. Il n'y a rien a
+        restaurer, et le rollback doit rester un succes. Si ce test rougit, le
+        remede a confondu « rien a faire » avec « je n'ai pas pu », et il
+        ferait echouer des rollbacks parfaitement valides.
+
+        C'est aussi ce que garde `test_rollback_5_of_10_partial` (5 done +
+        5 skipped -> DONE) : le present correctif ne doit PAS le retourner.
+        """
+        batch_id = self.store.apply.insert_apply_batch(
+            run_id="r1",
+            dry_run=False,
+            quarantine_unapproved=False,
+        )
+        # self.dst_root EXISTE (cree dans setUp), seul le fichier manque.
+        self.store.apply.append_apply_operation(
+            batch_id=batch_id,
+            op_index=1,
+            op_type="MOVE_FILE",
+            src_path=str(self.src_root / "fantome.mkv"),
+            dst_path=str(self.dst_root / "fantome.mkv"),
+            reversible=True,
+        )
+
+        result = rollback_forward(self.store, batch_id)
+
+        self.assertEqual(result["counts"]["skipped"], 1)
+        self.assertEqual(result["counts"]["failed"], 0)
+        self.assertTrue(result["ok"], f"rien a restaurer reste un succes : {result}")
+        self.assertEqual(result["rollback_status"], ROLLBACK_DONE)
+
     def test_rollback_skips_when_src_already_exists(self) -> None:
         """Si src existe deja (collision), skip + log."""
         batch_id = self.store.apply.insert_apply_batch(

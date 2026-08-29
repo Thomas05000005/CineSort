@@ -33,6 +33,7 @@ individuellement, avec son propre test.
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -51,7 +52,13 @@ _RACINE = Path("cinesort")
 # Le cliquet a signale la baisse tout seul — c'est son autre sens. Sans lui, un
 # plafond reste acquis apres un correctif et 3 sites pourraient revenir en
 # silence.
-PLAFOND = 63
+# 63 -> 59, le 2026-08-29, en DEUX temps :
+#   63  population vue par l'ancien recensement (marge zero) ;
+#   65  apres elargissement de `_ACCES_STORE` — deux sites reels etaient hors
+#       radar, `resolved_store.run.insert_error` et
+#       `default_store.run.list_pending_runs` ;
+#   59  apres correction de six sites (regle inviolable n4).
+PLAFOND = 59
 
 
 def _noms_exceptions(handler: ast.ExceptHandler) -> set[str]:
@@ -67,11 +74,27 @@ def _noms_exceptions(handler: ast.ExceptHandler) -> set[str]:
     return out
 
 
+#: Un acces au store, quel que soit le NOM de la variable qui le porte.
+#:
+#: 2026-08-29 : ce recensement filtrait sur une liste FERMEE de prefixes
+#: (`store.`, `self._store.`, `self.store.`, `_store.`) plus `.store.`. Il etait
+#: donc aveugle a tout renommage de variable — mesure du jour, DEUX sites reels
+#: lui echappaient : `resolved_store.run.insert_error` (cinesort_api.py:572) et
+#: `default_store.run.list_pending_runs` (run_control_support.py:224). Le
+#: cliquet avait 63 sites pour un plafond de 63, donc marge zero... sur une
+#: population amputee.
+#:
+#: Le motif accepte desormais n'importe quel identifiant se terminant par
+#: `store`, precede du debut de l'expression ou d'un point : `store.`,
+#: `_store.`, `resolved_store.`, `self.default_store.`. Il ne mord PAS sur
+#: `restore.` (le groupe optionnel doit se terminer par `_`).
+_ACCES_STORE = re.compile(r"(?:^|\.)(?:[A-Za-z0-9]+_)*_?store\.", re.IGNORECASE)
+
+
 def _touche_le_store(corps: list) -> bool:
     for noeud in ast.walk(ast.Module(body=corps, type_ignores=[])):
         if isinstance(noeud, ast.Attribute):
-            texte = ast.unparse(noeud)
-            if texte.startswith(("store.", "self._store.", "self.store.", "_store.")) or ".store." in texte:
+            if _ACCES_STORE.search(ast.unparse(noeud)):
                 return True
     return False
 

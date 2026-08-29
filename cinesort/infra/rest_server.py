@@ -535,9 +535,16 @@ class _CineSortHandler(BaseHTTPRequestHandler):
     # V6-01 : root des fichiers locales/. Initialise par RestApiServer (cf
     # `locales_root = _resolve_locales_root()` plus bas).
     locales_root: Optional[Path] = None
-    # 2026-06-08 : adresse de bind effective ("127.0.0.1" ou "0.0.0.0"). Utilisee
-    # par _check_auth pour decider si le bypass d'auth localhost est sur (cf
-    # plus bas). Initialisee par RestApiServer.start() depuis self._host.
+    # Adresse de bind effective ("127.0.0.1" ou "0.0.0.0"), posee par
+    # RestApiServer.start() depuis self._host.
+    #
+    # ATTRIBUT MORT depuis le retrait du bypass loopback (2026-08-07) : il est
+    # ECRIT (ici et au montage du handler) et LU PAR PERSONNE — mesure du
+    # 2026-08-28, `grep -rn bind_host` rend 2 ecritures et 0 lecture en
+    # production. Le commentaire disait qu'il servait a `_check_auth` « pour
+    # decider si le bypass d'auth localhost est sur » : ce bypass n'existe plus.
+    # Conserve pour l'instant (il documente le bind au point de montage) ; le
+    # supprimer est un arbitrage a part.
     bind_host: str = "127.0.0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -653,14 +660,132 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         NON trusted : navigateur cross-site (amplification CSRF, cf
         `_is_cross_site_get`) ET client LAN non-navigateur (curl distant en bind
         0.0.0.0, sans Origin ni Sec-Fetch -> ne doit pas bruler le quota TMDb).
-        Les appelants non fiables n'obtiennent QUE la lecture du cache.
+
+        2026-08-29 : `same-site` N'EST PLUS FIABLE, et l'IP ne rattrape plus un
+        navigateur.
+
+        Le « site » au sens Fetch Metadata est le domaine enregistrable : LE PORT
+        N'EN FAIT PAS PARTIE. Sur `127.0.0.1`, tout autre service web local est
+        donc `same-site`. Mesure au navigateur reel (deux serveurs locaux,
+        18801/18802) : une image demandee a un autre PORT porte
+        `Sec-Fetch-Site: same-site`, jamais `cross-site`. Contre CineSort en bac
+        a sable, une page servie sur 18801 obtenait la jaquette en cache de
+        l'instance du 18742 — et, `same-site` etant classe fiable, aussi
+        `force=1` et le fetch TMDb.
+
+        Le reste de l'API ne connait pas ce trou : il se garde par `Origin` via
+        `_allowed_origin`, qui CONTRAINT le port. Cette route ne le peut pas —
+        un `<img>` n'envoie pas d'`Origin` — d'ou le recours a `Sec-Fetch-Site`.
+        La valeur qui porte la meme frontiere que `_allowed_origin` est
+        `same-origin`, pas `same-site`.
+
+        Et le repli par IP etait la seconde moitie du defaut : exiger
+        `same-origin` sans lui aurait laisse un navigateur `same-site` sur la
+        boucle locale retomber sur `_LOCAL_CLIENT_IPS` et redevenir fiable. Des
+        lors qu'un `Sec-Fetch-Site` est present, l'appelant EST un navigateur et
+        se prononce lui-meme ; le repli ne sert plus qu'aux clients
+        non-navigateurs (pywebview natif, curl local), qui n'envoient rien.
+
+        `Sec-Fetch-Site` est un en-tete interdit : une page ne peut ni le forger
+        ni le supprimer. Garde : `tests/test_poster_frontiere_origine.py`.
         """
         if self._is_cross_site_get():
             return False
         sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
-        if sec_fetch_site in {"same-origin", "same-site"}:
-            return True
+        if sec_fetch_site:
+            return sec_fetch_site == "same-origin"
         return self._client_ip() in _LOCAL_CLIENT_IPS
+
+    def _poster_navigateur_etranger(self) -> bool:
+        """True si l'appelant est un NAVIGATEUR dont l'origine n'est pas la notre.
+
+        Le seul consommateur legitime de `/api/poster` est le dashboard, servi
+        par CE serveur : il est donc `same-origin`. Tout autre navigateur —
+        `same-site` (autre service local), `cross-site` (site tiers) ou `none`
+        (URL tapee) — n'a aucune raison d'y acceder.
+
+        Sert a rendre une reponse UNIFORME a ces appelants. Sans cela, 200 sur
+        un id en cache et 404 sur un id absent forment un ORACLE : une page
+        tierce teste id par id ce que le cache contient, donc enumere la
+        bibliotheque, sans aucun credential.
+
+        Un client sans `Sec-Fetch-Site` n'est pas un navigateur moderne : il
+        garde le regime actuel, pour ne casser ni pywebview, ni curl, ni un
+        navigateur trop ancien pour poser l'en-tete.
+        """
+        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        return bool(sec_fetch_site) and sec_fetch_site != "same-origin"
+
+    def _servir_jaquette(self, _t0: float) -> None:
+        """Route `GET /api/poster` : proxy TMDb avec cache disque local.
+
+        Extraite de `_handle_get` le 2026-08-29 : le cliquet de taille des
+        fonctions compte le span brut, et documenter correctement cette route
+        faisait deborder son hote. Sortir le bloc vaut mieux que monter un
+        plafond — c'est ce que dit le message d'echec du cliquet lui-meme.
+
+        Cette route n'est PAS authentifiee : un navigateur ne peut pas poser
+        d'en-tete `Authorization` sur un `<img src=...>`. La defense est portee
+        par `_poster_navigateur_etranger` (qui ferme l'oracle d'enumeration) et
+        `_poster_trusted_caller` (qui gate les effets de bord), pas par
+        `_check_auth`. Voir `tests/test_poster_frontiere_origine.py`.
+        """
+        from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
+        from cinesort.infra.state import default_state_dir  # noqa: PLC0415
+
+        # Resoudre state_dir : preferer l'API si disponible, sinon
+        # default_state_dir() (compat tests sans API monte).
+        api = getattr(self, "api", None)
+        state_dir = None
+        if api is not None:
+            get_state = getattr(api, "_get_state_dir", None)
+            if callable(get_state):
+                try:
+                    state_dir = get_state()
+                except Exception:  # noqa: BLE001 — boundary
+                    state_dir = None
+        if state_dir is None:
+            state_dir = default_state_dir()
+        cache_root = Path(state_dir) / "cache" / "posters"
+        # Parser la query string (premier raw seulement, jamais liste).
+        raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        parsed = parse_qs(raw_query, keep_blank_values=True)
+        flat_query: Dict[str, str] = {}
+        for key, values in parsed.items():
+            if values:
+                flat_query[key] = values[0]
+        # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
+        # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
+        # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
+        # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
+        # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
+        # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
+        # Un navigateur qui n'est pas same-origin n'est jamais un
+        # consommateur legitime : on lui rend une reponse UNIFORME, pour que
+        # le statut ne trahisse pas le contenu du cache. Corps identique a
+        # celui d'un cache miss (`poster_proxy._respond_error_json`), pour
+        # que les deux cas soient indiscernables jusqu'a l'octet.
+        if self._poster_navigateur_etranger():
+            self._respond_json(404, {"ok": False, "category": "resource", "message": "Poster not available"})
+            return
+        poster_trusted = self._poster_trusted_caller()
+        if "force" in flat_query and not poster_trusted:
+            flat_query.pop("force", None)
+            logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
+        try:
+            # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
+            # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
+            poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
+            logger.debug(
+                "REST GET /api/poster client disconnect (%s, %.0fms)",
+                type(exc).__name__,
+                (time.monotonic() - _t0) * 1000,
+            )
+        except Exception as exc:  # noqa: BLE001 — boundary
+            logger.exception("REST 500 /api/poster: %s", exc)
+            with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
 
     def _send_cors_headers(self) -> None:
         # On ne renvoie JAMAIS ACAO:* par defaut (lecture cross-site / CSRF).
@@ -1182,62 +1307,31 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # Iter12 / ETAPE 1b : proxy poster TMDb avec validation stricte
         # anti-SSRF/anti-open-relay + cache disque local.
         # Cf cinesort/infra/integrations/poster_proxy.py (whitelist sizes,
-        # regex id, scrub cle API). Pas d'auth Bearer requise sur cette
-        # route : sert directement <img src="/api/poster?id=...&size=..."> et
-        # le bypass loopback du _check_auth de cette classe couvre deja le
-        # cas pywebview natif. Note : on n'invoque PAS self._check_auth ici
-        # car le navigateur ne peut pas mettre d'header Authorization sur
-        # un <img>, et qu'en bind 127.0.0.1 (defaut desktop) le bypass
-        # serait de toute facon active.
+        # regex id, scrub cle API).
+        #
+        # PAS d'auth Bearer sur cette route, et la RAISON A CHANGE. Ce
+        # commentaire invoquait « le bypass loopback du _check_auth de cette
+        # classe », en concluant qu'en bind 127.0.0.1 le bypass serait de toute
+        # facon actif. CE BYPASS A ETE RETIRE LE 2026-08-07 (cf. _check_auth,
+        # qui porte les mesures du retrait) : la justification etait morte
+        # depuis trois semaines quand elle a ete relue le 2026-08-28.
+        #
+        # La raison qui TIENT est la seule seconde : un navigateur ne peut pas
+        # poser d'en-tete Authorization sur un <img src=...>. La route reste
+        # donc ouverte, et c'est `_poster_trusted_caller` qui porte la defense,
+        # pas l'authentification.
+        #
+        # SURFACE MESUREE le 2026-08-28 (bac a sable, port ephemere) :
+        #   POST /api/run/get_status sans Bearer   -> 401   (temoin)
+        #   GET  /api/poster?id=... sans Bearer    -> jamais 401
+        #   GET  /api/poster?id=<en cache>  cross-site -> 200 image/jpeg
+        #   GET  /api/poster?id=<pas en cache> cross-site -> 404
+        # Les deux dernieres lignes forment un ORACLE D'APPARTENANCE : une page
+        # tierce peut, sans credential, tester id par id ce que le cache
+        # contient, donc enumerer la bibliotheque. C'est le prix assume de
+        # servir le <img> ; le noter ici pour que personne ne le redecouvre.
         if clean == "/api/poster":
-            from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
-            from cinesort.infra.state import default_state_dir  # noqa: PLC0415
-
-            # Resoudre state_dir : preferer l'API si disponible, sinon
-            # default_state_dir() (compat tests sans API monte).
-            api = getattr(self, "api", None)
-            state_dir = None
-            if api is not None:
-                get_state = getattr(api, "_get_state_dir", None)
-                if callable(get_state):
-                    try:
-                        state_dir = get_state()
-                    except Exception:  # noqa: BLE001 — boundary
-                        state_dir = None
-            if state_dir is None:
-                state_dir = default_state_dir()
-            cache_root = Path(state_dir) / "cache" / "posters"
-            # Parser la query string (premier raw seulement, jamais liste).
-            raw_query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            parsed = parse_qs(raw_query, keep_blank_values=True)
-            flat_query: Dict[str, str] = {}
-            for key, values in parsed.items():
-                if values:
-                    flat_query[key] = values[0]
-            # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
-            # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
-            # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
-            # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
-            # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
-            # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
-            poster_trusted = self._poster_trusted_caller()
-            if "force" in flat_query and not poster_trusted:
-                flat_query.pop("force", None)
-                logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
-            try:
-                # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
-                # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
-                poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
-            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
-                logger.debug(
-                    "REST GET /api/poster client disconnect (%s, %.0fms)",
-                    type(exc).__name__,
-                    (time.monotonic() - _t0) * 1000,
-                )
-            except Exception as exc:  # noqa: BLE001 — boundary
-                logger.exception("REST 500 /api/poster: %s", exc)
-                with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
-                    self._respond_json(500, {"ok": False, "category": "runtime", "message": "Erreur interne"})
+            self._servir_jaquette(_t0)
             return
 
         # Fichiers statiques du dashboard distant
@@ -1621,9 +1715,11 @@ class RestApiServer:
                 "dashboard_root": dashboard_root,
                 "shared_root": shared_root,
                 "locales_root": locales_root,
-                # 2026-06-08 : expose le bind effectif au handler pour que
-                # _check_auth puisse decider si le bypass localhost est sur
-                # (uniquement vrai bind 127.0.0.1, pas 0.0.0.0 expose LAN).
+                # Expose le bind effectif au handler. Le commentaire d'origine
+                # disait « pour que _check_auth puisse decider si le bypass
+                # localhost est sur » : ce bypass est RETIRE depuis le
+                # 2026-08-07 et plus rien ne lit cet attribut (cf. sa
+                # declaration).
                 "bind_host": self._host,
             },
         )
