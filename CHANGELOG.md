@@ -5,6 +5,66 @@ Categories : `Added`, `Changed`, `Fixed`, `Removed`, `Performance`, `Security`.
 
 ---
 
+> **Renseigne le 2026-08-29 depuis les releases GitHub publiees.** Ce fichier
+> s'arretait a `v1.2.0-beta` (17 mai) alors que huit releases avaient suivi les
+> 24 et 25 mai. Les titres et les dates ci-dessous sont ceux des releases, pas
+> une reconstitution : le detail de chacune vit dans sa page GitHub.
+>
+> **Et depuis le 2026-05-25, aucune release n'a ete coupee.** Ce n'est pas un
+> oubli : la version est gelee a `1.5.2-beta` et les jalons se marquent par des
+> tags `+build` (cf. `/CLAUDE.md`, section Etat). Un `CHANGELOG` qui s'arrete
+> n'est donc pas ici le signe d'un retard de redaction, mais d'un choix de
+> versionnage — a rediscuter si le produit repart en versions.
+
+---
+
+## [v1.5.2-beta] - 2026-05-25 — 5 vagues post-audit : workflows + tools UI + update flow + undo 24h
+
+> Detail complet : [release v1.5.2-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.5.2-beta).
+
+---
+
+## [v1.5.1-beta] - 2026-05-24 — Hotfix UX splash + Plan introuvable DEBUG
+
+> Detail complet : [release v1.5.1-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.5.1-beta).
+
+---
+
+## [v1.5.0-beta] - 2026-05-24 — Audit 6-agents : ~50 bugs corriges (CRIT + HAUT + MOY)
+
+> Detail complet : [release v1.5.0-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.5.0-beta).
+
+---
+
+## [v1.4.1-beta] - 2026-05-24 — 8 bugs batch (5 logs + 3 UX critiques)
+
+> Detail complet : [release v1.4.1-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.4.1-beta).
+
+---
+
+## [v1.4.0-beta] - 2026-05-24 — Audit end-to-end : 7 fixes (PIL, cleanup, race, manifest, token, prerelease, i18n)
+
+> Detail complet : [release v1.4.0-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.4.0-beta).
+
+---
+
+## [v1.3.2-beta] - 2026-05-24 — Vrai fix ecran noir (events.loaded + suppression code redondant)
+
+> Detail complet : [release v1.3.2-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.3.2-beta).
+
+---
+
+## [v1.3.1-beta] - 2026-05-24 — Hotfix ecran noir au demarrage (auto-purge cache WebView2)
+
+> Detail complet : [release v1.3.1-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.3.1-beta).
+
+---
+
+## [v1.3.0-beta] - 2026-05-24 — Refonte UI complete FR + Undo 24h + Architecture verrouillee
+
+> Detail complet : [release v1.3.0-beta](https://github.com/Thomas05000005/CineSort/releases/tag/v1.3.0-beta).
+
+---
 ## [v1.2.0-beta] - 2026-05-17 — Repository pattern complet + suite E2E + bug Windows critique
 
 > **Bilan d'une journee de chantiers paralleles** apres v1.1.0-beta (16 mai 2026).

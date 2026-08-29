@@ -1,8 +1,11 @@
 [project]
 name = "cinesort"
 # v1.5.2-beta - lue depuis VERSION pour build, dupliquee ici pour PEP 621.
-# Garder ces deux valeurs synchronisees lors d'un bump (scripts/bump_version.py
-# couvre VERSION + ce champ).
+# Garder ces deux valeurs synchronisees lors d'un bump. Le garde qui le verifie
+# est `tests/test_pyproject_pep621_v77.py::test_project_version_aligned_on_version_file`.
+# 2026-08-29 : cette ligne renvoyait a un `scripts/bump_version.py` qui « couvre
+# VERSION + ce champ ». Ce script n'a JAMAIS existe : `git log --all --
+# scripts/bump_version.py` rend zero commit sur tout l'historique.
 version = "1.5.2-beta"
 description = "CineSort - tri et renommage automatique de bibliotheques de films (Windows desktop, Python 3.13, pywebview)."
 readme = "README.md"
