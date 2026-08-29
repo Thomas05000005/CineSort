@@ -283,6 +283,35 @@ class LiberationSurPreuveTests(unittest.TestCase):
             "c'est la trace d'un crash anterieur qui vient de disparaitre.",
         )
 
+    def test_une_INTERRUPTION_laisse_l_entree_meme_si_rien_n_a_bouge(self) -> None:
+        """Un KeyboardInterrupt, c'est l'application qui MEURT.
+
+        C'est exactement l'instant ou le journal sert. Laisser l'entree est
+        alors le comportement juste : la reconciliation du prochain demarrage
+        tranchera, et elle a plus de chances d'aboutir que des ecritures faites
+        pendant l'arret. D'ou `except Exception` et non `except BaseException`.
+        """
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+
+        with self.assertRaises(KeyboardInterrupt):
+            with journal_pose_autour(
+                self.record_op,
+                src=src,
+                dst=dst,
+                op_type="MOVE_DIR",
+                liberer_si_rien_n_a_bouge=True,
+            ):
+                raise KeyboardInterrupt
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            1,
+            "l'entree a ete liberee pendant un arret de l'application : c'est "
+            "le seul moment ou elle avait une chance de servir.",
+        )
+
     def test_sans_l_option_le_comportement_conservateur_est_inchange(self) -> None:
         src = self._tmp / "source"
         src.mkdir()

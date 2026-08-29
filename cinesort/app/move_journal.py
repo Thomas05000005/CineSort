@@ -380,7 +380,12 @@ def journal_pose_autour(
             row_id=row_id,
         ) as pending_id:
             yield pending_id
-    except BaseException:
+    except Exception:
+        # `Exception`, PAS `BaseException` : un KeyboardInterrupt ou un
+        # SystemExit, c'est l'application qui MEURT — precisement l'instant ou
+        # le journal sert. Laisser l'entree est alors le comportement juste :
+        # la reconciliation du prochain demarrage tranchera, et elle a plus de
+        # chances d'aboutir que des ecritures faites pendant l'arret.
         if liberer_si_rien_n_a_bouge:
             _liberer_si_le_disque_le_prouve(store, src=src, dst=dst)
         raise
