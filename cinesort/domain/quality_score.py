@@ -927,6 +927,20 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
         if lossy is None:
             lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
         return int(lossy), "Audio Atmos (lossy)"
+    if c in ("flac", "pcm") or c.startswith("lpcm") or c.startswith("pcm"):
+        # T-DOM-1 : cette table CONTREDISAIT `codec_ranks`. FLAC et PCM y ont
+        # le rang 3 depuis l'audit du 2026-08-19 — au-dessus de DTS (2) et de
+        # l'AAC (1) — mais ils n'avaient AUCUNE entree ici, donc bonus 0 :
+        # deux formats SANS PERTE classes sous des formats AVEC PERTE.
+        #
+        # La valeur suit le rang plutot que de l'inventer : entre `dts_bonus`
+        # (rang 2) et `dts_hd_ma_bonus` (rang 4). Le repli calcule preserve les
+        # profils utilisateur deja enregistres, qui n'ont pas cette cle — meme
+        # idiome que `atmos_lossy_bonus` juste au-dessus.
+        lossless_simple = bonuses.get("flac_pcm_bonus")
+        if lossless_simple is None:
+            lossless_simple = max(1, int(bonuses["dts_hd_ma_bonus"]) - 2)
+        return int(lossless_simple), "Audio lossless (FLAC/PCM)"
     if "hra" in c and "dts" in c:
         # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
         # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
@@ -1105,6 +1119,21 @@ def _score_video(
         video_sub -= 8
         if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
             is_4k_light = True
+            # T-DOM-1 : ce `-4` partait dans `reasons` — ce que l'utilisateur
+            # LIT — sans jamais toucher `video_sub`. Mesure : toggle ON 40,
+            # toggle OFF 40, ecart NUL, et la ligne « -4 4K Light probable »
+            # bien affichee. Deux consequences : le reglage `enable_4k_light`
+            # etait INERTE ici, et l'explication de score MENTAIT.
+            #
+            # La branche `elif` ci-dessous ne souffre pas du defaut, et porte
+            # meme le commentaire « Hotfix coherence (2026-06-04) : aligner
+            # add_reason delta sur l'increment reel applique a video_sub ».
+            # Le correctif existait donc a DEUX lignes d'ici.
+            #
+            # La valeur reste 4, celle qui etait deja annoncee : la rendre
+            # vraie est un correctif, la remplacer par `penalty_4k_light`
+            # (plus severe, pilote par le profil) serait un arbitrage produit.
+            video_sub -= 4
             add_reason(-4, "4K Light probable (tag release) sans debit mesure")
         add_reason(-8, "Debit video non detecte")
     elif threshold_kbps > 0:
