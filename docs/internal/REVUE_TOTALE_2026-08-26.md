@@ -188,8 +188,25 @@ public (le dépôt a un fork, et les caches GitHub existent).
 
 ## LOT 2 — Défauts de production (ils touchent la donnée)
 
-- [ ] **T-PROD-1 · `apply_rollback.py:106, :139-150, :460, :477` — un rollback qui ne restaure rien
-  et se déclare réussi.** Un partage réseau momentanément injoignable (winerror 53 → `ENOENT`,
+- [x] **T-PROD-1 · FAIT le 2026-08-29** (`rel(rollback)`) — le constat est RÉEL, son mécanisme
+  était FAUX, et le vérifier a changé le correctif.
+  **Reproduit** avec la fonction de production, 3 ops sur un volume absent : `ok=True`,
+  `ROLLED_BACK_BY_ATOMIC`, `done=0 skipped=3 failed=0`, « 0 revert / 3 skipped ». Trois films non
+  restaurés, annoncés comme un succès franc.
+  **Mais `ROLLBACK_PARTIAL` n'est PAS inatteignable** — il est produit à `:486` dès que
+  `failed>0 et done>0`. Le défaut est qu'un `SKIPPED` n'entre dans **aucun** des deux compteurs
+  qui font basculer le verdict.
+  ⚠️ **Ce que la vérification a sauvé** : `test_rollback_5_of_10_partial` asserte *explicitement*
+  que 5 done + 5 skipped rendent `ok=True`. Compter les SKIPPED comme des échecs aurait **éteint
+  cette garde délibérée** et fait échouer des rollbacks valides. Mutation à l'appui : le mutant
+  « sur-durcir » tue mon contre-test **et les deux gardes préexistantes**.
+  **Discriminant mesuré** (3 cas dont un UNC réellement injoignable) : `dst.exists()` rend False
+  partout, `dst.parent.is_dir()` sépare « rien à restaurer » de « je ne sais pas ». Correctif à la
+  **classification**, pas dans l'agrégation.
+  Reste ouvert : les deux autres raisons de saut qui signifient « je n'ai pas pu » —
+  `src/dst vides` et `orphan_backup_present` — non mesurées, donc non traitées.
+  ~~`apply_rollback.py:106, :139-150, :460, :477` — un rollback qui ne restaure rien
+  et se déclare réussi.~~ Un partage réseau momentanément injoignable (winerror 53 → `ENOENT`,
   winerror 21 lecteur non prêt) fait rendre `False` à `Path.exists()` ; l'op passe
   `SKIPPED/dst_missing`, l'`undo_status` est persisté, la reprise au boot ressort immédiatement, et
   comme `failed == 0` le statut final est `ROLLBACK_DONE` / `ok=True` / `done=0`. **Chaîne
