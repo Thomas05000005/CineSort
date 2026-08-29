@@ -399,10 +399,19 @@ etait en clair dans `docs/internal/BILAN_ITER4_2026-06-08.md:272` et
   `rest_server.py:543` journalise la ligne de requete brute. Demonstration avec
   la regex reelle : `?token=X` -> redige, `?ntoken=X` -> **intact**. La
   precaution anti-faux-positif d'une garde est ce qui aveugle l'autre.
-- **TROIS des SEPT checks REQUIS ne peuvent pas echouer** : `bandit.yml:89` et
-  `mypy.yml:92` finissent par `|| true`, `pip-audit.yml:87` porte
-  `continue-on-error: true`. La protection de `main` en annonce sept ; quatre
-  mordent. **Lire la COMMANDE d'un check requis, jamais son nom dans la liste.**
+- **DEUX des SEPT checks REQUIS ne pouvaient pas echouer** : `bandit.yml` et
+  `mypy.yml` finissaient par `|| true`. **Lire la COMMANDE d'un check requis,
+  jamais son nom dans la liste.** Corrige le 2026-08-29 par un cliquet sur le
+  COMPTE (33 findings bandit, 70 erreurs mypy) : la montee echoue, la baisse
+  aussi — un gain non verrouille se reperd.
+
+  Ce paragraphe a longtemps dit **TROIS**, en comptant `pip-audit.yml:87`. FAUX,
+  et la facon dont l'erreur a survecu compte plus que l'erreur : verifier que la
+  chaine `continue-on-error` EXISTE dans un fichier ne dit pas ce qu'elle
+  GOUVERNE. `pip-audit.yml` a un job et trois etapes ; les deux audits de
+  PRODUCTION tournent en `--strict` et bloquent, seul celui des dependances de
+  DEV est exempte. **Un `grep` qui trouve la chaine attendue confirme la
+  presence, jamais la portee.**
 
 **Un secret en query string fuit cote CLIENT.** Sur 129 889 fichiers balayes
 sous `%LOCALAPPDATA%/CineSort`, **24** portaient la valeur : 6 `settings.json.bak*`,
@@ -506,6 +515,63 @@ Un test (`LeVerdictNAtteintAUCUNEcranTests`) CONSTATE l'absence de lecteur cote
 front, pour que le jour ou un ecran le lira, quelqu'un vienne mettre ce constat
 a jour au lieu de le decouvrir.
 
+**`same-site` N'EST PAS UNE FRONTIERE SUR `127.0.0.1`.** Le « site » au sens
+Fetch Metadata est le domaine enregistrable : **le port n'en fait pas partie**.
+Mesure au navigateur reel (2026-08-29, deux serveurs locaux 18801/18802) : une
+image demandee a un AUTRE PORT porte `Sec-Fetch-Site: same-site`, jamais
+`cross-site`. `_poster_trusted_caller` acceptait `same-site` : tout autre service
+web tournant sur la machine de l'utilisateur etait donc FIABLE, avec `force=1` et
+le fetch TMDb — et pouvait lire le cache de jaquettes id par id, donc enumerer la
+bibliotheque. La valeur qui porte la meme frontiere qu'`_allowed_origin` (lequel,
+lui, contraint le port) est **`same-origin`**.
+
+Deux corollaires payes le meme jour :
+
+- **un repli par IP annule un durcissement d'en-tete.** Exiger `same-origin` sans
+  toucher au `return self._client_ip() in _LOCAL_CLIENT_IPS` laissait un
+  navigateur `same-site` en loopback redevenir fiable. Des qu'un `Sec-Fetch-Site`
+  est present, l'appelant EST un navigateur et se prononce lui-meme. C'est
+  l'ECRITURE DU TEST qui l'a revele, pas la lecture ;
+- **une preuve qui enumere les cas qu'on avait en tete n'est pas une preuve.**
+  Le diagnostic d'origine (`docs/internal/r8/r8_f3_poster_trusted_diff.py`, que
+  nul workflow ne lance) testait `same-origin` et `cross-site` — les deux
+  extremes d'un en-tete qui a QUATRE valeurs. Celle du milieu ouvrait le trou.
+
+**UN CORRECTIF DE SECURITE PEUT INTRODUIRE UN ReDoS, ET AUCUN TEST NE LE VERRA.**
+Le 2026-08-29, boucher le scrubber sur `ntoken=` demandait de retirer un `\b`.
+Prefixer le motif par `[\w-]*` pour englober le nom complet du parametre rend une
+sortie **strictement identique** — et fait passer 40 000 caracteres sans
+correspondance de **0,91 ms a 24 338 ms**. Cette version a bloque la batterie des
+12 fichiers lies : 371 s de CPU pour 439 s ecoulees, sans terminer.
+
+Les quatre variantes de motif etaient fonctionnellement VERTES : seule une mesure
+de TEMPS pouvait les separer. Quand un motif s'applique a de l'entree controlee
+par l'appelant — une ligne de requete, un nom de fichier —, sa complexite fait
+partie de sa surface d'attaque. Et **un test qui n'en finit pas ressemble a un
+test lent** : la difference se lit au compteur CPU, pas au chronometre.
+
+**`.get(cle, 0)` CONFOND « INCONNU » ET « PIRE ».** Dans le comparateur de
+doublons, `_video_codec_rank_value` rendait 0 pour tout codec absent d'une table
+de dix etiquettes — donc SOUS `xvid` (1). Mesure : `vc1`, `mpeg2video`, `vp9`,
+`prores`, `wmv3` rendaient tous 0, et le verdict d'un Blu-ray VC-1 25 Mbps 21 Go
+contre un DivX 1,5 Mbps 1,3 Go etait **« Garder B, archiver A »**, les deux debits
+affiches juste a cote. La fonction savait pourtant rendre `None` — elle le faisait
+deja pour un codec VIDE. Sur un chemin qui deplace des fichiers, l'absence de
+connaissance doit produire un refus de trancher, pas un jugement.
+
+**LE DEPOT STOCKE DU LF** (`core.autocrlf=true`, aucun `.gitattributes`) : la
+copie de travail est en CRLF, l'index en LF. La discipline binaire sur les fins de
+ligne protege donc la COPIE DE TRAVAIL, jamais le commit — `git add` normalise de
+toute facon. Le controle qui prouve qu'une edition est locale est le
+**`git diff --numstat` identique avec et sans `--ignore-cr-at-eol`**.
+
+Et ce controle **ne voit pas** une insertion qui coupe une fonction en deux :
+inserer entre deux lignes rend « N ajoutees, **0 retiree** » alors que le test
+voisin a perdu une assertion (vecu le 2026-08-29). Meme famille que « ne jamais
+inserer entre un decorateur et sa fonction ». Le garde qui mord est un controle
+**AST** : comparer, avant/apres, le nombre d'instructions du corps de chaque
+fonction preexistante.
+
 ## Conventions
 
 **Titre de PR** — types autorises : `feat fix docs ci refactor test chore perf
@@ -582,7 +648,7 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9131 tests**
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9279 tests**
 (`passed`, mesure de la CI sur `main` fusionne le 2026-08-16 ; s'y ajoutent
 20 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
 pas — et il se remesure **par la meme commande**, sinon on compare un compte

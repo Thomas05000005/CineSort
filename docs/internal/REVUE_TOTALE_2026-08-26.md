@@ -413,6 +413,82 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
 
 ---
 
+## Journal du 2026-08-29 — 11 commits locaux, suite CI verte (9 279 passed, 0 échec)
+
+### Débloqué
+
+- [x] **T-CI-1 · ÉPROUVÉ, puis généralisé — le remède marche.** Les runs parqués de #1133 ont
+  été approuvés, puis ceux des 7 autres (83 runs au total). Résultat mesuré :
+
+  | PR | Checks requis | État |
+  |---|---|---|
+  | #1128 #1134 #1148 #1152 | **7/7 verts** | **`CLEAN`, fusionnables** |
+  | #1137 | 7/7 verts | bloquée par 1 fil de revue |
+  | #1125 | 6/7 | + 1 fil de revue |
+  | #1130 #1133 | 6/7 | **1 check rouge légitime** |
+
+  Ni fermeture, ni réouverture, ni squash : le finding `a3610492` de la PR #1148 est
+  **réfuté par l'expérience**. Et T-CI-8 avait raison — approuver ne suffit pas là où un fil
+  de revue traîne.
+- [ ] **T-CI-3 · #1133 a un vrai défaut, pas seulement un gel.** Son `Lint, Tests, Build`
+  échoue sur `tests/test_contract_settings.py::test_every_canonical_key_has_backend_reader` :
+  la clé canonique `history_retention_days` n'a **pas de lecteur backend**. Mesuré dans le
+  journal du run, pas déduit. À corriger avant fusion — la PR porte par ailleurs le correctif
+  du « 0 = désactivé » d'un cron destructif (T-PROD-2).
+- [x] **T-SEC-7 · FAIT — cliquet sur le COMPTE** (`ci(sec)`). Retirer les `|| true` d'un coup
+  aurait rendu `main` rouge sur **103 éléments** (33 findings bandit dont 1 HIGH/HIGH,
+  70 erreurs mypy dans 34 fichiers). Le compte est figé ; la montée échoue, **la baisse aussi**
+  (un gain non verrouillé se reperd), et un rapport illisible échoue. Logique extraite des
+  workflows et jouée sur **9 cas contrôlés**. ⚠️ `actionlint` n'est pas installable localement :
+  c'est la CI qui le passera.
+
+### Deux défauts de sécurité NEUFS, dans le périmètre jamais audité
+
+- [x] **T-PROD-9 · NEUF — un `.nfo` amplifiait 500 octets en gigaoctets** (`sec(nfo)`, CWE-776).
+  Trouvé *en mesurant la dette bandit*. `parse_movie_nfo` appelait `ET.fromstring` sans garde ;
+  mesure par la fonction de production : 226 o → ~0 Mo, 336 o → 0,7 Mo, **391 o → 6,6 Mo**
+  (×10 par niveau). Atteignable par la planification (`plan_support_replan.py:783`), et un
+  `.nfo` arrive **avec le torrent** — donc écrit par le releaser.
+  Le commentaire en place justifiait l'inaction par « pas un input venant d'un attaquant » :
+  faux. Sa conclusion ne valait que pour **XXE**, que j'ai vérifié réellement fermé
+  (`ParseError: undefined entity`). Garde précis sur `<!ENTITY`, jamais sur `<!DOCTYPE`.
+  Après : 501 o → 0,01 Mo. Mutation 3/3.
+- [x] **T-PROD-10 · NEUF — le comparateur de doublons archivait un Blu-ray au profit d'un DivX**
+  (`fix(doublons)`). `_video_codec_rank_value` faisait `.get(codec, 0)` : `vc1`, `mpeg2video`,
+  `vp9`, `prores`, `wmv3` tombaient **sous `xvid`**. Verdict mesuré sur un probe construit par
+  `_build_pseudo_probe` : Blu-ray VC-1 25 Mbps 21 Go contre DivX 1,5 Mbps 1,3 Go →
+  **« Garder B, archiver A »**, les deux débits affichés juste à côté. Applicable en masse par
+  « Auto-décider tous ».
+  Le remède **n'invente aucun rang** : il distingue « inconnu » de « pire », ce que la fonction
+  faisait déjà pour un codec VIDE. Après : verdict `tie`. Témoin HEVC/XVID : inchangé.
+  ⚠️ **Le saut du critère bitrate entre codecs différents n'est PAS un défaut** — il est
+  délibéré et gardé par `test_different_codec_skip_bitrate`. Ne pas le « corriger ».
+
+### Ce qui reste ouvert, et ce qu'il faut savoir avant d'y toucher
+
+- [ ] **T-SEC-12 · `GET /api/spec` rend 80 182 octets sans jeton** — la carte des 172 endpoints,
+  routes destructives comprises. Non lisible *cross-site* (aucun `Access-Control-Allow-Origin`
+  émis pour une origine tierce), donc exploitable par un processus local ou en LAN sous
+  `--public`. À arbitrer.
+- [ ] **T-SEC-13 · Les 3 findings bandit à HAUTE confiance ne sont pas triés** : B324 SHA1
+  (`plan_support_core.py:264`, correctif trivial `usedforsecurity=False`), B310 `urlopen`
+  (`updater.py:220`), et les 27 B608 (SQL par construction de chaîne) probablement faux
+  positifs à vérifier un par un.
+- [ ] **T-DOM-1 · 27 pistes non vérifiées** issues d'un audit de `cinesort/domain/` et `web/`
+  (5 lecteurs + 5 réfutateurs). **Ce sont des PISTES, pas des constats** : une seule a été
+  remesurée à la main et livrée (T-PROD-10). Les autres portent sur le score qualité (plafond
+  SD inatteignable, rétro-compat legacy morte, `enable_4k_light` qui allège au lieu de pénaliser,
+  lossless FLAC/PCM sans bonus, un `add_reason(-4)` sans effet, un signe de facteur inversé),
+  la comparaison de doublons, le parsing de titres (`scene_parser` strippe `cam` et `opus`
+  inconditionnellement) et le front. **Vérifier chacune avant d'y toucher.**
+  ⚠️ **Le harnais qui les a produites a menti sur son propre bilan** : il a rapporté
+  « 28 confirmés, 0 réfutés » parce que le classificateur ne lisait que le PREMIER MOT du
+  verdict. **17 verdicts sur 28 portent une réserve explicite** dans leur corps, dont un qui
+  détruit deux affirmations d'impact. Un taux de réfutation de 0 % est en soi un signal
+  d'alarme — la revue du 2026-08-26 réfutait 52 %.
+
+---
+
 ## Ce que cette revue N'A PAS regardé
 
 Établi par un critique de complétude payé pour attaquer la synthèse. C'est la partie la plus utile.
