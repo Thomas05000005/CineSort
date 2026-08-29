@@ -777,7 +777,13 @@ def migrate_legacy_collection_root(
             # le record_apply_op ci-dessous, rien ne tracait l'operation : si
             # l'app meurt dans cette fenetre, la racine de collection entiere a
             # bouge et aucune ligne ne le dit.
-            with journal_pose_autour(record_op, src=legacy_root, dst=target_root, op_type="MOVE_DIR"):
+            with journal_pose_autour(
+                record_op,
+                src=legacy_root,
+                dst=target_root,
+                op_type="MOVE_DIR",
+                liberer_si_rien_n_a_bouge=True,
+            ):
                 legacy_root.rename(target_root)
             record_apply_op(
                 record_op,
@@ -2832,6 +2838,10 @@ def apply_single(
             op_type="MOVE_DIR",
             src_sha1=src_sha1,
             src_size=src_size,
+            # Renommage pur : s'il echoue, le disque prouve que rien n'a bouge.
+            # Sans ca, chaque fichier verrouille (VLC, indexeur) laisserait un
+            # pending derriere lui.
+            liberer_si_rien_n_a_bouge=True,
         ):
             if casse_seule:
                 # Fix audit 2026-05-26 (v1.5.6) Vague L : extraction en helper

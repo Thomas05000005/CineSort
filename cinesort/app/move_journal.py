@@ -343,6 +343,7 @@ def journal_pose_autour(
     src_sha1: Optional[str] = None,
     src_size: Optional[int] = None,
     row_id: Optional[str] = None,
+    liberer_si_rien_n_a_bouge: bool = False,
 ) -> Iterator[Optional[int]]:
     """Pose le journal write-ahead autour d'un deplacement fait par L'APPELANT.
 
@@ -367,14 +368,54 @@ def journal_pose_autour(
     if store is None:
         yield None
         return
-    with journaled_move(
-        store,
-        src=src,
-        dst=dst,
-        op_type=op_type,
-        batch_id=getattr(record_op, "journal_batch_id", None),
-        src_sha1=src_sha1,
-        src_size=src_size,
-        row_id=row_id,
-    ) as pending_id:
-        yield pending_id
+    try:
+        with journaled_move(
+            store,
+            src=src,
+            dst=dst,
+            op_type=op_type,
+            batch_id=getattr(record_op, "journal_batch_id", None),
+            src_sha1=src_sha1,
+            src_size=src_size,
+            row_id=row_id,
+        ) as pending_id:
+            yield pending_id
+    except BaseException:
+        if liberer_si_rien_n_a_bouge:
+            _liberer_si_le_disque_le_prouve(store, src=src, dst=dst)
+        raise
+
+
+def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: Union[Path, str]) -> None:
+    """Retire l'entree pending SI le disque prouve que rien n'a bouge.
+
+    `journaled_move` laisse l'entree en place sur exception, et il a raison pour
+    un `shutil.move` : celui-ci peut copier a moitie puis echouer, donc seule la
+    reconciliation au prochain demarrage peut trancher.
+
+    Un `rename` pur, lui, ne connait pas de demi-etat. Quand il echoue — le cas
+    NORMAL sous Windows, ou VLC ou l'indexeur tiennent un handle — la source est
+    toujours a sa place et la cible n'existe pas. Ce n'est pas une supposition :
+    c'est une lecture du disque, faite apres coup.
+
+    Sans cela, chaque fichier verrouille laisserait un pending derriere lui, et
+    la reconciliation du demarrage suivant aurait a trier des fantomes. Sur une
+    bibliotheque reelle, les fichiers verrouilles sont la norme, pas l'exception.
+
+    Prudence deliberee : sur un systeme de fichiers insensible a la casse, un
+    renommage a casse seule voit `dst.exists()` vrai meme quand rien n'a bouge.
+    La condition est alors fausse, l'entree reste, et la reconciliation tranche —
+    le comportement conservateur, celui d'avant.
+    """
+    try:
+        rien_n_a_bouge = Path(src).exists() and not Path(dst).exists()
+    except OSError:  # chemin devenu illisible : on ne sait pas, donc on garde
+        return
+    if not rien_n_a_bouge:
+        return
+    for entree in store.apply.list_pending_moves():
+        if entree.get("src_path") == str(src) and entree.get("dst_path") == str(dst):
+            try:
+                store.apply.delete_pending_move(entree["id"])
+            except Exception:  # noqa: BLE001 - best-effort, jamais bloquant
+                _logger.exception("journal: liberation du pending %s impossible", entree.get("id"))

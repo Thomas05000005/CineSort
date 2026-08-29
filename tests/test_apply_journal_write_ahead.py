@@ -40,7 +40,7 @@ from unittest import mock
 import cinesort.domain.core as core
 from cinesort.app import apply_core
 from cinesort.app.apply_core import apply_single, migrate_legacy_collection_root
-from cinesort.app.move_journal import RecordOpWithJournal
+from cinesort.app.move_journal import RecordOpWithJournal, journal_pose_autour
 from cinesort.infra.db.sqlite_store import SQLiteStore
 
 
@@ -162,6 +162,98 @@ class ApplyJournalWriteAheadTests(unittest.TestCase):
             "aucune entree pending PENDANT la migration de la racine de collection",
         )
         self.assertEqual(self.store.apply.count_pending_moves(), 0, "journal jamais relache")
+
+
+class LiberationSurPreuveTests(unittest.TestCase):
+    """`liberer_si_rien_n_a_bouge` doit lire le disque, pas supposer.
+
+    Poser le journal a fait apparaitre un residu : `journaled_move` laisse
+    l'entree en place sur exception — et il a raison pour un `shutil.move`, qui
+    peut copier a moitie puis echouer. Un `rename` pur ne connait pas de
+    demi-etat ; quand il echoue (cas NORMAL sous Windows : VLC ou l'indexeur
+    tiennent un handle), le lot CONTINUE et l'entree survivrait a un run
+    entierement reussi.
+
+    Les deux sens comptent. Sans le second test, « liberer sur preuve » serait
+    indistinguable de « toujours liberer », qui reintroduirait exactement le
+    trou que T-PROD-8 vient de fermer.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_liberation_"))
+        self.store = SQLiteStore(self._tmp / "test.sqlite", busy_timeout_ms=5000)
+        self.store.initialize()
+        self.record_op = RecordOpWithJournal(lambda payload: None, store=self.store, batch_id="lot")
+
+    def tearDown(self) -> None:
+        try:
+            self.store.close()
+        except Exception:
+            pass
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_echec_avec_source_intacte_libere_l_entree(self) -> None:
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+
+        with self.assertRaises(PermissionError):
+            with journal_pose_autour(
+                self.record_op,
+                src=src,
+                dst=dst,
+                op_type="MOVE_DIR",
+                liberer_si_rien_n_a_bouge=True,
+            ):
+                raise PermissionError("WinError 5 : handle tenu par un tiers")
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            0,
+            "la source est intacte et la cible absente : le disque PROUVE que rien "
+            "n'a bouge. Garder l'entree ferait trier un fantome a chaque fichier "
+            "verrouille, et ils sont la norme sur une vraie bibliotheque.",
+        )
+
+    def test_echec_avec_cible_presente_GARDE_l_entree(self) -> None:
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+        dst.mkdir()  # etat ambigu : quelque chose est a l'arrivee
+
+        with self.assertRaises(PermissionError):
+            with journal_pose_autour(
+                self.record_op,
+                src=src,
+                dst=dst,
+                op_type="MOVE_DIR",
+                liberer_si_rien_n_a_bouge=True,
+            ):
+                raise PermissionError("echec apres un deplacement partiel")
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            1,
+            "le disque ne prouve RIEN ici : seule la reconciliation au prochain "
+            "demarrage peut trancher. Liberer serait reintroduire le trou que "
+            "T-PROD-8 vient de fermer.",
+        )
+
+    def test_sans_l_option_le_comportement_conservateur_est_inchange(self) -> None:
+        src = self._tmp / "source"
+        src.mkdir()
+        dst = self._tmp / "cible"
+
+        with self.assertRaises(PermissionError):
+            with journal_pose_autour(self.record_op, src=src, dst=dst, op_type="MOVE_DIR"):
+                raise PermissionError("echec")
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            1,
+            "l'option est opt-in : les appelants qui font un shutil.move gardent "
+            "le contrat conservateur de journaled_move.",
+        )
 
 
 if __name__ == "__main__":
