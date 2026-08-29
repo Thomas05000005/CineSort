@@ -417,6 +417,39 @@ def extract_source(filename: str) -> Optional[str]:
     return None
 
 
+def _une_passe_de_nettoyage(name: str, *, had_tech_marker: bool) -> str:
+    """Une iteration du nettoyage de fin de nom (etapes 6 a 8 du pipeline).
+
+    Extraite de `parse_scene_title` le 2026-08-29 : ajouter le strip des jetons
+    ambigus la portait a 118 lignes pour un plafond gele a 117. Le corps de la
+    boucle formait deja une unite — « une passe » — et la rendre nommable vaut
+    mieux que monter le plafond d'une ligne.
+
+    L'ORDRE compte et n'est pas interchangeable : le release group part avant
+    les separateurs orphelins qu'il laisse, l'after-year noise a besoin que ces
+    separateurs aient disparu pour matcher, et les jetons ambigus passent en
+    DERNIER — quand tout ce qui les precede a ete retire, c'est la seule
+    position ou « le jeton EST tout le nom » se distingue de « le jeton SUIT
+    quelque chose ».
+    """
+    # Release group `-GROUP$` — seulement si vraie release (marqueur technique).
+    if had_tech_marker:
+        name = _RELEASE_GROUP_RE.sub(" ", name)
+    # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
+    name = _ORPHAN_SEP_RE.sub("", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    # Position-aware after-year noise tokens
+    name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    # Trailing language tokens sans annee prealable
+    # (cas "L'arme Fatale 2 - FR EN ...")
+    name = _TRAILING_LANG_TOKENS_RE.sub("", name)
+    name = _TRAILING_AMBIGU_RE.sub("", name)
+    name = _ORPHAN_SEP_RE.sub("", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+
 def parse_scene_title(filename: str) -> str:
     """Extrait un titre nettoye depuis un nom de fichier scene.
 
@@ -514,23 +547,7 @@ def parse_scene_title(filename: str) -> str:
     # Cap a 4 iterations par securite.
     for _ in range(4):
         prev = name
-        # Release group `-GROUP$` — seulement si vraie release (marqueur technique).
-        if had_tech_marker:
-            name = _RELEASE_GROUP_RE.sub(" ", name)
-        # Strip dash/separateurs orphelins en fin (apres release group ou NOISE)
-        name = _ORPHAN_SEP_RE.sub("", name)
-        name = re.sub(r"\s+", " ", name).strip()
-        # Position-aware after-year noise tokens
-        name = _AFTER_YEAR_NOISE_RE.sub(r"\1", name)
-        name = re.sub(r"\s+", " ", name).strip()
-        # Trailing language tokens sans annee prealable
-        # (cas "L'arme Fatale 2 - FR EN ...")
-        name = _TRAILING_LANG_TOKENS_RE.sub("", name)
-        # Jetons ambigus trailing, sans annee prealable (cf _TRAILING_AMBIGU_RE) :
-        # « Batman - Begins PROPER » perd son tag, « Cam » garde son titre.
-        name = _TRAILING_AMBIGU_RE.sub("", name)
-        name = _ORPHAN_SEP_RE.sub("", name)
-        name = re.sub(r"\s+", " ", name).strip()
+        name = _une_passe_de_nettoyage(name, had_tech_marker=had_tech_marker)
         if name == prev:
             break
 
