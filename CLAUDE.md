@@ -803,6 +803,18 @@ avaient **verifies mais laisses sans PR**, faute de budget d'ouverture.
   « ~1000 films + un parcours disque » (#406). L'absence vaut **INCONNU**, pas
   zero : l'ecran a trois etats.
 
+**ET UNE PR OUVERTE PEUT DEJA PORTER LE CORRECTIF.** Le 2026-08-29, un lot a
+reimplemente `sqlite3.Error` sur `cinesort_api.py::log_api_exception`... que la
+PR #1128, ouverte depuis huit jours, corrigeait deja — et mieux : elle traitait
+aussi `_find_run_row` et `quality_audit_support._recompute_worker`, avec un
+fichier de test dedie de 260 lignes. Le merge a produit un conflit sur la ligne
+exacte, et la branche a du ceder.
+
+La regle « re-mesurer avant de coder, y compris sur une issue ouverte » existait
+deja (voir juste en dessous). Il lui manquait sa variante la plus couteuse : les
+PR EN COURS. Avant d'attaquer un constat de la file de travail,
+`gh pr list --search "<mot-cle du defaut>"` coute dix secondes.
+
 **TROIS ISSUES OUVERTES ETAIENT DEJA CORRIGEES** — #984, #972, #1002. Mesurees
 avant d'ecrire une ligne : la garde d'unicite de #984 existe
 (`run_id_est_utilise` interroge les tables filles), le commentaire faux de #972
