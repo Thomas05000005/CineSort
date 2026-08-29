@@ -86,6 +86,38 @@ class CablageDuVerdictTests(unittest.TestCase):
     def _warns(self) -> List[str]:
         return [m for niveau, m in self.journal if niveau == "WARN"]
 
+    # --- T-PROD-6 : le mode degrade -------------------------------------
+    def test_un_apply_en_mode_DEGRADE_porte_son_verdict(self):
+        """`apply_batch_id` absent du payload = le batch n'a jamais ete cree.
+
+        C'est le mode degrade documente dans `apply_support.py` : quand
+        `insert_apply_batch` echoue, l'apply s'execute quand meme, `record_apply_op`
+        sort immediatement, et rien n'est annulable. Le verdict etait VERT parce
+        que deux journaux vides ne contredisent rien.
+
+        Ce test porte sur le CABLAGE, pas sur la fonction pure : sans lui,
+        retirer `journal_ouvert=apply_batch_id is not None` du site d'appel
+        laisserait toute la batterie verte.
+        """
+        payload = self._appeler({"result": {"applied_count": 12, "errors": 0}}, [])
+        self.assertIn("verdict", payload, f"aucun verdict rendu : journal={self.journal}")
+        self.assertIn(
+            "journal_absent_malgre_des_actions_annoncees",
+            [inc["code"] for inc in payload["verdict"]["incoherences"]],
+        )
+
+    def test_un_apply_NORMAL_ne_declenche_pas_ce_verdict(self):
+        """Temoin : avec un batch_id, l'invariant du mode degrade se tait.
+
+        Sans ce temoin, le test ci-dessus serait indistinguable d'un invariant
+        qui mord tout le monde.
+        """
+        payload = self._appeler(
+            {"apply_batch_id": "b-42", "result": {"applied_count": 1, "errors": 0}},
+            [{"op_type": "MOVE_DIR"}],
+        )
+        self.assertNotIn("verdict", payload, f"faux positif : {payload.get('verdict')}")
+
     # --- le cablage est-il VIVANT ? -------------------------------------
     def test_1062_de_bout_en_bout_le_payload_PORTE_l_incoherence(self):
         """Le cas reel : `errors: 0` annonce, des echecs inscrits au journal."""
@@ -555,3 +587,104 @@ class LE_VERDICT_ATTEINT_UN_HUMAIN_Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LE_CHEMIN_D_ERREUR_PORTE_AUSSI_SON_VERDICT_Tests(unittest.TestCase):
+    """T-PROD-7 : l'apply qui casse APRES avoir deplace ne disait rien de ce qui avait bouge.
+
+    `_avec_verdict` n'avait qu'UN seul site d'appel : le retour nominal.
+    L'`except Exception` du meme corps rendait un `_err_response` nu. Or c'est le
+    cas le plus grave du produit : trois cents films ont bouge, la finalisation
+    casse, et l'utilisateur lit « Echec application » sans apprendre que son
+    disque a change ni que l'annulation est disponible.
+
+    Le remede n'a demande AUCUN invariant nouveau. Un `_err_response` ne porte
+    aucun compteur d'action disque non nul — c'est exactement la precondition de
+    `_verifier_deplacements_tus`, ecrit pour le cas « le journal porte des
+    deplacements mais le payload n'en annonce aucun ». L'invariant juste
+    existait deja ; il n'etait simplement pas appele la.
+
+    On reutilise le harnais de la classe precedente, en faisant lever
+    `_execute_apply` APRES qu'il a pose le `batch_state` : c'est precisement la
+    fenetre ou le disque a bouge et ou la finalisation casse.
+    """
+
+    def _payload_d_un_apply_QUI_CASSE(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        from types import SimpleNamespace
+
+        logs: List[tuple[str, str]] = []
+        store = _FauxStore(operations)
+        store.backup_now = lambda *, trigger: None  # type: ignore[attr-defined]
+        store.close_apply_batch = lambda **kwargs: None  # type: ignore[attr-defined]
+        api = SimpleNamespace(
+            _get_run=lambda _run_id: None,
+            _app_version="test",
+            _notify=SimpleNamespace(notify=lambda *a, **k: None),
+            _dispatch_plugin_hook=lambda *a, **k: None,
+            _dispatch_email=lambda *a, **k: None,
+            log_api_exception=lambda *a, **k: None,
+        )
+        ctx = {
+            "ok": True,
+            "_ctx": (
+                SimpleNamespace(),
+                SimpleNamespace(run_dir="run_dir_factice"),
+                [],
+                lambda niveau, message: logs.append((str(niveau), str(message))),
+                store,
+                {},
+                set(),
+            ),
+        }
+
+        def _execute_puis_casse(*_a: Any, **kwargs: Any) -> Any:
+            # Le disque a bouge : le batch existe et porte deja des operations.
+            kwargs["batch_state"][0] = "batch-42"
+            kwargs["batch_state"][1] = len(operations)
+            raise RuntimeError("la finalisation casse APRES les deplacements")
+
+        with (
+            mock.patch.object(apply_support, "_validate_apply", return_value=ctx),
+            mock.patch.object(apply_support, "_snapshot_jellyfin_watched", return_value=None),
+            mock.patch.object(apply_support, "_execute_apply", side_effect=_execute_puis_casse),
+            mock.patch.object(apply_support, "read_apply_audit", return_value=[]),
+        ):
+            payload = apply_support._apply_changes_body(
+                api,
+                "run-1",
+                {},
+                False,
+                False,
+                cleanup_scope_label=lambda value: str(value),
+                cleanup_status_label=lambda *a, **k: "",
+                cleanup_reason_label=lambda value: str(value),
+            )
+        self._logs = logs
+        return payload
+
+    def test_le_harnais_atteint_bien_le_chemin_D_ERREUR(self) -> None:
+        """Sans ce garde, un harnais qui rendrait un payload NOMINAL ferait
+        passer le test suivant sans jamais avoir atteint l'`except`."""
+        payload = self._payload_d_un_apply_QUI_CASSE([{"op_type": "MOVE_DIR"}] * 12)
+        self.assertFalse(payload.get("ok"), f"le harnais n'atteint pas le chemin d'erreur : {payload}")
+        self.assertEqual(payload.get("apply_batch_id"), "batch-42")
+
+    def test_un_apply_qui_casse_APRES_avoir_deplace_porte_son_verdict(self) -> None:
+        payload = self._payload_d_un_apply_QUI_CASSE([{"op_type": "MOVE_DIR"}] * 12)
+        self.assertIn(
+            "verdict",
+            payload,
+            "l'apply a casse apres avoir deplace 12 dossiers et le payload d'erreur "
+            "n'en dit rien : l'utilisateur ignore que son disque a change.",
+        )
+        self.assertIn(
+            "deplacements_journalises_non_annonces",
+            [inc["code"] for inc in payload["verdict"]["incoherences"]],
+        )
+
+    def test_un_apply_qui_casse_AVANT_tout_deplacement_ne_porte_PAS_de_verdict(self) -> None:
+        """Temoin. Sans lui, l'ajout serait indistinguable d'un verdict pose sur
+        toutes les erreurs, y compris celles ou rien n'a bouge."""
+        payload = self._payload_d_un_apply_QUI_CASSE([])
+        self.assertFalse(payload.get("ok"))
+        self.assertNotIn("verdict", payload, f"faux positif : {payload.get('verdict')}")

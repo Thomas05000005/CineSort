@@ -207,7 +207,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_podiums_support.py", "_get_library_podiums_impl"): 120,
     ("cinesort/infra/db/repositories/decisions.py", "upgrade_deferred_to_accepted"): 118,
     ("cinesort/app/watchlist.py", "compare_watchlist"): 117,
-    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 117,
+    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 109,
     ("cinesort/domain/duplicate_compare.py", "compare_by_criteria"): 116,
     ("cinesort/domain/video_hash.py", "extract_video_thumbnails"): 116,
     # 114 -> 108 : la route jaquettes a ete documentee et durcie le 2026-08-29,

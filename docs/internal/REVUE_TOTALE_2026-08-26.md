@@ -246,27 +246,27 @@ public (le dépôt a un fork, et les caches GitHub existent).
   n'en a inscrit que 3 » — absurde — et **une notification d'erreur publiée**. Chaque `move` crée
   le dossier parent de sa destination (`apply_core.py:1005`) : c'est l'undo **ORDINAIRE**.
   Le test `tests/test_verdicts_undo.py:274` mocke `_undo_mkdir_ops` à `0` : il ne pouvait pas le voir.
-- [ ] **T-PROD-6 · `apply_support.py:3262-3266`** — un apply réel dont `insert_apply_batch` a
-  échoué (`apply_batch_id = None`, mode dégradé documenté) échappe au verdict.
-- [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
-  chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
-  produit aucun.
-- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`**
-  → suivi dans l'issue **#1166** (« Close crash-consistency window between pending move
-  cleanup and record_apply_op »), ouverte par la revue automatique depuis cette entree.
-  CONSTAT NEUF
-  du 2026-08-29, issu d'une revue automatique sur la PR T-PROD-8 et VERIFIE.
-  `journaled_move` supprime l'entree pending des que le bloc de deplacement se termine, donc
-  AVANT le `record_apply_op` de l'appelant. Si le processus meurt dans cet intervalle, les
-  octets ont bouge et ni l'entree pending ni l'operation d'apply n'existent :
-  `reconcile_pending_moves()` n'a rien a reconcilier.
-  **Ce n'est PAS un defaut de T-PROD-8** : c'est le contrat de `journaled_move` (« DELETE
-  pending move si le with se termine sans exception »), donc TOUS les appelants d'`atomic_move`
-  le portent depuis l'origine. T-PROD-8 RETRECIT la fenetre — avant, le deplacement entier
-  n'etait pas trace ; apres, seul l'intervalle final l'est.
-  **Remede** : que la suppression du pending et l'insertion de l'operation d'apply partagent une
-  meme transaction. Changement de frontiere transactionnelle touchant tous les call sites du
-  journal — a instruire, pas a bricoler en passant.
+- [x] **T-PROD-6** — FAIT le 2026-08-29 (les lignes du constat ont dérivé ; le mécanisme, lui,
+  a été mesuré). ⚠ **Le constat était vrai, mais PAS par le mécanisme annoncé.** Le verdict
+  n'« échappe » pas : il EST calculé, et il rend `coherent=True`. Ce n'est pas une évasion,
+  c'est un **faux vert** — et la distinction change le remède.
+  Cause réelle : `_verifier_deplacements_tus` ne couvre qu'UN sens (le journal porte des
+  déplacements, le payload n'en annonce aucun). Le sens inverse — le payload annonce
+  12 rangements, le journal est vide — n'était couvert par rien, et il ment plus fort :
+  l'utilisateur voit « 12 films rangés » et un bouton *Annuler* qui ne fera rien.
+  Remède : `_verifier_journal_absent`, déclenché sur le journal **JAMAIS OUVERT** et non
+  sur le journal vide — un batch existant et vide peut avoir une cause légitime, un batch
+  jamais créé n'en a aucune. 4 mutants, 4 morts, dont le retrait du câblage.
+  Mesuré avec témoin : un apply sain (12 annoncés / 12 journalisés) reste vert.
+- [x] **T-PROD-7** — FAIT le 2026-08-29. Constat exact : `_avec_verdict` n'avait qu'UN site
+  d'appel, le retour nominal. C'est pourtant le cas le plus grave du produit — 300 films ont
+  bougé, la finalisation casse, et l'utilisateur lit « Échec application » sans apprendre que
+  son disque a changé ni que l'annulation est disponible.
+  **Aucun invariant nouveau n'a été nécessaire.** Un `_err_response` ne porte aucun compteur
+  d'action disque non nul — précisément la précondition de `_verifier_deplacements_tus`, écrit
+  pour « le journal porte des déplacements, le payload n'en annonce aucun ». L'invariant juste
+  existait déjà ; il n'était pas appelé là. 2 mutants, 2 morts, plus un témoin (un apply qui
+  casse AVANT tout déplacement ne doit porter aucun verdict).
 - [x] **T-PROD-8 · `apply_core.py:2817` et `:775`** — FAIT le 2026-08-29 (PR à ouvrir).
   Constat vérifié dans le code : les deux sites renomment puis appellent `record_apply_op`,
   et la docstring d'`atomic_move` décrit mot pour mot ce que cela coûte. Le remède n'est PAS
@@ -279,8 +279,22 @@ public (le dépôt a un fork, et les caches GitHub existent).
   un `pending` derrière lui. D'où `liberer_si_rien_n_a_bouge`, qui LIT le disque au lieu de
   supposer. 8 mutants, 8 morts — dont un survivant qui a révélé que l'appariement src/dst
   n'était testé par rien : sans lui, un échec d'aujourd'hui effaçait la trace d'un crash d'hier.
-
-- [ ] ~~**T-PROD-8 · `apply_core.py:2817` et `:775`**~~ — `apply_single` (le chemin le plus fréquent)
+- [ ] ~~**T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
+- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`** — CONSTAT NEUF
+  du 2026-08-29, issu d'une revue automatique sur la PR T-PROD-8 et VERIFIE.
+  → suivi dans l'issue **#1166** (« Close crash-consistency window between pending move cleanup
+  and record_apply_op »), ouverte par la revue automatique depuis cette entree.
+  `journaled_move` supprime l'entree pending des que le bloc de deplacement se termine, donc
+  AVANT le `record_apply_op` de l'appelant. Si le processus meurt dans cet intervalle, les
+  octets ont bouge et ni l'entree pending ni l'operation d'apply n'existent :
+  `reconcile_pending_moves()` n'a rien a reconcilier.
+  **Ce n'est PAS un defaut de T-PROD-8** : c'est le contrat de `journaled_move` (« DELETE
+  pending move si le with se termine sans exception »), donc TOUS les appelants d'`atomic_move`
+  le portent depuis l'origine. T-PROD-8 RETRECIT la fenetre — avant, le deplacement entier
+  n'etait pas trace ; apres, seul l'intervalle final l'est.
+  **Remede** : que la suppression du pending et l'insertion de l'operation d'apply partagent une
+  meme transaction. Changement de frontiere transactionnelle touchant tous les call sites du
+  journal — a instruire, pas a bricoler en passant.
   et la migration de la racine de collection ne passent pas par `move_journal.atomic_move` : elles
   renomment puis appellent `record_apply_op`. Le **journal write-ahead n'est pas posé**, et c'est
   lui qui rend le déplacement réconciliable si l'app meurt entre les deux — la docstring
@@ -552,7 +566,17 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
   (`plan_support_core.py:264`, correctif trivial `usedforsecurity=False`), B310 `urlopen`
   (`updater.py:220`), et les 27 B608 (SQL par construction de chaîne) probablement faux
   positifs à vérifier un par un.
-- [ ] **T-DOM-1 · 27 pistes non vérifiées** issues d'un audit de `cinesort/domain/` et `web/`
+- [~] **T-DOM-1 · 27 pistes** — UNE traitée le 2026-08-29 (`scene_parser`), et un constat
+  préalable : **le détail des 27 n'existe nulle part sur disque.** Seul le résumé ci-dessous
+  les évoque, et il n'en NOMME que six. Les autres ne sont pas vérifiables faute de source.
+  ✅ **`scene_parser` — CONFIRMÉE et bien pire qu'annoncé.** Sept mots de `_NOISE_RE` sont de
+  vrais titres : `Cam (2018)` et `Opus (2025)` rendaient une chaîne **VIDE**, `Internal Affairs`
+  rendait `Affairs`, `Complete Unknown` rendait `Unknown`. Cause : `_NOISE_RE` (étape 3)
+  s'applique PARTOUT, y compris avant l'année, et s'exécute quatre étapes AVANT le traitement
+  position-aware (étape 7). `cam`, `proper` et `repack` figuraient dans les DEUX listes —
+  la première les consommait, la seconde ne les voyait jamais. 6 mutants, 6 morts, dont un
+  survivant qui a révélé que ma propre correction recréait la redondance.
+- [ ] ~~**T-DOM-1 · 27 pistes non vérifiées**~~ issues d'un audit de `cinesort/domain/` et `web/`
   (5 lecteurs + 5 réfutateurs). **Ce sont des PISTES, pas des constats** : une seule a été
   remesurée à la main et livrée (T-PROD-10). Les autres portent sur le score qualité (plafond
   SD inatteignable, rétro-compat legacy morte, `enable_4k_light` qui allège au lieu de pénaliser,

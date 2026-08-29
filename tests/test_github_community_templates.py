@@ -24,10 +24,13 @@ class CommunityTemplatesTests(unittest.TestCase):
                 self.assertTrue(Path(f).is_file(), f"Manquant: {f}")
 
     def test_yaml_files_valid_yaml(self):
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("PyYAML non installé (CI a yaml)")
+        # Le `skipTest("PyYAML non installé (CI a yaml)")` d'origine est retiré :
+        # PyYAML est DÉCLARÉ dans requirements-dev.txt depuis le 2026-08-29, et
+        # un garde vérifie qu'il y reste. Le commentaire disait « CI a yaml »,
+        # c'est-à-dire une supposition là où il faut une déclaration — et un
+        # test qui se met en skip rend le même vert qu'un test qui passe, dans
+        # une sortie qu'on lit en diagonale.
+        import yaml  # noqa: PLC0415 — dépendance de test, pas du produit
 
         for f in REQUIRED_FILES:
             if f.endswith(".yml"):
