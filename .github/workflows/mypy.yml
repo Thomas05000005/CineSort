@@ -76,17 +76,60 @@ jobs:
           # des libs tierces (rapidfuzz, segno, etc.)
           uv pip install --system -r requirements.txt
 
-      - name: Run mypy (informational, non-blocking)
-        # Non-bloquant tant que la dette type-hints est reduite.
-        # Une fois prete a etre stricte, retirer le `|| true` et
-        # ajouter --strict + --warn-unused-ignores.
+      # === CLIQUET (2026-08-29) ====================================
+      # Ce check est REQUIS par la protection de `main`. Avant ce jour il ne
+      # pouvait pas echouer : le `|| true` avalait tout, et la protection
+      # annoncait donc un garde qui n'en etait pas un.
+      #
+      # Retirer le `|| true` d'un coup aurait rendu `main` rouge : mesure du
+      # 2026-08-29, 70 erreurs dans 34 fichiers. On fige le compte et on
+      # interdit qu'il MONTE. Une BAISSE echoue aussi, avec le nouveau chiffre
+      # a inscrire — un gain non verrouille se reperd.
+      #
+      # La sortie complete reste affichee : le `|| true` sur mypy est conserve
+      # pour que le rapport soit toujours lisible, et c'est le cliquet qui
+      # decide du verdict.
+      - name: Run mypy + cliquet sur le nombre d'erreurs
         run: |
           mypy cinesort/ \
             --ignore-missing-imports \
             --no-strict-optional \
-            --pretty \
             --show-error-codes \
             --show-error-context \
             --warn-redundant-casts \
             --check-untyped-defs \
-            || true
+            > mypy-out.txt 2>&1 || true
+          cat mypy-out.txt
+          python - <<'PY'
+          import re, sys
+
+          PLAFOND = 70  # mesure du 2026-08-29, mypy>=1.13,<2, drapeaux ci-dessus
+
+          texte = open("mypy-out.txt", encoding="utf-8", errors="replace").read()
+          m = re.search(r"Found (\d+) errors?", texte)
+          if m is None:
+              if re.search(r"Success: no issues found", texte):
+                  n = 0
+              else:
+                  sys.exit(
+                      "Le rapport mypy n'est pas lisible : ni « Found N errors » "
+                      "ni « Success ». Le cliquet ne peut pas se prononcer, et un "
+                      "cliquet qui ne sait pas se prononcer doit ECHOUER, pas passer."
+                  )
+          else:
+              n = int(m.group(1))
+          print(f"mypy : {n} erreur(s), plafond {PLAFOND}")
+
+          if n > PLAFOND:
+              sys.exit(
+                  f"REGRESSION : {n} erreurs pour un plafond de {PLAFOND}. "
+                  "Corriger, ou (si justifie) monter PLAFOND dans "
+                  ".github/workflows/mypy.yml — choix explicite en review."
+              )
+          if n < PLAFOND:
+              sys.exit(
+                  f"GAIN A VERROUILLER : {n} erreurs, le plafond en annonce "
+                  f"{PLAFOND}. Abaisser PLAFOND a {n} dans "
+                  ".github/workflows/mypy.yml pour que ce gain ne se reperde pas."
+              )
+          PY
