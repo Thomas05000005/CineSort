@@ -60,7 +60,9 @@ public (le dépôt a un fork, et les caches GitHub existent).
   Élargir le glob ferait **supprimer silencieusement au produit des fichiers qu'il n'a jamais
   créés**, sauvegarde manuelle de l'utilisateur comprise — la règle inviolable n°3 prise à
   revers. Le bon remède est la purge locale (T-SEC-3), qui appartient à Thomas.
-- [ ] **T-SEC-7 · Retirer les `|| true` des trois checks REQUIS** — ou les sortir de la liste des
+- [x] **T-SEC-7 · FAIT le 2026-08-29 (cliquet sur le COMPTE) — voir le Journal.** Et le « trois »
+  de cette ligne est FAUX : `pip-audit` bloque sur la production, seuls bandit et mypy étaient
+  aveugles. ~~Retirer les `|| true` des trois checks REQUIS~~ — ou les sortir de la liste des
   requis. `bandit.yml:89`, `mypy.yml:92`, `pip-audit.yml:87` (`continue-on-error`). La protection
   de `main` en annonce sept ; **quatre mordent**.
 - [ ] **T-SEC-8 · Ajouter une règle gitleaks qui mord sur un secret nu entre backticks en prose.**
@@ -116,7 +118,10 @@ public (le dépôt a un fork, et les caches GitHub existent).
 ## LOT 1 — Débloquer la file (au 2026-08-26 : 12 infusionnables sur 22 ; remesuré le
 2026-08-28 : **17 sur 28** — 16 BLOCKED + 1 UNSTABLE)
 
-- [ ] **T-CI-1 · Éprouver le remède sur UNE seule PR.** Sept PR (#1125 #1128 #1130 #1133 #1134
+- [x] **T-CI-1 · FAIT le 2026-08-29 — voir le Journal du 2026-08-29.** Éprouvé sur #1133 puis
+  généralisé : 4 PR passées à `CLEAN`. Le reste de cette entrée est conservé pour la mémoire du
+  raisonnement.
+  ~~Éprouver le remède sur UNE seule PR.~~ Sept PR (#1125 #1128 #1130 #1133 #1134
   #1137 #1148) portent **0 des 7 checks requis** : leurs 10 à 44 runs sont parqués en
   `conclusion=action_required`. Discriminant mesuré : le **`triggering_actor` du push** —
   `claude[bot]` passe, `github-actions[bot]` est parqué.
@@ -338,7 +343,10 @@ Ces fichiers ne sont pas lus par des humains : ils sont **injectés dans des pro
 - [ ] **T-DOC-12 · `CITATION.cff:35`** figé à `1.0.0-beta`.
 - [ ] **T-DOC-13 · `pyproject.toml:4-5`** renvoie à `scripts/bump_version.py`, qui **n'a jamais
   existé**.
-- [ ] **T-DOC-14 · Résidus documentaires dans le code** : `apply_core.py:3066` — la docstring
+- [x] **T-DOC-14 · À MOITIÉ FAIT le 2026-08-29** — les résidus de `rest_server.py:538-541,1627`
+  (bind_host) sont corrigés par `docs(rest)`. Reste `apply_core.py:3066`, la docstring
+  d'`apply_tv_episode` qui décrit encore un renommage supprimé.
+  ~~Résidus documentaires dans le code~~ : `apply_core.py:3066` — la docstring
   d'`apply_tv_episode` décrit encore le renommage **supprimé**, sur la règle inviolable n°1 ;
   `rest_server.py:538-541,1627` — `bind_host` mort dont le commentaire affirme qu'un bypass
   loopback existe encore.
