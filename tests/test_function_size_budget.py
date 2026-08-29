@@ -105,7 +105,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/run_flow_support.py", "_build_plan_job_fn"): 304,
     ("cinesort/ui/api/perceptual_support.py", "_execute_perceptual_analysis"): 298,
     ("cinesort/app/job_runner.py", "_run_worker"): 292,
-    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 275,
+    # 275 -> 265 : la decision « dst manquant » a ete extraite dans
+    # `_verdict_dst_manquant` le 2026-08-29 (un volume injoignable n'est plus
+    # confondu avec un fichier deja deplace). Plafond resserre sur la taille
+    # obtenue plutot que monte.
+    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 265,
     ("cinesort/domain/librarian.py", "generate_suggestions"): 272,
     ("cinesort/ui/api/run_flow_support.py", "job_fn"): 271,
     ("cinesort/app/runtime_probe_check.py", "cross_check_rows_with_probe"): 258,
