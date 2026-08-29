@@ -519,7 +519,9 @@ class CineSortApi:
         if rid and self._is_valid_run_id(rid):
             try:
                 found = self._find_run_row(rid)
-            except (OSError, TypeError, ValueError):
+            # +sqlite3.Error (regle n4) : `_find_run_row` interroge `store.run.get_run`
+            # sur CHAQUE store. Repli `found = None`, celui d'un run introuvable.
+            except (OSError, TypeError, ValueError, sqlite3.Error):
                 found = None
             if found:
                 row, found_store = found
@@ -569,14 +571,9 @@ class CineSortApi:
                     message=str(exc),
                     context=context_payload,
                 )
-            # `sqlite3.Error` n'herite PAS d'`OSError`. Ici le cout est maximal :
-            # ce bloc est DANS un gestionnaire d'erreur (18 appelants, tous dans un
-            # `except`). Une base verrouillee faisait echapper l'OperationalError de
-            # `insert_error`, qui REMPLACAIT alors l'exception d'origine — celle
-            # qu'on essayait justement de tracer. Mesure du 2026-08-29 : sous un
-            # `BEGIN IMMEDIATE` concurrent, `insert_error` leve bien
-            # `OperationalError: database is locked`.
-            except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as insert_exc:
+            # Idem : `insert_error` ECRIT, donc site le plus expose au verrou. Sans
+            # sqlite3.Error, le `logger.warning` ci-dessous etait INATTEIGNABLE.
+            except (KeyError, OSError, TypeError, ValueError, sqlite3.Error) as insert_exc:
                 logger.warning(
                     "API_EXCEPTION_PERSIST_FAILED endpoint=%s run_id=%s err=%s",
                     endpoint,
