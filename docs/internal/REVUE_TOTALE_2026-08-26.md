@@ -218,13 +218,17 @@ public (le dépôt a un fork, et les caches GitHub existent).
   `int(settings.get("quarantaine_ttl_days") or _Q_DEFAULT_TTL)` : le `or` remplace le 0 de
   l'utilisateur avant que la garde `if days <= 0` puisse le voir. Elle est **inatteignable**, et
   `_review/` se purge à 30 jours malgré le réglage. Correctif = PR #1133, gelée.
-- [ ] **T-PROD-3 · `web/dashboard/views/historique.js:1648` — supprimer un run détruit le journal
+- [x] **T-PROD-3 · FAIT le 2026-08-29** (`83ed5cfb`) — modale corrigee (le texte mentait dans les deux sens) ; AUCUNE garde backend — elle aurait eteint test_issue_448 et gele la retention 90 j.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-PROD-3 (enonce d'origine) · `web/dashboard/views/historique.js:1648` — supprimer un run détruit le journal
   d'undo, et la modale annonce l'inverse.** Le texte promet « le run + son plan + son log » :
   **faux**, aucun fichier n'est touché (`history_support.py:731-732`). Et il **tait** le seul effet
   grave : `run.py:726` fait `DELETE FROM apply_batches`, dont la cascade détruit
   `apply_operations`. Supprimer un run de moins de 24 h rend son apply **définitivement non
   annulable**, sans aucune garde de réversibilité.
-- [ ] **T-PROD-4 · Quatre sites `except OSError` sur du SQLite.** La règle inviolable n°4
+- [x] **T-PROD-4 · FAIT le 2026-08-29** (`83ff4a94`) — 6 sites (pas 4) ; lignes du constat toutes derivees ; sous WAL seuls les chemins d'ECRITURE tombent.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-PROD-4 (enonce d'origine) · Quatre sites `except OSError` sur du SQLite.** La règle inviolable n°4
   (`sqlite3.Error` n'hérite PAS d'`OSError`) est déjà appliquée trois fois ailleurs. Manquent :
   - `apply_support.py:3076` (`_restore_jellyfin_watched`) — un apply **intégralement réussi sur
     disque** est annoncé `{ok: False}` quand la base est verrouillée ;
@@ -273,7 +277,9 @@ Le dépôt n'est pas sous-protégé : il est protégé par des instruments dont 
   **nommée « Tests E2E Dashboard »** exécute `tests/e2e/` — un autre répertoire — avec
   `continue-on-error: true` et `-x` (`ci.yml:319-321`), donc zéro signal, à l'intérieur du job
   `Lint, Tests, Build` qui est un check **requis**.
-- [ ] **T-GARDE-4 · Le cliquet `sqlite3.Error` est aveugle à un renommage de variable.**
+- [x] **T-GARDE-4 · FAIT le 2026-08-29** (`83ff4a94`) — recensement elargi : 63 -> 65 (2 sites hors radar) -> 59 apres correctifs ; plafond resserre.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-GARDE-4 (enonce d'origine) · Le cliquet `sqlite3.Error` est aveugle à un renommage de variable.**
   `tests/test_sqlite_error_hors_oserror_cliquet.py:70-76` filtre sur des **préfixes de variable**
   (`store.`, `self._store.`) : `resolved_store.run.insert_error` et
   `default_store.run.list_pending_runs()` échappent au recensement. 63 sites vus, plafond 63,
@@ -303,7 +309,9 @@ Le dépôt n'est pas sous-protégé : il est protégé par des instruments dont 
   déterministe.
 - [ ] **T-GARDE-12 · Deux bugs réels masqués par des `pytest.xfail()` dynamiques** (exit 0) dans
   `test_lotd_chain_doublons.py`, dont un sur le chemin **destructif** (`files_identical_quick`).
-- [ ] **T-GARDE-13 · `ci.yml:48-72` — le job « Generate/Verify uv.lock » ne vérifie rien** :
+- [x] **T-GARDE-13 · FAIT le 2026-08-29** (`df74274f`) — le job verifie desormais ; `uv lock --check` echouait deja sur HEAD.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-GARDE-13 (enonce d'origine) · `ci.yml:48-72` — le job « Generate/Verify uv.lock » ne vérifie rien** :
   `run: uv lock` nu, sans `--check`, sans `--locked`, sans `git diff --exit-code`. Il **régénère**.
   `uv lock --check` sort déjà en code 1 sur `HEAD`.
 - [ ] **T-GARDE-14 · `tests/test_pyproject_pep621_v77.py:91-113`** — le garde d'alignement
@@ -328,10 +336,14 @@ Le dépôt n'est pas sous-protégé : il est protégé par des instruments dont 
 
 Ces fichiers ne sont pas lus par des humains : ils sont **injectés dans des prompts**.
 
-- [ ] **T-DOC-1 · `.github/workflows/claude.yml:104` — priorité.** Le prompt du bot d'audit
+- [x] **T-DOC-1 · FAIT le 2026-08-29** (`ce0b2912`) — DEUX prompts, TROIS comptes, aucun juste ; le chiffre porte desormais sa date et sa commande.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-1 (enonce d'origine) · `.github/workflows/claude.yml:104` — priorité.** Le prompt du bot d'audit
   hebdomadaire (cron `0 4 * * 1`) injecte « 4277 tests unitaires, coverage seuil 80 % ».
   Réel : **9 276 items** (mesuré `--collect-only -q` le 2026-08-26), seuil **75 %**.
-- [ ] **T-DOC-2 · Seuil de couverture annoncé à 80 % dans quatre fichiers** — `.codecov.yml:5`,
+- [x] **T-DOC-2 · FAIT le 2026-08-29** (`5f7db3f0`) — le `target: 80%` de codecov est legitime ; c'est son COMMENTAIRE qui mentait.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-2 (enonce d'origine) · Seuil de couverture annoncé à 80 % dans quatre fichiers** — `.codecov.yml:5`,
   `README.md:194`, `claude.yml:104`, `docs/internal/CLAUDE.md:521` — alors que `ci.yml:211` dit
   `--fail-under=75`. Nuance : `.codecov.yml:13` `target: 80%` est un réglage codecov distinct,
   légitime ; c'est le **commentaire** de `:5` (« aligné avec `--fail-under=80` ») qui ment.
@@ -341,7 +353,9 @@ Ces fichiers ne sont pas lus par des humains : ils sont **injectés dans des pro
   « nouveaux tests dashboard » promis sont précisément les 98 tests que rien n'exécute (T-GARDE-3).
 - [ ] **T-DOC-4 · Quatre comptes de tests différents circulent**, tous faux : 4277 (README ×3 +
   `claude.yml`), 6062 (`docs/internal`), 9140 (`/CLAUDE.md`).
-- [ ] **T-DOC-5 · `README.md:186` et `docs/internal/CLAUDE.md:573`** publient
+- [x] **T-DOC-5 · FAIT le 2026-08-29** (`5f7db3f0`) — `--timeout=60` mesure : exit 4, zero test ; et ci.yml n'en porte aucune occurrence.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-5 (enonce d'origine) · `README.md:186` et `docs/internal/CLAUDE.md:573`** publient
   `pytest --timeout=60` : le plugin n'est pas installé → **exit 4, zéro test exécuté**. Et
   `/CLAUDE.md:43` interdit explicitement ce drapeau. Corriger aussi `pyproject.toml:105-106`, qui
   affirme que `--timeout=60` est dans `ci.yml`.
@@ -353,12 +367,20 @@ Ces fichiers ne sont pas lus par des humains : ils sont **injectés dans des pro
   serveur REST sont faux (taille du fichier +50 %, `compare_digest` déplacé).
 - [ ] **T-DOC-9 · `docs/internal/CLAUDE.md:536`** — annonce Opus 4.8 / effort `ultra` pour les deux
   workflows ; le bot d'audit tourne en Opus 5 avec `--effort max`.
-- [ ] **T-DOC-10 · `README.md:18,21,158,196,283`** — version, compte de tests, taille et nombre de
+- [x] **T-DOC-10 · FAIT le 2026-08-29** (`5f7db3f0`) — six affirmations du README fausses, mesurees une par une.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-10 (enonce d'origine) · `README.md:18,21,158,196,283`** — version, compte de tests, taille et nombre de
   façades tous faux : le document public est trois versions mineures en retard.
-- [ ] **T-DOC-11 · `CHANGELOG.md:8` s'arrête à v1.2.0-beta (17 mai)** : les versions 1.3, 1.4 et
+- [x] **T-DOC-11 · FAIT le 2026-08-29** (`199439d4`) — 8 releases renseignees depuis GitHub ; les « trois mois » du constat sont en realite DEUX JOURS.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-11 (enonce d'origine) · `CHANGELOG.md:8` s'arrête à v1.2.0-beta (17 mai)** : les versions 1.3, 1.4 et
   1.5.x n'y existent pas — trois mois de livraisons non documentées.
-- [ ] **T-DOC-12 · `CITATION.cff:35`** figé à `1.0.0-beta`.
-- [ ] **T-DOC-13 · `pyproject.toml:4-5`** renvoie à `scripts/bump_version.py`, qui **n'a jamais
+- [x] **T-DOC-12 · FAIT le 2026-08-29** (`199439d4`) — 1.0.0-beta -> 1.5.2-beta.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-12 (enonce d'origine) · `CITATION.cff:35`** figé à `1.0.0-beta`.
+- [x] **T-DOC-13 · FAIT le 2026-08-29** (`199439d4`) — `scripts/bump_version.py` n'a JAMAIS existe ; renvoi vers le garde reel.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DOC-13 (enonce d'origine) · `pyproject.toml:4-5`** renvoie à `scripts/bump_version.py`, qui **n'a jamais
   existé**.
 - [x] **T-DOC-14 · À MOITIÉ FAIT le 2026-08-29** — les résidus de `rest_server.py:538-541,1627`
   (bind_host) sont corrigés par `docs(rest)`. Reste `apply_core.py:3066`, la docstring
@@ -409,7 +431,9 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
   pas les check-runs périmés d'un même nom. Non bloquant (documenté), mais il apprend à ignorer.
 - [ ] **T-DEPS-1 · `requirements.lock` (49 000 lignes) n'est installé ni audité par personne** :
   0 occurrence hors `docs/internal/`. Artefact mort qui donne l'illusion d'une reproductibilité.
-- [ ] **T-DEPS-2 · `uv.lock:139` est périmé** : `pytest-playwright >=0.8.0,<0.9` alors que les deux
+- [x] **T-DEPS-2 · FAIT le 2026-08-29** (`df74274f`) — lockfile regenere : la derive tenait en UNE ligne.
+  ~~Enonce d'origine ci-dessous.~~
+  · **T-DEPS-2 (enonce d'origine) · `uv.lock:139` est périmé** : `pytest-playwright >=0.8.0,<0.9` alors que les deux
   manifestes disent `<0.10` depuis #1112.
 - [ ] **T-DEPS-3 · `perceptual_support.py:1059`** importe Pillow en dur alors que Pillow n'est pas
   une dépendance runtime.
