@@ -251,7 +251,20 @@ public (le dépôt a un fork, et les caches GitHub existent).
 - [ ] **T-PROD-7 · `apply_support.py:3602/3604`** — le verdict d'apply n'est calculé que sur le
   chemin de retour **nominal**. L'`except Exception` (l'apply qui casse après avoir déplacé) n'en
   produit aucun.
-- [ ] **T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
+- [x] **T-PROD-8 · `apply_core.py:2817` et `:775`** — FAIT le 2026-08-29 (PR à ouvrir).
+  Constat vérifié dans le code : les deux sites renomment puis appellent `record_apply_op`,
+  et la docstring d'`atomic_move` décrit mot pour mot ce que cela coûte. Le remède n'est PAS
+  `atomic_move` : les deux sites passent par `renommer_avec_reprise` et
+  `_case_only_rename_with_rollback`, que le remplacement aurait ÉTEINTS. Nouveau gestionnaire
+  de contexte `journal_pose_autour`, dont `atomic_move` devient un appelant.
+  ⚠ **Poser le journal a créé un second défaut, attrapé par un test existant** :
+  `journaled_move` laisse l'entrée sur exception — correct pour un `shutil.move`, faux pour un
+  `rename` pur, qui n'a pas de demi-état. Chaque fichier verrouillé (VLC, indexeur) laissait
+  un `pending` derrière lui. D'où `liberer_si_rien_n_a_bouge`, qui LIT le disque au lieu de
+  supposer. 8 mutants, 8 morts — dont un survivant qui a révélé que l'appariement src/dst
+  n'était testé par rien : sans lui, un échec d'aujourd'hui effaçait la trace d'un crash d'hier.
+
+- [ ] ~~**T-PROD-8 · `apply_core.py:2817` et `:775`**~~ — `apply_single` (le chemin le plus fréquent)
   et la migration de la racine de collection ne passent pas par `move_journal.atomic_move` : elles
   renomment puis appellent `record_apply_op`. Le **journal write-ahead n'est pas posé**, et c'est
   lui qui rend le déplacement réconciliable si l'app meurt entre les deux — la docstring
