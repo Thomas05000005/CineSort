@@ -12,6 +12,7 @@ Cf docs/internal/design/refonte_2026_05_17/screens/10-qualite.md
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 import time
 import uuid
@@ -422,8 +423,8 @@ def _recompute_worker(api: Any, job_id: str, run_id: str, row_ids: List[str]) ->
                 # meme quand tout echouait. On compte les echecs metier.
                 if isinstance(res, dict) and res.get("ok") is False:
                     errors += 1
-            # except Exception large : on continue en cas d'erreur sur un film
-            except (OSError, KeyError, TypeError, ValueError) as exc:
+            # On continue par film. +sqlite3.Error (regle n4) : sinon un verrou tuait le job ENTIER.
+            except (OSError, KeyError, TypeError, ValueError, sqlite3.Error) as exc:
                 logger.debug("recompute_worker error row_id=%s: %s", rid, exc)
                 errors += 1
             processed += 1
