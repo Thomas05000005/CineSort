@@ -417,7 +417,7 @@ def extract_source(filename: str) -> Optional[str]:
     return None
 
 
-def _une_passe_de_nettoyage(name: str, *, had_tech_marker: bool) -> str:
+def _une_passe_de_nettoyage(name: str, *, had_tech_marker: bool, annee_parenthesee: bool) -> str:
     """Une iteration du nettoyage de fin de nom (etapes 6 a 8 du pipeline).
 
     Extraite de `parse_scene_title` le 2026-08-29 : ajouter le strip des jetons
@@ -444,7 +444,16 @@ def _une_passe_de_nettoyage(name: str, *, had_tech_marker: bool) -> str:
     # Trailing language tokens sans annee prealable
     # (cas "L'arme Fatale 2 - FR EN ...")
     name = _TRAILING_LANG_TOKENS_RE.sub("", name)
-    name = _TRAILING_AMBIGU_RE.sub("", name)
+    # Jetons ambigus : « Batman - Begins PROPER » perd son tag, « Cam » garde
+    # son titre. SAUF si une annee PARENTHESEE a ancre le titre : l'etape 2 a
+    # alors garde tout ce qui precedait la parenthese et jete le reste, donc ce
+    # qui subsiste est le titre PAR CONSTRUCTION et les tags qui suivaient
+    # l'annee sont deja coupes. « Mission Complete (2020) » rendait
+    # « Mission » — defaut qui PRE-EXISTAIT a la separation des jetons ambigus
+    # (mesure sur origin/main : meme resultat, `_NOISE_RE` retirant `complete`
+    # partout).
+    if not annee_parenthesee:
+        name = _TRAILING_AMBIGU_RE.sub("", name)
     name = _ORPHAN_SEP_RE.sub("", name)
     name = re.sub(r"\s+", " ", name).strip()
     return name
@@ -517,6 +526,9 @@ def parse_scene_title(filename: str) -> str:
     # "(year) LANG" → garde uniquement le titre avant la parenthese.
     # Sinon "Le Capitaine Fracasse (1961) FRENCH" -> "Le Capitaine Fracasse FRENCH".
     paren_year_match = _PAREN_YEAR_RE.search(name)
+    #: Une annee parenthesee ANCRE le titre : tout ce qui la suit est coupe,
+    #: donc ce qui reste ne peut plus porter de tag de release.
+    annee_parenthesee = bool(paren_year_match)
     if paren_year_match:
         name = name[: paren_year_match.start()].rstrip(" .-_")
 
@@ -547,7 +559,7 @@ def parse_scene_title(filename: str) -> str:
     # Cap a 4 iterations par securite.
     for _ in range(4):
         prev = name
-        name = _une_passe_de_nettoyage(name, had_tech_marker=had_tech_marker)
+        name = _une_passe_de_nettoyage(name, had_tech_marker=had_tech_marker, annee_parenthesee=annee_parenthesee)
         if name == prev:
             break
 

@@ -174,6 +174,51 @@ class MotsAmbigusDeLaListeINCONDITIONNELLETests(unittest.TestCase):
             with self.subTest(fichier=fichier):
                 self.assertEqual(parse_scene_title(fichier), attendu)
 
+    def test_une_annee_PARENTHESEE_ancre_le_titre(self) -> None:
+        """Le dernier trou de la regle trailing, signale par une revue automatique.
+
+        Quand `_PAREN_YEAR_RE` trouve une annee entre parentheses, le pipeline
+        garde TOUT CE QUI LA PRECEDE et jette le reste. Ce qui subsiste est donc
+        le titre PAR CONSTRUCTION : les tags qui suivaient l'annee sont deja
+        coupes. Un jeton ambigu qui traine a la fin appartient au titre.
+
+        Sans cette ancre, « Mission Complete (2020) » rendait « Mission » — et
+        ce n'etait PAS une regression de la correction des jetons ambigus :
+        mesure sur `origin/main`, le comportement etait identique, `_NOISE_RE`
+        retirant `complete` partout.
+
+        La revue se trompait sur son exemple — « Complete Unknown (2016) » sort
+        intact, `unknown` n'etant pas un jeton ambigu — mais avait raison sur le
+        mecanisme. Ecarter le signal parce que sa demonstration etait fausse
+        aurait laisse le defaut en place.
+        """
+        cas = {
+            "Mission Complete (2020).mkv": "Mission Complete",
+            "Operation Hybrid (2019).mkv": "Operation Hybrid",
+            "The Internal (2015).mkv": "The Internal",
+            "Complete Unknown (2016).mkv": "Complete Unknown",
+            "A Complete Unknown (2024).mkv": "A Complete Unknown",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
+    def test_un_tag_APRES_l_annee_parenthesee_part_quand_meme(self) -> None:
+        """Temoin : l'ancre ne doit pas rendre la regle inoperante.
+
+        Un tag ecrit apres l'annee parenthesee est coupe par le strip d'annee
+        lui-meme, bien avant la regle trailing. Sans ce temoin, l'ancre serait
+        indistinguable d'une desactivation pure et simple.
+        """
+        cas = {
+            "Movie (2019) PROPER.mkv": "Movie",
+            "Movie (2019) LIMITED 1080p.mkv": "Movie",
+            "Batman - Begins PROPER.mkv": "Batman - Begins",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
     def test_les_tags_NON_ambigus_restent_inconditionnels(self) -> None:
         """Temoin : le gros de `_NOISE_RE` ne doit pas bouger.
 
