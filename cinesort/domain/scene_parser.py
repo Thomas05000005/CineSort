@@ -129,12 +129,12 @@ _NOISE_RE = re.compile(
         4k|uhd|fhd|
         hdr10\+?|hdr|dv|dolby[\s.-]?vision|sdr|
         bluray|blu[\s.-]?ray|brrip|bdrip|bd[\s.-]?remux|bd[\s.-]?rip|
-        web[\s.-]?dl|web[\s.-]?rip|hdtv|hdrip|remux|dvdrip|cam|camrip|telesync|telecine|
+        web[\s.-]?dl|web[\s.-]?rip|hdtv|hdrip|remux|dvdrip|camrip|telesync|telecine|
         x265|x264|hevc|avc|xvid|divx|h[\s.]?26[45]|av1|vp9|
-        truehd|dts[\s.-]?hd|dts[\s.-]?x|dts|atmos|aac|ac3|eac3|ddp|opus|flac|mp3|
+        truehd|dts[\s.-]?hd|dts[\s.-]?x|dts|atmos|aac|ac3|eac3|ddp|flac|mp3|
         dd5\.?1|dd7\.?1|dd2\.?0|
         10bit|8bit|12bit|
-        proper|repack|internal|limited|complete|hybrid|mhd|uhdrip|
+        repack|mhd|uhdrip|
         qtz|a3l|hdlight|4klight
     )\b
     """,
@@ -142,6 +142,12 @@ _NOISE_RE = re.compile(
 )
 
 # Tokens ambigus stripes UNIQUEMENT s'ils apparaissent apres le token annee.
+#
+# ATTENTION A L'ORDRE : `_NOISE_RE` (etape 3) s'execute QUATRE etapes avant
+# ce traitement (etape 7). Un jeton present dans les deux listes est donc
+# consomme par la premiere et n'atteint JAMAIS celle-ci — c'etait le cas de
+# `cam`, `proper` et `repack`, inscrits ici mais inatteignables. Ajouter un
+# jeton ci-dessous SANS le retirer de `_NOISE_RE` ne fait rien du tout.
 # Strategie position-aware : "The French Connection 2 1975" -> "French" est
 # AVANT 1975 donc preserve. "Le Capitaine Fracasse 1961 FRENCH" -> "FRENCH"
 # est APRES 1961 donc stripe.
@@ -152,7 +158,11 @@ _AFTER_YEAR_NOISE = (
     r"director'?s?|extended|theatrical|unrated|remastered|restored|"
     r"criterion|edition|version|cut|special|imax|final|ultimate|"
     r"hdlight|4klight|hdr|hdr10\+?|sdr|uhd|"
-    r"web|bd|br|tv|cam|tc|repack|proper)"
+    r"web|bd|br|tv|cam|tc|repack|proper|"
+    # T-DOM-1 : ces cinq-la vivaient dans `_NOISE_RE`, qui s'applique PARTOUT.
+    # « Internal Affairs » rendait « Affairs », « Complete Unknown » rendait
+    # « Unknown », et « Cam » ou « Opus » rendaient une chaine VIDE.
+    r"internal|limited|complete|hybrid|opus)"
 )
 
 # Pattern : (annee)(tokens noise apres)*$ → on remplace par juste l'annee.
@@ -182,6 +192,26 @@ _RELEASE_GROUP_RE = re.compile(r"\s-[A-Za-z0-9_]{2,25}\s*$")
 # avec un release group court qui suit.
 _TRAILING_LANG_TOKENS_RE = re.compile(
     r"(?:\s+(?:fr|en|vf|vo|vff|vfq|vfi|vof|vostfr|vostr|vost|multi)\b){1,3}\s*$",
+    re.IGNORECASE,
+)
+
+#: Jetons AMBIGUS en fin de chaine, sans annee pour les ancrer.
+#:
+#: `_AFTER_YEAR_NOISE_RE` a besoin d'une annee. Sans elle, « Batman - Begins
+#: PROPER.mkv » garderait son PROPER. Ce motif prend le relais — mais avec une
+#: reserve decisive : `(?<=\S)\s+` exige au moins un caractere AVANT le jeton.
+#:
+#: Un nom reduit au seul jeton n'est donc PAS touche : « Cam » et « Opus » sont
+#: des films (2018, 2025), et les retirer rendait une chaine VIDE. Un tag qui
+#: SUIT quelque chose reste un tag ; un jeton qui est TOUT le nom est le titre.
+#:
+#: LIMITE ASSUMEE : un vrai titre dont le DERNIER mot est l'un de ces sept, et
+#: dont le nom de fichier ne porte AUCUNE annee, perd encore ce mot. Le depot
+#: avait deja tranche en ce sens (cf. `test_subtitle_preserved_even_with_single
+#: _quality_tag`, qui exige « Batman - Begins PROPER » -> « Batman - Begins ») ;
+#: on ne fait qu'y decouper le cas « le jeton EST le titre entier ».
+_TRAILING_AMBIGU_RE = re.compile(
+    r"(?<=\S)\s+(?:proper|internal|limited|complete|hybrid|opus|cam)\b\s*$",
     re.IGNORECASE,
 )
 
@@ -489,6 +519,9 @@ def parse_scene_title(filename: str) -> str:
         # Trailing language tokens sans annee prealable
         # (cas "L'arme Fatale 2 - FR EN ...")
         name = _TRAILING_LANG_TOKENS_RE.sub("", name)
+        # Jetons ambigus trailing, sans annee prealable (cf _TRAILING_AMBIGU_RE) :
+        # « Batman - Begins PROPER » perd son tag, « Cam » garde son titre.
+        name = _TRAILING_AMBIGU_RE.sub("", name)
         name = _ORPHAN_SEP_RE.sub("", name)
         name = re.sub(r"\s+", " ", name).strip()
         if name == prev:
