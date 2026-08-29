@@ -2627,6 +2627,65 @@ def apply_rows(
     return res
 
 
+def _deplacer_le_dossier_du_film(
+    folder: Path,
+    dst: Path,
+    *,
+    record_op: Optional[Callable[[Dict[str, Any]], None]],
+    src_sha1: Optional[str],
+    src_size: Optional[int],
+) -> None:
+    """Le deplacement lui-meme, extrait d'`apply_single` le 2026-08-29.
+
+    Le cliquet de taille de fonction a rougi : poser le journal write-ahead
+    (T-PROD-8) portait `apply_single` de 212 a 236 lignes pour un plafond gele a
+    212. Le cliquet demande de DECOUPER plutot que de monter le plafond, et il a
+    raison — ce bloc est une unite : la garde d'ecrasement, le journal, et les
+    deux facons de renommer. Aucun changement de comportement.
+    """
+    casse_seule = folder.name.lower() == dst.name.lower()
+
+    # Hotfix2 H5 (DATA LOSS) : guard explicite avant rename pour eviter
+    # ecrasement silencieux. dst.exists() etait verifie l. 1619 mais la
+    # fenetre TOCTOU jusqu'ici peut etre longue (sha1 du main_video sur
+    # SMB). Sur POSIX, Path.rename() ECRASE silencieusement la cible si
+    # elle existe ; sur Windows ca leve FileExistsError mais le
+    # comportement SMB est variable. On force une erreur explicite et
+    # cohrente plutot que de perdre des donnees.
+    # Il reste AVANT le journal : poser une entree pending pour un
+    # deplacement qui ne va pas avoir lieu ferait voir a la reconciliation
+    # une source et une cible toutes deux presentes, qu'elle lirait comme
+    # un doublon.
+    if not casse_seule and dst.exists():
+        raise FileExistsError(f"apply_single: destination apparue pendant l'apply (race condition) : {dst}")
+
+    # T-PROD-8 : le chemin le plus frequent du produit ne posait pas le
+    # journal write-ahead. Il s'enroule AUTOUR des deplacements existants
+    # plutot que de les remplacer par atomic_move : les deux portent des
+    # comportements propres (reprise sur course Windows, renommage a casse
+    # seule en deux temps) qu'un remplacement eteindrait.
+    with journal_pose_autour(
+        record_op,
+        src=folder,
+        dst=dst,
+        op_type="MOVE_DIR",
+        src_sha1=src_sha1,
+        src_size=src_size,
+        # Renommage pur : s'il echoue, le disque prouve que rien n'a bouge.
+        # Sans ca, chaque fichier verrouille (VLC, indexeur) laisserait un
+        # pending derriere lui.
+        liberer_si_rien_n_a_bouge=True,
+    ):
+        if casse_seule:
+            # Fix audit 2026-05-26 (v1.5.6) Vague L : extraction en helper
+            # _case_only_rename_with_rollback pour tester le COMPORTEMENT de
+            # rollback (assertLogs sur logger.warning) au lieu de matcher le
+            # texte du source code.
+            _case_only_rename_with_rollback(folder, dst)
+        else:
+            renommer_avec_reprise(folder, dst)
+
+
 def apply_single(
     cfg: "Config",
     folder: Path,
@@ -2810,47 +2869,13 @@ def apply_single(
                 src_sha1 = None
                 src_size = None
 
-        casse_seule = folder.name.lower() == dst.name.lower()
-
-        # Hotfix2 H5 (DATA LOSS) : guard explicite avant rename pour eviter
-        # ecrasement silencieux. dst.exists() etait verifie l. 1619 mais la
-        # fenetre TOCTOU jusqu'ici peut etre longue (sha1 du main_video sur
-        # SMB). Sur POSIX, Path.rename() ECRASE silencieusement la cible si
-        # elle existe ; sur Windows ca leve FileExistsError mais le
-        # comportement SMB est variable. On force une erreur explicite et
-        # cohrente plutot que de perdre des donnees.
-        # Il reste AVANT le journal : poser une entree pending pour un
-        # deplacement qui ne va pas avoir lieu ferait voir a la reconciliation
-        # une source et une cible toutes deux presentes, qu'elle lirait comme
-        # un doublon.
-        if not casse_seule and dst.exists():
-            raise FileExistsError(f"apply_single: destination apparue pendant l'apply (race condition) : {dst}")
-
-        # T-PROD-8 : le chemin le plus frequent du produit ne posait pas le
-        # journal write-ahead. Il s'enroule AUTOUR des deplacements existants
-        # plutot que de les remplacer par atomic_move : les deux portent des
-        # comportements propres (reprise sur course Windows, renommage a casse
-        # seule en deux temps) qu'un remplacement eteindrait.
-        with journal_pose_autour(
-            record_op,
-            src=folder,
-            dst=dst,
-            op_type="MOVE_DIR",
+        _deplacer_le_dossier_du_film(
+            folder,
+            dst,
+            record_op=record_op,
             src_sha1=src_sha1,
             src_size=src_size,
-            # Renommage pur : s'il echoue, le disque prouve que rien n'a bouge.
-            # Sans ca, chaque fichier verrouille (VLC, indexeur) laisserait un
-            # pending derriere lui.
-            liberer_si_rien_n_a_bouge=True,
-        ):
-            if casse_seule:
-                # Fix audit 2026-05-26 (v1.5.6) Vague L : extraction en helper
-                # _case_only_rename_with_rollback pour tester le COMPORTEMENT de
-                # rollback (assertLogs sur logger.warning) au lieu de matcher le
-                # texte du source code.
-                _case_only_rename_with_rollback(folder, dst)
-            else:
-                renommer_avec_reprise(folder, dst)
+        )
 
     # P1.3 : record l'op même en dry_run pour la preview UI
     record_apply_op(
