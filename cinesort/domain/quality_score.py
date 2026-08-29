@@ -99,7 +99,13 @@ DEFAULT_PROFILE_VERSION = 1
 # codec). Les flags d'encode changent donc les scores deja persistes des films
 # cinemascope, des 4K severement re-encodees et des 1080p en codec exotique :
 # sans ce bump, ces rapports resteraient caches avec leur ancien verdict.
-SCORING_RULES_VERSION = 3
+# 3 -> 4 le 2026-08-29 : deux correctifs CHANGENT des scores et des paliers —
+# la penalite « 4K Light probable » etait annoncee sans etre appliquee, et
+# FLAC/PCM n'avaient aucun bonus. Sans cette incrementation,
+# `quality_report_support` rend un CACHE HIT sur tout rapport deja persiste
+# (`existing_rules_version == str(SCORING_RULES_VERSION)`) et le correctif
+# reste invisible en production sur les bibliotheques deja scorees.
+SCORING_RULES_VERSION = 4
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -486,6 +492,14 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     ab = profile["audio_bonuses"]
     for key in ("truehd_atmos_bonus", "dts_hd_ma_bonus", "dts_bonus", "aac_bonus"):
         ab[key] = max(0, _to_int(ab.get(key), base["audio_bonuses"][key]))
+    # `flac_pcm_bonus` est OPTIONNELLE — elle n'est dans aucun preset, son repli
+    # est calcule — mais pas dispensee de validation : sans cela une valeur non
+    # numerique dans un profil utilisateur atteignait `int()` PENDANT le scoring
+    # et levait ValueError. Le repli n'est pas 0 : ramener un lossless a zero
+    # violerait l'invariant que cette cle existe precisement pour tenir.
+    if "flac_pcm_bonus" in ab:
+        repli = max(1, _to_int(ab.get("dts_hd_ma_bonus"), 0) - 2)
+        ab["flac_pcm_bonus"] = max(0, _to_int(ab.get("flac_pcm_bonus"), repli))
     channels_raw = ab.get("channels_bonus_map")
     channels = base["audio_bonuses"]["channels_bonus_map"].copy()
     if isinstance(channels_raw, dict):

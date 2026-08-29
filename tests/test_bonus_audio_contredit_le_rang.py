@@ -87,5 +87,64 @@ class UnLosslessNeVautJamaisMoinsQuUnLossyTests(unittest.TestCase):
         self.assertGreater(self._bonus("flac"), self._bonus("dts"))
 
 
+class LaCleOptionnelleEstVALIDEEComme_les_autresTests(unittest.TestCase):
+    """`flac_pcm_bonus` est optionnelle, pas dispensee de validation.
+
+    `validate_quality_profile` normalise `truehd_atmos_bonus`, `dts_hd_ma_bonus`,
+    `dts_bonus` et `aac_bonus` — mais pas la nouvelle cle. Un profil utilisateur
+    portant une valeur non numerique atteignait donc `int(lossless_simple)` et
+    levait `ValueError` PENDANT le scoring, pas a la validation.
+
+    La valeur de repli n'est pas 0 : ramener un lossless a zero violerait
+    l'invariant que cette cle existe precisement pour tenir. On retombe sur le
+    meme calcul que quand la cle est absente.
+
+    Signale par une revue automatique sur la PR qui a introduit la cle, puis
+    verifie : la liste de `validate_quality_profile` ne la contenait pas.
+    """
+
+    def test_une_valeur_non_numerique_ne_casse_pas_le_scoring(self) -> None:
+        import copy
+
+        from cinesort.domain.quality_score import compute_quality_score, validate_quality_profile
+
+        brut = copy.deepcopy(default_quality_profile())
+        brut["audio_bonuses"]["flac_pcm_bonus"] = "pas un nombre"
+        ok, _erreurs, prof = validate_quality_profile(brut)
+        self.assertTrue(ok, "le profil doit rester acceptable, pas etre rejete")
+        self.assertIsInstance(
+            prof["audio_bonuses"]["flac_pcm_bonus"],
+            int,
+            "la cle n'a pas ete normalisee : elle atteindra `int()` pendant le scoring",
+        )
+
+        sonde = {
+            "width": 1920,
+            "height": 1080,
+            "video_codec": "h264",
+            "bitrate": 10000,
+            "duration": 7200,
+            "audio_tracks": [{"codec": "flac", "channels": 6, "language": "fre", "bitrate": 1500}],
+            "subtitle_tracks": [],
+        }
+        r = compute_quality_score(normalized_probe=sonde, profile=brut)
+        self.assertIsInstance(r["score"], int)
+
+    def test_le_repli_ne_ramene_pas_le_lossless_sous_le_lossy(self) -> None:
+        """Normaliser vers 0 remplacerait le defaut par celui qu'on vient de fermer."""
+        import copy
+
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        brut = copy.deepcopy(default_quality_profile())
+        brut["audio_bonuses"]["flac_pcm_bonus"] = "pas un nombre"
+        _ok, _e, prof = validate_quality_profile(brut)
+        self.assertGreater(
+            _audio_codec_bonus("flac", prof)[0],
+            _audio_codec_bonus("dts", prof)[0],
+            "une valeur invalide a fait retomber le lossless sous le lossy",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
