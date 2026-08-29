@@ -103,7 +103,33 @@ jobs:
           python - <<'PY'
           import re, sys
 
-          PLAFOND = 70  # mesure du 2026-08-29, mypy>=1.13,<2, drapeaux ci-dessus
+          # PLAFOND = 75, mesure du 2026-08-29 DANS LES CONDITIONS DE CE JOB.
+          #
+          # Le chiffre a d'abord ete pose a 70, mesure en local par un `uvx mypy`
+          # nu. Le cliquet a rougi des sa premiere execution reelle : 75. Ni une
+          # regression, ni un bug — TROIS instruments differents pour la meme
+          # question :
+          #
+          #     mypy nu, sur Windows                        70 erreurs / 34 fichiers
+          #     + les deps de production installees          59 erreurs / 25 fichiers
+          #     + `--platform linux` (le runner)             75 erreurs / 32 fichiers
+          #     ce job, sur ubuntu-latest                    75 erreurs / 32 fichiers
+          #
+          # Les deps changent ce que mypy sait resoudre ; la PLATEFORME change ce
+          # qu'il analyse, parce que ce produit est truffe de branches
+          # `sys.platform == "win32"` que mypy elague selon la cible. Mesurer
+          # depuis un poste Windows repond a une autre question que celle du job.
+          #
+          # REPRODUIRE CE CHIFFRE, exactement :
+          #
+          #     uvx --from "mypy>=1.13,<2" --with-requirements requirements.txt \
+          #       mypy cinesort/ --platform linux --ignore-missing-imports \
+          #       --no-strict-optional --show-error-codes --show-error-context \
+          #       --warn-redundant-casts --check-untyped-defs --no-pretty
+          #
+          # Sans `--platform linux` ET sans les deps, le nombre obtenu ne veut
+          # rien dire pour ce cliquet.
+          PLAFOND = 75
 
           texte = open("mypy-out.txt", encoding="utf-8", errors="replace").read()
           m = re.search(r"Found (\d+) errors?", texte)
