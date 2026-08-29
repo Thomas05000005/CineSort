@@ -185,7 +185,11 @@ class LaPremisseEstTesteeTests(unittest.TestCase):
 
         from cinesort.ui.api import apply_support
 
-        with mock.patch.object(apply_support, "_avec_verdict", side_effect=lambda payload, **_: payload):
+        # `_avec_verdict(payload, api, *, ...)` prend DEUX positionnels. La doublure
+        # n'en prenait qu'un : elle ne pouvait etre appelee que par un chemin qui
+        # ne l'atteignait jamais vraiment. Depuis T-PROD-7, le chemin d'erreur
+        # l'appelle pour de bon, et l'arite fausse remontait en TypeError.
+        with mock.patch.object(apply_support, "_avec_verdict", side_effect=lambda payload, api, **_: payload):
             self.assertFalse(
                 _prouver_run_facade_apply(),
                 "la preuve rend True alors que le verdict est neutralise : elle ne prouve rien",
