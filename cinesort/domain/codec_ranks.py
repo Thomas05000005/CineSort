@@ -33,6 +33,8 @@ from typing import Any, List, Tuple
 __all__ = [
     "AUDIO_CODEC_RANK_PATTERNS",
     "AUDIO_CODEC_RANK",
+    "AUDIO_LOSSLESS_LABELS",
+    "est_lossless",
     "format_audio_channels",
 ]
 
@@ -114,6 +116,56 @@ AUDIO_CODEC_RANK: dict[str, int] = {
 # ---------------------------------------------------------------------------
 # Formatage canaux audio — sortie lisible (badge UI, comparaison, naming)
 # ---------------------------------------------------------------------------
+
+
+#: Labels de `AUDIO_CODEC_RANK_PATTERNS` qui designent un flux SANS PERTE.
+#: On nomme des LABELS, pas des codecs bruts : la table sait deja ramener
+#: `pcm_s24le`, `lpcm` et `pcm_bluray` sur un seul « PCM ».
+AUDIO_LOSSLESS_LABELS = frozenset({"TrueHD", "DTS-HD MA", "FLAC", "PCM"})
+
+
+def est_lossless(codec: str, title: str = "") -> bool:
+    """Ce flux audio est-il SANS PERTE ?
+
+    Ajoute le 2026-08-30. `composite_score_v2` portait la QUATRIEME table du
+    depot encodant cette notion, et la seule a le faire par egalite EXACTE sur
+    la forme brute : `("flac", "truehd", "dts-hd ma", "mlp")`. Or ffprobe ne
+    dit pas « pcm » mais `pcm_s24le`, `pcm_s16le`, `pcm_bluray` — aucune de ces
+    formes n appartenait a la liste, donc le malus « fake lossless » ne pouvait
+    PAS se declencher sur un remux PCM, le format ou il compte le plus.
+
+    La connaissance existait pourtant ici meme : `AUDIO_CODEC_RANK_PATTERNS`
+    porte `("pcm", 3, "PCM")` avec le commentaire « couvre lpcm / pcm_s24le /
+    pcm_bluray ». Elle n etait simplement pas partagee. Cette fonction ne cree
+    donc pas une cinquieme verite : elle expose celle de la table.
+
+    DEUX CAS que la table ne tranche pas seule, traites ici explicitement :
+
+    - **Atmos** est ambigu et la table le classe en tete sans le dire : porte
+      par du TrueHD il est lossless, porte par de l E-AC-3 (JOC, streaming) il
+      est lossy. On applique la meme regle que `audio_analysis._classify_codec`
+      — c est le TrueHD qui decide, pas le mot « atmos ».
+    - **`mlp`** (Meridian Lossless Packing, le coeur du TrueHD) est un
+      `codec_name` ffprobe a part entiere et n a AUCUNE entree dans la table.
+      L ancienne liste le connaissait ; le retirer serait une regression. Il
+      est donc traite ici, et son absence de la table reste un ecart a
+      instruire — l ajouter changerait le badge et la comparaison de doublons.
+
+    DTS:X n est volontairement PAS traite ici : la table le ramene sur `dts`
+    (rang 2) alors que `quality_score` lui donne le rang 4 via un alias. Cet
+    ecart pre-existe et se corrige dans la table, pas dans un contournement.
+    """
+    combine = f"{codec} {title}".strip().lower()
+    if not combine:
+        return False
+    if "atmos" in combine:
+        return "truehd" in combine
+    if "mlp" in combine:
+        return True
+    for motif, _rang, label in AUDIO_CODEC_RANK_PATTERNS:
+        if motif in combine:
+            return label in AUDIO_LOSSLESS_LABELS
+    return False
 
 
 def format_audio_channels(
