@@ -566,6 +566,40 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
   (`plan_support_core.py:264`, correctif trivial `usedforsecurity=False`), B310 `urlopen`
   (`updater.py:220`), et les 27 B608 (SQL par construction de chaîne) probablement faux
   positifs à vérifier un par un.
+- [~] **T-DOM-1 (scoring)** — deux pistes nommees traitees le 2026-08-29.
+
+  OK **`enable_4k_light` / `add_reason(-4)` sans effet — c'est UN SEUL defaut**, pas deux.
+  Site : `_score_video`, branche « debit video non detecte ». `add_reason(-4, ...)` ecrit dans
+  `reasons` — ce que l'utilisateur LIT — et `video_sub` ne bougeait que de -8. Mesure : toggle
+  ON 40, toggle OFF 40, ecart NUL, la ligne « -4 4K Light probable » bien affichee.
+  Deux consequences : le reglage etait INERTE, et l'explication de score MENTAIT.
+  Le correctif existait a DEUX LIGNES de la : la branche `elif` voisine porte le commentaire
+  « Hotfix coherence (2026-06-04) : aligner add_reason delta sur l'increment reel ».
+  Apres correctif : sous-score video -4 (exactement l'annonce), et le PALIER bascule de
+  Bronze a Reject. La valeur reste 4 — la rendre vraie est un correctif, la remplacer par
+  `penalty_4k_light` serait un arbitrage.
+
+  OK **FLAC/PCM sans bonus — une TROISIEME table que l'audit du 2026-08-19 n'avait pas vue.**
+  Cet audit avait aligne `AUDIO_CODEC_RANK` et `AUDIO_CODEC_RANK_PATTERNS` (rang 3 pour PCM,
+  au-dessus de l'AAC). Mais `profile['audio_bonuses']`, lue par `_audio_codec_bonus`, n'a
+  aucune entree FLAC ni PCM. Mesure, meme film, seul le codec change :
+  `TrueHD 16 | DTS-HD MA 16 | DTS 14 | AAC 14 | AC3 13 | FLAC 13 | PCM 13`.
+  **8 paires** ou les deux tables se contredisent. Invariant pose : un codec SANS PERTE ne
+  peut jamais valoir moins qu'un codec AVEC PERTE. Repli calcule, donc aucune migration des
+  profils utilisateur (meme idiome qu'`atmos_lossy_bonus`).
+
+  ATTENTION **NON corrige, deliberement** — 2 constats MESURES qui appellent un ARBITRAGE :
+  1. **AC3/EAC3 (rang 2) recoivent 0, sous l'AAC (rang 1) qui recoit +3.** C'est l'une des
+     8 paires. Mais `codec_ranks` documente une divergence VOLONTAIRE sur eac3 entre ses deux
+     tables, et « AAC haut debit contre AC3 » est une opinion produit. Rebalancer changerait
+     le score de toute une bibliotheque sur un jugement qui n'est pas le mien.
+  2. **`composite_score_v2.has_lossless_codec` lit `('flac','truehd','dts-hd ma','mlp')`** —
+     PCM/LPCM et DTS:X en sont ABSENTS, et la comparaison porte sur le codec BRUT et non sur
+     l'etiquette canonique (`pcm_s24le` n'y correspond a rien). Le malus « fake lossless » ne
+     peut donc pas se declencher sur un remux PCM. **QUATRIEME** encodage de « ce codec est-il
+     sans perte » dans le depot. Non touche ici : autre sous-systeme, et le malus a ses propres
+     implications a mesurer d'abord.
+
 - [~] **T-DOM-1 · 27 pistes** — UNE traitée le 2026-08-29 (`scene_parser`), et un constat
   préalable : **le détail des 27 n'existe nulle part sur disque.** Seul le résumé ci-dessous
   les évoque, et il n'en NOMME que six. Les autres ne sont pas vérifiables faute de source.
