@@ -242,32 +242,45 @@ class ProbeFilesBatchTests(unittest.TestCase):
         distincts quand parallelism_enabled=True + probe_workers=4. C'est la
         VRAIE definition de "parallel" et c'est deterministe.
 
-        On garde un check timing soft (par_dur < seq_dur * 1.5) pour detecter
-        un crash hypothetique ou parallel serait dramatiquement plus lent —
-        marge tres large, ne fail que sur regression majeure.
+        2026-08-29 : le check timing soft (par_dur < seq_dur * 1.5) est RETIRE.
+        Il a echoue en CI a par=1.211s / seq=0.713s, c'est-a-dire pour la raison
+        exacte que la docstring ci-dessus annonce depuis l'issue #88 :
+        preemption Windows, AV, init du threadpool. Un ratio wall-clock sur 5
+        fichiers de 100 ms n'a pas assez de signal pour dominer ce bruit — il ne
+        mesurait plus la parallelisation, seulement la charge du runner.
+
+        Il n'est pas remplace par une marge plus large mais par la BARRIERE de
+        rendez-vous, deja portee par `_SlowRunnerSpy` et deja utilisee par
+        `test_100_files_probe_simultaneously`. Ce test-la dit d'ailleurs que « la
+        conversion avait simplement oublie ce test-ci » : on la termine.
+
+        La barriere est STRICTEMENT plus forte que le ratio : elle ne se debloque
+        que si N probes sont reellement en vol au meme instant, et aucune horloge
+        n'entre dans le verdict. Elle attrape meme le cas qu'un ratio ne voyait
+        pas — plusieurs threads dont le travail serait serialise par un verrou.
         """
         # 5 films, 100ms chacun.
         runner_seq = _SlowRunnerSpy(sleep_s=0.10)
         service_seq = ProbeService(self.store, runner=runner_seq, which_fn=lambda n: str(n))
-        t0 = time.monotonic()
         service_seq.probe_files(
             media_paths=self.media_paths,
             settings=self._settings(probe_parallelism_enabled=False),
         )
-        seq_dur = time.monotonic() - t0
 
         # Reset cache pour le run parallel.
         for mp in self.media_paths:
             mp.touch()  # change mtime -> cache miss
 
-        runner_par = _SlowRunnerSpy(sleep_s=0.10)
+        # rendezvous=4 : les 4 premiers probes se bloquent mutuellement jusqu'a ce
+        # que les 4 soient arrives. 5 fichiers pour 4 workers, donc les 4 partent
+        # ensemble. En sequentiel, le premier attendrait seul et le drapeau de
+        # timeout se leverait.
+        runner_par = _SlowRunnerSpy(sleep_s=0.10, rendezvous=4, rendezvous_timeout_s=60.0)
         service_par = ProbeService(self.store, runner=runner_par, which_fn=lambda n: str(n))
-        t0 = time.monotonic()
         service_par.probe_files(
             media_paths=self.media_paths,
             settings=self._settings(probe_parallelism_enabled=True, probe_workers=4),
         )
-        par_dur = time.monotonic() - t0
 
         # Assertion principale : parallelism observable via les thread idents
         # uniques utilises par le runner. Avec 5 fichiers et 4 workers, on
@@ -280,12 +293,11 @@ class ProbeFilesBatchTests(unittest.TestCase):
         # Sequential doit utiliser exactement 1 thread.
         self.assertEqual(len(runner_seq.thread_ids), 1)
 
-        # Check soft : parallel pas catastrophiquement plus lent que sequential
-        # (regression majeure). Marge 50% pour tolerer la variance CI.
-        self.assertLess(
-            par_dur,
-            seq_dur * 1.5,
-            f"Parallel anormalement lent: par={par_dur:.3f}s seq={seq_dur:.3f}s",
+        # PREUVE de simultaneite, sans horloge : la barriere ne s'est pas debloquee
+        # par timeout, donc 4 probes tournaient VRAIMENT au meme instant.
+        self.assertFalse(
+            runner_par.rendezvous_timed_out,
+            "la barriere a expire : les probes ne tournent pas simultanement, ils sont serialises malgre plusieurs threads",
         )
 
     def test_invalid_probe_workers_value_falls_back_to_auto(self) -> None:

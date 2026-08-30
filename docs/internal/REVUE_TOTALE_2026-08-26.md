@@ -267,7 +267,34 @@ public (le dépôt a un fork, et les caches GitHub existent).
   pour « le journal porte des déplacements, le payload n'en annonce aucun ». L'invariant juste
   existait déjà ; il n'était pas appelé là. 2 mutants, 2 morts, plus un témoin (un apply qui
   casse AVANT tout déplacement ne doit porter aucun verdict).
-- [ ] **T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
+- [x] **T-PROD-8 · `apply_core.py:2817` et `:775`** — FAIT le 2026-08-29 (PR à ouvrir).
+  Constat vérifié dans le code : les deux sites renomment puis appellent `record_apply_op`,
+  et la docstring d'`atomic_move` décrit mot pour mot ce que cela coûte. Le remède n'est PAS
+  `atomic_move` : les deux sites passent par `renommer_avec_reprise` et
+  `_case_only_rename_with_rollback`, que le remplacement aurait ÉTEINTS. Nouveau gestionnaire
+  de contexte `journal_pose_autour`, dont `atomic_move` devient un appelant.
+  ⚠ **Poser le journal a créé un second défaut, attrapé par un test existant** :
+  `journaled_move` laisse l'entrée sur exception — correct pour un `shutil.move`, faux pour un
+  `rename` pur, qui n'a pas de demi-état. Chaque fichier verrouillé (VLC, indexeur) laissait
+  un `pending` derrière lui. D'où `liberer_si_rien_n_a_bouge`, qui LIT le disque au lieu de
+  supposer. 8 mutants, 8 morts — dont un survivant qui a révélé que l'appariement src/dst
+  n'était testé par rien : sans lui, un échec d'aujourd'hui effaçait la trace d'un crash d'hier.
+- [ ] ~~**T-PROD-8 · `apply_core.py:2817` et `:775`** — `apply_single` (le chemin le plus fréquent)
+- [ ] **T-JOURNAL-1 · fenetre residuelle entre le journal et `record_apply_op`** — CONSTAT NEUF
+  du 2026-08-29, issu d'une revue automatique sur la PR T-PROD-8 et VERIFIE.
+  → suivi dans l'issue **#1166** (« Close crash-consistency window between pending move cleanup
+  and record_apply_op »), ouverte par la revue automatique depuis cette entree.
+  `journaled_move` supprime l'entree pending des que le bloc de deplacement se termine, donc
+  AVANT le `record_apply_op` de l'appelant. Si le processus meurt dans cet intervalle, les
+  octets ont bouge et ni l'entree pending ni l'operation d'apply n'existent :
+  `reconcile_pending_moves()` n'a rien a reconcilier.
+  **Ce n'est PAS un defaut de T-PROD-8** : c'est le contrat de `journaled_move` (« DELETE
+  pending move si le with se termine sans exception »), donc TOUS les appelants d'`atomic_move`
+  le portent depuis l'origine. T-PROD-8 RETRECIT la fenetre — avant, le deplacement entier
+  n'etait pas trace ; apres, seul l'intervalle final l'est.
+  **Remede** : que la suppression du pending et l'insertion de l'operation d'apply partagent une
+  meme transaction. Changement de frontiere transactionnelle touchant tous les call sites du
+  journal — a instruire, pas a bricoler en passant.
   et la migration de la racine de collection ne passent pas par `move_journal.atomic_move` : elles
   renomment puis appellent `record_apply_op`. Le **journal write-ahead n'est pas posé**, et c'est
   lui qui rend le déplacement réconciliable si l'app meurt entre les deux — la docstring
