@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from cinesort.domain.codec_ranks import est_lossless
 from cinesort.domain.perceptual.composite_score_v2 import (
     _score_hdr,
     apply_contextual_adjustments,
@@ -153,6 +154,43 @@ class LeCodecEstLuSOUS_SA_FORME_BRUTETests(unittest.TestCase):
         for brut in ("flac", "truehd", "dts-hd ma", "mlp"):
             with self.subTest(codec=brut):
                 self.assertTrue(self._malus_applique(brut))
+
+    def test_le_TITRE_ne_peut_pas_rendre_un_lossy_lossless(self) -> None:
+        """Le titre d'une piste est du texte LIBRE ; le codec, lui, est un fait.
+
+        Signale par une revue automatique sur cette PR, et reproduit :
+        `est_lossless("ac3", "PCM")` rendait True. La premiere version
+        concatenait codec et titre AVANT d'appliquer les motifs, si bien qu'un
+        flux avec perte dont le titre mentionne un format sans perte passait
+        pour sans perte — et recevait a tort le malus fake-lossless.
+
+        Ce n'est pas theorique : les titres de piste viennent de MediaInfo ou de
+        la main de l'utilisateur, et « PCM master », « FLAC 5.1 », « TrueHD »
+        y figurent couramment sur des flux ac3 ou eac3 de commentaire.
+
+        Le titre n'est consulte que pour Atmos, parce qu'Atmos EST parfois
+        signale la et nulle part ailleurs. Meme la, c'est le codec qui tranche :
+        seul un porteur TrueHD rend l'Atmos sans perte.
+        """
+        for codec, titre in (
+            ("ac3", "PCM"),
+            ("aac", "FLAC 5.1"),
+            ("mp3", "TrueHD"),
+            ("eac3", "DTS-HD MA"),
+            ("opus", "PCM master"),
+        ):
+            with self.subTest(codec=codec, titre=titre):
+                self.assertFalse(
+                    est_lossless(codec, titre),
+                    f"codec={codec!r} est AVEC PERTE : le titre {titre!r} ne peut pas le changer",
+                )
+
+    def test_le_titre_reste_lu_pour_ATMOS_seulement(self) -> None:
+        """Temoin de la reserve : sans lui, "n utilise pas le titre" serait
+        indistinguable de "ignore le titre partout", ce qui perdrait l'Atmos
+        signale hors du champ codec."""
+        self.assertTrue(est_lossless("truehd", "Atmos 7.1"))
+        self.assertFalse(est_lossless("eac3", "Atmos 7.1"))
 
     def test_atmos_est_tranche_par_son_PORTEUR_pas_par_son_nom(self) -> None:
         """Le mot « atmos » ne dit pas si le flux est sans perte.

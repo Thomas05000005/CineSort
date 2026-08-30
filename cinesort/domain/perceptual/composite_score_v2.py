@@ -623,13 +623,6 @@ def apply_contextual_adjustments(
     # liste etait toujours vide, has_lossless_codec toujours False et le malus
     # fake-lossless + warning ne se declenchaient jamais.
     audio_tracks = (normalized_probe or {}).get("audio_tracks") or []
-    # 2026-08-30 : la comparaison portait sur le codec BRUT, en egalite exacte,
-    # contre `("flac", "truehd", "dts-hd ma", "mlp")`. ffprobe ne dit pas « pcm »
-    # mais `pcm_s24le` / `pcm_s16le` / `pcm_bluray` : aucune de ces formes
-    # n'appartenait a la liste, donc le malus ne pouvait PAS se declencher sur un
-    # remux PCM — le format ou il compte le plus. Quatrieme table du depot a
-    # encoder « ce codec est-il sans perte » ; `codec_ranks.est_lossless` expose
-    # desormais celle qui fait foi.
     has_lossless_codec = any(
         est_lossless(str((t or {}).get("codec", "")), str((t or {}).get("title", "")))
         for t in (audio_tracks if isinstance(audio_tracks, list) else [])

@@ -155,15 +155,23 @@ def est_lossless(codec: str, title: str = "") -> bool:
     (rang 2) alors que `quality_score` lui donne le rang 4 via un alias. Cet
     ecart pre-existe et se corrige dans la table, pas dans un contournement.
     """
-    combine = f"{codec} {title}".strip().lower()
-    if not combine:
+    # Le CODEC seul decide. Le titre est du texte LIBRE — il vient de MediaInfo
+    # ou de la main de l'utilisateur — et « PCM master », « FLAC 5.1 » ou
+    # « TrueHD » y figurent couramment sur des flux ac3 de commentaire. Une
+    # premiere version concatenait les deux avant d appliquer les motifs :
+    # `est_lossless("ac3", "PCM")` rendait alors True.
+    c = str(codec or "").strip().lower()
+    if not c:
         return False
-    if "atmos" in combine:
-        return "truehd" in combine
-    if "mlp" in combine:
+    # Le titre n est consulte QUE pour Atmos, parce qu Atmos est parfois
+    # signale la et nulle part ailleurs. Meme la, c est le codec qui tranche :
+    # seul un porteur TrueHD rend l Atmos sans perte.
+    if "atmos" in c or "atmos" in str(title or "").strip().lower():
+        return "truehd" in c
+    if "mlp" in c:
         return True
     for motif, _rang, label in AUDIO_CODEC_RANK_PATTERNS:
-        if motif in combine:
+        if motif in c:
             return label in AUDIO_LOSSLESS_LABELS
     return False
 
