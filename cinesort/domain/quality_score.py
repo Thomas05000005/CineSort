@@ -11,7 +11,7 @@ import re
 # testing patche dataclasses.is_dataclass -> les tests cassent (preuve).
 from dataclasses import asdict as _asdict
 from dataclasses import is_dataclass as _is_dc
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.confidence_thresholds import confidence_label_fr
@@ -1040,6 +1040,102 @@ def _title_in_folder(folder_name: str, title: str) -> bool:
     return bool(nt) and (nt in nf)
 
 
+def _scorer_le_debit_video(
+    *,
+    bitrate_kbps: Optional[int],
+    threshold_kbps: int,
+    resolution_rank: int,
+    resolution_label: str,
+    release_4k_light_hint: bool,
+    toggles: Dict[str, Any],
+    penalty_4k_light: int,
+    low_bitrate_penalty: int,
+    add_reason: Callable[[int, str], None],
+) -> Tuple[int, bool]:
+    """Score le debit video. Rend `(delta de sous-score, is_4k_light)`.
+
+    Extrait de `_score_video` le 2026-08-29 : appliquer enfin la penalite
+    « 4K Light probable » (T-DOM-1) portait la fonction de 175 a 190 lignes pour
+    un plafond gele a 175. Le cliquet demande de DECOUPER plutot que de monter
+    le plafond, et le bloc formait deja une unite — le seuil est calcule juste
+    avant par l'appelant, ici on ne fait que le confronter au debit mesure.
+
+    Le delta est RENDU au lieu de muter `video_sub` : c'est ce qui permet de
+    verifier, dans un test, que le chiffre annonce par `add_reason` est bien
+    celui qui est applique — l'invariant que ce lot vient de retablir.
+    """
+    delta = 0
+    is_4k_light = False
+    if bitrate_kbps is None:
+        delta -= 8
+        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
+            is_4k_light = True
+            # T-DOM-1 : ce `-4` partait dans `reasons` — ce que l'utilisateur
+            # LIT — sans jamais toucher `video_sub`. Mesure : toggle ON 40,
+            # toggle OFF 40, ecart NUL, et la ligne « -4 4K Light probable »
+            # bien affichee. Deux consequences : le reglage `enable_4k_light`
+            # etait INERTE ici, et l'explication de score MENTAIT.
+            #
+            # La branche `elif` ci-dessous ne souffre pas du defaut, et porte
+            # meme le commentaire « Hotfix coherence (2026-06-04) : aligner
+            # add_reason delta sur l'increment reel applique a video_sub ».
+            # Le correctif existait donc a DEUX lignes d'ici.
+            #
+            # La valeur reste 4, celle qui etait deja annoncee : la rendre
+            # vraie est un correctif, la remplacer par `penalty_4k_light`
+            # (plus severe, pilote par le profil) serait un arbitrage produit.
+            delta -= 4
+            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
+        add_reason(-8, "Debit video non detecte")
+    elif threshold_kbps > 0:
+        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
+        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
+        # l'increment reel applique a video_sub. Avant, les factors reportaient
+        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
+        # faussait les weighted_delta et le top_positive de explain_score.
+        if ratio >= 1.35:
+            delta += 18
+            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
+        elif ratio >= 1.15:
+            delta += 14
+            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 1.0:
+            delta += 10
+            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 0.85:
+            delta += 6
+            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        elif ratio >= 0.70:
+            delta += 1
+            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        else:
+            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
+                is_4k_light = True
+                dynamic_penalty = penalty_4k_light
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
+                delta -= dynamic_penalty
+                if release_4k_light_hint:
+                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
+                else:
+                    add_reason(
+                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
+                    )
+            else:
+                dynamic_penalty = low_bitrate_penalty
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
+                delta -= dynamic_penalty
+                add_reason(
+                    -dynamic_penalty,
+                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
+                )
+        if resolution_rank >= 2160 and ratio >= 1.15:
+            delta += 4
+            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
+    return delta, is_4k_light
+
+
 def _score_video(
     video: Dict[str, Any],
     prof: Dict[str, Any],
@@ -1129,74 +1225,18 @@ def _score_video(
             reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
             threshold_kbps = adjusted
 
-    if bitrate_kbps is None:
-        video_sub -= 8
-        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
-            is_4k_light = True
-            # T-DOM-1 : ce `-4` partait dans `reasons` — ce que l'utilisateur
-            # LIT — sans jamais toucher `video_sub`. Mesure : toggle ON 40,
-            # toggle OFF 40, ecart NUL, et la ligne « -4 4K Light probable »
-            # bien affichee. Deux consequences : le reglage `enable_4k_light`
-            # etait INERTE ici, et l'explication de score MENTAIT.
-            #
-            # La branche `elif` ci-dessous ne souffre pas du defaut, et porte
-            # meme le commentaire « Hotfix coherence (2026-06-04) : aligner
-            # add_reason delta sur l'increment reel applique a video_sub ».
-            # Le correctif existait donc a DEUX lignes d'ici.
-            #
-            # La valeur reste 4, celle qui etait deja annoncee : la rendre
-            # vraie est un correctif, la remplacer par `penalty_4k_light`
-            # (plus severe, pilote par le profil) serait un arbitrage produit.
-            video_sub -= 4
-            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
-        add_reason(-8, "Debit video non detecte")
-    elif threshold_kbps > 0:
-        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
-        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
-        # l'increment reel applique a video_sub. Avant, les factors reportaient
-        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
-        # faussait les weighted_delta et le top_positive de explain_score.
-        if ratio >= 1.35:
-            video_sub += 18
-            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
-        elif ratio >= 1.15:
-            video_sub += 14
-            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 1.0:
-            video_sub += 10
-            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 0.85:
-            video_sub += 6
-            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        elif ratio >= 0.70:
-            video_sub += 1
-            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        else:
-            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
-                is_4k_light = True
-                dynamic_penalty = penalty_4k_light
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
-                video_sub -= dynamic_penalty
-                if release_4k_light_hint:
-                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
-                else:
-                    add_reason(
-                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
-                    )
-            else:
-                dynamic_penalty = low_bitrate_penalty
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
-                video_sub -= dynamic_penalty
-                add_reason(
-                    -dynamic_penalty,
-                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
-                )
-        if resolution_rank >= 2160 and ratio >= 1.15:
-            video_sub += 4
-            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
-
+    delta_debit, is_4k_light = _scorer_le_debit_video(
+        bitrate_kbps=bitrate_kbps,
+        threshold_kbps=threshold_kbps,
+        resolution_rank=resolution_rank,
+        resolution_label=resolution_label,
+        release_4k_light_hint=release_4k_light_hint,
+        toggles=toggles,
+        penalty_4k_light=penalty_4k_light,
+        low_bitrate_penalty=low_bitrate_penalty,
+        add_reason=add_reason,
+    )
+    video_sub += delta_debit
     if (has_dv or has_hdr10 or has_hdr10p) and (bit_depth > 0 and bit_depth <= 8):
         p_hdr8 = _to_int(vt.get("penalty_hdr_8bit"), 8)
         video_sub -= p_hdr8
