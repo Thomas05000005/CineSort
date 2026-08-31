@@ -1060,6 +1060,7 @@ def observe_dashboard(
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "views": [],
         "views_with_broken_posters": [],
+        "views_with_posters_absents": [],
         "console_errors_major": [],
     }
 
@@ -1427,6 +1428,22 @@ def observe_dashboard(
                 if broken_posters:
                     summary["views_with_broken_posters"].append(label)
 
+                # L'ABSENCE TOTALE N'EST PAS « PAS DE CASSE ».
+                #
+                # Une vue qui n'a rien rendu donne `posters_expected == 0`, donc
+                # verdict `POSTERS_ABSENTS` — et `broken_posters_detected` reste
+                # False, puisqu'il ne vaut True que sur `POSTERS_KO`. Ce flag est
+                # [FIGE] pour compat, on n'y touche pas ; mais rien ne faisait
+                # remonter `POSTERS_ABSENTS` au sommaire, alors que
+                # `POSTERS_KO` y remonte deux lignes plus haut.
+                #
+                # Consequence : une execution ou AUCUNE vue n'affiche de jaquette
+                # — page blanche, JS casse, selecteur perime — passait pour
+                # saine. C'est la difference entre « rien de casse » et « rien
+                # observe », et c'est precisement ce que cet outil doit dire.
+                if verdict == "POSTERS_ABSENTS":
+                    summary["views_with_posters_absents"].append(label)
+
                 # Erreurs majeures (type "error" ou pageerror).
                 for rec in console_records:
                     if rec.get("type") in {"error", "pageerror"}:
@@ -1443,7 +1460,20 @@ def observe_dashboard(
                 summary["views"].append(view_summary)
 
             browser.close()
-            summary["ok"] = True
+            # `ok` NE DOIT PAS IGNORER LES ECHECS DE NAVIGATION.
+            #
+            # Cette ligne valait `True` inconditionnellement des que la boucle
+            # se terminait sans lever. Or chaque vue qui echoue a naviguer pose
+            # `view_summary["nav_error"]` (l.1324) et CONTINUE : toutes les vues
+            # pouvaient donc etre en erreur et le rapport annoncer `ok: True`.
+            #
+            # C'est la meme famille que les trois mesureurs de #1175 — un outil
+            # de diagnostic qui rend un verdict propre sans avoir rien mesure.
+            vues_en_erreur = [
+                str(v.get("route") or v.get("hash") or "?") for v in summary["views"] if v.get("nav_error")
+            ]
+            summary["views_with_nav_error"] = vues_en_erreur
+            summary["ok"] = not vues_en_erreur
     except Exception as exc:
         summary["error"] = scrub(str(exc))
     finally:
@@ -1684,6 +1714,19 @@ def main(argv: list[str] | None = None) -> int:
             f"broken_posters={dash.get('views_with_broken_posters')}",
             file=sys.stderr,
         )
+
+    # LE CODE DE SORTIE DOIT DIRE LA VERITE.
+    #
+    # `return 0` etait inconditionnel. Si playwright est absent,
+    # `observe_dashboard` rend `{"ok": False, "views": []}` (l.982-988) et le
+    # processus sortait quand meme en 0 : un appelant qui lit le code de sortie
+    # concluait « observation reussie » alors que RIEN n'avait ete observe.
+    #
+    # Un outil de diagnostic qui ne peut pas echouer ne diagnostique rien.
+    if isinstance(dash, dict) and not dash.get("ok"):
+        motif = dash.get("error") or dash.get("views_with_nav_error") or "raison non precisee"
+        print(f"[observe] [ECHEC] observation non concluante : {motif}", file=sys.stderr)
+        return 1
     return 0
 
 
