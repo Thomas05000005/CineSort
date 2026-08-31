@@ -378,7 +378,7 @@ et la procédure de résolution. Chaque section référence les chemins de logs 
 ## Pour aller plus loin
 
 - **Manuel utilisateur** : [MANUAL.md](MANUAL.md) — tutoriel pas-à-pas + glossaire + FAQ.
-- **API REST** : [api/ENDPOINTS.md](api/ENDPOINTS.md) — référence des 98 endpoints.
+- **API REST** : [api/ENDPOINTS.md](api/ENDPOINTS.md) — référence complète des endpoints (auto-générée).
 - **Architecture** : [architecture.mmd](architecture.mmd) — diagrammes Mermaid des modules.
 - **Signaler un bug** : Aide → **Exporter le diagnostic** (zip avec logs scrubbés sans clés API),
   joindre à une issue GitHub.

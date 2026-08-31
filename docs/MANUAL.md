@@ -739,7 +739,7 @@ Vue **Aide** dans l'app (icône `?` dans la sidebar) — FAQ + glossaire + racco
 |---|---|
 | [README.md](../README.md) | Présentation, quick start, screenshots |
 | [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Dépannage détaillé par catégorie |
-| [docs/api/ENDPOINTS.md](api/ENDPOINTS.md) | Référence des 98 endpoints API REST |
+| [docs/api/ENDPOINTS.md](api/ENDPOINTS.md) | Référence complète des endpoints API REST (auto-générée) |
 | [CHANGELOG.md](../CHANGELOG.md) | Historique des versions |
 | [docs/internal/CLAUDE.md](internal/CLAUDE.md) | Architecture (lecture dev) |
 
