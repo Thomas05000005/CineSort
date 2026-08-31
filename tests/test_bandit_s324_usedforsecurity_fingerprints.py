@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import hmac
 import shutil
 import tempfile
 import unittest
@@ -41,6 +42,7 @@ import cinesort.domain.core as core
 from cinesort.app.apply_core import sha1_quick
 from cinesort.app.plan_support_core import (
     _nfo_signature,
+    _tmdb_api_key_fingerprint,
     cfg_signature_for_incremental,
     folder_signature,
 )
@@ -66,15 +68,19 @@ _EXPECTED_ANNOTATED: Dict[str, Dict[str, int]] = {
     },
 }
 
-# Exception ASSUMEE et hors perimetre de ce correctif :
-# `_tmdb_api_key_fingerprint` hache une cle API TMDb pour ne PAS la stocker en
-# clair dans la signature de cache. C'est le seul site dont l'usage a une
-# dimension securite reelle (non-reversibilite d'un secret) : y coller
-# `usedforsecurity=False` serait une etiquette mensongere. Arbitrage a trancher
-# separement (migration vers sha256 plutot qu'annotation).
-# Assertion en SOUS-ENSEMBLE : annoter/corriger ce site plus tard ne cassera pas
-# ce test, mais tout NOUVEL appel nu le fera tomber.
-_TOLERATED_BARE = frozenset({"_tmdb_api_key_fingerprint"})
+# L'EXCEPTION EST LEVEE (2026-08-31), ET PAR L'ARBITRAGE QU'ELLE ANNONCAIT.
+#
+# `_tmdb_api_key_fingerprint` hachait une cle API TMDb pour ne PAS la stocker en
+# clair dans la signature de cache. C'etait le seul site dont l'usage a une
+# dimension securite reelle — la non-reversibilite d'un secret — et le
+# commentaire qui vivait ici refusait a juste titre d'y coller
+# `usedforsecurity=False` : l'etiquette aurait ete MENSONGERE, elle aurait
+# eteint l'alerte sans rien changer au fond.
+#
+# La sortie qu'il nommait (« migration vers sha256 plutot qu'annotation ») est
+# desormais appliquee. L'ensemble est donc VIDE, et il le reste : tout nouvel
+# appel nu fait tomber le test ci-dessous.
+_TOLERATED_BARE: frozenset[str] = frozenset()
 
 
 def _fips_sha1(*args: object, **kwargs: object):
@@ -156,10 +162,71 @@ class Sha1FipsModeTests(unittest.TestCase):
     def test_cfg_signature_survit_au_mode_fips(self) -> None:
         cfg = self._cfg()
         with mock.patch.object(hashlib, "sha1", _fips_sha1):
-            # tmdb_api_key=None : `_tmdb_api_key_fingerprint` sort avant de
-            # hacher, on n'exerce que le site du correctif.
             signature = cfg_signature_for_incremental(cfg, tmdb_api_key=None)
         self.assertEqual(len(signature), 40)
+
+    def test_cfg_signature_survit_au_mode_fips_AVEC_une_cle_tmdb(self) -> None:
+        """Ce test passait `tmdb_api_key=None`, et le commentaire le disait :
+        « `_tmdb_api_key_fingerprint` sort avant de hacher, on n'exerce que le
+        site du correctif ». Il CONTOURNAIT donc le seul site qui ne survivait
+        pas au mode FIPS.
+
+        Avec une cle reelle, l'ancien code levait `[FIPS] SHA-1 interdit` :
+        `hashlib.sha1(...)` y etait appele SANS `usedforsecurity=False`, et
+        aucune annotation n'etait acceptable ici (voir le bloc en tete). La
+        migration vers SHA-256 le sort du probleme au lieu de le maquiller."""
+        cfg = self._cfg()
+        with mock.patch.object(hashlib, "sha1", _fips_sha1):
+            signature = cfg_signature_for_incremental(cfg, tmdb_api_key="cle-tmdb-factice-de-test-pas-un-secret")
+        self.assertEqual(len(signature), 40)
+
+    def test_l_empreinte_de_cle_tmdb_est_un_HMAC(self) -> None:
+        """Verrouille la migration : SHA-1, SHA-256 nu et HMAC-SHA-256 tronques
+        ont TOUS la meme longueur — une assertion sur `len()` ne distinguerait
+        aucun des trois.
+
+        CodeQL signalait ce site depuis le 2026-08-02 (`py/weak-sensitive-data-
+        hashing`, HIGH). Passer au SHA-256 nu ne l'a pas ferme : le grief porte
+        sur le GESTE — hacher un secret avec une primitive rapide — pas sur
+        l'algorithme. HMAC fait du secret la CLE et non le message, ce qui est
+        l'usage correct."""
+        # CETTE VALEUR NE RESSEMBLE PAS A UNE CLE, ET C'EST VOULU.
+        #
+        # La premiere version employait 32 caracteres hexadecimaux — la forme
+        # exacte d'une cle TMDb. ELLE N'EST PAS RECOPIEE ICI : `git log -p`
+        # inclut le diff ET les messages de commit, donc decrire une chaine
+        # detectee en la reproduisant la REINTRODUIT dans la plage scannee.
+        # C'est ecrit en tete de `.github/workflows/gitleaks.yml`, et c'est
+        # exactement ce qui est arrive a une premiere version de ce
+        # commentaire. La regle
+        # PAR DEFAUT `generic-api-key` de gitleaks a mordu dessus et rendu le
+        # check requis `Scan secrets` ROUGE.
+        #
+        # Un `# gitleaks:allow` n'aurait pas suffi : l'action scanne les COMMITS
+        # de la PR, et l'annotation ne s'applique pas retroactivement au diff qui
+        # introduit la ligne (c'est ecrit en tete de `.gitleaksignore`). Figer
+        # une empreinte pour une fausse cle serait pire encore — une exemption
+        # posee a la legere transforme un check requis en decoration.
+        #
+        # La fonction testee accepte n'importe quelle chaine : sa valeur n'a
+        # aucune importance ici, seule compte sa transformation. Ne pas ecrire
+        # quelque chose qui ressemble a un secret est donc gratuit.
+        cle = "cle-tmdb-factice-de-test-pas-un-secret"
+        empreinte = _tmdb_api_key_fingerprint(cle)
+
+        attendu = hmac.new(
+            key=cle.encode("utf-8"),
+            msg=b"cinesort:tmdb_api_key_fingerprint:v1",
+            digestmod=hashlib.sha256,
+        ).hexdigest()[:16]
+        self.assertEqual(empreinte, attendu)
+        # Ni SHA-1 nu, ni SHA-256 nu : le secret doit etre la CLE, pas le
+        # message. Ces deux contre-controles distinguent les trois etapes de
+        # cette correction — sans eux, un retour au hash nu passerait.
+        self.assertNotEqual(empreinte, _REAL_SHA1(cle.encode("utf-8")).hexdigest()[:16])
+        self.assertNotEqual(empreinte, hashlib.sha256(cle.encode("utf-8")).hexdigest()[:16])
+        self.assertIsNone(_tmdb_api_key_fingerprint(""), "cle vide : pas d'empreinte")
+        self.assertIsNone(_tmdb_api_key_fingerprint(None))
 
     def test_nfo_signature_survit_au_mode_fips(self) -> None:
         nfo = self.tmp / "movie.nfo"

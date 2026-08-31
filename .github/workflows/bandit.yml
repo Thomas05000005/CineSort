@@ -119,7 +119,12 @@ jobs:
           python - <<'PY'
           import json, sys
 
-          PLAFOND = 33  # mesure du 2026-08-29, bandit>=1.7,<2, drapeaux ci-dessus
+          # 33 -> 32 le 2026-08-31 : le SEUL finding de niveau `error` du lot,
+          # B324 sur `_tmdb_api_key_fingerprint`, a ete resolu par MIGRATION
+          # vers SHA-256 — pas par annotation. Mesure faite avec bandit 1.9.4 et
+          # les drapeaux ci-dessous : 33 avant, 32 apres, et B324 disparait de
+          # la ventilation par regle. Reste {B104: 4, B310: 1, B608: 27}.
+          PLAFOND = 32  # mesure du 2026-08-31, bandit>=1.7,<2, drapeaux ci-dessus
 
           with open("bandit-results.sarif", encoding="utf-8") as fh:
               sarif = json.load(fh)

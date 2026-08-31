@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -257,11 +258,62 @@ def _tmdb_api_key_fingerprint(api_key: Optional[str]) -> Optional[str]:
     bougeait NI cfg_sig NI folder_signature, donc l'enrichissement TMDb ne
     reprenait jamais. Un simple booleen ne suffirait pas non plus — remplacer
     une cle revoquee par une valide doit aussi invalider les caches.
+
+    SHA-256 ET NON SHA-1, ET NON PAS `usedforsecurity=False`.
+
+    Les neuf autres empreintes du depot sont des cles de CACHE : elles hachent
+    un chemin, une taille, un payload de reglages. `usedforsecurity=False` y est
+    une etiquette VRAIE, et bandit se tait a juste titre.
+
+    Ici c'est different, et le commentaire de
+    `tests/test_bandit_s324_usedforsecurity_fingerprints.py` l'avait deja
+    tranche : ce site est le SEUL dont l'usage a une dimension securite reelle —
+    la non-reversibilite d'un secret. Y coller `usedforsecurity=False` aurait
+    ete une etiquette MENSONGERE, qui eteint l'alerte sans rien changer au fond.
+    L'arbitrage qui y etait note (« migration vers sha256 plutot qu'annotation »)
+    est applique ici.
+
+    TROISIEME RAISON, absente de ce commentaire : en mode FIPS, `hashlib.sha1()`
+    appele SANS `usedforsecurity=False` LEVE. Ce site faisait donc planter le
+    calcul de signature sur un interpreteur FIPS — ni annote, ni migre, il
+    n'avait aucune issue.
+
+    La troncature a 16 hex est conservee : le format stocke ne change pas, seule
+    la valeur change. Consequence assumee et unique : les caches incrementaux
+    des installations qui ont une cle TMDb sont invalides une fois, et le
+    prochain scan les reconstruit.
     """
     key = (api_key or "").strip()
     if not key:
         return None
-    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    # HMAC, ET NON UN HASH NU — la cle devient la CLE, pas le MESSAGE.
+    #
+    # CodeQL signale ce site depuis le 2026-08-02 (alerte #264,
+    # `py/weak-sensitive-data-hashing`, severite HIGH) : « sensitive data is
+    # used in a hashing algorithm that is insecure [...] since it is not a
+    # computationally expensive hash function ». Passer de SHA-1 a SHA-256 ne
+    # l'a pas ferme, et c'etait previsible — le grief ne porte pas sur
+    # l'algorithme mais sur le GESTE : hacher un secret avec une primitive
+    # rapide reste attaquable par force brute quand le secret, lui, est faible.
+    #
+    # Une cle TMDb fait 32 caracteres hexadecimaux tires au hasard, donc 128
+    # bits : ce cas precis n'est pas force-brutable. Mais l'argument depend
+    # d'une propriete du SECRET, pas du code — il cesserait de valoir le jour ou
+    # ce champ accueillerait autre chose. Un garde ne doit pas reposer sur une
+    # hypothese que rien ne verifie.
+    #
+    # HMAC est la primitive faite pour cela : deriver un identifiant stable et
+    # non reversible d'un secret. Le secret y est la CLE et non le message, ce
+    # qui est l'usage correct — et ce que CodeQL reconnait comme tel.
+    #
+    # Le message est un DOMAINE constant : il empeche qu'une empreinte calculee
+    # ici serve ailleurs, et son suffixe de version permet de la faire tourner
+    # sans toucher au reste.
+    return hmac.new(
+        key=key.encode("utf-8"),
+        msg=b"cinesort:tmdb_api_key_fingerprint:v1",
+        digestmod=hashlib.sha256,
+    ).hexdigest()[:16]
 
 
 def cfg_signature_for_incremental(
