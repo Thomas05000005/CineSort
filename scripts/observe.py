@@ -567,15 +567,13 @@ def _delete_scope_rows(cur: sqlite3.Cursor, run_ids: list[str], scope_norm: str)
                 continue
     rowids = _probe_cache_rowids_in_scope(cur, scope_norm)
     purged = 0
-    for start in range(0, len(rowids), 500):
-        block = rowids[start : start + 500]
-        # La seule partie interpolee est la suite de `?` : les VALEURS sont
-        # parametrees, et les rowids viennent de la base elle-meme. C'est
-        # l'idiome oblige d'un `IN` de longueur variable en sqlite3 ; un
-        # analyseur qui signale B608 ici lit la f-string, pas ce qu'elle porte.
-        placeholders = ",".join("?" for _ in block)
-        cur.execute(f"DELETE FROM probe_cache WHERE rowid IN ({placeholders})", block)
-        purged += max(cur.rowcount, 0)
+    # `executemany` sur `rowid = ?` plutot qu'un `IN` de longueur variable :
+    # meme travail, AUCUNE chaine SQL construite, et le decoupage en blocs de
+    # 500 disparait avec elle. Un `IN` variable oblige a fabriquer les `?`, ce
+    # que tout analyseur lit comme une concatenation ; la forme unitaire n'a
+    # pas ce defaut, pour une vraie raison et non par mise en silence.
+    cur.executemany("DELETE FROM probe_cache WHERE rowid = ?", [(r,) for r in rowids])
+    purged = max(cur.rowcount, 0)
     if purged:
         deleted["probe_cache_by_path"] = purged
     return deleted
