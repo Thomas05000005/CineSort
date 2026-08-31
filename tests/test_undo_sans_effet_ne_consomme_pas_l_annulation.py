@@ -64,6 +64,8 @@ def _finaliser(
     failed: int,
     store: Optional[_StoreEspion] = None,
     notify: Optional[_NotifyEspion] = None,
+    conflicts_root: str = "",
+    conflicts_details: Optional[list] = None,
 ) -> Tuple[Dict[str, Any], _StoreEspion, _NotifyEspion]:
     """Execute `_execute_and_finalize_undo` avec des compteurs imposes.
 
@@ -85,7 +87,8 @@ def _finaliser(
         "conflict_moves": 0,
         "empty_folder_dirs_reversed": 0,
         "cleanup_residual_dirs_reversed": 0,
-        "undo_conflicts_root": "",
+        "undo_conflicts_root": conflicts_root,
+        "conflicts_details": list(conflicts_details or []),
         "aborted_atomic": False,
         "preverify": {},
     }
@@ -177,6 +180,49 @@ class ContreEpreuvesTests(unittest.TestCase):
 
         self.assertEqual(out.get("status"), "UNDONE_DONE")
         self.assertEqual(store.clotures, [("b1", "UNDONE_DONE")])
+
+
+class OuLUtilisateurRetrouveSesFilmsTests(unittest.TestCase):
+    """`conflicts_root` est le SEUL endroit ou la reponse dit ou sont passes les
+    films qu'un undo n'a pas pu remettre en place.
+
+    Quand la destination d'origine est occupee, `_execute_undo_ops` deplace le
+    fichier vers `<run_dir>/_review/_undo_conflicts/` plutot que d'ecraser. Le
+    commentaire du payload le dit : « leur destination ne doit pas rester
+    prisonniere d'un message ». Sans ce champ, l'utilisateur lit « conflits » et
+    n'a aucun chemin ou aller chercher.
+
+    MESURE DU TROU : remplacer `str(undo_counts.get("undo_conflicts_root") or "")`
+    par `""` survivait a 251 tests (`pytest -k "undo or conflict"`). Les deux
+    fichiers qui posaient la cle la laissaient VIDE — une valeur que le mutant
+    rend aussi. Un contrat qui ne peut rendre qu'une valeur ne mesure rien.
+    """
+
+    def test_le_chemin_de_quarantaine_REMONTE_dans_la_reponse(self) -> None:
+        racine = r"C:/runs/r1/_review/_undo_conflicts"
+        out, _store, _notify = _finaliser(
+            done=0,
+            skipped=0,
+            failed=1,
+            conflicts_root=racine,
+            conflicts_details=[{"src": "a.mkv", "dst": "b.mkv"}],
+        )
+
+        self.assertEqual(out.get("conflicts_root"), racine)
+        self.assertEqual(
+            out.get("conflicts"),
+            [{"src": "a.mkv", "dst": "b.mkv"}],
+            "le detail des conflits est la liste que l'ecran affiche",
+        )
+
+    def test_sans_conflit_le_champ_reste_VIDE_et_non_absent(self) -> None:
+        """Contre-test : l'UI lit `conflicts_root` sans condition. Un champ
+        absent la ferait afficher `undefined`, une chaine vide la fait taire."""
+        out, _store, _notify = _finaliser(done=1, skipped=0, failed=0)
+
+        self.assertIn("conflicts_root", out)
+        self.assertEqual(out.get("conflicts_root"), "")
+        self.assertEqual(out.get("conflicts"), [])
 
 
 if __name__ == "__main__":

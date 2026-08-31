@@ -563,3 +563,87 @@ def comparer_annonce_et_journal(
         if inc is not None:
             trouvees.append(inc)
     return Verdict(incoherences=trouvees, comptes_journal=comptes)
+
+
+#: Les statuts d'undo que `apply_operations.undo_status` peut porter.
+STATUTS_UNDO: tuple[str, ...] = ("PENDING", "DONE", "FAILED", "SKIPPED")
+
+
+def comparer_undo_annonce_et_journal(
+    annonce: Mapping[str, Any],
+    statuts_avant: Mapping[str, int],
+    statuts_apres: Mapping[str, int],
+) -> List[Incoherence]:
+    """Le triangle sur l'UNDO — et pourquoi il se lit en DELTA.
+
+    L'undo annonce `counts: {done, skipped, failed, irreversible}` et marque
+    chaque operation dans `apply_operations.undo_status`. L'appariement est
+    MESURE, pas suppose : chaque `done += 1` est suivi d'un
+    `_mark_undo_status(DONE)`, chaque `failed += 1` d'un `FAILED`. Ce sont donc
+    bien deux vues de la MEME population — contrairement au compte de
+    quarantaine, retire pour cette raison exacte.
+
+    POURQUOI LE DELTA, ET PAS L'ETAT
+    ---------------------------------
+    Un batch peut etre annule plusieurs fois : `_build_undo_preview_payload` ne
+    filtre pas sur `undo_status`. Apres deux passages, le journal porte la SOMME
+    des deux, alors que `counts` ne decrit que le dernier. Comparer des etats
+    absolus produirait donc un faux positif a chaque reprise. On compare les
+    ECARTS entre avant et apres.
+
+    LA DIVERGENCE EST ATTEIGNABLE, ET ELLE COUTE CHER
+    --------------------------------------------------
+    `_mark_undo_status` avale `sqlite3.Error` et `OSError` DELIBEREMENT : « le
+    statut en base est un ARTEFACT DE RAPPORT », son echec ne doit jamais
+    interrompre une restauration en cours. Une base verrouillee fait donc
+    annoncer N fichiers restaures alors que le journal en garde moins — et au
+    prochain essai ces operations seront REJOUEES, puisque l'undo complet ne
+    filtre pas sur le statut.
+
+    Args:
+        annonce: le `counts` du payload d'undo.
+        statuts_avant: comptes par `undo_status` AVANT la boucle.
+        statuts_apres: comptes par `undo_status` APRES.
+    """
+
+    def _delta(statut: str) -> int:
+        return int(statuts_apres.get(statut, 0) or 0) - int(statuts_avant.get(statut, 0) or 0)
+
+    def _annonce(cle: str) -> int:
+        try:
+            return int((annonce or {}).get(cle) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    trouvees: List[Incoherence] = []
+
+    restaures_annonces, restaures_inscrits = _annonce("done"), _delta("DONE")
+    if restaures_annonces != restaures_inscrits:
+        trouvees.append(
+            Incoherence(
+                code="undo_compte_restaure_diverge",
+                message=(
+                    f"l'undo annonce {restaures_annonces} restauration(s) mais le journal "
+                    f"n'en a inscrit que {restaures_inscrits}"
+                ),
+                annonce={"done": restaures_annonces},
+                journal={"delta_DONE": restaures_inscrits},
+                reserve=(
+                    "un statut non persiste ne veut PAS dire que le fichier n'a pas bouge : "
+                    "`_mark_undo_status` s'execute APRES la restauration. Le risque est le "
+                    "REJEU au prochain essai, pas la perte."
+                ),
+            )
+        )
+
+    echecs_annonces, echecs_inscrits = _annonce("failed"), _delta("FAILED")
+    if echecs_annonces == 0 and echecs_inscrits > 0:
+        trouvees.append(
+            Incoherence(
+                code="undo_succes_annonce_malgre_des_echecs",
+                message=f"l'undo annonce failed=0 mais le journal a inscrit {echecs_inscrits} echec(s)",
+                annonce={"failed": 0},
+                journal={"delta_FAILED": echecs_inscrits},
+            )
+        )
+    return trouvees

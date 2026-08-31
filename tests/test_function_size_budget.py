@@ -220,7 +220,14 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # 114 -> 172 : un undo qui n'a restaure AUCUN fichier ne consomme plus
     # l'annulation. Le cas et sa justification tiennent en une trentaine de
     # lignes de commentaire — c'est le prix pour que personne ne les reperde.
-    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 172,
+    # 172 -> 161 le 2026-08-31 : le triangle sur l'undo ajoutait deux lignes
+    # irreductibles (la photo des `undo_status` AVANT la boucle, et l'appel au
+    # verdict), et une premiere version de cette PR portait donc le plafond a
+    # 174. Le cliquet ne monte pas : `_payload_de_fin_d_undo` a ete EXTRAITE a
+    # la place. Ce bloc ne consultait que des variables locales deja calculees,
+    # donc rien ne le retenait ici — la fonction passe SOUS son plafond
+    # historique au lieu de le repousser.
+    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 161,
     ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 114,
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
     ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 114,
