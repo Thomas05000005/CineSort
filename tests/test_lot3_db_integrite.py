@@ -26,7 +26,6 @@ D. Migration 021, filtre `WHERE EXISTS` des sections 2 et 3 : le constat
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -38,6 +37,7 @@ from unittest import mock
 from cinesort.app.apply_batches_reconciliation import _list_inprogress_rollbacks
 from cinesort.infra.db.migration_manager import _split_sql_statements
 from cinesort.infra.db.sqlite_store import SQLiteStore
+from tests._helpers import cleanup_test_tree
 
 # Resolu depuis `__file__` et NON depuis le repertoire courant : un chemin
 # relatif ferait dependre la lecture de la migration de l'endroit d'ou pytest
@@ -58,7 +58,13 @@ class _BaseReelle(unittest.TestCase):
 
         with contextlib.suppress(Exception):
             self.store.close()
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        # `shutil.rmtree(..., ignore_errors=True)` AVALE l'echec : sous Windows,
+        # un handle SQLite encore ouvert empeche la suppression, et le dossier
+        # reste dans %TEMP% sans qu'aucune erreur ne le dise. Mesure en CI :
+        # 4 dossiers `cinesort_lot3_*` laisses, portant la session de 9 a 13
+        # pour une borne de 12 — c'est `tests/_temp_leak_guard.py` qui l'a dit.
+        # `cleanup_test_tree` joint les threads de fond puis reessaie.
+        cleanup_test_tree(self._tmp)
 
     def _run_avec_batch(self, run_id: str, batch_id: str, *, rollback_status: str = "NONE") -> None:
         """Cree un run, un batch qui lui appartient, et son mode atomique."""
@@ -471,7 +477,10 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
         self._peupler()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self._tmp, ignore_errors=True)
+        # Meme raison que la classe ci-dessus : `_peupler` ouvre la base par
+        # `sqlite3.connect`, et le fichier peut rester verrouille un instant
+        # apres la fermeture du `with`.
+        cleanup_test_tree(self._tmp)
 
     def _peupler(self) -> None:
         with sqlite3.connect(str(self.db_path)) as conn:
