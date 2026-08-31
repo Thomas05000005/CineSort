@@ -11,8 +11,19 @@ start_plan / check_duplicates / apply complet — NE PAS inventer noms") :
     - apply            : ApplyRequest / ApplyResponse
     - reports          : PerceptualReport | QualityReport (discriminated)
 
-BACKWARD COMPAT : si pydantic est absent (ex : venv minimal pre-V2.1), on
-sort un avertissement et un schema vide plutot que de crasher.
+Si pydantic est absent (ex : venv minimal pre-V2.1), le script ECHOUE : message
+sur stderr, code retour 1, et `--out` reste INTACT.
+
+Audit 2026-08-31, constat #40 (MAJEUR) : la branche `except ImportError`
+retournait un schema vide (`"endpoints": {}, "reports": {}`) que `main()`
+ecrivait quand meme, avant d'annoncer `[generate_api_schema] OK -> ...` et de
+rendre 0. MESURE dans `.venv`, qui n'a pas pydantic : rc=0, 167 octets ecrits,
+message « OK » — la ou `docs/api/schema.json` en fait 20 915. Un lancement dans
+le mauvais venv effacait donc le schema reel sans le moindre signal d'echec.
+
+Constat #37 (MINEUR) : la version etait recopiee ici en dur, troisieme copie a
+cote de `VERSION` et `pyproject.toml` (eux verrouilles l'un a l'autre par
+`tests/test_pyproject_pep621_v77.py`). Elle est desormais LUE dans `VERSION`.
 """
 
 from __future__ import annotations
@@ -33,8 +44,29 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+class SchemaUnavailableError(RuntimeError):
+    """pydantic (ou les schemas) manquent : impossible de construire le schema.
+
+    Levee plutot que de rendre un document vide : un appelant qui ne teste que
+    la valeur de retour ecrirait ce vide par-dessus le schema reel (constat #40).
+    """
+
+
+def _schema_version() -> str:
+    """Version applicative, LUE dans le fichier `VERSION` (source unique).
+
+    `VERSION` est deja la reference de `pyproject.toml:version`, verrouillee par
+    `tests/test_pyproject_pep621_v77.py`. La recopier ici en faisait une
+    troisieme copie que rien ne gardait (constat #37).
+    """
+    return "v" + (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+
 def build_schema() -> Dict[str, Any]:
-    """Compile le JSON Schema unifie pour les endpoints REELS du run_facade."""
+    """Compile le JSON Schema unifie pour les endpoints REELS du run_facade.
+
+    Leve `SchemaUnavailableError` si pydantic ou les schemas sont absents.
+    """
     try:
         from pydantic import TypeAdapter  # type: ignore  # noqa: F401 - sonde de disponibilite de pydantic
 
@@ -48,16 +80,10 @@ def build_schema() -> Dict[str, Any]:
             StartPlanResponse,
         )
     except ImportError as exc:
-        sys.stderr.write(
-            f"[generate_api_schema] pydantic ou schemas indisponibles : {exc}\n"
-            "Installer via 'pip install pydantic>=2.13' (ou 'pip install -r requirements.txt').\n"
-        )
-        return {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "CineSort API Schemas (unavailable — pydantic missing)",
-            "endpoints": {},
-            "reports": {},
-        }
+        raise SchemaUnavailableError(
+            f"pydantic ou schemas indisponibles : {exc}. "
+            "Installer via 'pip install pydantic>=2.13' (ou 'pip install -r requirements.txt')."
+        ) from exc
 
     endpoints = {
         "start_plan": {
@@ -81,7 +107,7 @@ def build_schema() -> Dict[str, Any]:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "CineSort API Schemas (V2.1)",
-        "version": "v1.5.2-beta",
+        "version": _schema_version(),
         "endpoints": endpoints,
         "reports": reports_schema,
     }
@@ -98,7 +124,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--indent", type=int, default=2, help="Indentation JSON (defaut 2).")
     args = parser.parse_args(argv)
 
-    schema = build_schema()
+    try:
+        schema = build_schema()
+    except SchemaUnavailableError as exc:
+        # Aucun `mkdir`, aucune ecriture : `--out` doit rester tel quel. Ecrire
+        # un schema vide ici effacait le schema reel en annoncant « OK ».
+        sys.stderr.write(f"[generate_api_schema] ECHEC : {exc}\n")
+        sys.stderr.write(f"[generate_api_schema] {args.out} est laisse INCHANGE.\n")
+        return 1
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(
         json.dumps(schema, indent=args.indent, ensure_ascii=False, sort_keys=False),
