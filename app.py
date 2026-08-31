@@ -7,6 +7,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+from cinesort.infra.state import default_state_dir
 from cinesort.ui.api.cinesort_api import CineSortApi
 
 DEV_MODE_ENV_VAR = "DEV_MODE"
@@ -93,7 +94,7 @@ def _startup_error(message: str, exc: Exception | None = None) -> None:
         lines.append("")
         lines.append(traceback.format_exc())
 
-    state_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
+    state_dir = default_state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
     crash_path = state_dir / "startup_crash.txt"
     crash_path.write_text("\n".join(lines), encoding="utf-8")
@@ -459,7 +460,7 @@ def main_api() -> None:
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
-    state_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
+    state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
 
     api = CineSortApi()
@@ -631,7 +632,7 @@ def _configure_webview2_runtime() -> None:
     # Donnees utilisateur (cache, cookies, IndexedDB) — isolees du profil global
     # pour eviter conflit avec un Edge installe. Doit etre ECRIVABLE (pas dans
     # sys._MEIPASS qui est read-only).
-    userdata_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview2_userdata"
+    userdata_dir = default_state_dir() / "webview2_userdata"
     try:
         userdata_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -703,7 +704,7 @@ def main() -> None:
     if str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
         print("[LOG] Mode debug active (CINESORT_DEBUG=1) — niveau DEBUG", file=sys.stderr)
 
-    state_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
+    state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
 
     _check_dpapi_availability()
@@ -1095,7 +1096,7 @@ def main() -> None:
                     try:
                         import shutil as _shutil
 
-                        _eb_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview" / "EBWebView"
+                        _eb_dir = default_state_dir() / "webview" / "EBWebView"
                         if _eb_dir.exists():
                             _shutil.rmtree(str(_eb_dir), ignore_errors=True)
                             _log.info("main_window: cache EBWebView purge (%s)", _eb_dir)
@@ -1141,7 +1142,7 @@ def main() -> None:
         # private_mode=False : autorise localStorage/sessionStorage persistants
         # (sinon le token bypass login est purge au reload, login obligatoire).
         # storage_path : isole le storage CineSort dans %LOCALAPPDATA%/CineSort/webview.
-        _storage_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort" / "webview"
+        _storage_dir = default_state_dir() / "webview"
         _storage_dir.mkdir(parents=True, exist_ok=True)
         # VN-A.5 : DevTools (F12) actif uniquement en mode developpeur. Triggers :
         #   - env CINESORT_DEBUG=1/true/yes/on

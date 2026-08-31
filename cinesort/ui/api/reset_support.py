@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from cinesort.domain.i18n_messages import t
+from cinesort.infra import state as _state
 from cinesort.infra.db.sqlite_store import attendre_les_portees, portees_ouvertes
 from cinesort.ui.api import settings_support as _settings_support
 from cinesort.ui.api._responses import err as _err_response
@@ -377,7 +377,7 @@ def _build_default_settings(api: Any) -> Dict[str, Any]:
     # charges au boot quoi qu'il arrive.
     from cinesort.ui.api import cinesort_api as _api_mod
 
-    state_dir = _resolve_state_dir(api) or Path(os.environ.get("LOCALAPPDATA", ".")) / "CineSort"
+    state_dir = _resolve_state_dir(api) or _state.default_state_dir()
     return _settings_support.apply_settings_defaults(
         {},
         state_dir=state_dir,

@@ -3193,8 +3193,16 @@ class CineSortApi:
 
     # ---------- support / logs (V3-13) ----------
     def _get_log_paths_impl(self) -> Dict[str, Any]:
-        """V3-13 — Retourne les chemins des logs (pour affichage UI + copie)."""
-        log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CineSort", "logs")
+        """V3-13 — Retourne les chemins des logs (pour affichage UI + copie).
+
+        Le chemin passe par `state.default_state_dir()`, seul producteur du
+        repertoire d'etat. Reconstruit a la main, il valait
+        `os.path.join(os.environ.get("LOCALAPPDATA", ""), ...)` : sans
+        `LOCALAPPDATA`, `os.path.join("", "CineSort", "logs")` rend
+        `CineSort/logs` — un chemin RELATIF au repertoire de lancement, soit
+        exactement le defaut que #1074 a supprime de `default_state_dir()`.
+        """
+        log_dir = str(state.default_state_dir() / "logs")
         return {
             "data": {
                 "log_dir": log_dir,
@@ -3221,7 +3229,7 @@ class CineSortApi:
                 log_module=__name__,
                 key="error",
             )
-        log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CineSort", "logs")
+        log_dir = str(state.default_state_dir() / "logs")
         if not os.path.isdir(log_dir):
             return _err_response(
                 "Dossier logs introuvable",
