@@ -10,7 +10,8 @@
 - **Chemins directs `POST /api/{method_name}`** : desactives par defaut (P0 #233) — le serveur repond `410 Gone` avec `Use /api/<facade>/<method> instead`
 - **Auth** : `Authorization: Bearer <token>` (token configure dans les Reglages)
 - **Format reponse** : `{"ok": true, ...}` ou `{"ok": false, "message": "..."}`
-- **Endpoints publics** : `GET /api/health` (sans auth) et `GET /api/spec` (OpenAPI)
+- **Endpoint public** : `GET /api/health` (sans auth)
+- **`GET /api/spec`** (OpenAPI 3.0.3) : exige `Authorization: Bearer <token>`, comme les POST
 - **Body max** : 16 MB ; **Rate limit auth** : 5 echecs / 60s par IP
 
 ## Endpoints groupes par categorie

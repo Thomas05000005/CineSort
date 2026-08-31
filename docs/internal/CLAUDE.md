@@ -198,13 +198,13 @@ Dispatcher unique : `cinesort/infra/rest_server.py` (**1800 lignes** au 2026-08-
 - **Legacy DESACTIVE** depuis 2026-05 (P0 #233) : `POST /api/<methode>` direct renvoie **410 Gone**, sauf si `CINESORT_REST_LEGACY_PASS1_ENABLED=1`.
 
 ### Endpoints non-dispatcher
-- `GET /api/health` (+`active_run_id`, `last_event_ts`)
-- `GET /api/spec` (OpenAPI 3.0.3 auto-genere)
+- `GET /api/health` (+`active_run_id`, `last_event_ts`) — **seule route publique**
+- `GET /api/spec` (OpenAPI 3.0.3 auto-genere) — **auth Bearer exigee** depuis le lot 2 (2026-08-31) : elle rendait 80 182 octets, la carte des 172 endpoints, sans jeton
 - `GET /dashboard/*`, `/shared/*`, `/locales/*`
 
 ### Securite
-- Auth Bearer token via `hmac.compare_digest` (rest_server.py:435)
-- Rate-limit : 5 echecs / 60s / IP + global 4x
+- Auth Bearer token via `hmac.compare_digest` (rest_server.py:435) ; nom de schema **insensible a la casse** (RFC 7235 §2.1)
+- Rate-limit : 5 echecs / 60s / IP + global 4x — applique aux **GET comme aux POST** depuis le lot 2
 - Bind `127.0.0.1` par defaut
 - `_MAX_BODY_SIZE = 16 MB`
 - Convention `http_status` opt-in (Phase 11 v7.8.0) dans return dict pour codes metier 4xx/5xx sans casser `ok=true`.

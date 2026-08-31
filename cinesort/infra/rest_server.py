@@ -2,7 +2,9 @@
 
 Uses stdlib http.server only — zero external dependencies.
 All endpoints: POST /api/{method_name} with JSON body.
-Public endpoints: GET /api/health, GET /api/spec.
+Public endpoints: GET /api/health.
+GET /api/spec exige le jeton depuis le lot 2 (2026-08-31) : la spec OpenAPI
+est la carte complete des 172 endpoints, elle ne s'offre plus a tout venant.
 Static files: GET /dashboard/* (web dashboard distant).
 """
 
@@ -14,6 +16,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import ssl
 import threading
 import time
@@ -162,6 +165,17 @@ _DRAIN_BODY_MAX_WALL_S = 10.0
 # gagnerait rien en local (deja exempte) et affaiblirait la seule surface reelle.
 _RATE_LIMIT_MAX_FAILURES = 5
 _RATE_LIMIT_WINDOW_S = 60.0
+
+# LOT 2 (2026-08-31) — un nom de schema d'auth, au sens RFC 7235 §2.1 (`token`).
+# Sert UNIQUEMENT a decider si la premiere moitie d'un en-tete `Authorization`
+# peut etre journalisee. Un jeton `token_urlsafe` contient `-` et `_` et peut
+# donc franchir ce filtre : c'est la presence d'une ESPACE dans l'en-tete qui
+# prouve qu'on regarde un schema et non le secret lui-meme (cf `_schema_dauth`).
+_RE_SCHEMA_AUTH = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,31}$")
+
+# Schema attendu, en minuscules, espace comprise. RFC 7235 §2.1 : « the scheme
+# name is case-insensitive ». La comparaison se fait donc sur `auth[:7].lower()`.
+_SCHEMA_BEARER = "bearer "
 
 # --- Dashboard statique ---------------------------------------------------
 # Repertoire racine des fichiers statiques du dashboard distant.
@@ -358,6 +372,57 @@ def generate_openapi_spec(api: Any, *, port: int = 8642) -> Dict[str, Any]:
             },
         },
     }
+
+
+def _pour_journal(valeur: object, *, plafond: int = 200) -> str:
+    """Neutralise CR/LF avant qu'une valeur d'origine EXTERNE n'entre dans un log.
+
+    Une entree de journal se termine par un saut de ligne : y laisser passer un
+    `\r` ou un `\n` fourni par l'appelant permet de FORGER des lignes entieres
+    — un « REST auth OK » fabrique, par exemple. C'est CWE-117.
+
+    Aucun des deux sites protegés ici n'est aujourd'hui atteignable :
+    `_schema_dauth` filtre par `^[A-Za-z][A-Za-z0-9-]{0,31}$`, motif ANCRE qui
+    n'admet ni CR ni LF (mesure : `'Evil\nINJECTE'` rend `<sans-schema>`), et
+    `self.path` ne peut pas contenir de saut de ligne, `BaseHTTPRequestHandler`
+    lisant la ligne de requete jusqu'au `\r\n`.
+
+    Cette fonction est posee quand meme, pour la meme raison que HMAC a remplace
+    un hash nu ailleurs dans ce depot : les deux arguments ci-dessus reposent sur
+    des proprietes d'AUTRES fonctions, qu'un refactor peut changer sans que
+    personne ne relise ces lignes-ci. Un garde ne doit pas dependre d'une
+    hypothese que rien ne verifie.
+
+    Le plafond borne aussi la taille : un chemin de 8 Ko dans un log de
+    diagnostic est du bruit, pas de l'information.
+    """
+    texte = str(valeur)
+    texte = texte.replace("\r", "\\r").replace("\n", "\\n")
+    return texte if len(texte) <= plafond else texte[:plafond] + "...(tronque)"
+
+
+def _schema_dauth(auth: str) -> str:
+    """Rend le nom du schema d'un en-tete `Authorization`, JAMAIS sa valeur.
+
+    LOT 2 (2026-08-31). La branche de repli de `_check_auth` journalisait
+    `auth[:40]`, c'est-a-dire l'en-tete BRUT. Le plafond de 40 caracteres
+    passait pour une troncature : il n'en est pas une. Le jeton REST est un
+    `token_urlsafe(24)`, soit 32 caracteres ; « bearer  » + 32 = 39. Sous une
+    casse non canonique — que la RFC 7235 autorise — le secret ENTIER partait
+    donc dans le fichier de log, et le `log_scrubber` ne le rattrapait pas.
+
+    La regle appliquee ici : on ne rend le premier mot que s'il y a une ESPACE
+    dans l'en-tete (donc qu'il s'agit bien d'un schema suivi de credentials) ET
+    qu'il ressemble a un `token` RFC 7235. Sans espace, l'en-tete tout entier
+    EST le materiel secret — c'est exactement le cas d'un jeton colle sans son
+    schema, l'erreur de saisie la plus courante — et rien n'en sort.
+    """
+    if not auth:
+        return "<absent>"
+    schema, separateur, _credentials = auth.partition(" ")
+    if not separateur or not _RE_SCHEMA_AUTH.match(schema):
+        return "<sans-schema>"
+    return schema
 
 
 def _log_auth_mismatch_debug(bearer: str, server_token: str) -> None:
@@ -696,25 +761,43 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             return sec_fetch_site == "same-origin"
         return self._client_ip() in _LOCAL_CLIENT_IPS
 
-    def _poster_navigateur_etranger(self) -> bool:
-        """True si l'appelant est un NAVIGATEUR dont l'origine n'est pas la notre.
+    # LOT 2 (2026-08-31) : `_poster_navigateur_etranger` est SUPPRIME. Il rendait
+    # la reponse uniforme aux seuls NAVIGATEURS tiers, parce qu'il exigeait un
+    # `Sec-Fetch-Site` pour se prononcer. `_poster_trusted_caller` porte la meme
+    # frontiere et couvre en plus les appelants qui ne posent aucun en-tete —
+    # c'est-a-dire ceux qui enumeraient encore. Garder deux predicats pour une
+    # seule frontiere, c'est garantir qu'ils divergeront.
 
-        Le seul consommateur legitime de `/api/poster` est le dashboard, servi
-        par CE serveur : il est donc `same-origin`. Tout autre navigateur —
-        `same-site` (autre service local), `cross-site` (site tiers) ou `none`
-        (URL tapee) — n'a aucune raison d'y acceder.
+    def _servir_la_spec(self) -> None:
+        """Route `GET /api/spec` : la specification OpenAPI, JETON EXIGE.
 
-        Sert a rendre une reponse UNIFORME a ces appelants. Sans cela, 200 sur
-        un id en cache et 404 sur un id absent forment un ORACLE : une page
-        tierce teste id par id ce que le cache contient, donc enumere la
-        bibliotheque, sans aucun credential.
+        LOT 2 (2026-08-31) — CETTE ROUTE ETAIT PUBLIQUE. Elle rendait
+        80 182 octets sans aucun credential : la carte complete des 172
+        endpoints, leurs signatures et leurs parametres. `_handle_get`
+        n'appelait jamais `_check_auth`, alors que les 172 POST decrits sont
+        tous authentifies depuis le retrait du bypass loopback (2026-08-07).
+        Publier la carte d'une porte fermee reste un cadeau fait a qui cherche
+        laquelle forcer — d'autant que le serveur peut etre lie sur le LAN
+        (dashboard distant).
 
-        Un client sans `Sec-Fetch-Site` n'est pas un navigateur moderne : il
-        garde le regime actuel, pour ne casser ni pywebview, ni curl, ni un
-        navigateur trop ancien pour poser l'en-tete.
+        Recensement des appelants SANS jeton, tous adaptes avec ce correctif :
+          - `tests/test_lotd_chain_rest.py` (scenario 02) ;
+          - `docs/api/ENDPOINTS.md` et son generateur
+            `scripts/gen_endpoints_doc.py` (qui n'appelle pas la route : il
+            introspecte `CineSortApi`, seule sa phrase etait a corriger) ;
+          - `docs/internal/CLAUDE.md` (section « Endpoints non-dispatcher »).
+        Le dashboard n'est PAS concerne : `web/dashboard/core/api.js::apiGet`
+        pose deja l'en-tete Bearer sur toutes ses requetes GET.
+
+        Extraite de `_handle_get` : le cliquet de taille des fonctions compte
+        le span brut, et documenter ce changement faisait deborder son hote —
+        meme arbitrage que pour `_servir_jaquette` le 2026-08-29.
         """
-        sec_fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
-        return bool(sec_fetch_site) and sec_fetch_site != "same-origin"
+        if not self._check_auth():
+            logger.warning("REST auth failure from %s for GET /api/spec", self._client_ip())
+            self._send_unauthorized()
+            return
+        self._respond_json(200, self.openapi_spec)
 
     def _servir_jaquette(self, _t0: float) -> None:
         """Route `GET /api/poster` : proxy TMDb avec cache disque local.
@@ -724,11 +807,35 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         faisait deborder son hote. Sortir le bloc vaut mieux que monter un
         plafond — c'est ce que dit le message d'echec du cliquet lui-meme.
 
-        Cette route n'est PAS authentifiee : un navigateur ne peut pas poser
+        Validation stricte anti-SSRF / anti-open-relay dans
+        `cinesort/infra/integrations/poster_proxy.py` (whitelist des tailles,
+        regex sur l'id, scrub de la cle API).
+
+        POURQUOI PAS D'AUTH BEARER, ET LA RAISON A DEJA CHANGE UNE FOIS. Le
+        commentaire d'origine invoquait « le bypass loopback du `_check_auth` de
+        cette classe » : ce bypass a ete RETIRE le 2026-08-07, sa justification
+        etait donc morte depuis trois semaines quand on l'a relue le 2026-08-28.
+        La raison qui TIENT est la seconde : un navigateur ne peut pas poser
         d'en-tete `Authorization` sur un `<img src=...>`. La defense est portee
-        par `_poster_navigateur_etranger` (qui ferme l'oracle d'enumeration) et
-        `_poster_trusted_caller` (qui gate les effets de bord), pas par
-        `_check_auth`. Voir `tests/test_poster_frontiere_origine.py`.
+        par `_poster_trusted_caller`, pas par `_check_auth` — il decide a la
+        fois qui obtient une reponse utile et qui declenche les effets de bord.
+
+        SURFACE MESUREE le 2026-08-28 (bac a sable, port ephemere) :
+            POST /api/run/get_status sans Bearer        -> 401  (temoin)
+            GET  /api/poster?id=... sans Bearer         -> jamais 401
+            GET  /api/poster?id=<en cache>  cross-site  -> 200 image/jpeg
+            GET  /api/poster?id=<absent>    cross-site  -> 404
+        Les deux dernieres lignes formaient un ORACLE D'APPARTENANCE : sans
+        credential, on testait id par id ce que le cache contient, donc on
+        enumerait la bibliotheque. Le commentaire qui portait ces mesures
+        concluait « c'est le prix assume de servir le <img> ». CE N'EST PLUS LE
+        CAS : ferme pour les navigateurs tiers le 2026-08-29, puis pour tout
+        appelant non fiable au lot 2 (2026-08-31). Il ne reste ouvert qu'au
+        client LOCAL sans en-tete `Sec-Fetch` — position qui suppose deja un
+        shell sur la machine.
+
+        Gardes : `tests/test_poster_frontiere_origine.py` et
+        `tests/test_lot2_securite_rest.py`.
         """
         from cinesort.infra.integrations import poster_proxy  # noqa: PLC0415
         from cinesort.infra.state import default_state_dir  # noqa: PLC0415
@@ -754,28 +861,23 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         for key, values in parsed.items():
             if values:
                 flat_query[key] = values[0]
-        # R8-030/R8-094 (F3) : `force=1` PURGE le cache disque + re-telecharge
-        # depuis TMDb (effet de bord). Un <img src=...&force=1> CROSS-SITE
-        # (R8-030) OU un client LAN non-navigateur (R8-094, curl en bind
-        # 0.0.0.0 sans token) declenchait ce purge/re-DL. On NEUTRALISE `force`
-        # pour tout appelant NON fiable ; la LECTURE du cache reste ouverte
-        # pour les <img> legitimes (same-origin desktop/LAN, client loopback).
-        # Un navigateur qui n'est pas same-origin n'est jamais un
-        # consommateur legitime : on lui rend une reponse UNIFORME, pour que
-        # le statut ne trahisse pas le contenu du cache. Corps identique a
-        # celui d'un cache miss (`poster_proxy._respond_error_json`), pour
-        # que les deux cas soient indiscernables jusqu'a l'octet.
-        if self._poster_navigateur_etranger():
+        # LOT 2 (2026-08-31) : reponse UNIFORME a tout appelant NON fiable, pour
+        # que le statut ne trahisse pas le contenu du cache. Corps identique a
+        # celui d'un cache miss (`poster_proxy._respond_error_json`) : les deux
+        # cas sont indiscernables jusqu'a l'octet. La garde precedente
+        # (`_poster_navigateur_etranger`, supprime) exigeait un `Sec-Fetch-Site`
+        # pour se prononcer et laissait donc passer curl et les scripts.
+        #
+        # UNE SEULE FRONTIERE, DONC UN SEUL VERROU. La neutralisation de `force`
+        # et le `allow_fetch=False` (R8-030/R8-094/R8-095) etaient les deux
+        # demi-mesures que ce refus rend sans objet : un appelant non fiable ne
+        # parvient plus jusqu'a `serve_poster`. Les conserver en aval en ferait
+        # des gardes que rien n'atteint — donc des gardes que rien ne mesure.
+        if not self._poster_trusted_caller():
             self._respond_json(404, {"ok": False, "category": "resource", "message": "Poster not available"})
             return
-        poster_trusted = self._poster_trusted_caller()
-        if "force" in flat_query and not poster_trusted:
-            flat_query.pop("force", None)
-            logger.info("REST GET /api/poster: parametre 'force' ignore (appelant non fiable)")
         try:
-            # R8-095 (F3) : appelant non fiable -> serve_poster en CACHE SEUL
-            # (pas de fetch TMDb / ecriture = anti-amplification cross-site/LAN).
-            poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=poster_trusted)
+            poster_proxy.serve_poster(self, Path(state_dir), cache_root, flat_query, allow_fetch=True)
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as exc:
             logger.debug(
                 "REST GET /api/poster client disconnect (%s, %.0fms)",
@@ -858,13 +960,26 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # marquage `set_remote_request`) : ne pas le supprimer.
         if not self.auth_token:
             return False
+
+        # LOT 2 (2026-08-31) — LA COMPARAISON DU SCHEMA ETAIT SENSIBLE A LA
+        # CASSE. RFC 7235 §2.1 : « the scheme name is case-insensitive ». Mesure
+        # avant correctif : `bearer <bon jeton>` -> 401, `Bearer <bon jeton>` ->
+        # 200. Un client conforme etait donc refuse, et — pire — il tombait dans
+        # la branche de repli ci-dessous, qui journalisait son jeton en clair.
         auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        if auth[:7].lower() != _SCHEMA_BEARER:
             # DEBUG VERBOSE 2026-06-08 : signaler header manquant/malforme.
+            #
+            # LOT 2 : on ne rend plus que le SCHEMA et la LONGUEUR. L'ancien
+            # `auth[:40]` rendait l'en-tete brut, et « bearer  » + un
+            # `token_urlsafe(24)` fait 39 caracteres : le plafond ne tronquait
+            # rien. Longueur et schema suffisent au diagnostic d'origine
+            # (en-tete absent, schema errone, jeton colle sans son schema).
             if os.environ.get("CINESORT_DEBUG", "").strip().lower() in {"1", "true", "yes", "on", "debug"}:
                 logger.warning(
-                    "[DEBUG-AUTH] header Authorization absent ou non-Bearer: %r",
-                    auth[:40] if auth else "<empty>",
+                    "[DEBUG-AUTH] header Authorization absent ou non-Bearer: schema=%s longueur=%d",
+                    _pour_journal(_schema_dauth(auth)),
+                    len(auth),
                 )
             return False
         bearer = auth[7:].strip()
@@ -901,9 +1016,15 @@ class _CineSortHandler(BaseHTTPRequestHandler):
 
         2. Token PRESENT mais FAUX : vrai vecteur d'attaque -> on garde le
            comptage record_failure() comme avant.
+
+        LOT 2 (2026-08-31) : meme correctif de casse que `_check_auth`, et il
+        n'est pas cosmetique. Tant que ce predicat exigeait un `B` majuscule,
+        un attaquant ecrivant `bearer` en minuscule n'incrementait JAMAIS le
+        compteur d'echecs — le plafond de 5 tentatives par 60 s se contournait
+        par un simple changement de casse.
         """
         auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
+        if auth[:7].lower() != _SCHEMA_BEARER:
             return False
         return bool(auth[7:].strip())
 
@@ -1284,6 +1405,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         clean = path.rstrip("/")
 
+        # LOT 2 (2026-08-31) — LE PLAFOND NE COUVRAIT QUE LES POST.
+        # `_is_rate_limited()` n'avait qu'UN site d'appel, dans `_handle_post` :
+        # une IP deja bloquee pour 5 echecs d'auth continuait de lire toutes les
+        # routes GET (spec, jaquettes, dashboard, traductions) sans plafond.
+        # Le blocage se prononce donc ici aussi, AVANT toute route — meme ordre
+        # que dans `_handle_post`. Les IPs locales restent totalement exemptees
+        # (fix definitif 2026-06-07) : le desktop ne peut pas s'auto-bannir.
+        #
+        # CONSEQUENCE ASSUMEE : le compteur n'est alimente QUE par des echecs
+        # d'auth (`_send_unauthorized`). Un utilisateur LAN qui se trompe cinq
+        # fois de jeton perd aussi, pendant 60 s, la page de connexion
+        # elle-meme. C'est le comportement de tout plafond de connexion, et il
+        # se resorbe seul ; le `Retry-After` emis par `_is_rate_limited` dit
+        # exactement combien de temps.
+        if self._is_rate_limited():
+            logger.warning("REST 429 rate limit %s (GET %s)", self._client_ip(), _pour_journal(clean))
+            return
+
         # Health enrichi avec active_run_id
         if clean == "/api/health":
             version = getattr(self.api, "_app_version", "?")
@@ -1301,35 +1440,13 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             return
 
         if clean == "/api/spec":
-            self._respond_json(200, self.openapi_spec)
+            self._servir_la_spec()
             return
 
-        # Iter12 / ETAPE 1b : proxy poster TMDb avec validation stricte
-        # anti-SSRF/anti-open-relay + cache disque local.
-        # Cf cinesort/infra/integrations/poster_proxy.py (whitelist sizes,
-        # regex id, scrub cle API).
-        #
-        # PAS d'auth Bearer sur cette route, et la RAISON A CHANGE. Ce
-        # commentaire invoquait « le bypass loopback du _check_auth de cette
-        # classe », en concluant qu'en bind 127.0.0.1 le bypass serait de toute
-        # facon actif. CE BYPASS A ETE RETIRE LE 2026-08-07 (cf. _check_auth,
-        # qui porte les mesures du retrait) : la justification etait morte
-        # depuis trois semaines quand elle a ete relue le 2026-08-28.
-        #
-        # La raison qui TIENT est la seule seconde : un navigateur ne peut pas
-        # poser d'en-tete Authorization sur un <img src=...>. La route reste
-        # donc ouverte, et c'est `_poster_trusted_caller` qui porte la defense,
-        # pas l'authentification.
-        #
-        # SURFACE MESUREE le 2026-08-28 (bac a sable, port ephemere) :
-        #   POST /api/run/get_status sans Bearer   -> 401   (temoin)
-        #   GET  /api/poster?id=... sans Bearer    -> jamais 401
-        #   GET  /api/poster?id=<en cache>  cross-site -> 200 image/jpeg
-        #   GET  /api/poster?id=<pas en cache> cross-site -> 404
-        # Les deux dernieres lignes forment un ORACLE D'APPARTENANCE : une page
-        # tierce peut, sans credential, tester id par id ce que le cache
-        # contient, donc enumerer la bibliotheque. C'est le prix assume de
-        # servir le <img> ; le noter ici pour que personne ne le redecouvre.
+        # Iter12 / ETAPE 1b : proxy poster TMDb (anti-SSRF, cache disque).
+        # Route sans jeton, et le POURQUOI vit desormais dans la docstring de
+        # `_servir_jaquette` — a cote du code qu'il explique, pas trois ecrans
+        # plus haut.
         if clean == "/api/poster":
             self._servir_jaquette(_t0)
             return
