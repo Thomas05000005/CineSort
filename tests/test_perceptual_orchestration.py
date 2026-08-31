@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from cinesort.domain.perceptual.constants import PERCEPTUAL_ENGINE_VERSION
 from cinesort.ui.api.perceptual_support import (
     _build_settings_dict,
     analyze_perceptual_batch,
@@ -147,7 +148,15 @@ class GetPerceptualReportTests(unittest.TestCase):
 
     @mock.patch("cinesort.ui.api.perceptual_support.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg")
     def test_cache_hit_returns_existing(self, _) -> None:
-        """Rapport deja en DB → retourne le cache sans ré-analyser."""
+        """Rapport deja en DB → retourne le cache sans ré-analyser.
+
+        `version` AJOUTEE le 2026-08-31. Sans elle ce test restait VERT tout en
+        changeant de sens : depuis que le cache exige la version courante, un
+        rapport sans version passe par le REPLI (rapport perime servi faute de
+        recalcul possible), pas par le cache. `ok` et `cache_hit` valent True
+        dans les deux cas — mesure faite. L'assertion sur `_get_run`, atteint
+        seulement APRES le bloc de cache, est ce qui les separe.
+        """
         api = _mock_api()
         store = mock.MagicMock()
         store.perceptual.get_perceptual_report.return_value = {
@@ -157,7 +166,7 @@ class GetPerceptualReportTests(unittest.TestCase):
             "global_tier": "excellent",
             "visual_score": 78,
             "audio_score": 82,
-            "metrics": {"global_score": 80},
+            "metrics": {"global_score": 80, "version": PERCEPTUAL_ENGINE_VERSION},
             "settings_used": {},
             "ts": 1.0,
         }
@@ -165,6 +174,8 @@ class GetPerceptualReportTests(unittest.TestCase):
         result = get_perceptual_report(api, "run1", "r1")
         self.assertTrue(result["ok"])
         self.assertTrue(result["cache_hit"])
+        self.assertNotIn("perceptual_engine_stale", result)
+        api._get_run.assert_not_called()
 
     @mock.patch("cinesort.ui.api.perceptual_support.resolve_ffmpeg_path", return_value="/usr/bin/ffmpeg")
     def test_force_bypasses_cache(self, _) -> None:
