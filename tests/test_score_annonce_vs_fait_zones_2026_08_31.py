@@ -47,7 +47,20 @@ def _profil_hierarchie_active() -> dict:
 
 
 def _deltas(res: dict, categorie: str) -> list:
-    return [int(f.get("delta") or 0) for f in res["explanation"]["factors"] if f.get("category") == categorie]
+    """Deltas annonces d une categorie, SANS troncature.
+
+    La version d origine faisait `int(...)`. Or `_apply_cam_subscore_floor`
+    emet DELIBEREMENT un delta fractionnaire quand la chute ne tombe pas juste
+    (`delta = int(chute) if float(chute).is_integer() else chute`,
+    quality_score.py:1704) — c est le cas des que le multiplicateur de genre a
+    deplace le sous-score avant l ecrasement.
+
+    Tronquer ici annulait donc exactement la precision que la production prend
+    soin de garder : un -0.5 annonce devenait 0, et l assertion passait alors
+    que l explication restait numeriquement fausse. Le test ne pouvait plus
+    detecter l ecart qu il existe pour mesurer.
+    """
+    return [float(f.get("delta") or 0) for f in res["explanation"]["factors"] if f.get("category") == categorie]
 
 
 # ---------------------------------------------------------------------------
@@ -274,19 +287,21 @@ class CamAnnonceUnChiffreFixePourUnEcrasementTests(unittest.TestCase):
     def test_le_sous_score_video_annonce_est_celui_qui_est_applique(self):
         res = self._res_cam()
         self.assertEqual(res["metrics"]["subscores"]["video"], 14.0)
-        self.assertEqual(
+        self.assertAlmostEqual(
             8.0 + sum(_deltas(res, "video")),
             14.0,
-            "les facteurs video n'expliquent pas l'ecrasement CAM",
+            places=6,
+            msg="les facteurs video n'expliquent pas l'ecrasement CAM",
         )
 
     def test_la_chute_audio_est_annoncee(self):
         res = self._res_cam()
         self.assertEqual(res["metrics"]["subscores"]["audio"], 14.0)
-        self.assertEqual(
+        self.assertAlmostEqual(
             12.0 + sum(_deltas(res, "audio")),
             14.0,
-            "l'audio tombe de plus de 20 points sans qu'aucun facteur ne le dise",
+            places=6,
+            msg="l'audio tombe de plus de 20 points sans qu'aucun facteur ne le dise",
         )
 
 
@@ -423,3 +438,34 @@ class GrainInatteignableParEncodeWarningsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeHelperDeMESUREDoitMesurerTests(unittest.TestCase):
+    """Le harnais lui-meme, signale par une revue automatique sur la PR.
+
+    `_deltas` tronquait par `int()`. Or `_apply_cam_subscore_floor` emet
+    DELIBEREMENT un delta fractionnaire quand la chute ne tombe pas juste
+    (`quality_score.py:1704`). Un `-0.5` annonce devenait donc `0`, et les deux
+    assertions « l'annonce explique le sous-score » passaient alors que
+    l'explication restait numeriquement fausse.
+
+    Un instrument de mesure qui arrondit ce qu'il vient mesurer ne mesure plus.
+    """
+
+    def test_un_delta_fractionnaire_survit_a_la_lecture(self) -> None:
+        faux = {
+            "explanation": {
+                "factors": [
+                    {"category": "video", "delta": -0.5, "label": "chute CAM partielle"},
+                    {"category": "video", "delta": -8, "label": "entier"},
+                    {"category": "audio", "delta": -1.25, "label": "autre categorie"},
+                ]
+            }
+        }
+        self.assertEqual(_deltas(faux, "video"), [-0.5, -8.0])
+        self.assertAlmostEqual(sum(_deltas(faux, "video")), -8.5, places=6)
+
+    def test_la_somme_ne_perd_pas_la_fraction(self) -> None:
+        """Sans ce garde, `int()` rendrait -8 et l'ecart de 0.5 disparaitrait."""
+        faux = {"explanation": {"factors": [{"category": "video", "delta": -0.5}]}}
+        self.assertNotEqual(sum(_deltas(faux, "video")), 0, "la fraction a ete tronquee")
