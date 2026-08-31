@@ -214,8 +214,7 @@ class LaModaleDeSuppressionAnnonceLaPerteDeLUndoTests(unittest.TestCase):
         )
         self.assertTrue(
             self.modale["cablee_sans_undo"],
-            "le handler ne transmet pas `undoEncorePossible` : "
-            f"recu {self.modale['consequence_sans_undo']!r}",
+            f"le handler ne transmet pas `undoEncorePossible` : recu {self.modale['consequence_sans_undo']!r}",
         )
 
 
