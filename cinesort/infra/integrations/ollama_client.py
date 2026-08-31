@@ -252,10 +252,20 @@ class OllamaClient:
                 "reason": f"http_{resp.status_code}",
                 "ai_generated": False,
             }
+        # `resp.json()` ne rend pas forcement un objet : `[]`, `"texte"` et `12`
+        # sont du JSON valide. `.get()` y leve `AttributeError`, absente de la
+        # clause `except` ci-dessous — et pour `parsed`, l'appel etait meme HORS
+        # du `try`. Le contrat de `_invoke` est de ne jamais lever : on filtre
+        # donc le TYPE aux deux etages, l'endpoint Ollama etant configurable
+        # (donc distant, donc potentiellement usurpe).
         try:
             data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"corps JSON de type {type(data).__name__}, objet attendu")
             raw = data.get("response", "")
             parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(parsed, dict):
+                raise ValueError(f"champ 'response' de type {type(parsed).__name__}, objet attendu")
         except (ValueError, json.JSONDecodeError) as exc:
             logger.warning("Ollama JSON parse echec : %s", exc)
             return {"ok": False, "reason": "invalid_json", "ai_generated": False}

@@ -8,8 +8,10 @@ factices + .srt + .nfo). Aucun binaire externe requis (probe_backend="none").
 Scenarios figes (dans l'ordre) :
   01. GET /api/health public (sans token) : ok/version/ts, PAS d'active_run_id
       au repos.
-  02. GET /api/spec public : OpenAPI 3.0.3 parseable, les 6 facades presentes
-      (run, settings, quality, integrations, library, runtime), bearerAuth.
+  02. GET /api/spec AUTHENTIFIE (lot 2, 2026-08-31 : la route n'est plus
+      publique) : 401 sans token ; avec token, OpenAPI 3.0.3 parseable, les 6
+      facades presentes (run, settings, quality, integrations, library,
+      runtime), bearerAuth.
   03. Auth avec CINESORT_DISABLE_LOCAL_AUTH=1 (posee AVANT le start du
       serveur) : 401 sans token, 401 token faux, 200 token correct.
   03b. Garde xfail nominative [BUG-LOTD-401-RST-BODY] (voir ci-dessous).
@@ -287,7 +289,13 @@ def test_01_health_public_sans_token(chain):
 
 
 def test_02_spec_openapi_6_facades(chain):
-    status, spec, _ = _request(chain["port"], "GET", "/api/spec")
+    # LOT 2 (2026-08-31) : `/api/spec` n'est plus public. La carte des 172
+    # endpoints exige le jeton, comme les 172 POST qu'elle decrit. Le scenario
+    # verifie donc les DEUX faces : refus sans jeton, spec complete avec.
+    status, _, _ = _request(chain["port"], "GET", "/api/spec")
+    assert status == 401, f"la spec OpenAPI est encore servie sans jeton (status={status})"
+
+    status, spec, _ = _request(chain["port"], "GET", "/api/spec", token=_TOKEN)
     assert status == 200
     assert isinstance(spec, dict), "le spec doit etre du JSON parseable"
     assert spec.get("openapi") == "3.0.3"

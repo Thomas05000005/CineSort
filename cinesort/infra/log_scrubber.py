@@ -68,6 +68,33 @@ _SECRET_PATTERNS: List[Pattern[str]] = [
     re.compile(r'(MediaBrowser Token=")([^"]+)(")', re.IGNORECASE),
     # Bearer token generique (REST CineSort, beaucoup d'API)
     re.compile(r"(Authorization:\s*Bearer\s+)(\S+)", re.IGNORECASE),
+    # LOT 2 (2026-08-31) — L'EN-TETE D'AUTH CITE SANS SON NOM DE CHAMP.
+    #
+    # Le motif ci-dessus exige le litteral « Authorization: » COLLE a
+    # « Bearer ». Or un message de diagnostic ne cite presque jamais l'en-tete
+    # sous sa forme reseau : `rest_server._check_auth` journalisait
+    # « header Authorization absent ou non-Bearer: 'bearer <jeton>' ». Le nom du
+    # champ est bien present, mais separe du schema par sept mots : le motif ne
+    # mordait pas, et le jeton COMPLET atteignait le fichier de log.
+    #
+    # On redige donc la VALEUR d'un couple `<schema> <credentials>` partout ou
+    # elle apparait, quel que soit le contexte. Les schemas sont enumeres
+    # (RFC 7235 + celui de Jellyfin) plutot que generalises : un `\w+\s+\S+`
+    # caviarderait de la prose entiere.
+    #
+    # Le seuil de 8 caracteres evite de mordre sur « Basic auth » ou
+    # « Bearer token » ecrits en toutes lettres dans un commentaire ; un secret
+    # utile est toujours plus long (le jeton REST fait 32 caracteres).
+    #
+    # Le prefixe (groupe 1) reste intact : on perd la valeur, jamais le nom du
+    # schema en cause — c'est justement ce qui rend le diagnostic exploitable.
+    # Place APRES le motif `MediaBrowser Token="..."` pour que le plus
+    # specifique gagne. Pas de quantifieur imbrique : `\s+` est suivi d'une
+    # classe qui exclut l'espace, donc aucune ambiguite (pas de ReDoS).
+    re.compile(
+        r"\b((?:Bearer|Basic|Token|Digest|MediaBrowser)\s+)([A-Za-z0-9._~+/=-]{8,})",
+        re.IGNORECASE,
+    ),
     # Plex header : X-Plex-Token: xxx ou X-Plex-Token=xxx
     re.compile(r"(X-Plex-Token[:\s=]+)([^\s;,&\"']+)", re.IGNORECASE),
     # Radarr/Sonarr header : X-Api-Key: xxx

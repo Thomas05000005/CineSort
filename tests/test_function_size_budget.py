@@ -147,7 +147,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
         "cinesort/ui/api/library_actions_support.py",
         "_rematch_tmdb_and_update_plan",
     ): 176,  # -8 le 2026-08-31, gain verrouille
-    ("cinesort/infra/integrations/poster_proxy.py", "fetch_and_cache"): 180,
+    # 180 -> 144 le 2026-08-31 : ce lot a EXTRAIT `_resoudre_url_cdn` et
+    # `_lire_corps_borne` plutot que de monter le plafond quand le cliquet a
+    # morde (216 puis 192 pour 180). Le gain de 36 lignes est inscrit ICI, sans
+    # quoi il se reperdrait — le cliquet est bidirectionnel depuis #1188, et
+    # omettre cette ligne aurait rendu `main` rouge apres la fusion, exactement
+    # comme #1192 l'a fait le meme jour.
+    ("cinesort/infra/integrations/poster_proxy.py", "fetch_and_cache"): 144,
     ("cinesort/domain/quality_score.py", "_score_video"): 150,  # -25 le 2026-08-31, gain verrouille
     # 175 -> 176 : l'insight « DNR partiel » etait le dernier site de cette
     # fonction a compter sur les 20 derniers runs au lieu du dernier scan. UNE
@@ -174,7 +180,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_timeline_support.py", "_get_library_timeline_impl"): 153,
     ("cinesort/ui/api/settings_support.py", "write_settings"): 152,
     ("cinesort/domain/perceptual/composite_score.py", "detect_cross_verdicts"): 150,
-    ("cinesort/infra/rest_server.py", "_handle_post"): 147,  # -3 le 2026-08-31, gain verrouille
+    # 147 -> 135 le 2026-08-31 : ce lot ajoute trois appels a `_pour_journal`,
+    # que le formateur eclate en multi-ligne — la fonction montait a 159. Plutot
+    # que le plafond, c'est `_repondre_methode_introuvable` qui a ete EXTRAITE,
+    # et le gain net de 12 lignes est inscrit ici. Le cliquet a mordu DANS LES
+    # DEUX SENS sur cette PR : d'abord a la hausse (159 > 147), puis a la baisse
+    # une fois l'extraction faite.
+    ("cinesort/infra/rest_server.py", "_handle_post"): 135,  # -3 le 2026-08-31, gain verrouille
     # 150 -> 170 : le pre-check d'espace disque regarde desormais le SECOND
     # volume (les bacs vivent sous le state_dir, pas sous la bibliotheque).
     ("cinesort/ui/api/apply_support.py", "_validate_apply"): 170,

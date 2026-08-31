@@ -39,6 +39,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from cinesort.infra.db.migration_manager import MigrationManager
@@ -48,6 +49,26 @@ _REPERTOIRE = Path(__file__).resolve().parents[1] / "cinesort" / "infra" / "db" 
 
 def _manager(db: Path) -> MigrationManager:
     return MigrationManager(db, _REPERTOIRE)
+
+
+def _derniere_version_sur_disque() -> int:
+    """Le plus grand numero de migration PRESENT DANS LE REPERTOIRE.
+
+    Les assertions de version ci-dessous ecrivaient `32` en toutes lettres. Le
+    nombre etait juste le jour ou il a ete ecrit, et FAUX des la migration
+    suivante : les quatre assertions rougissaient d'un coup en accusant une
+    migration parfaitement saine. Ce qu'elles veulent dire est « `apply()` a
+    bien atteint la derniere migration du repertoire », pas « 32 ».
+
+    On lit donc les NOMS DE FICHIERS, pas `MigrationManager.latest_version()` :
+    c'est precisement ce que `test_latest_version_suit_le_dernier_fichier`
+    verifie, et une assertion qui s'appuierait dessus ne dirait plus rien de
+    l'application reelle.
+    """
+    numeros = [int(m.group(1)) for p in _REPERTOIRE.glob("*.sql") if (m := re.match(r"^(\d+)", p.name))]
+    if not numeros:  # pragma: no cover - le repertoire est versionne
+        raise AssertionError(f"aucune migration trouvee dans {_REPERTOIRE}")
+    return max(numeros)
 
 
 class AucuneMigrationNEstINVISIBLETests(unittest.TestCase):
@@ -115,18 +136,18 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _tables(self) -> set[str]:
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     def _user_version(self) -> int:
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
     def test_sur_une_base_NEUVE_la_table_est_creee(self) -> None:
         _manager(self.db).apply()
 
         self.assertIn("vec_films_hash", self._tables())
-        self.assertEqual(self._user_version(), 32)
+        self.assertEqual(self._user_version(), _derniere_version_sur_disque())
 
     def test_sur_une_base_PRE_EXISTANTE_arretee_a_31(self) -> None:
         """Regle du depot : une migration se teste sur une base PRE-EXISTANTE,
@@ -135,7 +156,7 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         """
         m = _manager(self.db)
         m.apply()
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("DROP TABLE IF EXISTS vec_films_hash")
             conn.execute("PRAGMA user_version = 31")
         self.assertNotIn("vec_films_hash", self._tables())
@@ -143,7 +164,7 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         _manager(self.db).apply()
 
         self.assertIn("vec_films_hash", self._tables(), "la base existante n'a pas recu la 032")
-        self.assertEqual(self._user_version(), 32)
+        self.assertEqual(self._user_version(), _derniere_version_sur_disque())
 
     def test_un_rejeu_ne_DETRUIT_PAS_les_donnees(self) -> None:
         """L'idempotence qui compte : rejouer la 032 preserve le contenu.
@@ -181,18 +202,18 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         (tables identiques, version 32) en detruisant les donnees.
         """
         _manager(self.db).apply()
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("INSERT INTO vec_films_hash(film_id, embedding) VALUES (7, ?)", (b"",))
             conn.commit()
         avant = self._tables()
 
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("PRAGMA user_version = 31")
         self.assertIn("vec_films_hash", self._tables(), "precondition : la table doit rester en place")
 
         _manager(self.db).apply()
 
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             lignes = conn.execute("SELECT film_id FROM vec_films_hash").fetchall()
         self.assertEqual(
             [r[0] for r in lignes],
@@ -200,7 +221,7 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
             "le rejeu a PERDU les lignes : la migration recree la table au lieu de la respecter",
         )
         self.assertEqual(self._tables(), avant)
-        self.assertEqual(self._user_version(), 32)
+        self.assertEqual(self._user_version(), _derniere_version_sur_disque())
 
     def test_le_bootstrap_direct_la_contient_AUSSI(self) -> None:
         """Le second chemin de demarrage. `_bootstrap_schema_latest` rejoue le
@@ -214,7 +235,7 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         script, version = MM(self.db, _REPERTOIRE).build_bootstrap_script()
 
         self.assertIn("vec_films_hash", script, "le chemin de bootstrap direct ignore toujours la 032")
-        self.assertEqual(version, 32)
+        self.assertEqual(version, _derniere_version_sur_disque())
 
 
 if __name__ == "__main__":
