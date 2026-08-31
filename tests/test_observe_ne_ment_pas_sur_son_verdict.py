@@ -40,6 +40,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests._helpers import cleanup_test_tree
+
 _RACINE = Path(__file__).resolve().parents[1]
 _OBSERVE = _RACINE / "scripts" / "observe.py"
 
@@ -59,6 +61,20 @@ class LeCodeDeSortieDitLaVeriteTests(unittest.TestCase):
         self.observe = _charger_observe()
         self._tmp = tempfile.mkdtemp(prefix="cinesort_observe_verdict_")
         self.out = Path(self._tmp) / "out"
+
+    def tearDown(self) -> None:
+        # CE `tearDown` MANQUAIT, et le garde `tests/_temp_leak_guard.py` l'a dit :
+        # trois dossiers `cinesort_observe_verdict_*` laisses dans %TEMP%,
+        # portant la session de 10 a 13 pour une borne de 12.
+        #
+        # L'erreur porte le nom d'un test INNOCENT — le garde s'accroche au
+        # dernier de la session, ici `tests/visual/test_responsive_viewports.py`.
+        # Seul le detail PAR FAMILLE designe le coupable.
+        #
+        # `cleanup_test_tree` plutot que `shutil.rmtree(..., ignore_errors=True)` :
+        # ce dernier avale son echec, et `main()` ecrit un `manifest.json` dans
+        # `out/` par un chemin que rien ne garantit ferme a cet instant.
+        cleanup_test_tree(self._tmp)
 
     def _lancer(self, faux_dashboard: dict) -> int:
         """Execute `main()` en substituant la seule observation reelle."""
