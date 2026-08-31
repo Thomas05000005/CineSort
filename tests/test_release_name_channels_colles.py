@@ -69,6 +69,31 @@ class CanauxCollesAuCodecTests(unittest.TestCase):
         self.assertEqual(self._canaux("Movie.2020.2160p.UHD.BluRay.DDP2.0.TrueHD.7.1.Atmos-GRP.mkv"), "7.1")
         self.assertEqual(self._canaux("Movie.2020.2160p.BluRay.DTS-HD.MA.5.1.DDP2.0-GRP.mkv"), "5.1")
 
+    def test_deux_multicanaux_le_depart_se_fait_au_SOMMET(self) -> None:
+        """Les cas ci-dessus opposent tous un multicanal a un stereo : un code
+        qui prendrait « le premier non-2.0 » les passerait TOUS. Il faut deux
+        dispositions multicanaux pour exercer reellement le haut de
+        `_CHANNELS_PAR_RICHESSE` ('7.1', '6.1', ...).
+
+        Et il faut les DEUX ORDRES : avec un seul, « le plus riche gagne » et
+        « le dernier rencontre gagne » rendent la meme valeur, donc le test ne
+        les distingue pas. C'est la paire qui mesure, pas le cas."""
+        cas = [
+            # 6.1 puis 7.1, et l'inverse — meme reponse attendue
+            ("Movie.2020.2160p.BluRay.DTS.6.1.TrueHD.7.1.Atmos-GRP.mkv", "7.1"),
+            ("Movie.2020.2160p.BluRay.TrueHD.7.1.DTS.6.1-GRP.mkv", "7.1"),
+            # idem sous la forme COLLEE, celle que ce fichier corrige
+            ("Movie.2020.2160p.BluRay.DTS6.1.TrueHD7.1-GRP.mkv", "7.1"),
+            ("Movie.2020.2160p.BluRay.TrueHD7.1.DTS6.1-GRP.mkv", "7.1"),
+            # un cran plus bas, pour que le test ne se contente pas de
+            # toujours repondre le maximum absolu
+            ("Movie.2020.1080p.BluRay.DTS.5.1.AC3.5.0-GRP.mkv", "5.1"),
+            ("Movie.2020.1080p.BluRay.AC3.5.0.DTS.5.1-GRP.mkv", "5.1"),
+        ]
+        for nom, attendu in cas:
+            with self.subTest(nom=nom):
+                self.assertEqual(self._canaux(nom), attendu)
+
     def test_aucun_couple_invente_sur_un_nombre_plus_long(self) -> None:
         """La queue d'un nombre n'est pas un couple de canaux."""
         cas = [
