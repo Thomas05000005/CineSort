@@ -8,14 +8,32 @@ d'entree de l'application, qui porte le boot desktop ET le passage du jeton REST
 sous `?ntoken=` — n'etait donc PAS scanne.
 
 Et pas seulement par bandit. Mesure du 2026-08-31 : `app.py` echappait a SIX
-controles statiques a la fois, tous bornes a `cinesort/` :
+controles statiques a la fois, tous bornes a `cinesort/`. LES SIX SONT
+DESORMAIS FERMES — cette liste est tenue a jour parce qu'un recensement qui
+reste fige devient un document qui ment :
 
-    bandit                      .github/workflows/bandit.yml
-    mypy                        .github/workflows/mypy.yml
-    budget de taille            tests/test_function_size_budget.py:37
-    cliquet except OSError      tests/test_sqlite_error_hors_oserror_cliquet.py:44
-    cliquet imports lazy        tests/test_refactor_84_progress_v77.py:340
-    contrat symboles morts      tests/test_contract_dead_symbols.py
+    bandit                  .github/workflows/bandit.yml              #1190
+    mypy                    .github/workflows/mypy.yml                #1191
+    budget de taille        tests/test_function_size_budget.py        ferme
+    cliquet except OSError  tests/test_sqlite_error_hors_...py        ferme
+    cliquet imports lazy    tests/test_refactor_84_progress_v77.py    ferme
+    contrat symboles morts  tests/test_contract_dead_symbols.py       ferme
+
+Ce que les quatre derniers ont revele, chacun mesure :
+
+  - budget de taille : 13 fonctions au-dessus du seuil hors `cinesort/`, dont
+    `app.py::main` a 525 lignes et `scripts/observe.py::observe_dashboard` a
+    524. Entrees a leur taille exacte, marge zero.
+  - cliquet except OSError : ZERO site nouveau. Un elargissement gratuit se
+    fait pendant qu'il est gratuit ; sinon il ne se fait jamais.
+  - imports lazy : 42 dans le seul `app.py`, soit 41 % de plus que tout
+    `cinesort/`, et aucun n'etait compte. L'elargissement a aussi revele que
+    ce cliquet n'echouait qu'a la HAUSSE, et qu'une de ses bornes etait deja
+    PERIMEE (couche `app` : 19 pour 18 sites reels).
+  - symboles morts : ZERO mort nouveau dans `app.py`. `scripts/` est reste
+    dehors pour une raison MESUREE, ecrite dans ce fichier-la : ce contrat
+    compare des NOMS, et un homonyme dans un script RESSUSCITE un symbole
+    reellement mort.
 
 Ce que l'elargissement a revele
 -------------------------------

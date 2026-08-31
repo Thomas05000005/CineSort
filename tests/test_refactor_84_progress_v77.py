@@ -111,6 +111,19 @@ EXCLUDED_DIRS = frozenset({"tests", "__pycache__"})
 # REFACTOR_PLAN_84.md. `__root__` = modules a la racine du paquet.
 MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     "__root__": 3,
+    # `app.py` — le POINT D'ENTREE, ajoute au perimetre le 2026-08-31. Il
+    # echappait a ce cliquet comme a cinq autres controles statiques (recense
+    # dans `tests/test_bandit_perimetre_couvre_le_code.py`). A lui seul il
+    # porte 42 imports differes, soit 41 % de plus que tout `cinesort/`, et
+    # aucun n'etait compte.
+    #
+    # `scripts/` reste DEHORS, mesure a l'appui : 24 imports differes, dont les
+    # plus lourds sont des dependances OPTIONNELLES (`playwright`, `torch`,
+    # `onnx`, `PIL`, `mss`, `pydantic`), 6 explicitement sous un garde
+    # `ImportError`. Ce cliquet mesure l'avancement du refactor #84, qui porte
+    # sur les CYCLES internes au paquet ; y verser des chargements paresseux
+    # d'outils autonomes changerait ce que le nombre veut dire.
+    "app.py": 42,
     # 23 -> 25 (PR#852, +2). Les DEUX imports differes ont ete verifies un par
     # un, et ils ne sont pas du meme genre :
     #   - `cleanup` -> `apply_core._append_error_message` : VRAI CYCLE.
@@ -139,7 +152,11 @@ MAX_LAZY_IMPORTS_BY_LAYER: dict[str, int] = {
     # Ajoutes en tete : `os` (plan_support_core), `contextlib`
     # (plan_support_replan), `concurrent.futures.ThreadPoolExecutor`
     # (_local_candidate).
-    "app": 19,
+    # 19 -> 18 le 2026-08-31. La borne etait PERIMEE : une conversion avait ete
+    # faite sans que la borne suive, donc un import differe pouvait revenir
+    # GRATUITEMENT. Ce cliquet ne savait pas le dire — il n'echouait qu'a la
+    # HAUSSE ; `test_les_bornes_ne_sont_pas_PERIMEES` ferme ce sens-la.
+    "app": 18,
     "data": 0,
     # 16 -> 15 (#554/#595, -1) : `lpips_compare._resolve_model_path` importait
     # `sys` dans la fonction pour lire `sys.frozen`.
@@ -332,13 +349,31 @@ def _count_lazy_imports(root: Path) -> tuple[dict[str, int], dict[str, int]]:
     return by_layer, by_file
 
 
+def _compter_le_perimetre() -> tuple[dict[str, int], dict[str, int]]:
+    """Compte les imports differes de `cinesort/` ET d'`app.py`.
+
+    `_count_lazy_imports` derive la couche du chemin RELATIF a sa racine ;
+    `app.py` n'est pas sous `cinesort/`, il lui faut donc sa propre mesure et
+    sa propre couche. La nommer `app.py` plutot qu'`app` est delibere : la
+    couche `app` designe `cinesort/app/`, et confondre les deux ferait porter a
+    l'une la borne de l'autre.
+    """
+    racine = Path(__file__).resolve().parent.parent
+    by_layer, by_file = _count_lazy_imports(racine / "cinesort")
+
+    visiteur = _LazyImportCounter()
+    visiteur.visit(ast.parse((racine / "app.py").read_text(encoding="utf-8")))
+    by_layer["app.py"] = visiteur.count
+    if visiteur.count:
+        by_file["app.py"] = visiteur.count
+    return by_layer, by_file
+
+
 class TestRefactor84LazyImportProgress(unittest.TestCase):
     """Borne le nombre de lazy imports residuels apres M-03 / refactor #84."""
 
     def test_lazy_imports_bounded(self) -> None:
-        repo_root = Path(__file__).resolve().parent.parent
-        cinesort_dir = repo_root / "cinesort"
-        by_layer, by_file = _count_lazy_imports(cinesort_dir)
+        by_layer, by_file = _compter_le_perimetre()
 
         top_files = "\n".join(f"  {c:3d}  {p}" for p, c in sorted(by_file.items(), key=lambda x: -x[1])[:15])
         over = {
@@ -358,6 +393,44 @@ class TestRefactor84LazyImportProgress(unittest.TestCase):
                 f"Top fichiers :\n{top_files}"
             ),
         )
+
+    def test_les_bornes_ne_sont_pas_PERIMEES(self) -> None:
+        """L'AUTRE SENS DU CLIQUET, qui manquait.
+
+        Ce fichier n'echouait qu'a la HAUSSE. Une couche convertie sans que sa
+        borne suive rendait le gain disponible pour n'importe qui : le cliquet
+        restait vert pendant qu'on reintroduisait ce qu'on venait de retirer.
+        Ce n'etait pas theorique — MESURE du 2026-08-31 : la couche `app`
+        portait une borne de 19 pour 18 sites reels.
+
+        Marge zero, comme le dit l'en-tete du fichier. Une baisse doit se
+        VERROUILLER, sinon elle n'a servi a rien.
+        """
+        by_layer, _ = _compter_le_perimetre()
+
+        perimees = {
+            couche: (by_layer.get(couche, 0), borne)
+            for couche, borne in MAX_LAZY_IMPORTS_BY_LAYER.items()
+            if by_layer.get(couche, 0) < borne
+        }
+
+        self.assertEqual(
+            perimees,
+            {},
+            "Borne(s) PERIMEE(S) (couche: mesure < borne) : "
+            + ", ".join(f"{k}: {m} < {b}" for k, (m, b) in sorted(perimees.items()))
+            + " | Une conversion a ete faite sans abaisser la borne : le gain est "
+            "rendu disponible a la prochaine regression. Abaisser la borne d'autant "
+            "dans MAX_LAZY_IMPORTS_BY_LAYER.",
+        )
+
+    def test_le_perimetre_VOIT_bien_app_py(self) -> None:
+        """Une couche a zero se lit de deux facons : « rien a signaler » ou
+        « personne n'a regarde ». Ici la mesure doit etre franchement positive.
+        """
+        by_layer, _ = _compter_le_perimetre()
+
+        self.assertGreater(by_layer.get("app.py", 0), 10, "app.py n'est pas mesure")
 
     def test_known_converted_in_m03_stay_top_level(self) -> None:
         """Verifie que les 4 conversions M-03 ne sont pas regressees.

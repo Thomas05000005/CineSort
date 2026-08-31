@@ -33,8 +33,23 @@ import pathlib
 # l'allowlist se vide via les PR de decoupe #215.
 MAX_LINES = 100
 
-# Racine du package a auditer (le dossier de tests interne est exclu).
-_PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent / "cinesort"
+# PERIMETRE. Longtemps `cinesort/` seul — et `app.py`, point d'entree de
+# l'application, echappait donc a ce budget comme a cinq autres controles
+# statiques (recense dans `tests/test_bandit_perimetre_couvre_le_code.py`).
+#
+# Elargi le 2026-08-31 a `app.py` et `scripts/`, dans la continuite de
+# l'elargissement de bandit (#1190), qui avait revele un `shell=True`
+# HIGH/HIGH dans `scripts/run_lighthouse.py`. Un point d'entree et un dossier
+# d'outillage sont exactement les endroits ou une fonction grossit sans que
+# personne ne relise.
+#
+# Ce que l'elargissement revele : 13 fonctions au-dessus de MAX_LINES, dont
+# `app.py::main` a 525 lignes et `scripts/observe.py::observe_dashboard` a 524.
+# Elles entrent dans PLAFONDS a leur taille MESUREE, marge zero — la reponse du
+# depot a une fonction trop longue est de l'EXTRAIRE, et le cliquet descendant
+# (`test_les_plafonds_ne_sont_pas_PERIMES`) rend tout gain definitif.
+_REPERTOIRE_DU_DEPOT = pathlib.Path(__file__).resolve().parent.parent
+_RACINES = ("cinesort", "app.py", "scripts")
 
 # ---------------------------------------------------------------------------
 # PLAFONDS gelés : (chemin POSIX relatif a la racine du repo, nom) -> taille
@@ -283,13 +298,45 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/dashboard_support.py", "compose_score_explanation"): 102,
     ("cinesort/domain/perceptual/grain_analysis.py", "analyze_grain_v2"): 101,
     ("cinesort/ui/api/profiles_support_crud.py", "save_profile"): 101,
+    # ------------------------------------------------------------------
+    # ELARGISSEMENT DU PERIMETRE, 2026-08-31 : `app.py` et `scripts/`.
+    # Tailles MESUREES a cette date, marge zero. Aucune de ces fonctions n'est
+    # benie : le cliquet descendant les fera baisser des qu'on les decoupera.
+    # ------------------------------------------------------------------
+    ("app.py", "main"): 525,
+    ("app.py", "_startup"): 155,
+    ("app.py", "main_api"): 144,
+    ("app.py", "_start_rest_server"): 127,
+    ("scripts/observe.py", "observe_dashboard"): 524,
+    ("scripts/_iter10_gate_lisibilite.py", "main"): 358,
+    ("scripts/i18n_full_sync.py", "transform_radarr_js"): 147,
+    ("scripts/make_test_library.py", "build_catalog"): 140,
+    ("scripts/_gate_auth_iter14_runtime.py", "main"): 132,
+    ("scripts/measure_codebase_health.py", "format_report"): 113,
+    ("scripts/make_test_library.py", "create_clip"): 110,
+    ("scripts/i18n_full_sync.py", "transform_plex_js"): 109,
+    ("scripts/observe.py", "main"): 107,
 }
+
+
+def _fichiers_du_perimetre() -> list[pathlib.Path]:
+    """Les fichiers du perimetre. Une racine peut etre un FICHIER (`app.py`) :
+    `pathlib.Path("app.py").rglob("*.py")` ne rend rien, en silence.
+    """
+    fichiers: list[pathlib.Path] = []
+    for racine in _RACINES:
+        chemin = _REPERTOIRE_DU_DEPOT / racine
+        if chemin.is_dir():
+            fichiers.extend(chemin.rglob("*.py"))
+        elif chemin.is_file():
+            fichiers.append(chemin)
+    return sorted(fichiers)
 
 
 def _iter_oversized_functions():
     """Yield (rel_path, func_name, loc) pour chaque fonction > MAX_LINES."""
-    repo_root = _PACKAGE_ROOT.parent
-    for path in sorted(_PACKAGE_ROOT.rglob("*.py")):
+    repo_root = _REPERTOIRE_DU_DEPOT
+    for path in _fichiers_du_perimetre():
         # Exclut le dossier de tests interne au package.
         if "tests" in path.parts:
             continue

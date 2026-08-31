@@ -232,18 +232,9 @@ def _text_mentions_scope(text: str, scope_norm: str) -> bool:
         start = idx + 1
 
 
-def _read_head(path: Path, size: int = 256 * 1024) -> str:
-    """Lit la tete d'un fichier en texte tolerant. Vide si illisible."""
-    try:
-        with open(path, "rb") as fh:
-            return fh.read(size).decode("utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
 def _plan_jsonl_in_scope(plan: Path, scope_norm: str) -> bool:
     """Relit `plan.jsonl` comme du JSON et confronte ses chemins au perimetre."""
-    # Lecture INTEGRALE, ligne a ligne. `_read_head` s'arretait a 256 Kio :
+    # Lecture INTEGRALE, ligne a ligne. la lecture par la TETE du fichier s'arretait a 256 Kio :
     # un plan plus gros dont le chemin cible n'apparaissait qu'apres etait
     # declare hors perimetre, et le run survivait a la purge. Le cout reste
     # nul en pratique puisqu'on sort au premier chemin qui correspond.
@@ -275,7 +266,7 @@ def _plan_lignes_en_perimetre(lignes: Iterable[str], scope_norm: str) -> bool:
 def _fichier_mentionne_le_perimetre(chemin: Path, scope_norm: str) -> bool:
     """Cherche le perimetre dans un journal texte, SANS le tronquer.
 
-    `_read_head` s'arretait a 256 Kio : un journal plus gros citant le chemin
+    la lecture par la TETE du fichier s'arretait a 256 Kio : un journal plus gros citant le chemin
     plus loin faisait conclure « hors perimetre », et le run n'etait jamais
     purge. On sort a la premiere ligne qui correspond.
     """

@@ -49,7 +49,32 @@ from typing import Dict, List, Set, Tuple
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Repertoires/fichiers ou l'on CHERCHE des declarations mortes.
-DECL_ROOTS = ("cinesort",)
+#
+# `app.py` ajoute le 2026-08-31 : il echappait a ce contrat comme a cinq autres
+# controles statiques (recense dans
+# `tests/test_bandit_perimetre_couvre_le_code.py`). L'ajout revele ZERO mort
+# nouveau — un elargissement gratuit, epingle par
+# `test_le_perimetre_VOIT_bien_app_py` pour qu'un zero « personne n'a regarde »
+# ne puisse pas se faire passer pour un zero « rien a signaler ».
+#
+# `scripts/` reste DEHORS, et la raison est MESUREE — ce n'est pas un oubli :
+#
+#   - ajoute a DECL_ROOTS SEUL, il porte la population de 57 a 283. Ces 226
+#     sont un artefact : personne ne cherche les LECTURES dans `scripts/`, donc
+#     un symbole utilise seulement a l'interieur d'un script parait mort.
+#   - ajoute AUX DEUX cotes, l'artefact disparait (58) mais un defaut PIRE
+#     apparait. Ce contrat compare des NOMS, pas des symboles resolus. Cette
+#     largeur est voulue du cote « declare mort » : elle garantit zero faux
+#     positif. Du cote LECTURES elle se retourne — mesure :
+#     `scripts/make_test_library.py` definit et appelle SON PROPRE `ensure_dir`,
+#     ce qui RESSUSCITE `cinesort/infra/state.py::ensure_dir`, mort pour de bon,
+#     et le fait sortir de KNOWN_DEAD.
+#
+# Le bilan serait d'une trouvaille gagnee (`scripts/observe.py::_read_head`,
+# supprime dans le meme lot) contre une trouvaille perdue. Couvrir `scripts/`
+# demande de resoudre les symboles par module, pas d'elargir une comparaison de
+# noms.
+DECL_ROOTS = ("cinesort", "app.py")
 # `cinesort/tests/` contient des TestCase decouverts par nom par pytest : ils
 # n'ont, par construction, aucun lecteur dans le depot.
 DECL_EXCLUDED_DIRS = ("cinesort/tests",)
@@ -235,6 +260,18 @@ class DeadSymbolsContractTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.declarations = _collect_declarations()
         cls.dead = collect_dead_symbols()
+
+    def test_le_perimetre_VOIT_bien_app_py(self) -> None:
+        """L'ajout d'`app.py` a DECL_ROOTS revele ZERO mort. Un zero a deux
+        lectures — « rien a signaler » ou « personne n'a regarde ». Ce test
+        tranche : les declarations d'`app.py` sont bien collectees, donc le
+        zero est un vrai zero. Sans lui, une racine mal orthographiee rendrait
+        un perimetre ampute en silence.
+        """
+        decls = _collect_declarations()
+        depuis_app = [cle for cle in decls if cle.startswith("app.py::")]
+
+        self.assertGreater(len(depuis_app), 10, f"app.py n'est pas lu : {len(depuis_app)} declaration(s)")
 
     def test_extraction_is_sane(self) -> None:
         """Garde anti-silence : un extracteur casse rendrait le test vert a tort."""
