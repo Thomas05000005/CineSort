@@ -39,6 +39,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from cinesort.infra.db.migration_manager import MigrationManager
@@ -135,11 +136,11 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _tables(self) -> set[str]:
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     def _user_version(self) -> int:
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
     def test_sur_une_base_NEUVE_la_table_est_creee(self) -> None:
@@ -155,7 +156,7 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         """
         m = _manager(self.db)
         m.apply()
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("DROP TABLE IF EXISTS vec_films_hash")
             conn.execute("PRAGMA user_version = 31")
         self.assertNotIn("vec_films_hash", self._tables())
@@ -201,18 +202,18 @@ class LaMigration032EstREELLEMENTAppliqueeTests(unittest.TestCase):
         (tables identiques, version 32) en detruisant les donnees.
         """
         _manager(self.db).apply()
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("INSERT INTO vec_films_hash(film_id, embedding) VALUES (7, ?)", (b"",))
             conn.commit()
         avant = self._tables()
 
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             conn.execute("PRAGMA user_version = 31")
         self.assertIn("vec_films_hash", self._tables(), "precondition : la table doit rester en place")
 
         _manager(self.db).apply()
 
-        with sqlite3.connect(str(self.db)) as conn:
+        with closing(sqlite3.connect(str(self.db))) as conn, conn:
             lignes = conn.execute("SELECT film_id FROM vec_films_hash").fetchall()
         self.assertEqual(
             [r[0] for r in lignes],
