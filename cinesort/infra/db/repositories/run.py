@@ -650,6 +650,11 @@ class RunRepository(_BaseRepository):
         - perceptual_reports : suppression manuelle par run_id
         - apply_batches      : suppression manuelle (et donc apply_operations
           via FK CASCADE sur batch_id)
+        - apply_batch_modes  : suppression manuelle par `batch_id` des batches
+          du run. Elle ne porte pas de `run_id` (donc invisible a la liste
+          `_TABLES_PORTANT_RUN_ID`) et n'a pas de FK vers `apply_batches` (choix
+          documente en 029:15-19) : sans cette purge dediee, rien au monde ne la
+          nettoie.
 
         Les fichiers vidéo (root) ne sont JAMAIS touchés. Les fichiers
         d'état (plan.jsonl, validation.json, log.txt) restent eux aussi
@@ -723,13 +728,58 @@ class RunRepository(_BaseRepository):
                 (rid,),
             )
             apply_ops_deleted = int(cur.fetchone()["n"] or 0)
+
+            # LOT 3 / A — `apply_batch_modes` n'etait dans AUCUNE des deux listes.
+            #
+            # La table (migration 029) est indexee par `batch_id` et n'a PAS de
+            # colonne `run_id` : l'invariant de symetrie du #984, qui itere
+            # `_TABLES_PORTANT_RUN_ID`, ne pouvait donc pas la voir. Elle n'a pas
+            # non plus de cle etrangere vers `apply_batches` — 029:15-19 le
+            # documente comme un choix delibere — donc aucune CASCADE ne
+            # l'atteint. Ses lignes survivaient POUR TOUJOURS a la suppression
+            # de leur run, et rien d'autre dans le depot ne les supprime.
+            #
+            # Ce n'etait pas qu'une fuite d'espace. `_list_inprogress_rollbacks`
+            # (app/apply_batches_reconciliation.py) lit cette table A CHAQUE BOOT
+            # et relance `rollback_forward` sur tout batch `IN_PROGRESS`. Une
+            # ligne orpheline y restait eligible a vie, pour un batch dont les
+            # operations n'existent plus : reconciliation a vide, a chaque
+            # demarrage, sans aucun moyen d'en sortir.
+            #
+            # Purge AVANT le DELETE des batches, meme sous-requetage borne que
+            # pour le compte ci-dessus (issue #448 : pas de `IN` deroule en
+            # parametres lies).
+            #
+            # CE QU'ON NE PURGE PAS, ET POURQUOI. `apply_pending_moves` porte
+            # aussi un `batch_id` sans cle etrangere, mais c'est le JOURNAL
+            # WRITE-AHEAD des deplacements deja faits sur disque (019:1-7), relu
+            # au boot par `move_reconciliation`. Meme taxonomie que les sections
+            # 1 et 4 de la migration 021 : ce qui trace une action irreversible
+            # survit, ce qui n'est qu'une metadonnee de batch part avec lui.
+            #
+            # La table n'existe pas avant la migration 029 : meme tolerance
+            # BORNEE que la boucle ci-dessus (table absente seulement, jamais un
+            # verrou ni une E/S), sans quoi `delete_run` casserait sur une base
+            # restee en v28.
+            try:
+                cur = conn.execute(
+                    "DELETE FROM apply_batch_modes"
+                    " WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
+                    (rid,),
+                )
+                modes_deleted = int(cur.rowcount or 0)
+            except sqlite3.OperationalError as exc:
+                if not self._is_missing_table_error(exc, "apply_batch_modes"):
+                    raise
+                modes_deleted = 0
+
             cur = conn.execute("DELETE FROM apply_batches WHERE run_id=?", (rid,))
             batches_deleted = int(cur.rowcount or 0)
 
             cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
             run_deleted = int(cur.rowcount or 0)
 
-        return run_deleted + enfants_supprimes + batches_deleted + apply_ops_deleted
+        return run_deleted + enfants_supprimes + batches_deleted + apply_ops_deleted + modes_deleted
 
     def list_runs_older_than(self, *, cutoff_ts: float) -> List[str]:
         """Retourne les run_ids dont la date la plus recente (started_ts > created_ts) est < cutoff_ts.

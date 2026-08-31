@@ -1,0 +1,66 @@
+-- Migration 033 : index COUVRANT pour `count_v2_tier_since` (LOT 3 / B).
+--
+-- LA REQUETE. `PerceptualRepository.count_v2_tier_since` (repositories/perceptual.py) :
+--
+--   SELECT COUNT(DISTINCT row_id) FROM perceptual_reports
+--    WHERE global_tier_v2 = ? AND ts >= ? [AND ts < ?]
+--
+-- Trois appels par chargement d'ecran : dashboard_support.py (insight
+-- « N films Platinum ce mois ») et quality_audit_support.py deux fois
+-- (les deux moities de la fenetre du delta Reject).
+--
+-- Aucune des deux colonnes filtrees n'est indexee : `EXPLAIN QUERY PLAN` rend
+-- `SCAN perceptual_reports`. C'est le seul acces de la table qui ne passe pas
+-- par le prefixe gauche `run_id` de sa PK.
+--
+-- CE QUE LA MESURE A REFUTE, ET C'EST LE POINT IMPORTANT DE CE FICHIER.
+--
+-- 1. Ce n'est PAS la migration 022 qui a retire l'index utile. Elle a supprime
+--    `idx_perceptual_reports_run ON perceptual_reports(run_id)` — une seule
+--    colonne, `run_id`, effectivement redondante avec le prefixe gauche de la
+--    PK `(run_id, row_id)`. Il n'aurait jamais servi ce filtre. Mieux :
+--    `global_tier_v2` n'existait meme pas a l'epoque, la colonne etant ajoutee
+--    par l'`ALTER` de la migration 018. Il n'y a donc jamais eu d'index a
+--    « remplacer » : il en manquait un depuis l'origine de la colonne.
+--
+-- 2. L'index « evident » a deux colonnes est une REGRESSION. Le compte porte
+--    sur `COUNT(DISTINCT row_id)`, colonne absente d'un index
+--    `(global_tier_v2, ts)` : SQLite paie alors une remontee de ligne par
+--    entree trouvee. Sur un tier frequent cela fait 40 000 acces aleatoires la
+--    ou un parcours sequentiel de 200 000 lignes etait plus rapide.
+--
+--    MESURE, 200 000 lignes, distribution desequilibree realiste, ms/appel :
+--
+--      tier (lignes rendues)   aucun index   (tier, ts)   (tier, ts, row_id)
+--      platinum   (  2 006)       26,6          10,5            1,1
+--      gold       ( 40 159)       58,2         241,3           37,5
+--      silver     ( 38 037)       57,1         234,3           44,5
+--      bronze     ( 15 108)       36,4          79,1           16,6
+--      reject     (  4 940)       28,3          24,6            4,9
+--
+--    L'index a deux colonnes ne gagne que sur le tier RARE — exactement le seul
+--    appel qu'on a en tete en lisant `dashboard_support` (« platinum »). Calibre
+--    sur lui, il aurait degrade d'un facteur 4 les deux appels les plus lourds.
+--
+-- LE CHOIX. Index COUVRANT : `row_id` en troisieme position rend la requete
+-- satisfiable SANS toucher la table (`SEARCH ... USING COVERING INDEX`). Gain
+-- mesure x25 sur platinum, x5,8 sur reject, x1,3 a x2,2 sur les tiers de masse
+-- — donc jamais de perdant. Cout : +37 % de fichier sur une base ne contenant
+-- que ces 200 000 lignes (17,6 -> 24,2 Mo), part qui diminue des que les autres
+-- tables pesent. Meme arbitrage que la migration 020, qui a ajoute deux index
+-- de perf a `quality_reports` pour le meme ecran.
+--
+-- L'ORDRE DES COLONNES EST PORTEUR. `global_tier_v2` (egalite) d'abord, `ts`
+-- (intervalle) ensuite : l'inverse rendrait le predicat d'egalite inutilisable
+-- apres l'intervalle. `row_id` en dernier n'est la que pour la couverture, il
+-- n'est jamais un critere de recherche.
+--
+-- Memoire feedback_sqlite_migration_test_existing_db : ordre strict
+-- CREATE TABLE -> CREATE INDEX, IF NOT EXISTS partout, PAS d'ALTER.
+-- Idempotente : rejouable sans dommage (le bootstrap concatene toutes les
+-- migrations a chaque auto-reparation).
+
+CREATE INDEX IF NOT EXISTS idx_perceptual_reports_tier_v2_ts
+    ON perceptual_reports(global_tier_v2, ts, row_id);
+
+PRAGMA user_version = 33;
