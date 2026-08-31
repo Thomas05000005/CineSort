@@ -18,7 +18,7 @@ import numpy as np
 
 from cinesort.domain.perceptual.audio_perceptual import _compute_audio_score, classify_drc
 from cinesort.domain.perceptual.composite_score import build_perceptual_result
-from cinesort.domain.perceptual.composite_score_v2 import compute_global_score_v2
+from cinesort.domain.perceptual.composite_score_v2 import _score_hdr, compute_global_score_v2
 from cinesort.domain.perceptual.mel_analysis import (
     _score_from_aac_holes,
     _score_from_flatness,
@@ -325,6 +325,41 @@ def _mel_synthetique(
     return spec, freqs
 
 
+#: SURFACE AJOUTEE le 2026-08-31, et son absence etait un angle mort.
+#:
+#: `compute_global_score_v2` est appele plus bas avec `normalized_probe={}` :
+#: `_score_hdr` y prend donc TOUJOURS la branche SDR, et la surface
+#: `composite_v2` est aveugle a toutes les regles HDR/DV. Preuve : le lot qui a
+#: ferme le trou HLG / DV 7 / DV inconnu n'a change AUCUNE des six empreintes
+#: existantes. Un cliquet peut varier, couvrir dix cas, et ne rien garder de la
+#: regle qu'on vient de corriger.
+#:
+#: Ces cas portent les cles que `_normalize_ffprobe` produit REELLEMENT
+#: (`hdr_type`, `hdr10`, `hdr10_plus`, `dv_present`, `dv_profile`) — une
+#: premiere redaction avait invente une cle `hlg` qui n'existe nulle part, et
+#: mesurait donc un chemin que le produit n'emprunte jamais.
+CAS_HDR: Dict[str, Dict[str, Any]] = {
+    "sdr": {"hdr_type": "sdr"},
+    "hlg": {"hdr_type": "hlg"},
+    "hdr10_valide": {"hdr_type": "hdr10", "hdr10": True, "max_cll": 1000, "max_fall": 400},
+    "hdr10_sans_metadonnees": {"hdr_type": "hdr10", "hdr10": True},
+    "hdr10_plus": {"hdr_type": "hdr10_plus", "hdr10_plus": True},
+    "dv_5": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "5"},
+    "dv_7": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "7"},
+    "dv_8_1": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "8.1"},
+    "dv_8_2": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "8.2"},
+    "dv_8_4": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "8.4"},
+    "dv_profil_INCONNU": {"hdr_type": "dolby_vision", "dv_present": True, "dv_profile": "9.9"},
+    "video_absente": None,
+}
+
+
+class _VideoSansHdr10Plus:
+    """`_score_hdr` lit `video.has_hdr10_plus_detected` — le reste vient du probe."""
+
+    has_hdr10_plus_detected = False
+
+
 def verdicts() -> Dict[str, Dict[str, Any]]:
     """Le verdict de CHAQUE surface, sous une forme canonique et stable.
 
@@ -385,5 +420,18 @@ def verdicts() -> Dict[str, Dict[str, Any]]:
         )
         composite_v2[nom] = {"score": round(float(resultat.global_score), 4), "tier": resultat.global_tier}
     out["composite_v2"] = composite_v2
+
+    hdr: Dict[str, Any] = {}
+    for nom, video_probe in CAS_HDR.items():
+        note, confiance, drapeaux = _score_hdr(
+            None if video_probe is None else _VideoSansHdr10Plus(),
+            None if video_probe is None else {"video": video_probe},
+        )
+        hdr[nom] = {
+            "note": round(float(note), 4),
+            "confiance": round(float(confiance), 4),
+            "drapeaux": sorted(drapeaux),
+        }
+    out["hdr"] = hdr
 
     return out

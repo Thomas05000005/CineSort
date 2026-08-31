@@ -39,10 +39,12 @@ from .constants import (
     COHERENCE_WEIGHT_NFO,
     COHERENCE_WEIGHT_RUNTIME,
     CONFIDENCE_LOW_WARN_THRESHOLD,
+    DV_QUALITY_SCORE,
     GLOBAL_WEIGHT_AUDIO_V2,
     GLOBAL_WEIGHT_COHERENCE_V2,
     GLOBAL_WEIGHT_VIDEO_V2,
     GRAIN_VINTAGE_ERAS_V2,
+    HDR_QUALITY_SCORE,
     SHORT_FILE_WARN_DURATION_S,
     TIER_BRONZE_THRESHOLD,
     TIER_GOLD_THRESHOLD,
@@ -199,6 +201,34 @@ def _score_hdr(video: Any, normalized_probe: Optional[Dict[str, Any]]) -> Tuple[
     if has_hdr10:
         base = 85.0 if not flags else 75.0
         return base, 1.0, flags
+
+    # LE TROU, ferme le 2026-08-31.
+    #
+    # La chaine de `if` ci-dessus ne reconnait que HDR10, HDR10+ et les profils
+    # DV 5 / 8.1 / 8.2 / 8.4. TOUT LE RESTE tombait dans le `return 60.0, 0.3`
+    # final — c'est-a-dire dans la branche SDR. Mesure du 2026-08-31, avec les
+    # cles que `_normalize_ffprobe` produit REELLEMENT :
+    #
+    #     HLG              -> 60, confiance 0.3   (le probe portait 75)
+    #     DV profil 7      -> 60, confiance 0.3   (le probe portait 95)
+    #     DV profil inconnu-> 60, confiance 0.3   (le probe portait 75)
+    #
+    # La note est fausse, mais la CONFIANCE l'est davantage : 0.3 annonce au
+    # composite « cette dimension n'est pas vraiment mesuree », alors que le
+    # probe l'avait mesuree et rangee juste a cote, dans `dv_quality_score` et
+    # `hdr_quality_score`. C'est le motif « inconnu confondu avec pire » du
+    # comparateur de doublons, transpose a une chaine de `if` sans clause
+    # finale honnete.
+    #
+    # Les cas DEJA traites ne bougent pas : sur chacun d'eux le code etait
+    # d'accord avec le bareme canonique, ou en divergeait deliberement (SDR a
+    # 60 « neutre » plutot que 40 ; HDR10 sans metadonnees a 75 via le
+    # drapeau). Ce lot ferme un trou, il ne recalibre rien.
+    if has_dv:
+        return float(DV_QUALITY_SCORE.get(dv_profile, DV_QUALITY_SCORE["unknown"])), 1.0, flags
+    if str(video_data.get("hdr_type") or "").strip().lower() == "hlg":
+        return float(HDR_QUALITY_SCORE["hlg"]), 1.0, flags
+
     # SDR : score neutre, confidence faible (HDR pas pertinent pour certains films)
     return 60.0, 0.3, flags
 

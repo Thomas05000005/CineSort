@@ -405,7 +405,26 @@ class PerceptualEngineVersionTests(unittest.TestCase):
     """Estampille des regles : un rapport calcule avant ce lot doit rester identifiable."""
 
     def test_engine_version_bumped_for_this_rules_change(self) -> None:
-        self.assertEqual(PERCEPTUAL_ENGINE_VERSION, "1.1")
+        """Le sujet de ce test est LE LOT DU 2026-08-03, pas la version courante.
+
+        Il epinglait `== "1.1"`. Le bump suivant (1.2, le 2026-08-31, sans
+        aucun rapport avec ce lot-ci) l'a donc fait rougir : un test date qui
+        exige la valeur COURANTE devient une taxe d'entretien sur tous les lots
+        suivants, et le reflexe est alors de recopier le nouveau numero sans
+        relire ce qu'il garde.
+
+        Ce qu'il doit garder, c'est que le bump de ce lot a bien eu lieu et n'a
+        jamais ete annule — donc un PLANCHER. La comparaison se fait sur les
+        composants entiers : `"1.10" < "1.2"` en ordre lexical, et cette
+        version-la finira par exister.
+        """
+        composants = tuple(int(p) for p in PERCEPTUAL_ENGINE_VERSION.split("."))
+
+        self.assertGreaterEqual(
+            composants,
+            (1, 1),
+            "le bump du lot verdicts 2026-08-03 (#660) a ete annule",
+        )
 
 
 if __name__ == "__main__":
