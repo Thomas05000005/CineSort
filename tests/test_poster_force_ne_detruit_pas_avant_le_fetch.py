@@ -26,6 +26,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -233,3 +236,61 @@ class LeCacheResteServiSansForceTests(_ProxyPosterBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeuxRafraichissementsConcurrentsTests(unittest.TestCase):
+    """Signale par une revue automatique : la purge peut effacer le fichier
+    qu'un autre rafraichissement vient d'ecrire.
+
+    `_purge_stale_extensions` supprimait TOUT fichier `(id, size)` sauf le sien.
+    Deux requetes simultanees sur la meme jaquette :
+
+        A ecrit 550.jpg      -> purge : supprime 550.webp (celui de B)
+        B ecrit 550.webp     -> purge : supprime 550.jpg  (celui de A)
+
+    Les DEUX disparaissent, et chacune sert un chemin que l'autre vient
+    d'effacer. C'est la meme famille que le defaut principal de cette PR — on
+    detruit sans avoir la certitude d'un remplacant — mais entre deux requetes
+    au lieu d'entre le cache et le reseau.
+
+    Le remede ne prend pas de verrou : on ne supprime que ce qui est
+    STRICTEMENT plus ancien que le fichier qu'on vient d'ecrire. Un fichier
+    concurrent est forcement plus recent, donc il survit.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_poster_race_"))
+        self.taille = self._tmp / "w342"
+        self.taille.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _poser(self, nom: str, mtime: float) -> Path:
+        p = self.taille / nom
+        p.write_bytes(b"x")
+        os.utime(p, (mtime, mtime))
+        return p
+
+    def test_un_fichier_PLUS_RECENT_survit_a_la_purge(self) -> None:
+        ancien = self._poser("550.png", 1000.0)
+        garde = self._poser("550.jpg", 2000.0)
+        concurrent = self._poser("550.webp", 3000.0)  # ecrit par une AUTRE requete
+
+        poster_proxy._purge_stale_extensions(self._tmp, "w342", 550, keep=garde)
+
+        self.assertTrue(garde.is_file(), "le fichier qu'on vient d'ecrire a disparu")
+        self.assertTrue(
+            concurrent.is_file(),
+            "la purge a efface le fichier qu'un rafraichissement CONCURRENT venait "
+            "d'ecrire : les deux requetes se detruisent mutuellement.",
+        )
+        self.assertFalse(ancien.is_file(), "l'extension REELLEMENT obsolete devait partir")
+
+    def test_l_obsolete_part_toujours(self) -> None:
+        """Temoin : sans lui, « ne rien supprimer » passerait le test ci-dessus."""
+        ancien = self._poser("550.png", 1000.0)
+        garde = self._poser("550.jpg", 2000.0)
+        poster_proxy._purge_stale_extensions(self._tmp, "w342", 550, keep=garde)
+        self.assertFalse(ancien.is_file(), "le cache obsolete serait resservi 30 jours")
+        self.assertTrue(garde.is_file())

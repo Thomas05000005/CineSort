@@ -574,9 +574,24 @@ def _purge_stale_extensions(cache_root: Path, size: str, tmdb_id: int, *, keep: 
     Best-effort : un unlink qui echoue laisse au pire un fichier de trop, jamais
     l'absence de jaquette.
     """
+    if keep is None:
+        # Aucun remplacant ecrit : il n y a rien a rendre obsolete. C est la
+        # meme regle que celle de `get_or_fetch` — on ne detruit jamais sans
+        # tenir le remplacant.
+        return
     try:
+        # Seuil : la date du fichier qu on vient d ECRIRE. Un rafraichissement
+        # CONCURRENT ecrit forcement plus tard, donc son fichier survit.
+        # Sans ce seuil, deux requetes simultanees se detruisaient l une
+        # l autre : A ecrit 550.jpg puis efface le 550.webp de B, B ecrit
+        # 550.webp puis efface le 550.jpg de A, et les DEUX disparaissent.
+        # Une comparaison de date suffit ; un verrou serait plus lourd et
+        # plus fragile qu un cache de jaquettes ne le merite.
+        seuil = keep.stat().st_mtime
         for stale in (cache_root / size).glob(f"{tmdb_id}.*"):
-            if keep is not None and stale == keep:
+            if stale == keep:
+                continue
+            if stale.stat().st_mtime >= seuil:
                 continue
             stale.unlink()
     except (OSError, ValueError) as exc:
