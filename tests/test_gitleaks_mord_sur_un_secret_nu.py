@@ -44,6 +44,8 @@ import tomllib
 import unittest
 from pathlib import Path
 
+import yaml
+
 _RACINE = Path(__file__).resolve().parents[1]
 _CONFIG = _RACINE / ".gitleaks.toml"
 _WORKFLOW = _RACINE / ".github" / "workflows" / "gitleaks.yml"
@@ -101,12 +103,23 @@ class LaRegleMordSurUnSecretNuTests(unittest.TestCase):
         self.assertIs(conf.get("extend", {}).get("useDefault"), True)
 
     def test_le_workflow_CHARGE_bien_ce_fichier(self) -> None:
-        """Une config que le scan ne lit pas est une regle qui n'existe pas."""
-        texte = io.open(_WORKFLOW, encoding="utf-8").read()
-        self.assertIn(
-            "GITLEAKS_CONFIG",
-            texte,
-            "le workflow ne designe pas explicitement .gitleaks.toml",
+        """Une config que le scan ne lit pas est une regle qui n'existe pas.
+
+        ON PARSE LE YAML, on ne cherche pas la chaine. Une premiere version
+        faisait `assertIn("GITLEAKS_CONFIG", texte)` — elle passait au vert sur
+        une ligne COMMENTEE, puisque les caracteres y sont toujours. Elle
+        mesurait la presence de caracteres, pas celle d'un reglage actif.
+        Mutation qui l'a revele : `GITLEAKS_CONFIG:` prefixe d'un `#`."""
+        conf = yaml.safe_load(io.open(_WORKFLOW, encoding="utf-8").read())
+        etapes = conf["jobs"]["scan"]["steps"]
+        env = {}
+        for etape in etapes:
+            if "gitleaks" in str(etape.get("uses") or ""):
+                env = etape.get("env") or {}
+        self.assertEqual(
+            str(env.get("GITLEAKS_CONFIG") or ""),
+            _CONFIG.name,
+            "l'etape gitleaks ne designe pas explicitement .gitleaks.toml",
         )
 
     def test_la_forme_QUI_A_ECHAPPE_est_desormais_prise(self) -> None:
@@ -141,11 +154,17 @@ class LaRegleMordSurUnSecretNuTests(unittest.TestCase):
         """Contre-epreuve. Sans elle, une regle qui mord sur TOUT passerait les
         tests precedents — et 58 detections par scan rendraient l'alerte
         inaudible, ce qui revient a ne pas detecter."""
+        # CHAQUE cas n'est ecarte QUE PAR UN SEUL motif de l'allowlist.
+        # Une premiere version prenait des exemples couverts par plusieurs
+        # motifs a la fois : retirer l'un d'eux laissait le test VERT, puisqu'un
+        # autre rattrapait le cas. Le jeu ne distinguait donc pas les trois.
         benins = {
-            "hash git court": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
-            "nom de branche": "fix-audit-transverse-suppression-run",
-            "constante majuscule": "CINESORT_PROBE_DISK_CACHE_DIR_OVERRIDE",
-            "chemin de module": "cinesort_ui_api_apply_support_undo",
+            # majuscules ET minuscules, AUCUN chiffre -> seul `^[^0-9]+$` mord
+            "titre en CamelCase sans chiffre": "TitreDeSectionEnCamelCaseAssezLongPourPasser",
+            # minuscules ET chiffres, AUCUNE majuscule -> seul `^[^A-Z]+$` mord
+            "hash git complet": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            # majuscules ET chiffres, AUCUNE minuscule -> seul `^[^a-z]+$` mord
+            "constante majuscule": "CINESORT_PROBE_DISK_CACHE_V2_OVERRIDE_9",
         }
         for quoi, valeur in benins.items():
             with self.subTest(cas=quoi):
