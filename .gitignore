@@ -149,3 +149,8 @@ tests/e2e/visual_report.html
 # depot. Le cache de aider pesait 8,1 Mo a lui seul.
 .aider*
 .vscode/
+
+# Worktrees git crees par les agents en isolation. Ils vivent DANS le depot,
+# donc un `git add -A` les ratisse et commite six gitlinks parasites — arrive
+# le 2026-08-30. Ephemeres et locaux : ils ne doivent jamais etre suivis.
+.claude/worktrees/

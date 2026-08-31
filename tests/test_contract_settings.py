@@ -258,12 +258,32 @@ def _strip_line_comment(line: str) -> str:
     return line
 
 
+#: Assistants de LECTURE qui prennent le mapping settings en 1er argument et la
+#: cle en 2e. `settings.get(cle)` n est pas la seule forme de lecture : le
+#: 2026-08-30, `reglage_entier(settings, cle, defaut)` a ete introduit pour
+#: distinguer ABSENT de ZERO — `int(settings.get(cle) or defaut)` confondait les
+#: deux et rendait INATTEIGNABLE la garde `if days <= 0` des deux crons
+#: destructifs. Ce correctif JUSTE aveuglait ce garde JUSTE, qui ne connaissait
+#: que la forme `.get(`. Deux regles correctes s annulaient.
+#:
+#: La liste est NOMMEE plutot que deduite d un motif generique : un assistant
+#: d ECRITURE de la meme forme — `poser_reglage(settings, cle, valeur)` — ne
+#: doit surtout pas compter comme un lecteur. Ajouter un nom ici est un choix
+#: explicite, visible en revue.
+_ASSISTANTS_DE_LECTURE = ("reglage_entier",)
+
+
 def _read_context(line: str, m: "re.Match[str]") -> Optional[str]:
     """Contexte de lecture (read_get / read_subscript / read_membership) ou None."""
     before = line[: m.start()]
     after = line[m.end() :]
     if re.search(r"\.get\(\s*$", before):
         return "read_get"
+    if re.search(
+        r"\b(?:" + "|".join(_ASSISTANTS_DE_LECTURE) + r")\(\s*settings\s*,\s*$",
+        before,
+    ):
+        return "read_helper"
     if re.search(r"\.pop\(\s*$", before) or re.search(r"\.setdefault\(\s*$", before):
         return None  # ecriture
     if re.search(r"\[\s*$", before):
