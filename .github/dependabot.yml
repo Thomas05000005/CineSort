@@ -42,3 +42,33 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "ci"
+    groups:
+      # UNE ACTION DECOUPEE EN SOUS-CHEMINS EST UNE SEULE DEPENDANCE.
+      #
+      # `github/codeql-action` est utilisee sous trois chemins — `init`,
+      # `analyze` et `upload-sarif`. Dependabot traite chacun comme une
+      # dependance independante : sans ce groupe, il ouvre une PR par
+      # sous-chemin, vers le MEME SHA.
+      #
+      # Prise seule, chacune rend rouges les deux checks CodeQL requis, avec des
+      # erreurs symetriques :
+      #   Loaded a configuration file for version '4.37.6',
+      #   but running version '4.37.8'
+      # Aucune ne peut donc etre fusionnee, et elles gelent des creneaux de
+      # `open-pull-requests-limit` a vie, puisque rien ne les debloque.
+      # Mesure du 2026-08-24 : #1145 et #1142, exactement ce cas.
+      #
+      # PAS de `update-types` ici, a dessein : restreindre a minor/patch
+      # laisserait un bump MAJEUR se redecouper en PR separees — precisement le
+      # cas ou la desynchronisation casse le plus.
+      codeql:
+        patterns:
+          - "github/codeql-action*"
+      # Les actions officielles bougent souvent et ensemble ; les grouper hors
+      # majeur reduit le bruit sans masquer une rupture d'API, qui reste isolee.
+      actions-officielles:
+        patterns:
+          - "actions/*"
+        update-types:
+          - "minor"
+          - "patch"
