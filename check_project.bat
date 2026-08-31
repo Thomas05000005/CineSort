@@ -9,6 +9,14 @@ if exist ".venv313\Scripts\python.exe" (
 )
 echo [INFO] Python utilise: %PYTHON_EXE%
 
+REM Le gate doit lancer LA MEME version de ruff que la CI. Il resout un venv
+REM et appelle `-m ruff` : il n'epingle rien. Mesure du 2026-08-31 : .venv313
+REM portait 0.15.6, .venv 0.15.13, la CI 0.16.3 - soit 52 fichiers de moins
+REM vus par `ruff format --check` en local. Un gate plus permissif que la CI
+REM rend un vert que la CI peut contredire.
+"%PYTHON_EXE%" scripts\check_ruff_version.py
+if errorlevel 1 exit /b 1
+
 "%PYTHON_EXE%" -m ruff --version >nul 2>&1
 if errorlevel 1 (
   echo [ERREUR] Ruff est requis. Lance: %PYTHON_EXE% -m pip install -r requirements-dev.txt
