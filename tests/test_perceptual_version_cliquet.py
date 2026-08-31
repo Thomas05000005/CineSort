@@ -32,7 +32,7 @@ Le cliquet est BIDIRECTIONNEL :
 Ce n'est pas un test de non-regression : rien n'interdit de changer les regles.
 Il interdit de le faire SILENCIEUSEMENT.
 
-SIX surfaces, parce qu'une seule aurait menti
+SEPT surfaces, parce qu'une seule aurait menti
 ----------------------------------------------
 Les trois raisons citees par le bump 1.0 -> 1.1 vivent dans TROIS modules
 differents. Une empreinte posee sur le seul `build_perceptual_result` n'en
@@ -45,6 +45,14 @@ aurait couvert aucune :
 
 D'ou une empreinte PAR SURFACE : le message d'echec nomme alors celle qui a
 bouge, au lieu de dire « quelque chose a change quelque part ».
+
+LA SEPTIEME SURFACE (`hdr`) A ETE AJOUTEE APRES COUP, ET SON ABSENCE ETAIT UN
+ANGLE MORT. Le lot qui a ferme le trou HLG / DV 7 / DV inconnu de `_score_hdr`
+n'a change AUCUNE des six empreintes existantes : `composite_v2` est appele avec
+`normalized_probe={}`, donc `_score_hdr` y prend toujours la branche SDR. Le
+cliquet variait, couvrait dix cas, et ne gardait rien de la regle corrigee. Un
+corpus qui VARIE n'est pas un corpus qui COUVRE — c'est la lecon de plus, apres
+les trois inerties de sa redaction initiale.
 
 Ce que ce cliquet NE couvre pas
 --------------------------------
@@ -85,6 +93,15 @@ from tests._corpus_perceptuel import VERDICTS_CROISES_ATTENDUS, verdicts
 #: au vert sur la mutation qu'il devait attraper — un instrument casse ne rend
 #: pas d'erreur, il rend un chiffre propre.
 EMPREINTES: Dict[str, Dict[str, str]] = {
+    "1.2": {
+        "composite_v1": "9af3071f8085ad499869e8acef9b9cb3553f399d989b0365b2487c90e3add4da",
+        "drc": "267aa75cc1dfe558a5160f544d238f5f026c60f27e6eb7568908c6ea9c197225",
+        "audio_score": "9266ec38ce90ad82ec4a86546d309392380592716ea83e0b4acdf7b388eac664",
+        "mel_scores": "00beba2083f05d4c16301fa8a794be3c978389faaaecb82c643c1ac0cbc4870b",
+        "aac_holes": "2201737ec70ce2c50d822633f9d6616e0b18263fec350f24c25b6314fb233d2b",
+        "composite_v2": "9cd19ce24a04d704e23f2edb6c1025650ad562ed8b2b816a1dee63e1b7878656",
+        "hdr": "fc83d6f38b72748de98136695b19786c37549ee51755f8c0d7adf8664bb38b0f",
+    },
     "1.1": {
         "composite_v1": "9af3071f8085ad499869e8acef9b9cb3553f399d989b0365b2487c90e3add4da",
         "drc": "267aa75cc1dfe558a5160f544d238f5f026c60f27e6eb7568908c6ea9c197225",

@@ -335,10 +335,19 @@ class ConstantsCoherenceTests(unittest.TestCase):
         self.assertGreater(len(MAJOR_STUDIOS), 10)
 
     def test_engine_version_set(self) -> None:
-        # Bumpee a 1.1 le 2026-08-03 (lot verdicts perceptuels : #660 change le
-        # mel_score, donc le score global). Toute nouvelle regle de verdict ou de
-        # scoring doit bumper cette valeur, d'ou l'assertion exacte.
-        self.assertEqual(PERCEPTUAL_ENGINE_VERSION, "1.1")
+        # 1.1 le 2026-08-03 (lot verdicts perceptuels : #660 change le mel_score,
+        # donc le score global). 1.2 le 2026-08-31 (`_score_hdr` ne fait plus
+        # tomber HLG, le profil DV 7 et les profils DV inconnus dans la branche
+        # SDR). Toute nouvelle regle de verdict ou de scoring doit bumper cette
+        # valeur, d'ou l'assertion EXACTE.
+        #
+        # Ce test ne fait plus que la MOITIE du travail depuis
+        # `tests/test_perceptual_version_cliquet.py` : il force un bump
+        # DELIBERE, mais il ne dit rien du comportement. Le cliquet, lui,
+        # compare une empreinte par surface et refuse aussi bien un
+        # comportement change sans bump qu'un bump sans empreinte. Les deux se
+        # composent — celui-ci attrape l'oubli, l'autre attrape le mensonge.
+        self.assertEqual(PERCEPTUAL_ENGINE_VERSION, "1.2")
 
     def test_engine_version_is_stamped_on_the_result(self) -> None:
         """L'estampille doit ARRIVER dans le rapport, sinon elle ne sert a rien."""

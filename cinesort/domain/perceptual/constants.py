@@ -15,7 +15,14 @@ from __future__ import annotations
 #   peuvent baisser sur un audio lossy bas debit ; confiance DRC plafonnee sur
 #   une seule metrique (#752) ; confiance fake 4K plafonnee sur un seul signal
 #   (#804) ; verdict croise "Faux 4K" plus leve sur bit depth non mesure (#813).
-PERCEPTUAL_ENGINE_VERSION = "1.1"
+# 1.2 (2026-08-31) : `composite_score_v2._score_hdr` ne fait plus tomber en SDR
+#   les formats qu'il ne reconnaissait pas. HLG, le profil Dolby Vision 7 et
+#   tout profil DV non repertorie rendaient 60 avec une confiance de 0.3 —
+#   c'est-a-dire « HDR non pertinent, non mesure » — alors que le probe portait
+#   deja 75, 95 et 75 dans `hdr_quality_score` / `dv_quality_score`. Le
+#   sous-score `hdr_validation` (15 % de la note video) monte donc sur ces trois
+#   familles, et la confiance passe de 0.3 a 1.0. Aucun autre cas ne bouge.
+PERCEPTUAL_ENGINE_VERSION = "1.2"
 
 # ---------------------------------------------------------------------------
 # Selection de frames
