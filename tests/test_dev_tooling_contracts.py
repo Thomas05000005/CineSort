@@ -224,6 +224,14 @@ class DevToolingContractsTests(unittest.TestCase):
     def test_ruff_version_is_identical_everywhere(self) -> None:
         """Les CINQ endroits ou ruff est epingle doivent viser LA MEME version.
 
+        CES CINQ SONT DES FICHIERS DE CONFIGURATION. Aucun n'est l'outil que le
+        gate EXECUTE : `check_project.bat` resout un venv puis appelle `-m ruff`,
+        et prend la version qui s'y trouve. Ce sixieme ancrage est garde a part,
+        par `tests/test_ancrage_ruff.py` — mesure du 2026-08-31 : le gate lancait
+        ruff 0.15.6 quand la CI lancait 0.16.3, soit 52 fichiers de moins vus par
+        `ruff format --check`. Ce test-ci ne pouvait pas le voir : il lit des
+        declarations, pas un environnement.
+
         Sans cette garde, un developpeur formate avec une version et la CI
         rejette avec une autre — situation trouvee le 2026-08-02 (hook 0.15.6,
         lock 0.15.16, CI 0.15.22).

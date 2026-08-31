@@ -110,6 +110,16 @@ Le test `test_ruff_version_is_identical_everywhere` echoue si elles divergent.
 Toute montee de version doit etre **deliberee**, avec le reformatage dans le
 meme commit — sinon tout le depot devient non conforme du jour au lendemain.
 
+**Et il existe un SIXIEME ancrage : celui que le gate EXECUTE.** Les cinq
+ci-dessus sont des fichiers de CONFIGURATION ; `check_project.bat` resout
+`.venv313` sinon `.venv` puis appelle `-m ruff`, donc il prend la version qui se
+trouve la. MESURE du 2026-08-31 : `.venv313` portait ruff 0.15.6 (choisi EN
+PREMIER), `.venv` ruff 0.15.13, la CI 0.16.3 — soit **52 fichiers de moins** vus
+par `ruff format --check` en local qu'en CI. Un gate plus permissif que la CI
+rend un vert que la CI peut contredire. `scripts/check_ruff_version.py` compare
+desormais la version REELLEMENT installee a l'epingle et bloque le gate ;
+`tests/test_ancrage_ruff.py` l'exerce dans les deux sens.
+
 **Les erreurs de setup pytest n'apparaissent PAS dans un grep `FAILED`.** Ce sont
 des `ERROR at setup`. 46 tests `[chromium]` ont ainsi echoue en silence pendant
 des mois. Toujours lire le resume complet, pas seulement les lignes `FAILED`.
