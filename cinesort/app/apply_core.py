@@ -340,6 +340,15 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
     NB : la signature publique reste retro-compatible (``max_seconds`` est
     kwarg-only avec un defaut), les callers existants ne changent pas.
     """
+    # INEGALITE LARGE, PAS STRICTE. `ecoule > max_seconds` rend le declenchement
+    # dependant de la GRANULARITE de l'horloge : `time.monotonic()` a une
+    # resolution de 15,625 ms sous Windows, et deux lectures consecutives y
+    # rendent la MEME valeur dans 100 % des cas (mesure : 200 000 tirages).
+    # Avec `max_seconds=0`, `0.0 > 0.0` est donc faux — le budget est epuise, et
+    # la boucle lit quand meme. Le test qui verifie ce cas echouait 19 fois sur
+    # 20 en local.
+    # « Le temps imparti est ecoule » inclut l'egalite. Sur le defaut de 30 s,
+    # l'ecart entre les deux formes est de l'ordre du tick d'horloge.
     digest = hashlib.sha1(usedforsecurity=False)
     start = time.monotonic()
     chunk_8m = 8 * 1024 * 1024
@@ -348,18 +357,18 @@ def sha1_quick(path: Path, *, max_seconds: float = 30.0) -> str:
         with path.open("rb") as file_obj:
             if size < (2 * chunk_8m):
                 while True:
-                    if time.monotonic() - start > max_seconds:
+                    if time.monotonic() - start >= max_seconds:
                         raise TimeoutError(f"sha1_quick timeout ({max_seconds}s) on {path}")
                     block = file_obj.read(1024 * 1024)
                     if not block:
                         break
                     digest.update(block)
             else:
-                if time.monotonic() - start > max_seconds:
+                if time.monotonic() - start >= max_seconds:
                     raise TimeoutError(f"sha1_quick timeout head ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
                 file_obj.seek(max(0, size - chunk_8m))
-                if time.monotonic() - start > max_seconds:
+                if time.monotonic() - start >= max_seconds:
                     raise TimeoutError(f"sha1_quick timeout tail ({max_seconds}s) on {path}")
                 digest.update(file_obj.read(chunk_8m))
     except OSError as exc:

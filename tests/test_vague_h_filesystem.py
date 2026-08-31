@@ -352,6 +352,55 @@ class TestSha1QuickTimeout(unittest.TestCase):
             result = sha1_quick(test_file, max_seconds=0.0)
             self.assertEqual(result, "")
 
+    def test_le_budget_EXACTEMENT_epuise_declenche_le_timeout(self) -> None:
+        """Le test ci-dessus depend de l'HORLOGE REELLE ; celui-ci non.
+
+        La garde s'ecrivait `time.monotonic() - start > max_seconds`. Une
+        inegalite STRICTE rend le declenchement dependant de la GRANULARITE de
+        l'horloge : sous Windows `time.monotonic()` a une resolution de
+        15,625 ms, et deux lectures consecutives y rendent la MEME valeur dans
+        100 % des cas (mesure : 200 000 tirages). `ecoule` vaut alors exactement
+        `0.0`, et `0.0 > 0.0` est faux — le budget est epuise et la boucle lit
+        quand meme.
+
+        Mesure du defaut : `test_returns_empty_string_on_timeout` echouait
+        19 fois sur 20 en local, et passait en CI. Un test qui depend du tick
+        d'une horloge ne dit pas si le code est juste, il dit sur quelle machine
+        il tourne.
+
+        Ici l'horloge est FIGEE : le temps ne s'ecoule pas du tout, donc
+        `ecoule == 0.0` a coup sur, et le seul comportement conforme est de
+        traiter un budget de 0 comme epuise."""
+        from cinesort.app import apply_core
+
+        with tempfile.TemporaryDirectory() as tmp:
+            test_file = Path(tmp) / "tiny.bin"
+            test_file.write_bytes(b"x" * 1024)
+
+            with patch.object(apply_core.time, "monotonic", return_value=1234.5):
+                resultat = apply_core.sha1_quick(test_file, max_seconds=0.0)
+
+        self.assertEqual(
+            resultat,
+            "",
+            "budget de 0 s : le temps imparti est ecoule des le depart, l'egalite doit compter",
+        )
+
+    def test_un_budget_NON_nul_laisse_le_hash_se_calculer(self) -> None:
+        """Contre-epreuve, sans laquelle « timeout toujours vrai » passerait le
+        test precedent. L'horloge est figee ici aussi : `ecoule` vaut 0, donc un
+        budget de 30 s n'est PAS epuise et le hash doit sortir."""
+        from cinesort.app import apply_core
+
+        with tempfile.TemporaryDirectory() as tmp:
+            test_file = Path(tmp) / "tiny.bin"
+            test_file.write_bytes(b"x" * 1024)
+
+            with patch.object(apply_core.time, "monotonic", return_value=1234.5):
+                resultat = apply_core.sha1_quick(test_file, max_seconds=30.0)
+
+        self.assertEqual(len(resultat), 40, "un sha1 hexadecimal fait 40 caracteres")
+
     def test_normal_case_still_works(self) -> None:
         """Le cas nominal (fichier petit, lecture rapide) reste fonctionnel et
         renvoie un SHA-1 hexadecimal de 40 caracteres."""
