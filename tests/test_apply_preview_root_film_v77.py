@@ -2,7 +2,7 @@ r"""GATE AUDIT 2026-06-13 (R5-P2) — build_apply_preview classe un film à la
 racine comme un DÉPLACEMENT, pas un renommage de la racine.
 
 Contexte (analyse captures + run réel 20260612_234833) : 111 films posés
-DIRECTEMENT à la racine \\OMV\Media\downloads. L'aperçu de l'Étape 5 affichait
+DIRECTEMENT à la racine \\<nas>\Media\downloads. L'aperçu de l'Étape 5 affichait
 côté CLIENT "Dossier renommé : <racine> -> <titre>" + "945 renommages /
 0 déplacement" — un mensonge alarmant. Le backend, lui, range correctement
 chaque film dans un sous-dossier "Titre (Année)/" (cf summary.txt du run +

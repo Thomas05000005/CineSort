@@ -2,7 +2,7 @@
  "meta": {
   "mission": "M2 chaine facade->support->impl",
   "generated_by": "docs/internal/verif_totale_2026_07/scripts_matrices/m2_facades_impl.py",
-  "repo": "C:\\Users\\blanc\\projects\\CineSort",
+  "repo": "C:\\Users\\<utilisateur>\\projects\\CineSort",
   "files_analyzed": {
    "god": "cinesort/ui/api/cinesort_api.py",
    "facades": [

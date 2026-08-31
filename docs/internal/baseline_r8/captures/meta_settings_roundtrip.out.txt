@@ -1,4 +1,4 @@
-state_dir jetable: C:\Users\blanc\AppData\Local\Temp\cs_settings_rt_00loz9do
+state_dir jetable: C:\Users\<utilisateur>\AppData\Local\Temp\cs_settings_rt_00loz9do
 cles mutees (non-secretes): 99
 
 === DIVERGENCES round-trip (2/99) ===

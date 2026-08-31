@@ -4,7 +4,7 @@ export const meta = {
   phases: [{ title: 'Recon', detail: '8 lecteurs parallèles sur les 11 findings F4' }],
 }
 
-const REPO = 'C:/Users/blanc/projects/CineSort'
+const REPO = 'C:/Users/<utilisateur>/projects/CineSort'
 const BASE = `Repo: ${REPO}. Lis le VRAI code (Read/Grep) — les numéros de ligne du registre peuvent avoir dérivé,
 donne le site EXACT actuel. Pour chaque finding : confirmé (yes/partial/no) + cause racine réelle + site
 fichier:ligne actuel + approche de fix minimale + instrumentable avec un VRAI ffmpeg (yes/no/n-a).`

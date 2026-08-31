@@ -8,7 +8,7 @@ ANNULER), modale reset (saisie CONFIRMER + countdown, puis ANNULER — on ne
 confirme JAMAIS), aller-retour navigation x3 sans empilement.
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/e2e_dashboard/test_lotc_sweep_parametres.py -q
 
 Source des actions : docs/internal/verif_totale_2026_07/matrices/m4_actions_ui.json

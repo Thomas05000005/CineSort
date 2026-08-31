@@ -32,7 +32,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(r"C:/Users/blanc/projects/CineSort")
+# Derive de l'environnement : le chemin absolu d'origine portait un nom
+# d'utilisateur REEL dans un depot PUBLIC, et ne valait que sur une machine.
+REPO_ROOT = Path(__file__).resolve().parents[4]
 MIG_DIR = REPO_ROOT / "cinesort" / "infra" / "db" / "migrations"
 REPOS_DIR = REPO_ROOT / "cinesort" / "infra" / "db" / "repositories"
 STORE_PY = REPO_ROOT / "cinesort" / "infra" / "db" / "sqlite_store.py"

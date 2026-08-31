@@ -56,7 +56,7 @@ LIMITES explicites (pas de simulation) :
     CINESORT_FUSION_DOUBLONS -> hors perimetre.
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/test_lotd_chain_doublons.py -q
 """
 

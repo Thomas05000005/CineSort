@@ -21,7 +21,7 @@ de 15 films, cf tests/e2e/create_test_data.py) :
 Screenshots : docs/internal/verif_totale_2026_07/captures_runtime/traitement_*.png
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/e2e_dashboard/test_lotc_sweep_traitement.py -q
 """
 

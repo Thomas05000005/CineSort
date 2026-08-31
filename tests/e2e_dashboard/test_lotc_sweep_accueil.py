@@ -43,7 +43,7 @@ redeviendront passants d'eux-memes une fois le bug corrige) :
                        inexploitable). Constat visuel, pas de xfail dedie.
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/e2e_dashboard/test_lotc_sweep_accueil.py -q
 """
 

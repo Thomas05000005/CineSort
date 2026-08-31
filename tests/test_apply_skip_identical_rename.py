@@ -3,7 +3,7 @@ le rename quand src == dst caractere par caractere.
 
 Cas d'usage reel rapporte par l'utilisateur :
 
-    Dossier renomme : \\\\OMV\\Media\\Films\\12 Hommes en colere (1957)
+    Dossier renomme : \\\\<nas>\\Media\\Films\\12 Hommes en colere (1957)
                   -> 12 Hommes en colere (1957)
 
 Les 2 chemins sont strictement identiques mais le compteur "renames" et la

@@ -99,13 +99,13 @@ Le diff melange 4 strates independantes (UI web/, REST/infra, domaine pur, CI+do
 - Playwright `getComputedStyle` sur tier colors (memoire `tier_duplication_historique`).
 - Re-tester endpoints reels (`start_plan {settings:{library_path}}`, `check_duplicates`, `apply decisions:{}`) cote `rest_server.py` +150 lignes (memoire `endpoints_reels`).
 - Lire `settings.json` avec `encoding='utf-8-sig'` (memoire `settings_utf8_bom`).
-- Scrub `'users\blanc'` (test `release_hygiene` echoue actuellement sur `scripts/scan_smoketest_*`).
+- Scrub `'users\<utilisateur>'` (test `release_hygiene` echoue actuellement sur `scripts/scan_smoketest_*`).
 
 ---
 
 ## 0.2 Synthese 07/06
 
-- **Fichier ecrit** : `C:\Users\blanc\projects\CineSort\docs\internal\AUDIT_UX_2026-06-07.md`
+- **Fichier ecrit** : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\AUDIT_UX_2026-06-07.md`
 - **10 fixes confirmes** appliques (commits `mega-hotfix` quality_score_coherence + audio_perceptual_overall + autres)
 - **9 points ouverts** identifies dans la synthese, reportes dans 0.3 (triage tests) et 0.4 (triage erreurs log) ci-dessous
 
@@ -154,7 +154,7 @@ Le diff melange 4 strates independantes (UI web/, REST/infra, domaine pur, CI+do
 | 33 | `test_pyinstaller_smoke.py::PyInstallerSmokeTests::test_exe_starts_and_responds_to_health` | **flaky / env** | EXE n'a pas repondu `/api/health` en 15s (`dist/CineSort.exe` pas rebuild, hiddenimports manquants ou port 8642 occupe) | build smoke |
 | 34 | `test_quality_score.py::QualityScoreTests::test_analyze_quality_batch_rejects_concurrent_launch` | vrai bug | concurrent launch quality batch n'est plus rejete (regression guard) | quality batch concurrency |
 | 35 | `test_refactor_84_progress_v77.py::TestRefactor84LazyImportProgress::test_lazy_imports_bounded` | vrai bug | 121 lazy imports > borne 69 (regression #84/#83 lazy bound) | architecture / lazy imports |
-| 36 | `test_release_hygiene.py::ReleaseHygieneTests::test_no_personal_strings_in_repo` | vrai bug | `users\blanc` present dans `scripts/scan_smoketest_lib.py` et `scan_smoketest_parallel.py` | release hygiene / scrub |
+| 36 | `test_release_hygiene.py::ReleaseHygieneTests::test_no_personal_strings_in_repo` | vrai bug | `users\<utilisateur>` present dans `scripts/scan_smoketest_lib.py` et `scan_smoketest_parallel.py` | release hygiene / scrub |
 | 37 | `test_release_hygiene.py::RecordApplyOpTests::test_returns_false_on_failure_and_logs` | vrai bug | `record_apply_op` n'emet plus ERROR log on failure | apply audit logging |
 | 38 | `test_rest_http_status.py::HttpStatusConventionTests::test_default_status_is_200` | vrai bug | dispatcher legacy 410 court-circuite la convention `http_status` opt-in | REST http_status convention |
 | 39 | `test_rest_http_status.py::HttpStatusConventionTests::test_http_status_404_propagates` | vrai bug | meme cause (410 ecrase 404 metier) | REST http_status convention |
@@ -196,7 +196,7 @@ Le diff melange 4 strates independantes (UI web/, REST/infra, domaine pur, CI+do
 
 | # | Erreur | Cause probable | Domaine | Marqueur |
 |---|---|---|---|---|
-| 1 | `get_quality_report` failed `run_id=20260607_142449_050 row_id=T\|b4f7bd4f` (MediaInfo.exe timeout 30s sur `\\OMV\Media\downloads\A.Knight...mkv`) | subprocess MediaInfo.exe sature sur fichier UNC distant (SMB lent + fichier 2160p H265), timeout 30s code en dur `tooling.py` L55, pas de retry ni de cache probe | quality_report (perceptual!=quality) - probe MediaInfo sur partage SMB | **HYPOTHESE** (cause SMB latence non confirmee par mesure reseau, mais 14 occurrences identiques meme jour meme partage `\\OMV\Media`) |
+| 1 | `get_quality_report` failed `run_id=20260607_142449_050 row_id=T\|b4f7bd4f` (MediaInfo.exe timeout 30s sur `\\<nas>\Media\downloads\A.Knight...mkv`) | subprocess MediaInfo.exe sature sur fichier UNC distant (SMB lent + fichier 2160p H265), timeout 30s code en dur `tooling.py` L55, pas de retry ni de cache probe | quality_report (perceptual!=quality) - probe MediaInfo sur partage SMB | **HYPOTHESE** (cause SMB latence non confirmee par mesure reseau, mais 14 occurrences identiques meme jour meme partage `\\<nas>\Media`) |
 | 2 | `get_quality_report` failed `row_id=C\|3d53c61` (MediaInfo.exe timeout 30s sur `Bande Demo ILM.mkv` UNC) | meme racine que ci-dessus : timeout MediaInfo sur SMB. Notable : fichier petit (BONUS) timeout aussi -> handshake SMB ou OMV indisponible, pas la taille | quality_report probe pipeline | **HYPOTHESE** (meme root cause cluster MediaInfo timeout, hypothese reseau) |
 | 3 | `get_quality_report` failed (12 autres occurrences 16:20-16:29 toutes `row_id C\|*`) | repetition continue meme racine MediaInfo timeout UNC, indique boucle UI qui retente sans backoff sur erreur probe (refresh dashboard ou `get_quality_report` appele en boucle par composant UI) | quality_report UI polling + probe MediaInfo | **HYPOTHESE** (absence de circuit-breaker hypothese, a confirmer cote front - polling visible juste avant chaque ERROR avec `get_dashboard`/`get_status` repetes) |
 | 4 | REST 500 `method=quality/get_perceptual_report` (183482ms) ffmpeg `loudnorm` timeout 60s sur `The Abyss QTZ x265` UNC | ffmpeg loudnorm sur piste audio 4 (`-map 0:a:4`) lit fichier entier via SMB pour normaliser, timeout 60s insuffisant pour 4K 100Go+ sur reseau lent. Note : 183s ecoules = 3x le timeout, indique retry implicite ou multi-pistes | `quality/get_perceptual_report` (perceptual!=quality - audit audio) | **HYPOTHESE** (hypothese 4K+UNC, root cause meme famille que MediaInfo : I/O reseau) |
@@ -204,13 +204,13 @@ Le diff melange 4 strates independantes (UI web/, REST/infra, domaine pur, CI+do
 | 6 | API_EXCEPTION `endpoint=apply` meme `run_id` 8s apres (`req=99ab03a1`) | retry utilisateur sur la meme erreur sans correction du state -> meme echec. Confirme absence de feedback UI explicite (utilisateur clique 2x) | run apply UI feedback | **OPERATIONNEL** (symptome UX, pas defaut moteur) |
 | 7 | REST 500 `method=library/search_tmdb` `'CineSortApi' object has no attribute '_normalize_user_path'` | regression code : methode `_normalize_user_path` supprimee/renommee mais `search_tmdb` la reference toujours. `AttributeError` direct, pas un cas limite | library search TMDB | **OPERATIONNEL** (bug code reproductible 100%, root cause = refactor incomplet `cinesort_api.py` - probablement deja fixe vu memoire 'fixes deja appliques sur cinesort_api.py' section F) |
 | 8 | REST 500 `method=integrations/test_jellyfin_connection` `ReadTimeoutError` host=192.168.1.34:8096 timeout=5s | serveur Jellyfin LAN indisponible/ralenti, timeout 5s trop court pour endpoint `/Users/.../Items` avec `Recursive=true` (scan complet bibliotheque cote serveur). 3 occurrences meme jour 16:00-16:21 = test repetitif user | integrations Jellyfin test connection | **HYPOTHESE** (root cause double : Jellyfin lent ET timeout client trop court - cause serveur hypothese, cause client confirmee par valeur 5s en dur) |
-| 9 | **Total racines distinctes : 6** (MediaInfo timeout UNC x16, ffmpeg loudnorm timeout UNC x1, plan.jsonl introuvable x2, _normalize_user_path manquant x1, Jellyfin connection timeout x3, perceptual report ffmpeg x1) - dominant cluster = subprocess timeout sur partage SMB `\\OMV\Media` (17/24 = 71%) | racine commune systemique : I/O reseau SMB non-resilient (pas de timeout adaptatif, pas de cache probe, pas de circuit-breaker) | infra probe + perceptual analysis | **HYPOTHESE** (regroupement cause systemique a valider - solution probable : probe en arriere-plan + cache + timeout dynamique selon taille fichier) |
+| 9 | **Total racines distinctes : 6** (MediaInfo timeout UNC x16, ffmpeg loudnorm timeout UNC x1, plan.jsonl introuvable x2, _normalize_user_path manquant x1, Jellyfin connection timeout x3, perceptual report ffmpeg x1) - dominant cluster = subprocess timeout sur partage SMB `\\<nas>\Media` (17/24 = 71%) | racine commune systemique : I/O reseau SMB non-resilient (pas de timeout adaptatif, pas de cache probe, pas de circuit-breaker) | infra probe + perceptual analysis | **HYPOTHESE** (regroupement cause systemique a valider - solution probable : probe en arriere-plan + cache + timeout dynamique selon taille fichier) |
 
 ---
 
 ## 0.5 Bibliotheque Fictive
 
-- **Script** : `C:\Users\blanc\projects\CineSort\scripts\make_test_library.py`
+- **Script** : `C:\Users\<utilisateur>\projects\CineSort\scripts\make_test_library.py`
 - **Idempotent** : OUI (re-execution sans effet de bord, controle de presence)
 - **Arborescence** : `RootA/` et `RootB/` (2 racines pour tester multi-source + dedup cross-root)
 - **Contenu** : clips reels Creative Commons + stubs varies (titres FR/EN, annees diverses, codecs varies, 4K + 1080p + 720p, multi-piste audio)
@@ -221,9 +221,9 @@ Le diff melange 4 strates independantes (UI web/, REST/infra, domaine pur, CI+do
 
 ## 0.6 Outil Observation
 
-- **Script** : `C:\Users\blanc\projects\CineSort\scripts\observe.py`
+- **Script** : `C:\Users\<utilisateur>\projects\CineSort\scripts\observe.py`
 - **Capture AVANT** : `true`
-- **Sortie** : `C:\Users\blanc\projects\CineSort\docs\internal\observe\2026-06-08_184504`
+- **Sortie** : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\observe\2026-06-08_184504`
 - **Vues posters casses** : capture visuelle Playwright des cartes bibliotheque montre les posters non charges (CSP `img-src 'self' data:` bloque `image.tmdb.org` -- ref `rest_server.py` L716-725 + `index.html` L11). Confirme la rupture decrite section C.4 de la recon. **FIGE** sur la cause CSP, **OPERATIONNEL** sur la capture (utilisable comme baseline AVANT/APRES pour la boucle).
 
 ---

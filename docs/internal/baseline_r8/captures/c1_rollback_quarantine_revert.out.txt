@@ -1,4 +1,4 @@
-rollback_forward: dst manquant op_id=3 dst=C:\Users\blanc\AppData\Local\Temp\cs_rbq_ruxi1qz5\_review\_conflicts\Film.2019.1080p.mkv — skipped
+rollback_forward: dst manquant op_id=3 dst=C:\Users\<utilisateur>\AppData\Local\Temp\cs_rbq_ruxi1qz5\_review\_conflicts\Film.2019.1080p.mkv — skipped
 {
   "T1_quarantine_file_revert": {
     "status": "DONE",

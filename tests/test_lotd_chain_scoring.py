@@ -48,7 +48,7 @@ redeviendront passants d'eux-memes une fois corrige) :
       Silver — l'explication est incoherente avec le tier montre a l'user.
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/test_lotd_chain_scoring.py -q
 """
 

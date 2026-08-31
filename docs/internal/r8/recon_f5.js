@@ -4,7 +4,7 @@ export const meta = {
   phases: [{ title: 'Recon', detail: '7 lecteurs parallèles (clusters A-G)' }],
 }
 
-const REPO = 'C:/Users/blanc/projects/CineSort'
+const REPO = 'C:/Users/<utilisateur>/projects/CineSort'
 const BASE = `Repo: ${REPO}. Lis le VRAI code (Read/Grep). Les numéros de ligne du registre peuvent avoir dérivé.
 Pour CHAQUE finding : confirmé (yes/partial/no) + site fichier:ligne ACTUEL + cause racine + DÉCISION
 recommandée (CÂBLER / RETIRER / ALIGNER-CONTRAT / FORK-DESIGN-à-signaler) + fix minimal + comment prouver le

@@ -4,6 +4,7 @@ Inclut le GATE de falsifiabilite (plant connu -> doit detecter) + le run sur cor
 
 import json
 import os
+from pathlib import Path
 import shutil
 import sqlite3
 import sys
@@ -44,7 +45,9 @@ assert diverge(
 )
 assert diverge([{"codec": "truehd", "channels": 8, "bitrate": 600000}]) is None
 print("GATE falsifiabilite OK")
-db = r"C:\Users\blanc\AppData\Local\CineSort\db\cinesort.sqlite"
+# Derive de l'environnement : le chemin absolu d'origine portait un nom
+# d'utilisateur REEL dans un depot PUBLIC, et ne valait que sur une machine.
+db = str(Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "CineSort" / "db" / "cinesort.sqlite")
 tmp = os.path.join(tempfile.gettempdir(), "cinesort_corpus_ro.sqlite")
 shutil.copy2(db, tmp)
 c = sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)

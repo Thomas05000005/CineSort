@@ -12,7 +12,7 @@ scripte sur port ephemere, AUCUN reseau externe.
   - LOTD-INT-01 : JellyfinError sur la liste des films (404/5xx transitoire)
                   doit consommer une tentative et re-essayer, pas s'echapper.
 
-Execution : "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8
+Execution : "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8
             -m pytest tests/test_jellyfin_sync_transient_retry.py -q
 """
 

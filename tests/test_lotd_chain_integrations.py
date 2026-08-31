@@ -35,7 +35,7 @@ Gardes nominatives (bugs d'app REPORTES, pas corriges — pattern sweeps Lot C) 
                   renvoye au frontend par validate_key ("Erreur reseau: {exc}"
                   ou exc contient l'URL avec ?api_key=...).
 
-Execution : "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8
+Execution : "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8
             -m pytest tests/test_lotd_chain_integrations.py -q
 """
 
