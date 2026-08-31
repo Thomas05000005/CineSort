@@ -1,0 +1,72 @@
+# Configuration gitleaks de CineSort.
+#
+# POURQUOI CE FICHIER EXISTE
+# --------------------------
+# Un jeton REST du projet est reste publie 67 jours dans deux documents, entre
+# BACKTICKS, en prose, sans `=` ni nom de variable a cote. Aucune des ~150
+# regles par defaut ne mord sur cette forme : `generic-api-key` exige un
+# indice lexical (`token = ...`, `key: ...`) que la prose ne fournit pas.
+#
+# Ce n'etait donc PAS une exemption assumee — la valeur n'a jamais figure dans
+# `.gitleaksignore`. C'etait une NON-DETECTION.
+#
+# CALIBRAGE — la partie qui a failli etre fausse
+# ----------------------------------------------
+# Le premier seuil essaye etait 4.5 : sur le corpus reel du depot (2005 fichiers
+# suivis) il rendait exactement 2 detections, les deux vraies, et ZERO faux
+# positif. Parfait en apparence.
+#
+# Mesure contre la DISTRIBUTION, et non contre l'unique exemplaire connu :
+# 20 000 `secrets.token_urlsafe(24)` — la forme exacte du jeton REST du projet —
+# ont une entropie de Shannon comprise entre 4.011 et 5.000. Un seuil a 4.5 en
+# RATE 29,73 %. Celui du depot n'etait attrape que parce qu'il se trouve a 4.54.
+#
+# Seuil retenu : 4.0, qui ne rate AUCUN des 40 000 jetons mesures.
+#
+# LA MIXITE FAIT LE TRI, PAS L'ENTROPIE
+# -------------------------------------
+# A 4.0 seul, le corpus rend 58 detections — des hashes git, des noms de branche,
+# des identifiants. Un `token_urlsafe` melange trois classes de caracteres ; un
+# hash git est hexadecimal minuscule, un slug n'a pas de chiffre.
+#
+# Go/RE2 n'a PAS de lookahead : la mixite ne peut pas s'ecrire `(?=.*[A-Z])`.
+# Elle est donc exprimee a l'envers, par exclusion, dans l'allowlist ci-dessous.
+#
+# Mesure de la formulation RETENUE (celle du fichier, pas celle du brouillon) :
+#   corpus reel        2 detections — les deux vraies, zero faux positif
+#   token_urlsafe(24)  0,375 % de manques sur 20 000
+#   token_urlsafe(32)  0,070 % de manques sur 20 000
+#
+# CE QUE CETTE REGLE VA FAIRE, ET QUI EST VOULU
+# ---------------------------------------------
+# Le scan hebdomadaire de l'historique complet deviendra ROUGE tant que les deux
+# lignes ne sont pas ECRASEES (pas supprimees : gitleaks scanne une plage de
+# commits, cf. l'en-tete de `.github/workflows/gitleaks.yml`).
+#
+# C'est le comportement correct. Un jeton actif publie DOIT faire du bruit
+# jusqu'a sa revocation. Ces deux detections ne sont deliberement PAS figees
+# dans `.gitleaksignore` : les figer reviendrait a eteindre le detecteur pour
+# le seul cas ou il a raison.
+
+[extend]
+# On AJOUTE aux ~150 regles par defaut, on ne les remplace pas.
+useDefault = true
+
+[[rules]]
+id = "cinesort-secret-nu-entre-backticks"
+description = "Chaine a haute entropie isolee entre backticks, sans indice lexical (forme qui a echappe a generic-api-key pendant 67 jours)"
+# Pas de `=` ni de nom de variable exige : c'est precisement ce qui manquait.
+regex = '''`([A-Za-z0-9_-]{24,64})`'''
+secretGroup = 1
+entropy = 4.0
+
+  [rules.allowlist]
+  # RE2 n'a pas de lookahead : la mixite s'exprime par ce qu'on EXCLUT.
+  # Une chaine a laquelle il manque une des trois classes n'est pas un
+  # `token_urlsafe` — c'est un hash, un slug ou une constante.
+  regexTarget = "match"
+  regexes = [
+    '''^[^0-9]+$''',   # aucun chiffre     : nom de branche, mot compose
+    '''^[^A-Z]+$''',   # aucune majuscule  : hash git, slug, chemin
+    '''^[^a-z]+$''',   # aucune minuscule  : constante, hexa majuscule
+  ]

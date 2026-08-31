@@ -823,9 +823,19 @@ avaient **verifies mais laisses sans PR**, faute de budget d'ouverture.
   **1 au lieu de 0**), et la moyenne de la courbe Qualite passee PAR FILM
   (30,0 -> 50,0 sur le scenario discriminant, soit Bronze -> Silver).
 - **#1076** le scan gitleaks complet n'avait tourne qu'UNE fois, par accident.
-  Relance : **56 detections, ZERO secret reel** — exemples `curl` de la doc,
-  journaux de suites de tests, fixtures, et un NOM DE CLE de reglage signale par
-  entropie. Desormais HEBDOMADAIRE, avec les 56 empreintes figees.
+  Relance : **56 detections** — exemples `curl` de la doc, journaux de suites de
+  tests, fixtures, et un NOM DE CLE de reglage signale par entropie. Desormais
+  HEBDOMADAIRE, avec les 56 empreintes figees.
+  **CETTE LIGNE DISAIT « ZERO secret reel », ET C'ETAIT FAUX** (corrige le
+  2026-08-31) : un jeton REST ACTIF etait publie en prose, entre backticks.
+  AUCUNE des ~150 regles par defaut ne mord sur cette forme — `generic-api-key`
+  exige un indice lexical (`token = ...`) que la prose ne fournit pas. « Zero
+  DETECTION » avait ete lu comme « zero SECRET ». Un vert ne dit rien de ce que
+  le detecteur ne sait pas voir : c'est la troisieme cause de la fiche « un vert
+  a trois causes », appliquee a un outil au lieu d'un test.
+  `.gitleaks.toml` ajoute la regle manquante, calibree contre la DISTRIBUTION
+  des `token_urlsafe` (20 000 tirages) et non contre l'unique exemplaire connu —
+  un seuil regle sur ce seul jeton en aurait rate 29,73 %.
 - **#1077** le nombre de groupes de doublons est desormais RANGE la ou il est
   deja calcule (l'ouverture de l'ecran Doublons) et non au scan, ou il couterait
   « ~1000 films + un parcours disque » (#406). L'absence vaut **INCONNU**, pas
