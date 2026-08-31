@@ -39,7 +39,7 @@ import shutil
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cinesort.app.move_journal import _rename_or_cross_device_copy
 
@@ -138,6 +138,209 @@ def _verdict_dst_manquant(
     }
 
 
+def _taille_attendue(brut: Any) -> Optional[int]:
+    """Normalise le `src_size` d'une ligne de journal. None = taille INCONNUE.
+
+    Une ligne anterieure a la migration 013 n'en porte pas, et une valeur
+    illisible ne vaut pas mieux qu'une absente : les deux rendent None, ce que
+    les appelants traitent comme un refus d'ecraser.
+    """
+    if brut is None:
+        return None
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        return None
+
+
+def _identique_a_l_original(
+    chemin: Path,
+    *,
+    expected_sha1: Optional[str],
+    expected_size: Optional[int],
+) -> bool:
+    """True seulement si `chemin` a la MEME taille ET le MEME `sha1_quick`.
+
+    `sha1_quick` ne hache que les 8 premiers et les 8 derniers Mo du fichier :
+    deux fichiers de TAILLES DIFFERENTES qui partagent leur tete et leur queue
+    rendent le MEME digest. Le hash seul ne suffit donc pas a conclure « c'est
+    le meme fichier » avant un `unlink()`.
+
+    Sans taille de reference (`expected_size is None` — ligne de journal
+    anterieure a la migration 013, ou valeur illisible), la reponse est False :
+    sur un chemin destructif, l'absence de connaissance doit produire un refus
+    de trancher, pas un accord.
+
+    Peut lever `OSError` / `ImportError` : l'appelant journalise et traite
+    l'echec comme un refus.
+    """
+    if not expected_sha1 or expected_size is None:
+        return False
+    if chemin.stat().st_size != expected_size:
+        return False
+    # Import local : evite un cycle au module-load et garde apply_rollback
+    # utilisable meme si apply_core est indisponible.
+    from cinesort.app.apply_core import sha1_quick
+
+    actual_sha1 = sha1_quick(chemin)
+    return bool(actual_sha1) and actual_sha1 == expected_sha1
+
+
+def _ecarter_un_backup_orphelin(
+    backup_tmp: Path,
+    *,
+    op_id: Any,
+    op_index: Any,
+    expected_sha1: Optional[str],
+    expected_size: Optional[int],
+    audit_fn: Optional[Callable[[str, str], None]],
+) -> Optional[Dict[str, Any]]:
+    """Retire un `.rollback_bak` laisse par un rollback interrompu.
+
+    REG-DATA-001 : avant d'unlink, on verifie que c'est bien un backup d'un
+    rollback precedent (TAILLE et hash conformes a `src_size`/`src_sha1`) et
+    PAS un fichier user portant fortuitement ce suffixe. L'`unlink()` est
+    definitif.
+
+    LOT 1 / A : la taille manquait a cette verification. `sha1_quick` ne separe
+    pas deux fichiers de tailles differentes qui partagent leurs 8 Mo de tete et
+    leurs 8 Mo de queue — un fichier user pouvait donc etre efface ici.
+
+    Retourne None quand la place est libre, ou le verdict qui arrete l'op.
+    """
+    if not backup_tmp.exists():
+        return None
+    orphan_is_safe = False
+    try:
+        orphan_is_safe = _identique_a_l_original(
+            backup_tmp,
+            expected_sha1=expected_sha1,
+            expected_size=expected_size,
+        )
+    except (OSError, ImportError) as orphan_hash_exc:
+        _audit_log(
+            audit_fn,
+            "WARN",
+            f"rollback_forward: orphan backup identity check FAILED op_id={op_id} "
+            f"backup={backup_tmp}: {orphan_hash_exc} — assume user file",
+        )
+    if not orphan_is_safe:
+        # Soit pas de reference complete (op anterieure migration 013 : hash ou
+        # taille absent), soit taille/hash differents : on REFUSE d'effacer un
+        # fichier user potentiel. On abort cette op, le rollback de cette
+        # entree est skipped.
+        _audit_log(
+            audit_fn,
+            "ERROR",
+            f"rollback_forward: orphan backup present with unknown content op_id={op_id} "
+            f"backup={backup_tmp} — refusing to unlink (potential user file), skipped",
+        )
+        return {
+            "id": op_id,
+            "op_index": op_index,
+            "status": "SKIPPED",
+            "reason": "orphan_backup_present",
+        }
+    try:
+        backup_tmp.unlink()
+    except OSError as orphan_exc:
+        _audit_log(
+            audit_fn,
+            "WARN",
+            f"rollback_forward: orphan backup unlink FAILED op_id={op_id} backup={backup_tmp}: {orphan_exc}",
+        )
+    return None
+
+
+def _mettre_de_cote_le_src_reapparu(
+    src: Path,
+    *,
+    op_id: Any,
+    op_index: Any,
+    src_path: str,
+    expected_sha1: Optional[str],
+    expected_size: Optional[int],
+    audit_fn: Optional[Callable[[str, str], None]],
+) -> Tuple[Optional[Path], Optional[Dict[str, Any]]]:
+    """Hotfix2 H6 : defense TOCTOU quand `src` est apparu pendant le rollback.
+
+    Si `src` est apparu entre le `src.exists()` d'ouverture et maintenant
+    (course : l'utilisateur copie ou cree un fichier au meme chemin),
+    `shutil.move` ECRASERAIT silencieusement son fichier. On ne l'ecarte que si
+    la TAILLE **et** le hash correspondent a ce que le journal a retenu.
+
+    LOT 1 / A : la taille etait absente des DEUX verdicts de cette fonction.
+    `sha1_quick` ne voit que 8 Mo de tete et 8 Mo de queue — un fichier user de
+    taille differente partageant ces deux extremites passait pour « le meme »
+    et finissait `unlink()`.
+
+    Retourne `(backup_tmp, None)` quand le fichier present a pu etre mis de
+    cote, ou `(None, verdict)` quand l'op doit s'arreter la.
+    """
+    user_file_safe = False
+    try:
+        # Meme taille ET meme contenu qu'avant l'apply : on peut ecraser sans
+        # risque de data loss (c'est une copie/restauration identique du
+        # fichier originel).
+        user_file_safe = _identique_a_l_original(
+            src,
+            expected_sha1=expected_sha1,
+            expected_size=expected_size,
+        )
+    except (OSError, ImportError) as hash_exc:  # noqa: BLE001
+        _audit_log(
+            audit_fn,
+            "WARN",
+            f"rollback_forward: identity check FAILED op_id={op_id} "
+            f"src={src_path}: {hash_exc} — assume user file, skip",
+        )
+    if not user_file_safe:
+        _audit_log(
+            audit_fn,
+            "WARN",
+            f"rollback_forward: src apparu pendant rollback op_id={op_id} "
+            f"src={src_path} — fichier user different, skipped (no overwrite)",
+        )
+        return None, {
+            "id": op_id,
+            "op_index": op_index,
+            "status": "SKIPPED",
+            "reason": "src_appeared_during_rollback",
+        }
+    # Taille et hash identiques : on retire le fichier present pour permettre
+    # move (shutil.move sur Windows refuse l'ecrasement, on doit unlink).
+    # HOTFIX data-loss : on backup vers tmp AVANT unlink, et l'appelant restaure
+    # si shutil.move echoue ensuite (sinon perte definitive du fichier user meme
+    # s'il etait byte-identique au src originel).
+    backup_tmp = src.with_suffix(src.suffix + ".rollback_bak")
+    verdict_orphelin = _ecarter_un_backup_orphelin(
+        backup_tmp,
+        op_id=op_id,
+        op_index=op_index,
+        expected_sha1=expected_sha1,
+        expected_size=expected_size,
+        audit_fn=audit_fn,
+    )
+    if verdict_orphelin is not None:
+        return None, verdict_orphelin
+    try:
+        # rename atomique src -> backup_tmp (preserve les donnees)
+        src.rename(backup_tmp)
+    except OSError as unlink_exc:
+        _audit_log(
+            audit_fn,
+            "ERROR",
+            f"rollback_forward: backup dup src FAILED op_id={op_id} src={src_path}: {unlink_exc}",
+        )
+        return None, {
+            "id": op_id,
+            "op_index": op_index,
+            "status": "FAILED",
+            "reason": f"backup_dup_src: {unlink_exc}",
+        }
+    return backup_tmp, None
+
+
 def _revert_one_op(
     op: Dict[str, Any],
     *,
@@ -160,6 +363,14 @@ def _revert_one_op(
     expected_src_sha1 = op.get("src_sha1")
     if expected_src_sha1 is not None:
         expected_src_sha1 = str(expected_src_sha1) or None
+    # LOT 1 / A : la TAILLE journalisee a cote du hash. `sha1_quick` ne hache que
+    # les 8 premiers et les 8 derniers Mo (`apply_core.sha1_quick`) : deux
+    # fichiers de tailles DIFFERENTES qui partagent leur tete et leur queue
+    # rendent le meme digest. Conclure « c'est le meme fichier » sur le seul hash
+    # menait a un `unlink()` definitif du fichier de l'utilisateur. `src_size`
+    # est ecrit dans la meme ligne de journal (`list_apply_operations`) et
+    # n'etait lu nulle part ici.
+    expected_src_size = _taille_attendue(op.get("src_size"))
 
     if not reversible:
         return {
@@ -223,110 +434,24 @@ def _revert_one_op(
         # Hotfix2 H6 : defense TOCTOU. Si src est apparu entre la verification
         # ligne ~140 et maintenant (course user copie/cree fichier au meme path),
         # shutil.move ECRASERAIT silencieusement le fichier user (data loss).
-        # On re-check et si le hash differe du src_sha1 journalise (ou si on
-        # n'a pas de hash de reference), on SKIP au lieu d'ecraser.
+        # On re-check et si la TAILLE ou le hash different de ce que le journal
+        # a retenu (ou si l'un des deux manque), on SKIP au lieu d'ecraser.
+        # LOT 1 / A : la taille etait absente de ce verdict. `sha1_quick` ne
+        # voit que 8 Mo de tete et 8 Mo de queue — un fichier user de taille
+        # differente partageant ces deux extremites passait pour « le meme » et
+        # finissait `unlink()`.
         if src.exists():
-            user_file_safe = False
-            if expected_src_sha1:
-                try:
-                    # Import local : evite cycle au module-load et garde
-                    # apply_rollback utilisable meme si apply_core indisponible.
-                    from cinesort.app.apply_core import sha1_quick
-
-                    actual_src_sha1 = sha1_quick(src)
-                    if actual_src_sha1 and actual_src_sha1 == expected_src_sha1:
-                        # Meme contenu qu'avant l'apply : on peut ecraser sans
-                        # risque de data loss (c'est une copie/restauration
-                        # identique du fichier originel).
-                        user_file_safe = True
-                except (OSError, ImportError) as hash_exc:  # noqa: BLE001
-                    _audit_log(
-                        audit_fn,
-                        "WARN",
-                        f"rollback_forward: hash check FAILED op_id={op_id} "
-                        f"src={src_path}: {hash_exc} — assume user file, skip",
-                    )
-            if not user_file_safe:
-                _audit_log(
-                    audit_fn,
-                    "WARN",
-                    f"rollback_forward: src apparu pendant rollback op_id={op_id} "
-                    f"src={src_path} — fichier user different, skipped (no overwrite)",
-                )
-                return {
-                    "id": op_id,
-                    "op_index": op_index,
-                    "status": "SKIPPED",
-                    "reason": "src_appeared_during_rollback",
-                }
-            # Hash identique : on retire le fichier present pour permettre move
-            # (shutil.move sur Windows refuse l'ecrasement, on doit unlink).
-            # HOTFIX data-loss : on backup vers tmp AVANT unlink, et on restaure
-            # si shutil.move echoue ensuite (sinon perte definitive du fichier
-            # user meme s'il etait byte-identique au src originel).
-            backup_tmp = src.with_suffix(src.suffix + ".rollback_bak")
-            # Si un backup_tmp orphelin traine (ancien rollback interrompu),
-            # on le retire d'abord pour eviter conflit sur le rename.
-            # REG-DATA-001 : avant d'unlink, on verifie que c'est bien un
-            # backup d'un rollback precedent (hash match expected_src_sha1)
-            # et PAS un fichier user portant fortuitement ce suffixe.
-            if backup_tmp.exists():
-                orphan_is_safe = False
-                if expected_src_sha1:
-                    try:
-                        from cinesort.app.apply_core import sha1_quick
-
-                        orphan_sha1 = sha1_quick(backup_tmp)
-                        if orphan_sha1 and orphan_sha1 == expected_src_sha1:
-                            orphan_is_safe = True
-                    except (OSError, ImportError) as orphan_hash_exc:
-                        _audit_log(
-                            audit_fn,
-                            "WARN",
-                            f"rollback_forward: orphan backup hash check FAILED op_id={op_id} "
-                            f"backup={backup_tmp}: {orphan_hash_exc} — assume user file",
-                        )
-                if not orphan_is_safe:
-                    # Soit pas de hash de reference (op anterieure migration 013),
-                    # soit hash different : on REFUSE d'effacer un fichier user
-                    # potentiel. On abort cette op, le rollback de cette entree
-                    # est skipped (memo cohesion avec L194-198).
-                    _audit_log(
-                        audit_fn,
-                        "ERROR",
-                        f"rollback_forward: orphan backup present with unknown content op_id={op_id} "
-                        f"backup={backup_tmp} — refusing to unlink (potential user file), skipped",
-                    )
-                    return {
-                        "id": op_id,
-                        "op_index": op_index,
-                        "status": "SKIPPED",
-                        "reason": "orphan_backup_present",
-                    }
-                try:
-                    backup_tmp.unlink()
-                except OSError as orphan_exc:
-                    _audit_log(
-                        audit_fn,
-                        "WARN",
-                        f"rollback_forward: orphan backup unlink FAILED op_id={op_id} "
-                        f"backup={backup_tmp}: {orphan_exc}",
-                    )
-            try:
-                # rename atomique src -> backup_tmp (preserve les donnees)
-                src.rename(backup_tmp)
-            except OSError as unlink_exc:
-                _audit_log(
-                    audit_fn,
-                    "ERROR",
-                    f"rollback_forward: backup dup src FAILED op_id={op_id} src={src_path}: {unlink_exc}",
-                )
-                return {
-                    "id": op_id,
-                    "op_index": op_index,
-                    "status": "FAILED",
-                    "reason": f"backup_dup_src: {unlink_exc}",
-                }
+            backup_tmp, verdict = _mettre_de_cote_le_src_reapparu(
+                src,
+                op_id=op_id,
+                op_index=op_index,
+                src_path=src_path,
+                expected_sha1=expected_src_sha1,
+                expected_size=expected_src_size,
+                audit_fn=audit_fn,
+            )
+            if verdict is not None:
+                return verdict
         try:
             # Un op_type `*_DIR` remet un DOSSIER entier en place. `shutil.move`
             # degrade en copytree+rmtree des que `os.rename` echoue, y compris sur
@@ -373,7 +498,8 @@ def _revert_one_op(
         else:
             # Move succes : on peut retirer le backup_tmp (les donnees du
             # backup_tmp etaient identiques au contenu maintenant restaure
-            # depuis dst, hash deja verifie ligne ~174).
+            # depuis dst — taille ET hash deja verifies par
+            # `_identique_a_l_original`).
             if backup_tmp is not None and backup_tmp.exists():
                 try:
                     backup_tmp.unlink()

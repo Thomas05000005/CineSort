@@ -78,10 +78,28 @@ def _resolve_hashed_target(dst: Path, op_type: str) -> Optional[Path]:
     """P1.2 : localise le fichier a hasher pour une op.
 
     MOVE_FILE : dst_path est directement le fichier.
+    UNDO_QUARANTINE : dst_path est directement le fichier, comme MOVE_FILE.
     MOVE_DIR  : dst_path est un dossier -> trouver le plus gros video a l'interieur
                 (meme logique qu'au moment de l'apply via find_main_video_in_folder).
+
+    LOT 1 / B : `UNDO_QUARANTINE` manquait a cette liste, et le `return None`
+    final rendait MORT le garde que `_journaliser_quarantaine_undo` venait
+    d'armer. Cette operation-la est journalisee AVEC `src_sha1` et `src_size`
+    (son commentaire dit pourquoi : detecter qu'un utilisateur a remplace le
+    fichier DANS le bac `_undo_conflicts` entre la quarantaine et la reprise),
+    mais `preverify_undo_operations` la classait « impossible de localiser le
+    fichier hashe » -> categorie `missing`, que `_execute_undo_ops` n'abandonne
+    PAS. L'empreinte n'etait donc jamais comparee, et un fichier substitue
+    revenait dans la bibliotheque en etant compte DONE.
+
+    Son `dst_path` est le chemin du fichier video dans le bac (`conflict_dst`
+    au site d'appel) : la resolution est strictement celle de `MOVE_FILE`.
+
+    Les op_type `QUARANTINE_FILE` / `QUARANTINE_DIR` ne sont volontairement pas
+    ajoutes : `apply_core` ne leur journalise aucun `src_sha1`, donc ils
+    sortent en `legacy_no_hash` avant d'arriver ici.
     """
-    if op_type == "MOVE_FILE":
+    if op_type in ("MOVE_FILE", "UNDO_QUARANTINE"):
         return dst if dst.is_file() else None
     if op_type == "MOVE_DIR":
         if not dst.is_dir():
