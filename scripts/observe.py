@@ -90,7 +90,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 # ---------------------------------------------------------------------------
 # Constantes [FIGE]
@@ -243,7 +243,21 @@ def _read_head(path: Path, size: int = 256 * 1024) -> str:
 
 def _plan_jsonl_in_scope(plan: Path, scope_norm: str) -> bool:
     """Relit `plan.jsonl` comme du JSON et confronte ses chemins au perimetre."""
-    for raw in _read_head(plan).splitlines():
+    # Lecture INTEGRALE, ligne a ligne. `_read_head` s'arretait a 256 Kio :
+    # un plan plus gros dont le chemin cible n'apparaissait qu'apres etait
+    # declare hors perimetre, et le run survivait a la purge. Le cout reste
+    # nul en pratique puisqu'on sort au premier chemin qui correspond.
+    try:
+        fh = plan.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    with fh:
+        return _plan_lignes_en_perimetre(fh, scope_norm)
+
+
+def _plan_lignes_en_perimetre(lignes: Iterable[str], scope_norm: str) -> bool:
+    """Coeur de `_plan_jsonl_in_scope`, separe pour rester testable a plat."""
+    for raw in lignes:
         line = raw.strip()
         if not line.startswith("{"):
             continue
@@ -255,6 +269,23 @@ def _plan_jsonl_in_scope(plan: Path, scope_norm: str) -> bool:
             continue
         if any(_path_in_scope(row.get(key), scope_norm) for key in _RUN_PLAN_PATH_FIELDS):
             return True
+    return False
+
+
+def _fichier_mentionne_le_perimetre(chemin: Path, scope_norm: str) -> bool:
+    """Cherche le perimetre dans un journal texte, SANS le tronquer.
+
+    `_read_head` s'arretait a 256 Kio : un journal plus gros citant le chemin
+    plus loin faisait conclure « hors perimetre », et le run n'etait jamais
+    purge. On sort a la premiere ligne qui correspond.
+    """
+    try:
+        with chemin.open("r", encoding="utf-8", errors="replace") as fh:
+            for ligne in fh:
+                if _text_mentions_scope(ligne, scope_norm):
+                    return True
+    except OSError:
+        return False
     return False
 
 
@@ -271,7 +302,7 @@ def _run_dir_in_scope(run_dir: Path, scope_norm: str) -> bool:
         return True
     for name in ("ui_log.txt", "summary.txt"):
         marker = run_dir / name
-        if marker.is_file() and _text_mentions_scope(_read_head(marker), scope_norm):
+        if marker.is_file() and _fichier_mentionne_le_perimetre(marker, scope_norm):
             return True
     return False
 
@@ -312,6 +343,13 @@ def _webview2_pids_in_scope(scope_dir: Path) -> tuple[list[int], str | None]:
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         return [], scrub(str(exc))
     raw = (cp.stdout or "").strip()
+    # Le code de retour AVANT le stdout : sans cela, un PowerShell en echec
+    # qui n'ecrit rien rend « aucun processus, aucune erreur » — plus aucun
+    # hote WebView2 n'est tue et rien ne le signale. Le kill global qui
+    # servait de filet a disparu, donc ce silence est desormais total.
+    if cp.returncode != 0:
+        detail = scrub((cp.stderr or "").strip()) or f"code {cp.returncode}"
+        return [], f"inventaire WebView2 en echec: {detail}"
     if not raw:
         return [], None
     try:

@@ -435,3 +435,51 @@ def test_le_kill_webview2_cible_des_pid_et_jamais_l_image_globale(
     )
     assert ["taskkill", "/F", "/PID", "4242"] in taskkills, taskkills
     assert not [c for c in taskkills if "777" in c], "un hote WebView2 etranger au run a ete tue"
+
+
+# ---------------------------------------------------------------------------
+# Deux modes de panne SILENCIEUX, signales par une revue automatique sur la PR.
+#
+# Ils partagent une signature : la fonction rend une reponse d'apparence normale
+# la ou elle n'a rien pu mesurer.
+#
+# 1. `_webview2_pids_in_scope` ne lit JAMAIS `cp.returncode`. Un PowerShell qui
+#    echoue sans rien ecrire sur stdout rend donc `([], None)` — soit exactement
+#    « aucun hote WebView2, aucune erreur ». Plus rien n'est tue, et rien ne le
+#    dit. C'est la RESERVE que ce lot portait deja par ecrit ; elle est levee.
+#
+# 2. `_run_dir_in_scope` decide du perimetre sur les 256 premiers Kio des
+#    journaux. Un `plan.jsonl` plus gros dont le chemin cible n'apparait qu'apres
+#    est declare HORS perimetre : le run survit a la purge et ses donnees
+#    perimees restent en base. Or `plan.jsonl` est du JSONL — il se lit ligne a
+#    ligne, sans troncature et sans surcout, puisqu'on s'arrete au premier
+#    chemin qui correspond.
+# ---------------------------------------------------------------------------
+
+
+def test_un_powershell_en_echec_ne_passe_pas_pour_zero_processus(tmp_path: Path, monkeypatch) -> None:
+    echec = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="acces refuse")
+    monkeypatch.setattr(observe.subprocess, "run", lambda *a, **k: echec)
+    pids, erreur = observe._webview2_pids_in_scope(tmp_path)
+    assert pids == []
+    assert erreur is not None, (
+        "PowerShell a echoue et la fonction rend « aucun processus, aucune erreur » : "
+        "plus aucun hote WebView2 n'est tue et rien ne le signale."
+    )
+
+
+def test_un_plan_volumineux_reste_dans_le_perimetre(tmp_path: Path) -> None:
+    run_dir = tmp_path / "tri_films_RUN_X"
+    run_dir.mkdir(parents=True)
+    cible = (tmp_path / "test_library_A").as_posix().lower()
+    bourrage = json.dumps({"src_path": "D:/ailleurs/" + "x" * 200}) + "\n"
+    with (run_dir / "plan.jsonl").open("w", encoding="utf-8") as fh:
+        for _ in range(400 * 1024 // len(bourrage) + 1):
+            fh.write(bourrage)
+        fh.write(json.dumps({"src_path": cible + "/Film (2020)/f.mkv"}) + "\n")
+    taille = (run_dir / "plan.jsonl").stat().st_size
+    assert taille > 256 * 1024, f"le plan doit depasser la troncature ({taille} o)"
+    assert observe._run_dir_in_scope(run_dir, cible), (
+        "le chemin cible figure dans le plan mais au-dela des 256 premiers Kio : "
+        "le run est declare hors perimetre et sa purge n'a jamais lieu."
+    )
