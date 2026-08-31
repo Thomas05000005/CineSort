@@ -462,7 +462,12 @@ def generate_markdown(api: Any, methods: Dict[str, Callable[..., Any]] | None = 
     )
     out.append("- **Auth** : `Authorization: Bearer <token>` (token configure dans les Reglages)")
     out.append('- **Format reponse** : `{"ok": true, ...}` ou `{"ok": false, "message": "..."}`')
-    out.append("- **Endpoints publics** : `GET /api/health` (sans auth) et `GET /api/spec` (OpenAPI)")
+    # Lot 2 (2026-08-31) : `GET /api/spec` n'est PLUS public. Elle rendait
+    # 80 182 octets — la carte complete des endpoints ci-dessous — a un
+    # appelant sans jeton. Seule `/api/health` reste ouverte : le boot du
+    # dashboard et les sondes e2e l'interrogent avant d'avoir un jeton.
+    out.append("- **Endpoint public** : `GET /api/health` (sans auth)")
+    out.append("- **`GET /api/spec`** (OpenAPI 3.0.3) : exige `Authorization: Bearer <token>`, comme les POST")
     out.append("- **Body max** : 16 MB ; **Rate limit auth** : 5 echecs / 60s par IP\n")
 
     out.append("## Endpoints groupes par categorie\n")

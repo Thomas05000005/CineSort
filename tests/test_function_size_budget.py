@@ -180,7 +180,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_timeline_support.py", "_get_library_timeline_impl"): 153,
     ("cinesort/ui/api/settings_support.py", "write_settings"): 152,
     ("cinesort/domain/perceptual/composite_score.py", "detect_cross_verdicts"): 150,
-    ("cinesort/infra/rest_server.py", "_handle_post"): 147,  # -3 le 2026-08-31, gain verrouille
+    # 147 -> 135 le 2026-08-31 : ce lot ajoute trois appels a `_pour_journal`,
+    # que le formateur eclate en multi-ligne — la fonction montait a 159. Plutot
+    # que le plafond, c'est `_repondre_methode_introuvable` qui a ete EXTRAITE,
+    # et le gain net de 12 lignes est inscrit ici. Le cliquet a mordu DANS LES
+    # DEUX SENS sur cette PR : d'abord a la hausse (159 > 147), puis a la baisse
+    # une fois l'extraction faite.
+    ("cinesort/infra/rest_server.py", "_handle_post"): 135,  # -3 le 2026-08-31, gain verrouille
     # 150 -> 170 : le pre-check d'espace disque regarde desormais le SECOND
     # volume (les bacs vivent sous le state_dir, pas sous la bibliotheque).
     ("cinesort/ui/api/apply_support.py", "_validate_apply"): 170,
