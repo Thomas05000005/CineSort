@@ -37,6 +37,7 @@ import contextlib
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from cinesort.infra.db.sqlite_store import SQLiteStore
@@ -59,7 +60,7 @@ class UnVerrouSURVITALaSuppressionDuRunTests(unittest.TestCase):
         cleanup_test_tree(self._tmp)
 
     def _semer_verrou(self, run_id: str) -> None:
-        with sqlite3.connect(str(self._tmp / "cinesort.sqlite")) as conn:
+        with closing(sqlite3.connect(str(self._tmp / "cinesort.sqlite"))) as conn, conn:
             conn.execute(
                 "INSERT INTO film_field_locks(film_id, run_id, row_id, field_name, locked_value, locked_at, source) "
                 "VALUES ('tmdb:603', ?, 'r1', 'proposed_title', 'Matrix', 1.0, 'ui_lock')",
@@ -68,7 +69,7 @@ class UnVerrouSURVITALaSuppressionDuRunTests(unittest.TestCase):
             conn.commit()
 
     def _verrous(self) -> list:
-        with sqlite3.connect(str(self._tmp / "cinesort.sqlite")) as conn:
+        with closing(sqlite3.connect(str(self._tmp / "cinesort.sqlite"))) as conn, conn:
             return conn.execute("SELECT film_id, field_name, run_id FROM film_field_locks").fetchall()
 
     def test_le_verrou_est_conserve(self) -> None:
@@ -155,7 +156,7 @@ class LesAutresTablesSontTOUJOURSPurgeesTests(unittest.TestCase):
 
     def test_une_ligne_errors_est_bien_SUPPRIMEE(self) -> None:
         self.store.run.insert_run_pending(run_id="run-E", root="R", state_dir=str(self._tmp), config={})
-        with sqlite3.connect(str(self.chemin)) as conn:
+        with closing(sqlite3.connect(str(self.chemin))) as conn, conn:
             conn.execute(
                 "INSERT INTO errors(run_id, ts, step, code, message) VALUES ('run-E', 1.0, 'scan', 'X', 'boum')",
             )
@@ -163,7 +164,7 @@ class LesAutresTablesSontTOUJOURSPurgeesTests(unittest.TestCase):
 
         self.store.run.delete_run("run-E")
 
-        with sqlite3.connect(str(self.chemin)) as conn:
+        with closing(sqlite3.connect(str(self.chemin))) as conn, conn:
             restants = conn.execute("SELECT COUNT(*) FROM errors WHERE run_id='run-E'").fetchone()[0]
         self.assertEqual(restants, 0, "une ligne de run doit etre SUPPRIMEE, pas detachee")
 

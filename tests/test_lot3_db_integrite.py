@@ -29,7 +29,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -483,7 +483,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
         cleanup_test_tree(self._tmp)
 
     def _peupler(self) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute(
                 "INSERT INTO runs(run_id, status, created_ts, root, state_dir, config_json)"
@@ -514,7 +514,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
 
     def _rejouer_021(self) -> None:
         sql = (_MIG_DIR / "021_fk_cascade.sql").read_text(encoding="utf-8")
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute("BEGIN")
             for stmt in _split_sql_statements(sql):
@@ -522,7 +522,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
             conn.commit()
 
     def _compter(self) -> dict[str, int]:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             return {
                 table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # noqa: S608
                 for table in ("runs", "errors", "quality_reports", "anomalies", "apply_batches", "apply_operations")
@@ -543,7 +543,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
     def test_une_orpheline_APPARUE_entre_deux_rejeux_est_bien_filtree(self) -> None:
         """Le comportement voulu, pas le defaut annonce — et il doit rester vrai."""
         self._rejouer_021()
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute(
                 "INSERT INTO quality_reports(run_id,row_id,score,tier,reasons_json,metrics_json,"
@@ -561,7 +561,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
 
     def test_le_journal_d_UNDO_orphelin_survit_au_rejeu(self) -> None:
         """L'autre moitie de la regle : ce qui trace une action irreversible reste."""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute(
                 "INSERT INTO apply_operations(batch_id,op_index,op_type,src_path,dst_path,reversible,ts)"
@@ -570,7 +570,7 @@ class Migration021LeFiltreEstIdempotentTests(unittest.TestCase):
 
         self._rejouer_021()
 
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with closing(sqlite3.connect(str(self.db_path))) as conn, conn:
             restantes = int(
                 conn.execute("SELECT COUNT(*) FROM apply_operations WHERE batch_id='B-DISPARU'").fetchone()[0]
             )
