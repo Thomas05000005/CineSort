@@ -2145,6 +2145,25 @@ async function _loadProfiles() {
 function _mergeTierHierarchy(raw) {
   const out = { ..._DEFAULT_TIER_HIERARCHY, order: _DEFAULT_HIERARCHY_DIMENSIONS.slice() };
   if (!raw || typeof raw !== "object") return out;
+  // #1097, meme famille : cet ecran ne POSSEDE que `enabled` et l'ordre des
+  // dimensions. Les planchers et plafonds (`*_floors`, `*_ceilings`) vivent dans
+  // le profil — presets TRaSH embarques, round-trip Recyclarr — et ne sont
+  // affiches NULLE PART sur cet ecran. Les laisser tomber du brouillon les
+  // EFFACAIT au premier « Sauvegarder » : `save_profile` REMPLACE l'entree de
+  // meme id (profiles_support_crud, « Replace si meme id ») et
+  // `normalize_hierarchy_config` recomplete alors les sections absentes avec les
+  // defauts TRaSH — pas avec les valeurs de l'utilisateur.
+  //
+  // Mesure sur la VRAIE chaine (`_loadProfiles` -> `_saveProfileAsNew`, source de
+  // production sous Node) : trois sections entrantes (`audio_floors`,
+  // `resolution_ceilings`, `group_floors`), ZERO section sortante.
+  //
+  // La copie de surface evite d'aliaser la reponse d'API : sans elle, editer le
+  // brouillon modifierait aussi `_state.profilesList`.
+  for (const [cle, valeur] of Object.entries(raw)) {
+    if (cle === "enabled" || cle === "order") continue;
+    out[cle] = valeur && typeof valeur === "object" && !Array.isArray(valeur) ? { ...valeur } : valeur;
+  }
   if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
   if (Array.isArray(raw.order)) {
     const filtered = raw.order.filter((d) => _DEFAULT_HIERARCHY_DIMENSIONS.includes(d));
