@@ -105,7 +105,7 @@ DEFAULT_PROFILE_VERSION = 1
 # `quality_report_support` rend un CACHE HIT sur tout rapport deja persiste
 # (`existing_rules_version == str(SCORING_RULES_VERSION)`) et le correctif
 # reste invisible en production sur les bibliotheques deja scorees.
-SCORING_RULES_VERSION = 4
+SCORING_RULES_VERSION = 5
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
