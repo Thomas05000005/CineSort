@@ -671,7 +671,7 @@ function _buildInspectorSections(selectedRun) {
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="json" title="Télécharge le rapport de ce run au format JSON">⬇ Exporter en JSON</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-nfo" data-run-id="${escapeHtml(selectedRun.run_id)}" title="Écrit un fichier .nfo à côté de chaque film de ce run (lu par Kodi et Jellyfin)">🎬 Générer les .nfo</button>
           ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
-          <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
+          <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}" data-undo-possible="${isApply && status !== "UNDONE" ? "1" : ""}">🗑 Supprimer ce run</button>
         </div>
       `,
     },
@@ -1605,11 +1605,48 @@ async function _genererLesNfo(runId, btn) {
 // Formulation inconditionnelle a dessein : le handler ne dispose que du
 // `run_id`, et un run sans apply n'a pas de journal a perdre — la phrase reste
 // vraie, seulement sans objet.
-const _CONSEQUENCE_SUPPRESSION_RUN =
-  "Le run + son plan + son log seront supprimés définitivement. " +
-  "Les fichiers vidéo du disque ne sont pas déplacés — mais le journal " +
-  "d'annulation de ce run est détruit : si un apply a déjà eu lieu, " +
-  "« Annuler l'apply » ne sera plus possible. Action NON réversible.";
+// Ce que la modale annonce est CONDITIONNEL : le handler sait si l'undo est
+// encore possible (`data-undo-possible`), et avertir d'une perte qui n'existe
+// pas serait le defaut inverse.
+//
+// Trois familles de pertes, mesurees sur `_TABLES_PORTANT_RUN_ID`
+// (`infra/db/repositories/run.py`) et non devinees :
+//
+// 1. LE JOURNAL D'APPLY. `delete_run` emporte `apply_batches` et, par CASCADE,
+//    `apply_operations` : le journal grace auquel `run/undo_last_apply` remet
+//    les dossiers a leur place. `build_undo_preview_payload` echoue alors DEUX
+//    fois — `_find_run_row` ne trouve plus la ligne `runs`, et
+//    `get_last_reversible_apply_batch` plus le batch.
+//
+// 2. LES DECISIONS PRISES SUR CE RUN. `duplicate_decisions`,
+//    `film_marked_for_deletion`, `film_tmdb_overrides` et
+//    `user_quality_feedback` portent toutes `run_id` DANS leur cle d'identite :
+//    leur purge est correcte — ces lignes n'ont aucun sens sans le run. Mais
+//    l'utilisateur les perd sans en etre averti, et ce sont des heures
+//    d'arbitrage manuel. (`film_field_locks` est le seul cas ou `run_id` est
+//    HORS de l'identite : le code la DETACHE au lieu de la supprimer, donc les
+//    verrous de champ survivent.)
+//
+// 3. CE QUI NE SE PERD PAS, et qu'il faut dire aussi. Le plan, le log et le
+//    fichier de validation RESTENT sur disque (docstring de `delete_run`) : ils
+//    partent a la rotation de retention. Une version anterieure de cette modale
+//    annoncait leur suppression immediate — rassurer a tort et alarmer a tort
+//    sont le meme defaut.
+function _consequenceSuppressionRun(undoEncorePossible) {
+  return (
+    (undoEncorePossible
+      ? "⚠ L'annulation de cet apply deviendra DÉFINITIVEMENT impossible : " +
+        "supprimer le run efface le journal qui la rend possible. " +
+        "Si vous pensiez pouvoir revenir en arrière, annulez l'apply AVANT. "
+      : "") +
+    "L'entrée disparaît de l'historique, avec son journal d'apply. " +
+    "Sont aussi perdues les décisions prises sur ce run : doublons tranchés, " +
+    "films marqués pour suppression, corrections TMDb et retours qualité. " +
+    "Le plan, le log et le fichier de validation NE sont PAS supprimés : " +
+    "ils partiront à la rotation de rétention. " +
+    "Aucune modification sur les fichiers vidéo du disque. Action NON réversible."
+  );
+}
 
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
@@ -1664,17 +1701,36 @@ function _onActionClick(ev) {
         onConfirm: () => _doUndoApply(runId),
       });
       break;
-    case "delete-run":
+    case "delete-run": {
       // Action dangereuse — dangerConfirmModal + retention 90j auto (spec 09 §5).
+      //
+      // 2026-08-29 : ce texte etait faux DANS LES DEUX SENS. Il promettait une
+      // suppression qui n'a pas lieu — `history_support.delete_run` documente
+      // mot pour mot que « les fichiers d'etat sur disque (plan.jsonl,
+      // validation.json, ui_log.txt) NE sont PAS touches ». Et il taisait la
+      // seule consequence grave : `run.py` fait
+      // `DELETE FROM apply_batches WHERE run_id=?`, dont la cascade FK emporte
+      // `apply_operations` — le journal que les DEUX chemins d'undo lisent.
+      // Mesure du jour sur un store reel : 3 operations et un batch reversible
+      // AVANT, 0 et plus rien APRES.
+      //
+      // Pire, « Aucune modification sur les fichiers video du disque » rassurait
+      // au moment precis ou il fallait alerter. La regle n3 du produit exige que
+      // la CONSEQUENCE soit annoncee : elle l'etait, et elle etait fausse.
+      //
+      // `data-undo-possible` est pose au rendu, ou `isApply` et `status` sont
+      // deja en portee — le bouton voisin « Annuler l'apply » s'en sert.
+      const undoEncorePossible = target.dataset.undoPossible === "1";
       dangerConfirmModal({
         title: `Supprimer le run ${runId} de l'historique ?`,
         items: [`Run ${runId}`],
-        consequence: _CONSEQUENCE_SUPPRESSION_RUN,
+        consequence: _consequenceSuppressionRun(undoEncorePossible),
         countdownSeconds: 3,
         confirmLabel: "✗ Supprimer le run",
         onConfirm: () => _doDeleteRun(runId),
       });
       break;
+    }
     case "reload-log":
       if (runId) {
         _historyStatsCache.delete(runId);

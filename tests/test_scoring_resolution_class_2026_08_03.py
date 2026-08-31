@@ -182,13 +182,24 @@ class DuplicateResolutionClassTests(unittest.TestCase):
         self.assertEqual((crit2.winner, crit2.points_delta), ("a", 30))
 
     def test_sd_heights_remain_discriminated(self) -> None:
-        """Non-regression : sous 720p la hauteur brute reste comparee (576 > 360)."""
+        """Non-regression : sous 720p la hauteur brute reste comparee (576 > 360).
+
+        L'ETIQUETTE de gauche est passee de « 480p » a « 576p » le 2026-08-31
+        (constat #5). Ce test asserait la moitie ANNONCE de la divergence qu'il
+        gardait : `_resolution_height` compare bien 576, mais `_resolution_label`
+        re-classait cette valeur avec des seuils HAUTEUR (`h >= 480 -> "480p"`),
+        donc toute la plage [480..679] s'affichait « 480p » -- et deux SD de la
+        meme plage (720x576 PAL contre 720x480 NTSC) sortaient « 480p vs 480p »
+        avec un delta de +30. La comparaison gardee ici est INCHANGEE (winner=a,
+        30 points) ; seul l'affichage dit desormais ce qui a ete compare.
+        """
         crit = self._resolution_criterion(
             self._dup_probe(height=576, bitrate_kbps=2000),
             self._dup_probe(height=360, bitrate_kbps=2000),
         )
-        self.assertEqual((crit.value_a, crit.value_b), ("480p", "360p"))
+        self.assertEqual((crit.value_a, crit.value_b), ("576p", "360p"))
         self.assertEqual(crit.winner, "a")
+        self.assertEqual(crit.points_delta, 30)
 
 
 class GenreScoringIsReachableTests(unittest.TestCase):

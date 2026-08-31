@@ -204,6 +204,93 @@ class ParseMovieNfoRuntimeTests(unittest.TestCase):
             self.assertIsNone(info.runtime)
 
 
+class NfoBombeDEntitesTests(unittest.TestCase):
+    """Un `.nfo` peut declarer des entites XML et s'amplifier en memoire.
+
+    `parse_movie_nfo` appelle `ET.fromstring` sur le contenu brut du fichier.
+    ElementTree ne resout PAS les entites externes (mesure du 2026-08-29 :
+    `ParseError: undefined entity`, donc pas de XXE), mais il expand bien les
+    entites INTERNES — le motif « billion laughs ».
+
+    Mesure du 2026-08-29, par la fonction de production elle-meme :
+
+        NFO sur disque    pic memoire
+              226 o          ~0 Mo
+              336 o          0,7 Mo
+              391 o          6,6 Mo      <- amplification x10 par niveau
+
+    Un fichier d'environ 550 octets viserait donc plusieurs gigaoctets.
+
+    CE QUI REND LE CAS ATTEIGNABLE : un `.nfo` arrive AVEC le torrent, il est
+    donc ecrit par le releaser, pas par l'utilisateur. Le commentaire pose sur
+    ce `fromstring` affirmait l'inverse — « pas un input reseau venant d'un
+    attaquant » — et justifiait ainsi de ne rien faire. Sa conclusion tenait
+    pour XXE, jamais pour l'amplification.
+
+    Aucun `.nfo` legitime ne declare d'entites : Kodi, Jellyfin et tinyMediaManager
+    ecrivent du XML plat. Verifie sur le depot le 2026-08-29 — zero occurrence de
+    `<!ENTITY` ou `<!DOCTYPE` dans les fixtures.
+    """
+
+    @staticmethod
+    def _bombe(niveaux: int, base: int = 10) -> str:
+        entites = ['<!ENTITY e0 "' + "a" * base + '">']
+        for i in range(1, niveaux):
+            entites.append('<!ENTITY e{} "{}">'.format(i, ("&e%d;" % (i - 1)) * base))
+        return (
+            "<?xml version='1.0'?><!DOCTYPE movie [" + "".join(entites) + "]>"
+            f"<movie><title>&e{niveaux - 1};</title><year>2010</year></movie>"
+        )
+
+    def test_un_nfo_qui_declare_des_entites_est_refuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            nfo = Path(tmp) / "movie.nfo"
+            nfo.write_text(self._bombe(6), encoding="utf-8")
+            # 391 octets sur disque, 6,6 Mo en memoire sans le garde.
+            self.assertLess(nfo.stat().st_size, 1024)
+            info = core.parse_movie_nfo(nfo)
+            # `assertTrue` et non `assertIsNone` : sur echec, ce dernier affiche
+            # le repr de l'objet, donc le titre amplifie — un megaoctet deverse
+            # dans le rapport. Un test dont l'echec noie la sortie est un test
+            # qu'on apprend a ignorer.
+            self.assertTrue(
+                info is None,
+                "un NFO declarant des entites doit etre refuse avant le parsing ; "
+                f"obtenu un titre de {len(getattr(info, 'title', '') or '')} caracteres",
+            )
+
+    def test_un_nfo_normal_reste_lu(self):
+        """CONTRE-TEST : le garde ne doit pas casser le cas nominal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            nfo = Path(tmp) / "movie.nfo"
+            nfo.write_text(
+                "<?xml version='1.0' encoding='UTF-8'?>\n<movie><title>Inception</title><year>2010</year></movie>\n",
+                encoding="utf-8",
+            )
+            info = core.parse_movie_nfo(nfo)
+            self.assertIsNotNone(info)
+            assert info is not None
+            self.assertEqual(info.title, "Inception")
+
+    def test_un_doctype_sans_entite_reste_lu(self):
+        """CONTRE-TEST de PRECISION : c'est `<!ENTITY` qui amplifie, pas `<!DOCTYPE`.
+
+        Interdire tout DOCTYPE serait plus large que le defaut, et refuserait un
+        fichier inoffensif. Si ce test rougit, le garde a ete elargi au-dela de
+        ce que la mesure justifie.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            nfo = Path(tmp) / "movie.nfo"
+            nfo.write_text(
+                "<?xml version='1.0'?><!DOCTYPE movie><movie><title>Heat</title><year>1995</year></movie>",
+                encoding="utf-8",
+            )
+            info = core.parse_movie_nfo(nfo)
+            self.assertIsNotNone(info, "un DOCTYPE sans entite ne doit pas etre refuse")
+            assert info is not None
+            self.assertEqual(info.title, "Heat")
+
+
 class NfoConsistencyCheckTests(unittest.TestCase):
     """P1.1.b : distinguer folder_match et filename_match."""
 

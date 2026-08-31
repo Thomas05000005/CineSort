@@ -20,6 +20,7 @@ Architecture :
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Any, Dict, List
 
 from cinesort.domain.run_models import RunStatus
@@ -207,7 +208,10 @@ def list_pending_runs(api: Any) -> Dict[str, Any]:
                     if rid and rid not in seen:
                         seen.add(rid)
                         runs.append(row)
-            except (KeyError, OSError, TypeError, ValueError) as exc:
+            # `sqlite3.Error` n'herite PAS d'`OSError` : sans lui, une base
+            # verrouillee remontait en HTTP 500 au lieu d'etre absorbee par ce
+            # best-effort. Le meme defaut vit TROIS fois dans cette fonction.
+            except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as exc:
                 logger.warning("list_pending_runs: store failure err=%s", exc)
                 continue
 
@@ -221,13 +225,13 @@ def list_pending_runs(api: Any) -> Dict[str, Any]:
                     if rid and rid not in seen:
                         seen.add(rid)
                         runs.append(row)
-            except (KeyError, OSError, TypeError, ValueError) as exc:
+            except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as exc:
                 logger.warning("list_pending_runs: default store failure err=%s", exc)
 
         # Tri stable sur last_activity_at (DESC) pour avoir les plus recents en haut.
         runs.sort(key=lambda r: float(r.get("last_activity_at") or 0.0), reverse=True)
         return {"ok": True, "runs": runs}
-    except (KeyError, OSError, TypeError, ValueError) as exc:
+    except (KeyError, OSError, sqlite3.Error, TypeError, ValueError) as exc:
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 

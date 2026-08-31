@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """ITER10 v2 - mesure ciblee steps Traitement labels."""
+
 from __future__ import annotations
 import json, os, socket, subprocess, sys, time
 from datetime import datetime
@@ -10,6 +11,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAPTURE_DIR = PROJECT_ROOT / "docs/internal/observe/2026-06-08_ITER10_LISIBILITE"
 OUT_FILE = CAPTURE_DIR / "iter10_gate_lisibilite_v2_steps.json"
 CDP_PORT = 9225
+
+# Les libelles d'etapes ont UNE source : le gate v1. Les reecrire ici en faisait
+# un troisieme exemplaire, libre de diverger sans que rien ne rougisse.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _iter10_gate_lisibilite import STEP_LABEL_SELECTOR, STEP_LABELS
 
 
 def _wait_port(host, port, timeout=60):
@@ -44,8 +50,10 @@ env["CINESORT_OBSERVE_FORCE_DEV"] = "1"
 
 proc = subprocess.Popen(
     [sys.executable, str(PROJECT_ROOT / "app.py"), "--dev"],
-    cwd=str(PROJECT_ROOT), env=env,
-    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    cwd=str(PROJECT_ROOT),
+    env=env,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
 )
 
 out = {"ts": datetime.now().isoformat(timespec="seconds")}
@@ -54,6 +62,7 @@ try:
         out["error"] = f"CDP {CDP_PORT} unreachable"
     else:
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as pw:
             browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
             ctx = browser.contexts[0]
@@ -75,26 +84,29 @@ try:
             page.evaluate("() => { window.location.hash = '/traitement'; }")
             page.wait_for_timeout(4000)
             steps = page.evaluate(
-                r"""() => {
-                    const labels = Array.from(document.querySelectorAll('.traitement-step-label'));
+                r"""(selector) => {
+                    const labels = Array.from(document.querySelectorAll(selector));
                     return labels.map(l => ({
                         text: l.textContent || '',
                         hex: Array.from(l.textContent || '').map(c => c.codePointAt(0).toString(16)).join(',')
                     }));
-                }"""
+                }""",
+                STEP_LABEL_SELECTOR,
             )
             out["steps"] = steps
-            expected = ["Analyse", "Vérification", "Validation", "Doublons", "Application"]
+            expected = STEP_LABELS
             matches = []
             for i, exp in enumerate(expected):
                 actual = steps[i]["text"] if i < len(steps) else ""
-                matches.append({
-                    "expected": exp,
-                    "actual": actual,
-                    "expected_hex": ",".join(c.encode("utf-8").hex() for c in exp),
-                    "actual_hex": steps[i]["hex"] if i < len(steps) else "",
-                    "ok": actual.strip() == exp,
-                })
+                matches.append(
+                    {
+                        "expected": exp,
+                        "actual": actual,
+                        "expected_hex": ",".join(c.encode("utf-8").hex() for c in exp),
+                        "actual_hex": steps[i]["hex"] if i < len(steps) else "",
+                        "ok": actual.strip() == exp,
+                    }
+                )
             out["matches"] = matches
             out["all_ok"] = all(m["ok"] for m in matches)
             browser.close()

@@ -77,7 +77,7 @@ const buildEmptyState = () => "";
 
 _EXTRA = """
 export const __onActionClick = _onActionClick;
-export const __consequence = _CONSEQUENCE_SUPPRESSION_RUN;
+export const __consequence = _consequenceSuppressionRun;
 """
 
 # Sortie explicite apres l'emission, comme `test_historique_doublons_affirmation`
@@ -89,20 +89,27 @@ _EXIT = "\nprocess.exit(0);\n"
 # reellement : `ev.target.closest(sel)`, d'abord pour l'onglet d'inspecteur
 # (aucun ici), puis pour l'action.
 _DRIVER = """
-const evenement = (action, runId) => ({
+const evenement = (action, runId, undoPossible) => ({
   target: {
     closest: (sel) =>
-      sel === "[data-historique-action]" ? { dataset: { historiqueAction: action, runId } } : null,
+      sel === "[data-historique-action]"
+        ? { dataset: { historiqueAction: action, runId, undoPossible } }
+        : null,
   },
 });
-M.__onActionClick(evenement("delete-run", "run-42"));
-const m = globalThis.__modales[0] || null;
+// LES DEUX CAS. Le texte est CONDITIONNEL : n'en exercer qu'un laisserait
+// passer une fonction qui ignore son argument et rend toujours la meme chose.
+M.__onActionClick(evenement("delete-run", "run-42", "1"));
+M.__onActionClick(evenement("delete-run", "run-43", "0"));
+const avec = globalThis.__modales[0] || null;
+const sans = globalThis.__modales[1] || null;
 __emit({
   nb_modales: globalThis.__modales.length,
-  consequence: m ? String(m.consequence || "") : null,
-  titre: m ? String(m.title || "") : null,
-  constante: String(M.__consequence || ""),
-  cablee: !!(m && m.consequence === M.__consequence),
+  consequence: avec ? String(avec.consequence || "") : null,
+  consequence_sans_undo: sans ? String(sans.consequence || "") : null,
+  titre: avec ? String(avec.title || "") : null,
+  cablee: !!(avec && avec.consequence === M.__consequence(true)),
+  cablee_sans_undo: !!(sans && sans.consequence === M.__consequence(false)),
 });
 """
 
@@ -125,7 +132,7 @@ class LaModaleDeSuppressionAnnonceLaPerteDeLUndoTests(unittest.TestCase):
         porteraient sur `None` et passeraient pour de mauvaises raisons."""
         self.assertEqual(
             self.modale["nb_modales"],
-            1,
+            2,
             "aucune confirmation demandee avant une suppression definitive (regle n3)",
         )
         self.assertIn("run-42", self.modale["titre"])
@@ -135,36 +142,80 @@ class LaModaleDeSuppressionAnnonceLaPerteDeLUndoTests(unittest.TestCase):
         consequence = self.modale["consequence"]
 
         self.assertIn(
-            "Annuler l'apply",
+            "annulation de cet apply",
             consequence,
             "la modale ne nomme pas la capacite qu'elle detruit : le journal "
             "d'undo (apply_batches + apply_operations en CASCADE) part avec le run",
         )
 
-    def test_elle_ne_se_contente_plus_de_rassurer(self) -> None:
-        """Contre-epreuve de la phrase d'origine.
+    def test_l_avertissement_n_apparait_QUE_si_l_undo_est_possible(self) -> None:
+        """C'est ce test qui rend la CONDITION mesurable.
 
-        « Aucune modification sur les fichiers vidéo du disque » etait vraie au
-        pied de la lettre et lue comme « rien a craindre ». Ce test refuse le
-        retour a une formulation qui s'arrete a la partie rassurante.
-        """
-        consequence = self.modale["consequence"]
+        Sans lui, une fonction qui ignore son argument et rend toujours
+        l'avertissement passerait les autres — et alarmerait sur un run sans
+        apply, ou il n'y a rien a perdre. Alarmer a tort et rassurer a tort sont
+        le meme defaut."""
+        avec = self.modale["consequence"]
+        sans = self.modale["consequence_sans_undo"]
 
-        self.assertNotIn("Aucune modification sur les fichiers vidéo", consequence)
-        self.assertIn("détruit", consequence)
+        self.assertIn("DÉFINITIVEMENT impossible", avec)
+        self.assertNotIn(
+            "DÉFINITIVEMENT impossible",
+            sans,
+            "un run sans apply reversible n'a pas de journal a perdre",
+        )
+        self.assertNotEqual(avec, sans, "le texte ne depend pas de la condition")
 
-    def test_le_handler_passe_BIEN_cette_constante(self) -> None:
+    def test_les_DECISIONS_perdues_sont_nommees(self) -> None:
+        """Mesure sur `_TABLES_PORTANT_RUN_ID` : `duplicate_decisions`,
+        `film_marked_for_deletion`, `film_tmdb_overrides` et
+        `user_quality_feedback` portent toutes `run_id` DANS leur cle
+        d'identite. Leur purge est correcte — mais l'utilisateur perd des heures
+        d'arbitrage manuel sans en etre averti.
+
+        Present dans les DEUX cas : ces pertes n'ont rien a voir avec l'undo."""
+        for cle in ("consequence", "consequence_sans_undo"):
+            with self.subTest(cas=cle):
+                texte = self.modale[cle]
+                for attendu in ("doublons", "marqués", "TMDb", "qualité"):
+                    self.assertIn(attendu, texte)
+
+    def test_elle_ne_ment_PAS_sur_ce_qui_survit(self) -> None:
+        """Contre-epreuve, dans les deux sens.
+
+        « Aucune modification sur les fichiers vidéo du disque » est VRAIE et
+        doit rester : une version anterieure de ce test l'interdisait, ce qui
+        revenait a mesurer la formulation plutot que le fond.
+
+        Ce qui etait faux, c'est « le run + son plan + son log seront supprimés
+        définitivement » : la docstring de `delete_run` dit que le plan, le log
+        et le fichier de validation RESTENT sur disque jusqu'a la rotation de
+        retention."""
+        for cle in ("consequence", "consequence_sans_undo"):
+            with self.subTest(cas=cle):
+                texte = self.modale[cle]
+                self.assertIn("Aucune modification sur les fichiers vidéo", texte)
+                self.assertIn("NE sont PAS supprimés", texte)
+                self.assertNotIn("son plan + son log seront supprimés", texte)
+
+    def test_le_handler_passe_BIEN_cette_fonction(self) -> None:
         """Le SITE D'APPEL, pas seulement la valeur.
 
         Un mutant qui remet une chaine en dur dans `dangerConfirmModal({...})`
-        laisserait les trois tests precedents verts si l'on n'assertait que sur
-        la constante. On exige l'identite entre ce que la modale recoit et ce
-        que le module declare.
+        laisserait les tests precedents verts si l'on n'assertait que sur la
+        fonction. On exige l'identite entre ce que la modale recoit et ce que le
+        module produit POUR LE MEME ARGUMENT — les deux cas, sinon un handler
+        qui passe toujours `true` resterait invisible.
         """
         self.assertTrue(
             self.modale["cablee"],
-            "le handler `delete-run` n'utilise plus `_CONSEQUENCE_SUPPRESSION_RUN` : "
-            f"recu {self.modale['consequence']!r}, attendu {self.modale['constante']!r}",
+            "le handler `delete-run` n'appelle pas `_consequenceSuppressionRun(true)` : "
+            f"recu {self.modale['consequence']!r}",
+        )
+        self.assertTrue(
+            self.modale["cablee_sans_undo"],
+            "le handler ne transmet pas `undoEncorePossible` : "
+            f"recu {self.modale['consequence_sans_undo']!r}",
         )
 
 

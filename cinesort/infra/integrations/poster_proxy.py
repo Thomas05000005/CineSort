@@ -563,11 +563,48 @@ def content_type_from_ext(ext: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _purge_stale_extensions(cache_root: Path, size: str, tmdb_id: int, *, keep: Optional[Path]) -> None:
+    """Efface les cache files d'un `(id, size)` autres que celui qu'on vient d'ecrire.
+
+    Necessaire apres un refresh force : `resolve_cache_file` rend la PREMIERE
+    extension trouvee dans `POSTER_EXT_WHITELIST` (`jpg`, puis `png`, puis
+    `webp`). Si TMDb renvoie desormais un `webp` la ou le cache portait un `jpg`,
+    l'ancien serait resservi indefiniment (Cache-Control immuable 30 j).
+
+    Best-effort : un unlink qui echoue laisse au pire un fichier de trop, jamais
+    l'absence de jaquette.
+    """
+    if keep is None:
+        # Aucun remplacant ecrit : il n y a rien a rendre obsolete. C est la
+        # meme regle que celle de `get_or_fetch` — on ne detruit jamais sans
+        # tenir le remplacant.
+        return
+    try:
+        # Seuil : la date du fichier qu on vient d ECRIRE. Un rafraichissement
+        # CONCURRENT ecrit forcement plus tard, donc son fichier survit.
+        # Sans ce seuil, deux requetes simultanees se detruisaient l une
+        # l autre : A ecrit 550.jpg puis efface le 550.webp de B, B ecrit
+        # 550.webp puis efface le 550.jpg de A, et les DEUX disparaissent.
+        # Une comparaison de date suffit ; un verrou serait plus lourd et
+        # plus fragile qu un cache de jaquettes ne le merite.
+        seuil = keep.stat().st_mtime
+        for stale in (cache_root / size).glob(f"{tmdb_id}.*"):
+            if stale == keep:
+                continue
+            if stale.stat().st_mtime >= seuil:
+                continue
+            stale.unlink()
+    except (OSError, ValueError) as exc:
+        logger.debug("poster_proxy purge ext obsoletes id=%d size=%s err=%s", tmdb_id, size, exc)
+
+
 def get_or_fetch(
     tmdb_client: Any,
     cache_root: Path,
     tmdb_id: int,
     size: str,
+    *,
+    force: bool = False,
 ) -> Tuple[Optional[Path], Optional[str], Optional[str]]:
     """Orchestre cache lookup + fetch TMDb si miss.
 
@@ -581,6 +618,10 @@ def get_or_fetch(
         Identifiant TMDb deja valide (cf `validate_request`).
     size : str
         Taille TMDb deja validee.
+    force : bool
+        Refresh demande par l'utilisateur (« Recuperer jaquettes », `force=1`).
+        Le cache disque est IGNORE en lecture, mais il n'est PAS efface avant le
+        fetch — cf. la note ci-dessous.
 
     Returns
     -------
@@ -594,19 +635,31 @@ def get_or_fetch(
     -----
     Cas fallback graceful : si fetch TMDb echoue (`ERR_OFFLINE`/`ERR_UPSTREAM_ERROR`)
     mais qu'un cache disque existe (meme ancien), on sert le cache.
-    """
-    # 1. Cache hit ?
-    hit = resolve_cache_file(cache_root, size, tmdb_id)
-    if hit is not None:
-        cache_file, ext = hit
-        content_type = content_type_from_ext(ext)
-        logger.debug("poster_proxy cache hit id=%d size=%s ext=%s", tmdb_id, size, ext)
-        return cache_file, content_type, None
 
-    # 2. Cache miss -> fetch TMDb.
-    logger.debug("poster_proxy cache miss id=%d size=%s", tmdb_id, size)
+    C'est ce filet qui impose l'ordre du refresh force. `serve_poster` effacait le
+    cache AVANT d'appeler cette fonction : un « Recuperer jaquettes » lance hors
+    ligne detruisait donc la jaquette existante puis rendait 503, et le repli
+    ci-dessus ne trouvait plus rien a servir — l'utilisateur perdait ses
+    jaquettes en cliquant sur un bouton de rafraichissement. On NE DETRUIT donc
+    qu'apres avoir obtenu le remplacant, et seulement les extensions devenues
+    obsoletes (`_purge_stale_extensions`).
+    """
+    # 1. Cache hit ? (saute sur refresh force : c'est tout ce que `force` change
+    #    en lecture — le fichier reste en place tant qu'il n'est pas remplace.)
+    if not force:
+        hit = resolve_cache_file(cache_root, size, tmdb_id)
+        if hit is not None:
+            cache_file, ext = hit
+            content_type = content_type_from_ext(ext)
+            logger.debug("poster_proxy cache hit id=%d size=%s ext=%s", tmdb_id, size, ext)
+            return cache_file, content_type, None
+
+    # 2. Cache miss (ou refresh force) -> fetch TMDb.
+    logger.debug("poster_proxy cache miss id=%d size=%s force=%s", tmdb_id, size, force)
     cache_file, content_type, error_code = fetch_and_cache(tmdb_client, cache_root, tmdb_id, size)
     if error_code is None:
+        if force:
+            _purge_stale_extensions(cache_root, size, tmdb_id, keep=cache_file)
         return cache_file, content_type, None
 
     # 3. Fetch failed mais cache disque existe (cas tres improbable apres miss,
@@ -638,6 +691,49 @@ _HTTP_ERROR_MAP: Dict[str, Tuple[int, str, str]] = {
     ERR_OFFLINE: (503, "runtime", "Cache miss offline"),
     ERR_CACHE_POLLUTED: (502, "runtime", "Upstream error"),
 }
+
+
+def _force_demande(query: Dict[str, str]) -> bool:
+    """True si la query string demande un rafraichissement force."""
+    return str(query.get("force") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _servir_sans_cle_tmdb(
+    handler: Any,
+    cache_root: Path,
+    size: str,
+    tmdb_id: int,
+) -> Optional[Tuple[Path, str]]:
+    """Repli quand aucune cle TMDb n'est lisible : servir le cache, ou 503.
+
+    Rend `(cache_file, content_type)` s'il y a un hit, sinon repond 503 et rend
+    `None` — au caller de sortir.
+
+    2026-08-28 : cette situation sortait en 503 AVANT de consulter le cache.
+    Deux consequences, toutes deux mesurees en bac a sable :
+
+      - PRODUIT. Des que la cle devient illisible (effacee, ou blob DPAPI non
+        dechiffrable sur un profil neuf), les jaquettes de TOUT le dashboard
+        passaient en erreur alors que chaque image etait sur le disque.
+        `/api/poster` alimente 9 sites du front : grille bibliotheque (w185),
+        fiche film (w342) et le constructeur d'URL de `core/dom.js`.
+      - ASYMETRIE. Sur le MEME id en cache, l'appelant loopback recevait 503
+        tandis que l'appelant non fiable — passe par la branche cache-seul, qui
+        lit le cache d'abord — recevait l'image. L'appelant le moins fiable
+        etait le mieux servi.
+
+    On ne retombe PAS sur la branche cache-seul : elle rend 404 sur un miss, ce
+    qui perdrait le message « Proxy TMDb non configure » que l'ecran sait
+    afficher. Contre-test : `test_sans_cle_tmdb_et_sans_cache_reste_503`.
+    """
+    hit = resolve_cache_file(cache_root, size, tmdb_id)
+    if hit is None:
+        # Rien en cache ET pas de cle : le proxy est reellement inoperant.
+        # 503 (config) plutot que 502, qui suggererait une erreur TMDb.
+        _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
+        return None
+    cache_file, ext = hit
+    return cache_file, content_type_from_ext(ext)
 
 
 def serve_poster(
@@ -698,29 +794,23 @@ def serve_poster(
         # 2. Resoudre le TmdbClient (lazy depuis settings.json).
         tmdb_client = _build_or_get_tmdb_client(state_dir)
         if tmdb_client is None:
-            # Pas de cle API configuree -> on retourne 503 (proxy non operationnel)
-            # plutot que 502 (qui suggererait une erreur TMDb).
-            _respond_error_json(handler, 503, "config", "Proxy TMDb non configure")
-            return
-
-        # AUDIT 2026-06-14 (R7-8) : `force` -> invalider le cache disque pour
-        # (id, size) afin de re-telecharger depuis TMDb (bouton "Recuperer
-        # jaquettes"). Sinon le fichier cache (immuable, Cache-Control 30j) etait
-        # reservi tel quel -> le refresh n'avait aucun effet visuel.
-        if str(query.get("force") or "").strip().lower() in ("1", "true", "yes"):
-            try:
-                for _f in (cache_root / size).glob(f"{tmdb_id}.*"):
-                    _f.unlink()
-            except (OSError, ValueError):
-                pass
-
-        # 3. Orchestrer cache hit / fetch.
-        cache_file, content_type, error_code = get_or_fetch(tmdb_client, cache_root, tmdb_id, size)
-        if error_code is not None:
-            status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
-            _respond_error_json(handler, status, category, message)
-            return
-
+            # Pas de cle API : on ne peut plus rien ALLER CHERCHER, mais ce qui
+            # est deja en cache reste servable (cf. `_servir_sans_cle_tmdb`).
+            servi = _servir_sans_cle_tmdb(handler, cache_root, size, tmdb_id)
+            if servi is None:
+                return
+            cache_file, content_type = servi
+        else:
+            # 3. Orchestrer cache hit / fetch. `force` est TRANSMIS, jamais
+            # applique ici : cf. la docstring de `get_or_fetch`, qui explique
+            # pourquoi detruire avant le fetch perdait la jaquette hors ligne.
+            cache_file, content_type, error_code = get_or_fetch(
+                tmdb_client, cache_root, tmdb_id, size, force=_force_demande(query)
+            )
+            if error_code is not None:
+                status, category, message = _HTTP_ERROR_MAP.get(error_code, (502, "runtime", "Upstream error"))
+                _respond_error_json(handler, status, category, message)
+                return
     assert cache_file is not None and content_type is not None
 
     # 4. Lire les bytes.

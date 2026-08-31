@@ -10,17 +10,34 @@ Etapes :
 3. Patch les vues login.js, plex.js, radarr.js pour utiliser t()
 4. Cree le test de parite tests/test_phase6_i18n_parity.py
 
-Usage : python scripts/i18n_full_sync.py
+TOUT OU RIEN. Le script mute des fichiers SUIVIS par Git ; il ne doit donc
+jamais laisser le depot a mi-chemin. Trois dispositifs, ajoutes apres qu'il a
+ete mesure en train de faire exactement cela :
+
+- **preflight** : toutes les cibles sont verifiees AVANT la premiere ecriture.
+  Une seule absente et le script sort en code 2 sans avoir rien touche. Sans
+  lui, il reecrivait `fr.json`, `en.json` et `login.js`, puis levait
+  `FileNotFoundError` sur `web/dashboard/views/plex.js` — vue disparue du depot
+  — en laissant trois fichiers modifies et l'etape 4 jamais executee ;
+- **--dry-run** : calcule et affiche le travail, n'ecrit rien ;
+- **transaction** : si une ecriture echoue, toutes les precedentes sont
+  defaites a l'octet pres.
+
+Codes de sortie : 0 succes, 1 echec d'ecriture (depot restaure), 2 preflight.
+
+Usage :
+    python scripts/i18n_full_sync.py --dry-run   # voir ce qui serait ecrit
+    python scripts/i18n_full_sync.py             # appliquer
 """
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
+import os
 import sys
 from pathlib import Path
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
 EN_PATH = ROOT / "locales" / "en.json"
@@ -309,9 +326,13 @@ def flatten(d: dict, prefix: str = "") -> dict:
 # --------------------------------------------------------------------------- #
 # Patches des vues JS                                                         #
 # --------------------------------------------------------------------------- #
-def patch_login_js() -> int:
-    path = VIEWS_DIR / "login.js"
-    src = path.read_text(encoding="utf-8")
+def transform_login_js(src: str) -> tuple[str, int]:
+    """Rend le nouveau contenu de `login.js` et le nombre de `t()` poses.
+
+    Transformation PURE : elle ne lit ni n'ecrit aucun fichier. Le decouplage
+    entre « calculer » et « ecrire » est ce qui permet au script de tout
+    verifier avant de toucher au depot.
+    """
     n = 0
 
     # Import i18n
@@ -334,13 +355,11 @@ def patch_login_js() -> int:
             src = src.replace(old, new, 1)
             n += 1
 
-    path.write_text(src, encoding="utf-8")
-    return n
+    return src, n
 
 
-def patch_plex_js() -> int:
-    path = VIEWS_DIR / "plex.js"
-    src = path.read_text(encoding="utf-8")
+def transform_plex_js(src: str) -> tuple[str, int]:
+    """Transformation PURE de `plex.js` (cf. `transform_login_js`)."""
     n = 0
 
     if 'from "../core/i18n.js"' not in src:
@@ -447,13 +466,11 @@ def patch_plex_js() -> int:
         src = src.replace(test_old, test_new, 1)
         n += 11
 
-    path.write_text(src, encoding="utf-8")
-    return n
+    return src, n
 
 
-def patch_radarr_js() -> int:
-    path = VIEWS_DIR / "radarr.js"
-    src = path.read_text(encoding="utf-8")
+def transform_radarr_js(src: str) -> tuple[str, int]:
+    """Transformation PURE de `radarr.js` (cf. `transform_login_js`)."""
     n = 0
 
     if 'from "../core/i18n.js"' not in src:
@@ -598,8 +615,15 @@ def patch_radarr_js() -> int:
         src = src.replace(test_old, test_new, 1)
         n += 14
 
-    path.write_text(src, encoding="utf-8")
-    return n
+    return src, n
+
+
+#: Vues a patcher, dans l'ordre, avec leur transformation PURE.
+VIEW_TRANSFORMS = (
+    ("login.js", transform_login_js),
+    ("plex.js", transform_plex_js),
+    ("radarr.js", transform_radarr_js),
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -680,9 +704,83 @@ def test_parity_count(en_keys: set[str], fr_keys: set[str]) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Main                                                                        #
+# Ecriture transactionnelle                                                   #
 # --------------------------------------------------------------------------- #
-def main() -> int:
+def _ecrire_fichier(path: Path, texte: str) -> None:
+    """Ecrit `texte` en conservant la fin de ligne DEJA en place dans le fichier.
+
+    La copie de travail du depot est en CRLF, l'index en LF. Ecrire en `\\n` un
+    fichier qui est en `\\r\\n` fait voir a Git le fichier ENTIER comme modifie,
+    alors qu'une seule cle a bouge.
+    """
+    fin = os.linesep.encode()
+    if path.exists():
+        brut = path.read_bytes()
+        fin = b"\r\n" if brut.count(b"\r\n") > brut.count(b"\n") // 2 else b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(texte.replace("\r\n", "\n").encode("utf-8").replace(b"\n", fin))
+
+
+def _annuler(ecrits: list[tuple[Path, bytes | None]]) -> None:
+    """Restaure a l'octet pres les fichiers deja ecrits, dans l'ordre inverse."""
+    for path, original in reversed(ecrits):
+        try:
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(original)
+        except OSError as exc:  # pragma: no cover - defense en profondeur
+            print(f"  ! restauration IMPOSSIBLE pour {path} : {exc}")
+
+
+def appliquer_plan(plan: list[tuple[Path, str]]) -> int:
+    """Ecrit tout le plan, ou rien.
+
+    Chaque contenu d'origine est capture EN BINAIRE avant son ecriture ; si une
+    ecriture echoue, toutes les precedentes sont defaites. Une ecriture
+    partielle est le pire des trois etats possibles : ni l'avant, ni l'apres, et
+    aucune trace de ce qui manque.
+    """
+    ecrits: list[tuple[Path, bytes | None]] = []
+    try:
+        for path, texte in plan:
+            ecrits.append((path, path.read_bytes() if path.exists() else None))
+            _ecrire_fichier(path, texte)
+    except OSError as exc:
+        _annuler(ecrits)
+        print(f"ECHEC d'ecriture : {exc}")
+        print(f"  {len(ecrits)} ecriture(s) ANNULEE(S) — le depot est revenu a son etat initial.")
+        return 1
+    print(f"  {len(plan)} fichier(s) ecrit(s).")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# Preflight + construction du plan                                            #
+# --------------------------------------------------------------------------- #
+def preflight() -> list[str]:
+    """Liste les cibles introuvables. Vide = le script peut aller au bout.
+
+    Sans ce controle, le script ecrivait les deux locales et `login.js`, PUIS
+    levait `FileNotFoundError` sur `plex.js` — absent du depot depuis que les
+    vues Plex et Radarr ont ete fondues dans l'ecran Parametres. La commande
+    documentee en tete de ce fichier laissait donc trois fichiers modifies et
+    l'etape 4 jamais executee.
+    """
+    manquantes: list[str] = []
+    for path in (EN_PATH, FR_PATH):
+        if not path.is_file():
+            manquantes.append(str(path))
+    for nom, _transform in VIEW_TRANSFORMS:
+        if not (VIEWS_DIR / nom).is_file():
+            manquantes.append(str(VIEWS_DIR / nom))
+    if not TESTS_DIR.is_dir():
+        manquantes.append(str(TESTS_DIR))
+    return manquantes
+
+
+def _plan_locales(plan: list[tuple[Path, str]]) -> None:
+    """Ajoute au plan les deux locales fusionnees, et rend compte du delta."""
     en = json.loads(EN_PATH.read_text(encoding="utf-8"))
     fr = json.loads(FR_PATH.read_text(encoding="utf-8"))
 
@@ -706,40 +804,73 @@ def main() -> int:
     if isinstance(fr.get("_meta"), dict):
         fr["_meta"]["version"] = "1.2.0"
 
-    FR_PATH.write_text(
-        json.dumps(fr, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    EN_PATH.write_text(
-        json.dumps(en, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-
-    fr2 = json.loads(FR_PATH.read_text(encoding="utf-8"))
-    en2 = json.loads(EN_PATH.read_text(encoding="utf-8"))
-    en_flat = flatten(en2)
-    fr_flat = flatten(fr2)
+    en_flat = flatten(en)
+    fr_flat = flatten(fr)
     print(f"APRES : EN={len(en_flat)}  FR={len(fr_flat)}")
     print(f"  EN-FR diff : {sorted(set(en_flat) - set(fr_flat))}")
     print(f"  FR-EN diff : {sorted(set(fr_flat) - set(en_flat))}")
     print(f"  Traductions FR ajoutees    : {added_fr_trans}")
 
-    # 3) Patch des vues JS
-    n_login = patch_login_js()
-    n_plex = patch_plex_js()
-    n_radarr = patch_radarr_js()
-    print(f"  t() ajoutes login.js   : {n_login}")
-    print(f"  t() ajoutes plex.js    : {n_plex}")
-    print(f"  t() ajoutes radarr.js  : {n_radarr}")
-    print(f"  Total t() ajoutes      : {n_login + n_plex + n_radarr}")
+    plan.append((FR_PATH, json.dumps(fr, indent=2, ensure_ascii=False) + "\n"))
+    plan.append((EN_PATH, json.dumps(en, indent=2, ensure_ascii=False) + "\n"))
 
-    # 4) Test parite
-    test_path = TESTS_DIR / "test_phase6_i18n_parity.py"
-    test_path.write_text(PARITY_TEST, encoding="utf-8")
-    print(f"  Test cree : {test_path}")
 
-    return 0
+def _plan_vues(plan: list[tuple[Path, str]]) -> None:
+    """Ajoute au plan les vues JS patchees, et rend compte des `t()` poses."""
+    total = 0
+    for nom, transform in VIEW_TRANSFORMS:
+        path = VIEWS_DIR / nom
+        nouveau, n = transform(path.read_text(encoding="utf-8"))
+        total += n
+        print(f"  t() ajoutes {nom:<12} : {n}")
+        plan.append((path, nouveau))
+    print(f"  Total t() ajoutes      : {total}")
+
+
+def construire_plan() -> list[tuple[Path, str]]:
+    """Calcule TOUT le contenu a ecrire sans toucher au disque."""
+    plan: list[tuple[Path, str]] = []
+    _plan_locales(plan)
+    _plan_vues(plan)
+    plan.append((TESTS_DIR / "test_phase6_i18n_parity.py", PARITY_TEST))
+    return plan
+
+
+# --------------------------------------------------------------------------- #
+# Main                                                                        #
+# --------------------------------------------------------------------------- #
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Synchronise les locales FR/EN et patche les vues legacy.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Calcule et affiche le travail sans ecrire un seul fichier.",
+    )
+    args = parser.parse_args(argv)
+
+    manquantes = preflight()
+    if manquantes:
+        print("PREFLIGHT : cible(s) introuvable(s), AUCUN fichier n'a ete modifie.")
+        for chemin in manquantes:
+            print(f"  ABSENT : {chemin}")
+        print("Le depot est intact. Corriger la liste des cibles avant de relancer.")
+        return 2
+
+    plan = construire_plan()
+
+    if args.dry_run:
+        print("--dry-run : aucun fichier ecrit. Seraient reecrits :")
+        for path, _texte in plan:
+            print(f"  {path}")
+        return 0
+
+    return appliquer_plan(plan)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Reencodage de la console reserve a l'execution en ligne de commande. Pose
+    # au niveau du MODULE, il s'appliquait au seul fait d'importer le script :
+    # il remplacait le `sys.stdout` de l'appelant et fermait l'ancien, ce qui
+    # detruit la capture de pytest — le script n'etait donc pas mesurable.
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.exit(main(sys.argv[1:]))

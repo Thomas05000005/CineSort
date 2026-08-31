@@ -16,26 +16,23 @@ from typing import Any, Dict, List, Optional, Tuple
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
+# VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
+# domain<->domain core -> duplicate_support -> (lazy) naming -> core.
+# `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
+# compat avec les callers externes (apply_core, plan_support_*, etc.).
+from cinesort.domain.path_utils import windows_safe
+
 # --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
 # Symetrique a `tmdb_tag` produit par build_naming_context (ligne ~191).
 # Supporte les variantes Plex / Jellyfin / Radarr / TRaSH :
 #   {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345}, {tmdb_12345}
 #   [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567]
 # La regex tolere espaces internes et casse melangee.
-_PROVIDER_TMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*tmdb(?:id)?\s*[\-:_]\s*(\d{1,9})\s*[\}\]]",
-    re.IGNORECASE,
-)
-_PROVIDER_IMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*imdb(?:id)?\s*[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
-    re.IGNORECASE,
-)
-
-# VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
-# domain<->domain core -> duplicate_support -> (lazy) naming -> core.
-# `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
-# compat avec les callers externes (apply_core, plan_support_*, etc.).
-from cinesort.domain.path_utils import windows_safe
+#
+# Fix ultra-audit 2026-08-31 (#9) : ce module portait la SEULE des trois copies
+# qui tenait cette promesse d'espaces internes. Elle est desormais la seule tout
+# court, hebergee par `scene_parser` (feuille du domaine, sans import interne).
+from cinesort.domain.scene_parser import _PROVIDER_IMDB_TAG_RE, _PROVIDER_TMDB_TAG_RE
 
 logger = logging.getLogger(__name__)
 
@@ -500,9 +497,28 @@ def validate_template(template: str) -> Tuple[bool, List[str]]:
     return len(errors) == 0, errors
 
 
-def check_path_length(root: str, folder_name: str) -> Optional[str]:
-    """Verifie si le path resultant depasse le seuil de warning. Retourne le message ou None."""
-    full = f"{root}\\{folder_name}"
+def check_path_length(root: str, folder_name: str, inner_name: str = "") -> Optional[str]:
+    """Avertissement PREVENTIF : le chemin cible approche-t-il MAX_PATH ?
+
+    Retourne le message, ou None si le chemin est confortable.
+
+    Fix ultra-audit 2026-08-31 (#15). Deux defauts de la meme famille :
+
+    1. **Le garde ne voyait pas ce que le kill-switch tue.** Il mesurait
+       `root\\dossier` a 240 quand `check_path_length_killswitch` mesure le
+       chemin cible COMPLET a 259. Or `windows_safe` tronque deja le nom de
+       dossier a 180 : la longueur qui tue vient du nom de fichier INTERNE, que
+       ce garde ne recevait pas. Mesure, root='D:\\Films', dossier de 180 chars,
+       fichier interne de 74 chars -> kill-switch : PATH_TOO_LONG (260 chars) ;
+       ce garde : None. Un seuil plus BAS qui ne peut pas se declencher avant
+       le seuil plus HAUT n'est pas un garde, c'est un decor. `inner_name` rend
+       les deux mesures comparables ; sans lui, le comportement est inchange.
+    2. **Il n'avait AUCUN appelant de production** (`grep` : sa definition et
+       deux fichiers de tests). Il est desormais appele par `apply_core`, sur
+       le meme chemin candidat que le kill-switch, juste avant lui.
+    """
+    parts = [root, folder_name] + ([inner_name] if inner_name else [])
+    full = "\\".join(parts)
     if len(full) > _PATH_LENGTH_WARNING:
         return f"Chemin long ({len(full)} chars, seuil {_PATH_LENGTH_WARNING}) : {full[:80]}..."
     return None

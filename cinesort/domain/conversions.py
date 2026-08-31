@@ -154,13 +154,23 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
     """Parse *value* en bitrate (bits/s), retourne None si vide / invalide.
 
     Accepte les unites usuelles : Gb/s, Mb/s, Kb/s (binaire et decimal).
+
+    Les arrondis passent par `to_optional_int` plutot que par un `int(round(...))`
+    nu : ce frere du meme module porte DEJA la garde `OverflowError`, qui derive
+    d'`ArithmeticError` et PAS de `ValueError` (meme piege que la regle 4 du
+    CLAUDE.md sur `sqlite3.Error`). Sans elle, `round(float("inf"))` levait avant
+    meme le `int()`, et l'exception traversait ce helper « tolerant » alors qu'il
+    promet `None` — or `json.loads` accepte `Infinity` par defaut et ce helper est
+    le delegue de `infra.probe.normalize._to_bitrate_int`, nourri de valeurs
+    PERSISTEES. Deleguer plutot que recopier la garde : deux implementations de la
+    meme garantie divergent au premier reglage.
     """
     if value is None:
         return None
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return int(round(value))
+        return to_optional_int(value)
     s = str(value or "").strip().lower().replace(" ", " ")
     if not s:
         return None
@@ -172,11 +182,14 @@ def to_optional_bitrate(value: Any) -> Optional[int]:
         except (TypeError, ValueError):
             base = 0.0
         unit = unit_m.group(2)
+        # Meme delegation : `float("9" * 400)` vaut `inf` SANS lever, donc un
+        # champ de probe absurde ("999...9 Mb/s") produisait ici un `inf` puis un
+        # `OverflowError` a l'arrondi.
         if unit.startswith("gb") or unit.startswith("gi"):
-            return int(round(base * 1_000_000_000))
+            return to_optional_int(base * 1_000_000_000)
         if unit.startswith("mb") or unit.startswith("mi"):
-            return int(round(base * 1_000_000))
-        return int(round(base * 1_000))
+            return to_optional_int(base * 1_000_000)
+        return to_optional_int(base * 1_000)
     return to_optional_int(s)
 
 

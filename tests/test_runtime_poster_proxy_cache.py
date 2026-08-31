@@ -289,6 +289,64 @@ class PosterProxyCacheTests(unittest.TestCase):
         # Aucun appel reseau (cache hit prime sur fetch).
         self.assertEqual(fake_session.get.call_count, 0)
 
+    def test_cache_peuple_sans_cle_tmdb_sert_200_et_non_503(self) -> None:
+        """Cache peuple + cle TMDb ABSENTE -> 200 depuis le cache, pas 503.
+
+        C'est l'etat d'un profil dont le blob DPAPI ne se dechiffre plus, ou
+        d'une cle effacee. `serve_poster` resolvait le client TMDb AVANT de
+        consulter le cache et sortait en 503 : les jaquettes de TOUT le
+        dashboard (9 sites du front : grille bibliotheque w185, fiche film
+        w342, et le constructeur d'URL de core/dom.js) devenaient des erreurs
+        alors que chaque image etait sur le disque.
+
+        Asymetrie mesuree le 2026-08-28 en bac a sable : sur le MEME id en
+        cache, l'appelant loopback recevait 503 et l'appelant cross-site
+        recevait l'image — l'appelant le moins fiable etait le mieux servi.
+
+        Le garde voisin `test_offline_with_populated_cache_serves_200` ne
+        pouvait pas le voir : il MOCKE `_build_or_get_tmdb_client` pour rendre
+        un client, donc il saute par-dessus l'endroit ou le defaut vit. Et
+        `_setup_state_dir` pose toujours une cle par defaut : aucun test de ce
+        fichier n'exercait l'etat « pas de cle ».
+        """
+        # Reecrit settings.json SANS cle (le defaut en pose une).
+        cache_root = _setup_state_dir(self.state_dir, api_key="")
+        size_dir = cache_root / "w342"
+        size_dir.mkdir(parents=True, exist_ok=True)
+        (size_dir / "777.webp").write_bytes(b"CACHE_SANS_CLE_TMDB")
+
+        # Aucun mock : on injecte la panne a la couche de PRODUCTION, c'est-a-dire
+        # l'absence reelle de cle dans settings.json.
+        handler = _FakeHandler()
+        poster_proxy.serve_poster(
+            handler,
+            self.state_dir,
+            cache_root,
+            {"id": "777", "size": "w342"},
+        )
+
+        self.assertEqual(
+            handler.status_code,
+            200,
+            f"une jaquette DEJA en cache doit etre servie meme sans cle TMDb ; status={handler.status_code}",
+        )
+        self.assertEqual(handler.body.getvalue(), b"CACHE_SANS_CLE_TMDB")
+
+    def test_sans_cle_tmdb_et_sans_cache_reste_503(self) -> None:
+        """CONTRE-TEST : servir le cache sans cle ne doit pas transformer un
+        cache MISS en autre chose. Sans cle et sans cache, le proxy reste
+        inoperant et le dit — 503 « Proxy TMDb non configure ».
+        """
+        cache_root = _setup_state_dir(self.state_dir, api_key="")
+        handler = _FakeHandler()
+        poster_proxy.serve_poster(
+            handler,
+            self.state_dir,
+            cache_root,
+            {"id": "778", "size": "w342"},
+        )
+        self.assertEqual(handler.status_code, 503, f"status={handler.status_code}")
+
 
 class TestAtomicWriteConcurrency(unittest.TestCase):
     """Regression CWE-362 : `_atomic_write` sous ecriture multi-thread.
