@@ -35,7 +35,7 @@ jobs:
             Elle sera fermee dans 14 jours sans nouveau commentaire.
 
             **Pour la garder ouverte** : ajoutez un commentaire ou retirez
-            le label `stale`. Les issues avec le label `pinned`, `bug`,
+            le label `stale`. Les issues avec le label `blocked`, `bug`,
             `security` ou `documentation` ne sont jamais fermees.
           close-issue-message: |
             🗄️ Issue fermee automatiquement faute d'activite.
@@ -43,7 +43,13 @@ jobs:
             **N'hesitez pas a la rouvrir** si le sujet est toujours pertinent !
 
           # Exempt labels : on ne ferme JAMAIS ces issues
-          exempt-issue-labels: "pinned,security,help-wanted,good-first-issue,bug,documentation,high-priority"
+          # TOUS CES LABELS EXISTENT — verifie par `test_stale_ne_nomme_que_des_labels_REELS`.
+          # Une liste d'exemptions qui nomme un label inexistant donne l'illusion
+          # d'un filet : il ne peut structurellement jamais s'appliquer.
+          # Mesure du 2026-08-31 : `pinned` etait fantome, et `good-first-issue`
+          # aussi — le vrai nom porte des ESPACES (`good first issue`).
+          # `pinned` est remplace par `blocked`, qui existe et sert deja.
+          exempt-issue-labels: "blocked,security,help-wanted,good first issue,bug,documentation,high-priority"
 
           # ===== Pull Requests =====
           days-before-pr-stale: 30  # 1 mois -> stale
@@ -60,7 +66,16 @@ jobs:
             **Si le travail reprend, vous pouvez la rouvrir** ou en creer une
             nouvelle.
 
-          exempt-pr-labels: "pinned,security,wip,work-in-progress,blocked"
+          # `pinned`, `wip` et `work-in-progress` etaient FANTOMES : trois des cinq
+          # exemptions ne pouvaient jamais s'appliquer. Elles sont elaguees plutot
+          # que creees — `blocked` couvre deja l'intention, et le brouillon a une
+          # option NATIVE qui ne depend d'aucun label (voir `exempt-draft-pr`).
+          exempt-pr-labels: "blocked,security"
+
+          # Un brouillon est un travail en cours par DEFINITION. C'est ce que
+          # `wip`/`work-in-progress` visaient sans y parvenir : cette option-ci
+          # ne depend d'aucun label, donc elle ne peut pas devenir fantome.
+          exempt-draft-pr: true
 
           # ===== General =====
           operations-per-run: 100  # max 100 issues/PRs traitees par run
