@@ -151,13 +151,29 @@ class SchemasContreLePayloadReelTests(unittest.TestCase):
             "des validations. Relever la forme dans find_duplicate_targets.",
         )
 
-    def test_aucun_champ_de_la_reponse_doublons_nest_requis(self) -> None:
-        requis = sorted(nom for nom, champ in CheckDuplicatesResponse.model_fields.items() if champ.is_required())
+    def test_tout_champ_REQUIS_est_present_dans_le_payload_reel(self) -> None:
+        """Un requis absent de la charge utile fait echouer 100 % des validations.
+
+        Formulation d'origine : `assertEqual(requis, [])`. Elle attrapait bien le
+        defaut vise (`run_id` exige mais jamais pose), mais elle GELAIT le vide :
+        elle interdisait a jamais d'exiger meme `ok`, que les DEUX branches du
+        producteur posent pourtant systematiquement — `run_flow_support` rend
+        `{"ok": True, **data}` en succes et `_err_response` pose `ok: False` en
+        echec. Un garde qui interdit de se renforcer n'est plus un garde, c'est un
+        plafond.
+
+        La question juste est la SUBORDINATION : tout champ requis doit figurer
+        dans la charge utile reelle. Elle attrape exactement le meme defaut et
+        laisse le schema se durcir quand la production le permet.
+        """
+        payload = self._payload_check_duplicates()
+        requis = {nom for nom, champ in CheckDuplicatesResponse.model_fields.items() if champ.is_required()}
+        absents = sorted(requis - set(payload))
         self.assertEqual(
-            requis,
+            absents,
             [],
-            f"Champ(s) requis {requis} : le payload de check_duplicates n'en porte AUCUN "
-            "obligatoirement, un requis fait echouer la validation a chaque appel.",
+            f"Champ(s) requis absents du payload reel : {absents}. C'est ainsi que "
+            "`run_id` faisait echouer 100 % des validations de check_duplicates.",
         )
 
     # ------------------------------------------------------------------

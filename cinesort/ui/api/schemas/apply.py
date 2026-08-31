@@ -61,22 +61,6 @@ class ApplyRequest(BaseModel):
     )
 
 
-class ApplyOperationError(BaseModel):
-    """Forme HISTORIQUE d'une erreur d'operation, jamais produite par ce depot.
-
-    Conservee parce qu'elle est re-exportee ; elle n'entre plus dans
-    `ApplyResponse`. Le payload reel ne porte aucune liste d'erreurs : il porte
-    un COMPTEUR `result.errors` (int) et des messages sous
-    `result.error_messages`.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    row_id: str = Field(default="")
-    code: str = Field(default="", description="Code d'erreur stable (cf BUG-* / quality codes).")
-    message: str = Field(default="", description="Message lisible (peut etre i18n-resolu cote front).")
-
-
 class ApplyResponse(BaseModel):
     """Sortie de `RunFacade.apply`.
 
