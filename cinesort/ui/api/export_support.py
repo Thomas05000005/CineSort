@@ -27,6 +27,33 @@ logger = logging.getLogger(__name__)
 
 # Cf issue #95 : ces cles ne doivent JAMAIS apparaitre dans l'export.
 # Tout le reste des settings est inclus pour permettre une re-import.
+#
+# CETTE LISTE N'EST PLUS LE CRITERE — elle en est le complement.
+#
+# Mesure du 2026-08-31 : `email_smtp_password`, le mot de passe SMTP reel du
+# produit (`app/email_report.py:168`, `ui/api/cinesort_api.py:1529`), sortait
+# EN CLAIR dans tout export de reglages. La liste portait `smtp_password`, une
+# cle qu'AUCUN code du depot ne lit : le masquage s'appliquait a un fantome
+# pendant que le vrai secret passait.
+#
+# `docs/EXPORT_FORMAT.md` promet le masquage, et l'export est precisement le
+# fichier qu'un utilisateur partage pour demander de l'aide.
+#
+# LE DEPOT AVAIT DEJA TRANCHE, AILLEURS. `infra/log_scrubber.py:28-32` explique
+# pourquoi son motif JSON couvre tout suffixe `_api_key` / `_token` /
+# `_password` / `_secret` : « cela attrape `email_smtp_password`, `omdb_api_key`,
+# etc. SANS DEVOIR MAINTENIR UNE LISTE EXHAUSTIVE ». Le meme raisonnement vaut
+# ici, et la meme cle y est nommee. Une liste exhaustive est un inventaire a
+# tenir a jour ; un suffixe est une propriete du nom.
+#
+# Mesure du predicat sur les 157 reglages reellement lus par le produit :
+#   masques   7  — les 6 deja couverts + `email_smtp_password`
+#   faux pos. 0  — `rest_api_key_path` (un CHEMIN), `remember_key`,
+#                  `tmdb_key_protection` restent en clair, correctement.
+#
+# Les dix entrees ci-dessous finissent TOUTES par un de ces suffixes : elles
+# sont donc redondantes avec le predicat. On les garde comme filet pour un
+# secret futur qui ne suivrait pas la convention de nommage.
 _SECRET_KEYS = frozenset(
     {
         "tmdb_api_key",
@@ -45,6 +72,27 @@ _SECRET_KEYS = frozenset(
     }
 )
 
+#: Suffixes qui font d'un nom de reglage un secret. Repris de la politique de
+#: `infra/log_scrubber.py` — voir le bloc au-dessus de `_SECRET_KEYS`.
+_SUFFIXES_DE_SECRET = ("_api_key", "_apikey", "_api-key", "_token", "_password", "_secret")
+
+#: Memes notions employees NUES comme nom de reglage.
+_NOMS_DE_SECRET_NUS = frozenset({"api_key", "apikey", "api-key", "token", "password", "secret"})
+
+
+def _est_un_secret(cle: Any) -> bool:
+    """Vrai si ce NOM de reglage designe un secret.
+
+    Le critere est le nom, pas l'appartenance a une liste : c'est ce qui
+    distingue une garde d'un inventaire. Un reglage ajoute demain et nomme
+    selon la convention du depot est couvert sans que personne y pense.
+    """
+    nom = str(cle or "").strip().lower()
+    if not nom:
+        return False
+    return nom in _SECRET_KEYS or nom in _NOMS_DE_SECRET_NUS or nom.endswith(_SUFFIXES_DE_SECRET)
+
+
 EXPORT_FORMAT_VERSION = "1.0"
 
 
@@ -52,7 +100,7 @@ def _sanitize_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Retire les secrets DPAPI/API keys d'un dict de settings."""
     out: Dict[str, Any] = {}
     for key, value in settings.items():
-        if key in _SECRET_KEYS:
+        if _est_un_secret(key):
             # On conserve l'existence du champ avec valeur sentinelle mais
             # pas le contenu — permet de savoir qu'il y avait une cle sans
             # la divulguer.

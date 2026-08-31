@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -47,6 +48,37 @@ def _make_dir_link(link: Path, target: Path) -> None:
     link.symlink_to(target, target_is_directory=True)
 
 
+#: Un nom de reglage qui DESIGNE un secret. Volontairement plus large que le
+#: predicat de production (`export_support._est_un_secret`) : si les deux
+#: etaient identiques, le test ne ferait que reciter le code qu'il verifie.
+#: Celui-ci part des MOTS, celui-la des suffixes — un secret nomme
+#: `password_smtp` serait vu ici et raterait la production, ce qui est le sens
+#: utile de l'ecart.
+_NOM_SENSIBLE = re.compile(r"(api[_-]?key|token|password|secret)$", re.IGNORECASE)
+
+#: Les deux formes par lesquelles le produit LIT un reglage.
+_LECTURE_1 = re.compile(r"""settings(?:\.get\(|\[)\s*["']([a-z0-9_]+)["']""", re.IGNORECASE)
+_LECTURE_2 = re.compile(r"""(?:read_settings|_settings|cfg)\w*\.get\(\s*["']([a-z0-9_]+)["']""", re.IGNORECASE)
+
+
+def _reglages_lus_par_le_produit() -> set:
+    """Les noms de reglages que le code lit reellement.
+
+    Deriver le corpus du CODE et non d'une liste est tout l'objet : une liste
+    ne peut pas signaler ce qui lui manque."""
+    racine = Path(__file__).resolve().parents[1]
+    noms: set = set()
+    for dossier in ("cinesort",):
+        for fichier in (racine / dossier).rglob("*.py"):
+            try:
+                texte = fichier.read_text(encoding="utf-8", errors="ignore")
+            except OSError:  # pragma: no cover - lecture defensive
+                continue
+            noms |= set(_LECTURE_1.findall(texte))
+            noms |= set(_LECTURE_2.findall(texte))
+    return noms
+
+
 class SanitizeSettingsTests(unittest.TestCase):
     """Les secrets DPAPI doivent etre retires de l'export."""
 
@@ -68,12 +100,73 @@ class SanitizeSettingsTests(unittest.TestCase):
         self.assertEqual(out["plex_token"], "")
 
     def test_all_known_secret_keys_redacted(self) -> None:
+        """NOTE : ce test est TAUTOLOGIQUE et le reste volontairement.
+
+        Il construit son corpus DEPUIS `_SECRET_KEYS`, donc il verifie que la
+        liste masque ce que la liste contient. Il ne peut structurellement pas
+        voir une cle MANQUANTE — et c'est exactement ce qui est arrive :
+        `email_smtp_password` a fui pendant que ce test etait vert.
+
+        On le garde comme controle de non-regression du mecanisme, et le test
+        suivant, lui, derive son corpus du CODE REEL."""
         s = {k: "value" for k in _SECRET_KEYS}
         s["jellyfin_url"] = "http://j"  # un non-secret pour controle
         out = _sanitize_settings(s)
         for k in _SECRET_KEYS:
             self.assertEqual(out[k], "***REDACTED***", f"{k} pas masque")
         self.assertEqual(out["jellyfin_url"], "http://j")
+
+    def test_AUCUN_reglage_du_produit_qui_ressemble_a_un_secret_ne_sort_en_clair(self) -> None:
+        """LE test qui aurait attrape la fuite. Son corpus vient du CODE.
+
+        Mesure du 2026-08-31 : `_SECRET_KEYS` portait `smtp_password`, une cle
+        qu'AUCUN code du depot ne lit, pendant que `email_smtp_password` — le
+        mot de passe SMTP reel (`app/email_report.py:168`) — sortait EN CLAIR
+        dans tout export. `docs/EXPORT_FORMAT.md` promet pourtant le masquage,
+        et l'export est le fichier qu'un utilisateur partage pour demander de
+        l'aide.
+
+        Le test balaie les reglages REELLEMENT lus par le produit et exige que
+        chacun dont le NOM designe un secret ressorte masque. Un reglage ajoute
+        demain et nomme selon la convention est couvert sans que personne y
+        pense."""
+        reglages = _reglages_lus_par_le_produit()
+
+        self.assertGreater(len(reglages), 100, "le balayage n'a presque rien trouve : il ne mesure plus rien")
+
+        suspects = sorted(k for k in reglages if _NOM_SENSIBLE.search(k))
+        self.assertGreaterEqual(len(suspects), 5, f"corpus sans secret a masquer, le test serait vide : {suspects}")
+
+        out = _sanitize_settings({k: "valeur-non-vide" for k in suspects})
+        fuites = [k for k in suspects if out.get(k) != "***REDACTED***"]
+        self.assertEqual(
+            fuites,
+            [],
+            f"reglage(s) du produit dont le nom designe un secret et qui sortent EN CLAIR dans l'export : {fuites}",
+        )
+
+    def test_un_CHEMIN_ou_un_MODE_ne_sont_PAS_masques(self) -> None:
+        """Contre-epreuve, sans laquelle « tout masquer » passerait le test
+        precedent — et casserait la re-importation, qui est l'objet meme de
+        l'export.
+
+        Les trois cas viennent des reglages reels : `rest_api_key_path` est un
+        CHEMIN vers un fichier, pas une cle ; `tmdb_key_protection` est un mode ;
+        `remember_key` un booleen d'interface."""
+        out = _sanitize_settings(
+            {
+                "rest_api_key_path": "C:/un/chemin/cle.txt",
+                "tmdb_key_protection": "dpapi",
+                "remember_key": True,
+                "email_smtp_user": "moi@exemple.fr",
+                "jellyfin_url": "http://localhost:8096",
+            }
+        )
+        self.assertEqual(out["rest_api_key_path"], "C:/un/chemin/cle.txt")
+        self.assertEqual(out["tmdb_key_protection"], "dpapi")
+        self.assertEqual(out["remember_key"], True)
+        self.assertEqual(out["email_smtp_user"], "moi@exemple.fr")
+        self.assertEqual(out["jellyfin_url"], "http://localhost:8096")
 
     def test_masking_upstream_does_not_turn_an_absent_secret_into_a_present_one(self) -> None:
         """#526 (volet ECARTE) : un secret ABSENT reste distinguable d'un secret pose.
