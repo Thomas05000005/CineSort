@@ -28,9 +28,34 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CAPTURE_DIR = PROJECT_ROOT / "docs/internal/observe/2026-06-08_ITER10_LISIBILITE"
-CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+# Le dossier de capture est cree par main(), PAS a l'import : un outil de mesure
+# qui ecrit sur disque au seul fait d'etre importe n'est pas mesurable.
 OUT_FILE = CAPTURE_DIR / "iter10_gate_lisibilite.json"
 CDP_PORT = 9224  # different de observe.py (9223)
+
+#: SOURCE UNIQUE des libelles d'etapes de la vue Traitement, dans l'ordre.
+#:
+#: Ils etaient encodes TROIS fois dans `scripts/` : dans `EXPECTED_LABELS`
+#: (`step1`..`step5`, que personne ne relisait — un encodage MORT), dans la
+#: liste litterale de la boucle de verification ci-dessous, et dans
+#: `_iter10_gate_lisibilite_v2.py`. Renommer une etape dans l'application en
+#: laissait deux qui mentaient, dont un incapable de faire echouer quoi que ce
+#: soit. `_iter10_gate_lisibilite_v2.py` importe desormais cette liste.
+STEP_LABELS = ("Analyse", "Vérification", "Validation", "Doublons", "Application")
+
+#: SELECTEUR UNIQUE des libelles d'etapes dans le DOM.
+#:
+#: `web/dashboard/views/traitement.js` rend chaque libelle dans
+#: `<span class="traitement-step-label">`. Le gate cherchait avec
+#: `[data-step] .step-label, .step-card .step-label, .step-label, [data-step] span`
+#: — les QUATRE jetons sont absents de l'arbre front : l'attribut reel est
+#: `data-traitement-step` (`[data-step]` est un nom d'attribut EXACT, pas un
+#: prefixe), la classe reelle `traitement-step-label` (un selecteur de classe ne
+#: matche pas un prefixe non plus), et `.step-card` n'existe nulle part. La
+#: collecte rendait donc une liste VIDE et les cinq controles d'etape
+#: echouaient tous — sans consequence, puisque le code de sortie ne les
+#: regardait pas (cf. `gate_ok`).
+STEP_LABEL_SELECTOR = ".traitement-step-label"
 
 # Cibles labels-cles (mojibake exact-match)
 EXPECTED_LABELS = {
@@ -40,11 +65,8 @@ EXPECTED_LABELS = {
     "sidebar.quality": "Qualité",
     "sidebar.history": "Historique",
     "sidebar.settings": "Paramètres",
-    "step1": "Analyse",
-    "step2": "Vérification",
-    "step3": "Validation",
-    "step4": "Doublons",
-    "step5": "Application",
+    # Derives de STEP_LABELS : pas de second encodage.
+    **{f"step{i}": label for i, label in enumerate(STEP_LABELS, 1)},
 }
 
 # Tier invariantes (memoire user)
@@ -56,6 +78,88 @@ TIER_INVARIANTS = {
 }
 
 THEMES = ["studio", "cinema", "luxe", "neon"]
+
+
+#: Les quatre verdicts que le gate calcule, affiche — et qu'il ignorait.
+GATE_VERDICT_KEYS = (
+    "mojibake_OK",
+    "contraste_4_themes_OK",
+    "tier_colors_intactes",
+    "unmount_no_poll_OK",
+)
+
+
+def gate_ok(out: dict) -> bool:
+    """Verdict global du gate : la mesure a abouti ET les quatre verdicts sont verts.
+
+    `out["ok"]` etait pose a `True` **inconditionnellement**, a la fin du bloc
+    `try`, juste apres les mesures ; le code de sortie valait `0 if out["ok"]`.
+    Les quatre verdicts reellement calcules — `mojibake_OK`,
+    `contraste_4_themes_OK`, `tier_colors_intactes`, `unmount_no_poll_OK` —
+    etaient ecrits dans le JSON et imprimes sur stderr, mais n'entraient dans
+    aucune decision. Le gate ne pouvait echouer que lorsque Playwright levait,
+    c'est-a-dire quand la mesure n'avait PAS eu lieu : la seule chose qu'il
+    gardait etait sa propre execution.
+
+    Une cle absente vaut FAUX : un verdict qui n'a pas ete calcule n'est pas un
+    verdict vert.
+    """
+    if not out.get("measured"):
+        return False
+    return all(bool(out.get(key)) for key in GATE_VERDICT_KEYS)
+
+
+def verifier_etapes(steps: list[str]) -> dict:
+    """Confronte les libelles collectes dans le DOM a `STEP_LABELS`, DANS L'ORDRE.
+
+    Exact-match positionnel — ce que l'en-tete du module annonce depuis toujours
+    (« labels DOM == chaines UTF-8 attendues (exact-match) »). Le controle
+    d'origine faisait `any(expected in s for s in steps)` : n'importe quel noeud
+    CONTENANT le libelle suffisait, donc un seul conteneur portant les cinq
+    textes validait les cinq etapes d'un coup, et un libelle suffixe passait
+    aussi. Combine a un selecteur qui ne matchait rien, il ne restait aucune
+    mesure.
+    """
+    checks: dict = {}
+    for i, expected_label in enumerate(STEP_LABELS, 1):
+        actual = steps[i - 1] if i - 1 < len(steps) else ""
+        checks[f"step{i}"] = {
+            "expected": expected_label,
+            "actual": actual,
+            "actual_hex": actual.encode("utf-8").hex() if actual else "",
+            "actual_list": steps,
+            "ok": actual == expected_label,
+        }
+    return checks
+
+
+#: Controles presents dans `labels` mais EXCLUS du verdict : ils ne peuvent
+#: rendre que vert, donc les compter revient a diluer le verdict.
+INFORMATIVE_CHECKS = frozenset({"bullets_u2022"})
+
+
+def verdict_mojibake(checks: dict) -> dict:
+    """Verdict mojibake : AUCUN libelle reellement casse n'est tolere.
+
+    `checks["bullets_u2022"]` porte `"ok": True` EN DUR — c'est un controle
+    informatif, les champs masques n'etant pas forcement montes dans le DOM
+    courant. Le verdict appliquait par-dessus une tolerance d'un echec,
+    commentee « tolerance 1 (bullets) ». Or le controle bullets etant deja vert
+    par construction, cette tolerance ne le couvrait pas : elle restait
+    disponible pour un VRAI libelle. Un `Bibliothèque` rendu en mojibake passait
+    donc le gate — sur un gate dont c'est la raison d'etre.
+
+    Le controle informatif est desormais EXCLU du denominateur au lieu d'etre
+    compense par une tolerance, et le verdict exige l'unanimite du reste.
+    """
+    verdict_keys = [k for k in checks if k not in INFORMATIVE_CHECKS]
+    count_ok = sum(1 for k in verdict_keys if checks[k].get("ok"))
+    return {
+        "labels_ok_count": count_ok,
+        "labels_total": len(verdict_keys),
+        "labels_informatifs": sorted(set(checks) & INFORMATIVE_CHECKS),
+        "mojibake_OK": count_ok == len(verdict_keys),
+    }
 
 
 def _wait_port(host: str, port: int, timeout: int = 60) -> bool:
@@ -77,8 +181,11 @@ def main() -> int:
         "contrast": {},
         "tier_runtime": {},
         "unmount": {},
+        "measured": False,
         "ok": False,
     }
+
+    CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Lance python app.py --dev en CDP 9224, state isole.
     isolated_state = CAPTURE_DIR / "_iter10_state"
@@ -92,9 +199,7 @@ def main() -> int:
         "auto_check_updates": False,
         "rest_api_port": 8651,
     }
-    (isolated_state / "CineSort" / "settings.json").write_text(
-        json.dumps(seed, indent=2), encoding="utf-8"
-    )
+    (isolated_state / "CineSort" / "settings.json").write_text(json.dumps(seed, indent=2), encoding="utf-8")
 
     env = os.environ.copy()
     env["CINESORT_E2E"] = "1"
@@ -105,8 +210,10 @@ def main() -> int:
     print(f"[iter10] launching app.py --dev CDP={CDP_PORT}", file=sys.stderr)
     proc = subprocess.Popen(
         [sys.executable, str(PROJECT_ROOT / "app.py"), "--dev"],
-        cwd=str(PROJECT_ROOT), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
     try:
@@ -116,6 +223,7 @@ def main() -> int:
             return 1
 
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as pw:
             browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
             ctx = browser.contexts[0]
@@ -180,26 +288,17 @@ def main() -> int:
             # Get steps from Traitement view
             page.evaluate("() => { window.location.hash = '/traitement'; }")
             page.wait_for_timeout(2500)
+            # Ordre du DOM conserve, aucune deduplication : le controle est
+            # POSITIONNEL, donc perdre un doublon decalerait tout le reste.
             steps = page.evaluate(
-                r"""() => {
-                    const els = document.querySelectorAll('[data-step] .step-label, .step-card .step-label, .step-label, [data-step] span');
-                    const out = [];
-                    els.forEach((el) => {
-                        const txt = el.textContent?.trim();
-                        if (txt && !out.includes(txt)) out.push(txt);
-                    });
-                    return out;
-                }"""
+                r"""(selector) => {
+                    return Array.from(document.querySelectorAll(selector))
+                        .map((el) => (el.textContent || '').trim());
+                }""",
+                STEP_LABEL_SELECTOR,
             )
             out["steps_raw"] = steps
-            for i, expected_label in enumerate(["Analyse", "Vérification", "Validation", "Doublons", "Application"], 1):
-                key = f"step{i}"
-                found = any(expected_label in s for s in steps)
-                checks[key] = {
-                    "expected": expected_label,
-                    "actual_list": steps,
-                    "ok": found,
-                }
+            checks.update(verifier_etapes(steps))
 
             # Bullets U+2022 for masked secrets in Parametres > Integrations
             page.evaluate("() => { window.location.hash = '/parametres'; }")
@@ -223,10 +322,7 @@ def main() -> int:
             }
 
             out["labels"] = checks
-            mojibake_count_ok = sum(1 for c in checks.values() if c.get("ok"))
-            out["labels_ok_count"] = mojibake_count_ok
-            out["labels_total"] = len(checks)
-            out["mojibake_OK"] = mojibake_count_ok >= len(checks) - 1  # tolerance 1 (bullets)
+            out.update(verdict_mojibake(checks))
 
             # Test 2 : CONTRASTE — pour chaque theme, calcul ratio runtime
             ratio_js = r"""
@@ -320,9 +416,7 @@ def main() -> int:
             out["contrast"] = contrast_results
             out["tier_runtime"] = tier_results
             out["contraste_4_themes_OK"] = all(
-                contrast_results[t]["ok_primary"]
-                and contrast_results[t]["ok_secondary"]
-                for t in THEMES
+                contrast_results[t]["ok_primary"] and contrast_results[t]["ok_secondary"] for t in THEMES
             )
 
             # Verifie tier invariantes : convertir chaque rgb(...) en hex et comparer
@@ -385,9 +479,11 @@ def main() -> int:
 
             # Test 4 : traitement polling (par defaut)
             polling_log2 = []
+
             def on_req2(req):
                 if "/api/run/get_status" in req.url:
                     polling_log2.append(req.url)
+
             page.on("request", on_req2)
             page.evaluate("() => { window.location.hash = '/traitement'; }")
             page.wait_for_timeout(3000)
@@ -406,12 +502,15 @@ def main() -> int:
                 "ok": new_t == 0,
             }
 
-            out["unmount_no_poll_OK"] = (out["unmount"]["ok"] and out["unmount_traitement"]["ok"])
+            out["unmount_no_poll_OK"] = out["unmount"]["ok"] and out["unmount_traitement"]["ok"]
 
-            out["ok"] = True
+            # La mesure est allee au bout. Le VERDICT, lui, se calcule a partir
+            # des quatre resultats (cf. gate_ok) — pas de l'absence d'exception.
+            out["measured"] = True
             browser.close()
     except Exception as exc:
         import traceback
+
         out["error"] = str(exc)
         out["traceback"] = traceback.format_exc()
     finally:
@@ -424,10 +523,15 @@ def main() -> int:
         except Exception:
             pass
 
+    out["ok"] = gate_ok(out)
+
+    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUT_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     print(f"[iter10] wrote {OUT_FILE}", file=sys.stderr)
-    print(f"[iter10] mojibake_OK={out.get('mojibake_OK')} contraste_4_themes_OK={out.get('contraste_4_themes_OK')} tier_colors_intactes={out.get('tier_colors_intactes')} unmount_no_poll_OK={out.get('unmount_no_poll_OK')}", file=sys.stderr)
-    return 0 if out.get("ok") else 1
+    verdicts = " ".join(f"{key}={out.get(key)}" for key in GATE_VERDICT_KEYS)
+    print(f"[iter10] measured={out.get('measured')} {verdicts}", file=sys.stderr)
+    print(f"[iter10] GATE {'OK' if out['ok'] else 'ECHEC'}", file=sys.stderr)
+    return 0 if out["ok"] else 1
 
 
 if __name__ == "__main__":
