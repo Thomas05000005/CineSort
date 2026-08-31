@@ -41,6 +41,10 @@ _RACINE = Path(__file__).resolve().parents[1]
 # et non un synonyme d'« absent ». Les lire avec `or` les detruit.
 _ZERO_SIGNIFIANT = ("history_retention_days", "quarantaine_ttl_days")
 
+#: Les DEUX chemins de demarrage qui arment un cron destructif : `--api`
+#: (`main_api`) et le mode bureau (`_startup`, imbriquee dans `main`).
+_CHEMINS_DE_BOOT = ("main_api", "_startup")
+
 
 class ReglageEntierTests(unittest.TestCase):
     """La decision : distinguer ABSENT de ZERO."""
@@ -145,6 +149,56 @@ class LeZeroATTEINTLeCronTests(unittest.TestCase):
                     f"{cle} doit etre lu par `reglage_entier` sur les DEUX chemins de boot "
                     f"(mode --api et mode desktop) ; trouve {vus.count(cle)}",
                 )
+
+    def test_les_deux_chemins_de_boot_lisent_CHACUN_le_reglage(self) -> None:
+        """Le compte ne dit pas OU. Signale par une revue automatique.
+
+        Le test ci-dessus exige DEUX appels par cle. Deux appels tous deux
+        places dans `main_api` le satisferaient, et le mode bureau perdrait
+        sa garde sans que rien ne rougisse. Un compte est un PROXY de la
+        propriete visee ; ici la propriete est l APPARTENANCE.
+
+        Chaque appel est attribue a sa fonction englobante la plus INTERNE :
+        `_startup` est imbriquee dans `main`, donc un simple `ast.walk` la
+        compte deux fois et ferait croire a trois chemins la ou il y en a
+        deux.
+        """
+        source = (_RACINE / "app.py").read_text(encoding="utf-8", errors="replace")
+        arbre = ast.parse(source)
+        porteur: dict[int, str] = {}
+        for fonction in ast.walk(arbre):
+            if not isinstance(fonction, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for noeud in ast.walk(fonction):
+                if (
+                    isinstance(noeud, ast.Call)
+                    and isinstance(noeud.func, ast.Name)
+                    and noeud.func.id == "reglage_entier"
+                    and len(noeud.args) >= 2
+                    and isinstance(noeud.args[1], ast.Constant)
+                ):
+                    # La derniere fonction vue est la plus interne : `ast.walk`
+                    # parcourt du plus externe au plus imbrique.
+                    porteur[id(noeud)] = fonction.name
+
+        par_fonction: dict[str, set] = {}
+        for fonction in ast.walk(arbre):
+            if not isinstance(fonction, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for noeud in ast.walk(fonction):
+                if porteur.get(id(noeud)) == fonction.name:
+                    par_fonction.setdefault(fonction.name, set()).add(noeud.args[1].value)
+
+        for cle in _ZERO_SIGNIFIANT:
+            for chemin in _CHEMINS_DE_BOOT:
+                with self.subTest(cle=cle, chemin=chemin):
+                    self.assertIn(
+                        cle,
+                        par_fonction.get(chemin, set()),
+                        f"{cle} n est pas lu par `reglage_entier` dans {chemin}. "
+                        "Le cron destructif de ce chemin de boot n a donc plus sa garde, "
+                        "meme si le COMPTE global reste a 2.",
+                    )
 
 
 if __name__ == "__main__":
