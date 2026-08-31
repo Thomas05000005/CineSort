@@ -531,6 +531,10 @@ def _delete_scope_rows(cur: sqlite3.Cursor, run_ids: list[str], scope_norm: str)
     purged = 0
     for start in range(0, len(rowids), 500):
         block = rowids[start : start + 500]
+        # La seule partie interpolee est la suite de `?` : les VALEURS sont
+        # parametrees, et les rowids viennent de la base elle-meme. C'est
+        # l'idiome oblige d'un `IN` de longueur variable en sqlite3 ; un
+        # analyseur qui signale B608 ici lit la f-string, pas ce qu'elle porte.
         placeholders = ",".join("?" for _ in block)
         cur.execute(f"DELETE FROM probe_cache WHERE rowid IN ({placeholders})", block)
         purged += max(cur.rowcount, 0)
