@@ -354,23 +354,56 @@ class RestSecurityHttpTests(unittest.TestCase):
         vraie_classe = module.HTTPConnection
         tentatives = {"n": 0}
 
+        class _ReponseSimulee:
+            """Ce que `_request` lit d'une reponse : `status`, `read`, `getheaders`."""
+
+            status = 200
+
+            @staticmethod
+            def read() -> bytes:
+                return b'{"ok": true}'
+
+            @staticmethod
+            def getheaders():
+                return [("Content-Type", "application/json")]
+
         class _ConnexionQuiExpireUneFois:
+            """Premiere tentative : `TimeoutError`. Suivantes : reponse SIMULEE.
+
+            LA DELEGATION AU VRAI SOCKET A ETE RETIREE, et c'est le correctif.
+            Les tentatives 2 et 3 passaient par le transport reel : sous charge,
+            elles pouvaient echouer POUR DE BON, les trois tentatives etaient
+            epuisees et `_request` levait `RuntimeError` AVANT toute assertion.
+            Mesure : run CI 33413784453, « 3 tentatives epuisees (TimeoutError) ».
+
+            Le premier correctif (borner `>= 2` et `<= 3` au lieu d'epingler
+            `== 2`) traitait le cas ou la deuxieme tentative echoue et la
+            troisieme aboutit. Il ne traitait pas celui ou les DEUX echouent.
+
+            Ce test mesure « le helper reessaie-t-il apres un `TimeoutError` ? ».
+            Cette question ne demande pas le reseau reel — et c'est precisement
+            le reseau reel qui la rendait indecidable une fois sur N. La panne
+            reste injectee au NIVEAU DU TRANSPORT, ce qui etait l'intention
+            d'origine : seule la reponse des tentatives suivantes est simulee.
+
+            L'integration avec le vrai serveur reste couverte par les 20 autres
+            tests de ce fichier, qui l'exercent tous.
+            """
+
             def __init__(self, *args, **kwargs):
                 tentatives["n"] += 1
                 self._premiere = tentatives["n"] == 1
-                self._delegue = None if self._premiere else vraie_classe(*args, **kwargs)
 
             def request(self, *args, **kwargs):
                 if self._premiere:
                     raise TimeoutError("timed out")
-                return self._delegue.request(*args, **kwargs)
+                return None
 
             def getresponse(self):
-                return self._delegue.getresponse()
+                return _ReponseSimulee
 
             def close(self):
-                if self._delegue is not None:
-                    self._delegue.close()
+                return None
 
         module.HTTPConnection = _ConnexionQuiExpireUneFois
         try:
