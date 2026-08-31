@@ -41,4 +41,4 @@ import-linter>=2.0,<3
 # donc par accident. Signale par une revue automatique, puis verifie :
 # `pre_commit` etait le SEUL paquet declare a l'exiger. Un test qui se met en
 # skip faute de dependance rend le meme vert qu'un test qui passe.
-PyYAML>=6.0,<7
+PyYAML>=6.0.3,<7
