@@ -11,7 +11,7 @@ import re
 # testing patche dataclasses.is_dataclass -> les tests cassent (preuve).
 from dataclasses import asdict as _asdict
 from dataclasses import is_dataclass as _is_dc
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.confidence_thresholds import confidence_label_fr
@@ -99,7 +99,13 @@ DEFAULT_PROFILE_VERSION = 1
 # codec). Les flags d'encode changent donc les scores deja persistes des films
 # cinemascope, des 4K severement re-encodees et des 1080p en codec exotique :
 # sans ce bump, ces rapports resteraient caches avec leur ancien verdict.
-SCORING_RULES_VERSION = 3
+# 3 -> 4 le 2026-08-29 : deux correctifs CHANGENT des scores et des paliers —
+# la penalite « 4K Light probable » etait annoncee sans etre appliquee, et
+# FLAC/PCM n'avaient aucun bonus. Sans cette incrementation,
+# `quality_report_support` rend un CACHE HIT sur tout rapport deja persiste
+# (`existing_rules_version == str(SCORING_RULES_VERSION)`) et le correctif
+# reste invisible en production sur les bibliotheques deja scorees.
+SCORING_RULES_VERSION = 4
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -486,6 +492,14 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     ab = profile["audio_bonuses"]
     for key in ("truehd_atmos_bonus", "dts_hd_ma_bonus", "dts_bonus", "aac_bonus"):
         ab[key] = max(0, _to_int(ab.get(key), base["audio_bonuses"][key]))
+    # `flac_pcm_bonus` est OPTIONNELLE — elle n'est dans aucun preset, son repli
+    # est calcule — mais pas dispensee de validation : sans cela une valeur non
+    # numerique dans un profil utilisateur atteignait `int()` PENDANT le scoring
+    # et levait ValueError. Le repli n'est pas 0 : ramener un lossless a zero
+    # violerait l'invariant que cette cle existe precisement pour tenir.
+    if "flac_pcm_bonus" in ab:
+        repli = max(1, _to_int(ab.get("dts_hd_ma_bonus"), 0) - 2)
+        ab["flac_pcm_bonus"] = max(0, _to_int(ab.get("flac_pcm_bonus"), repli))
     channels_raw = ab.get("channels_bonus_map")
     channels = base["audio_bonuses"]["channels_bonus_map"].copy()
     if isinstance(channels_raw, dict):
@@ -853,6 +867,86 @@ def _best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
 
+def _audio_track_is_probed(track: Any) -> bool:
+    """True quand la piste vient du fichier, False quand elle vient du nom.
+
+    `_merge_probe_with_name_hints` estampille les pistes qu'il SYNTHETISE avec
+    `_source = "name_fallback"`. Toute piste sans cette marque a ete lue par le
+    probe. C'est la seule provenance disponible au niveau de la piste, et donc
+    le pivot de toutes les gardes « le nom n'est pas une mesure ».
+    """
+    if not isinstance(track, dict):
+        return False
+    return str(track.get("_source") or "").strip().lower() != "name_fallback"
+
+
+def _measured_audio_tracks_count(audio_tracks: Any) -> int:
+    """Nombre de pistes REELLEMENT lues dans le fichier.
+
+    Audit 2026-08-31 : `metrics.detected.audio_tracks_count` comptait la piste
+    fantome synthetisee depuis le nom de release, si bien que l'ecran Detail
+    affichait « Pistes audio : 1 » pour un fichier dont le probe n'avait rien
+    trouve. Le champ vit sous `detected` : il ne compte que ce qui a ete
+    detecte. `metrics.sources.audio` porte l'explication du codec affiche.
+    """
+    if not isinstance(audio_tracks, list):
+        return 0
+    return sum(1 for t in audio_tracks if _audio_track_is_probed(t))
+
+
+def _build_hierarchy_dimensions(
+    *,
+    vr: Dict[str, Any],
+    best_audio: Dict[str, Any],
+    name_info: Optional[ReleaseNameInfo],
+    sources: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Dimensions techniques soumises a la hierarchie de tiers (VP-B).
+
+    UNE regle gouverne ce dict : un plancher de tier ne s'arme que sur ce qui a
+    ete MESURE. Le nom de release peut mentir, et un plancher est une promotion
+    seche de plusieurs tiers -- c'est le levier le plus violent du moteur.
+
+    Fix trash-r6-001 (2026-06-04) pour le HDR : un fichier 720p AAC dont le nom
+    porte '*.DV.*' obtenait le floor 'dolby_vision' -> Gold a tort (promotion de
+    4 tiers sur un faux DV). Cf docstring tiers_helpers.py ('DV seul ne sera
+    applique qu'en presence de probe verifie').
+
+    Audit 2026-08-31 : la dimension AUDIO n'avait AUCUN equivalent. Quand le
+    probe ne rend aucune piste, `_merge_probe_with_name_hints` en synthetise une
+    depuis le nom, et `_hierarchy_audio_codec_token` la traduisait en
+    'truehd_atmos' -> floor Gold par defaut. MESURE sur un 1080p AVC 1200 kb/s
+    sans aucune piste audio : `Film.2020.1080p.WEB-DL.TrueHD.Atmos.7.1-X` passait
+    de **Reject a Gold**, soit la meme promotion de 4 tiers que celle que le
+    correctif HDR avait fermee deux mois plus tot, par la porte d'a cote.
+
+    Backward compat : les profils sans tier_hierarchy.enabled=True ne sont PAS
+    impactes (bloc deja gate par `enabled` cote `_apply_tier_hierarchy`).
+    """
+    hdr_source = ""
+    sources_video_local = sources.get("video") if isinstance(sources, dict) else None
+    if isinstance(sources_video_local, dict):
+        hdr_source = str(sources_video_local.get("hdr") or "").strip().lower()
+    hdr_is_probe = hdr_source != "name_fallback"
+    audio_is_probe = _audio_track_is_probed(best_audio)
+    return {
+        "resolution_label": vr.get("resolution_label"),
+        "resolution_source": vr.get("resolution_source"),
+        "video_codec": vr.get("video_codec"),
+        "hdr": (
+            "dolby_vision"
+            if (vr.get("has_dv") and hdr_is_probe)
+            else "hdr10_plus"
+            if (vr.get("has_hdr10p") and hdr_is_probe)
+            else "hdr10"
+            if (vr.get("has_hdr10") and hdr_is_probe)
+            else ""
+        ),
+        "audio_codec": _hierarchy_audio_codec_token(best_audio) if audio_is_probe else "",
+        "release_group": str(name_info.release_group or "").lower() if name_info else "",
+    }
+
+
 def _hierarchy_audio_codec_token(best_audio: Dict[str, Any]) -> str:
     """Mappe le codec audio detecte vers le token canonique hierarchie VP-B.
 
@@ -927,6 +1021,20 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
         if lossy is None:
             lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
         return int(lossy), "Audio Atmos (lossy)"
+    if c in ("flac", "pcm") or c.startswith("lpcm") or c.startswith("pcm"):
+        # T-DOM-1 : cette table CONTREDISAIT `codec_ranks`. FLAC et PCM y ont
+        # le rang 3 depuis l'audit du 2026-08-19 — au-dessus de DTS (2) et de
+        # l'AAC (1) — mais ils n'avaient AUCUNE entree ici, donc bonus 0 :
+        # deux formats SANS PERTE classes sous des formats AVEC PERTE.
+        #
+        # La valeur suit le rang plutot que de l'inventer : entre `dts_bonus`
+        # (rang 2) et `dts_hd_ma_bonus` (rang 4). Le repli calcule preserve les
+        # profils utilisateur deja enregistres, qui n'ont pas cette cle — meme
+        # idiome que `atmos_lossy_bonus` juste au-dessus.
+        lossless_simple = bonuses.get("flac_pcm_bonus")
+        if lossless_simple is None:
+            lossless_simple = max(1, int(bonuses["dts_hd_ma_bonus"]) - 2)
+        return int(lossless_simple), "Audio lossless (FLAC/PCM)"
     if "hra" in c and "dts" in c:
         # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
         # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
@@ -1012,6 +1120,102 @@ def _title_in_folder(folder_name: str, title: str) -> bool:
     return bool(nt) and (nt in nf)
 
 
+def _scorer_le_debit_video(
+    *,
+    bitrate_kbps: Optional[int],
+    threshold_kbps: int,
+    resolution_rank: int,
+    resolution_label: str,
+    release_4k_light_hint: bool,
+    toggles: Dict[str, Any],
+    penalty_4k_light: int,
+    low_bitrate_penalty: int,
+    add_reason: Callable[[int, str], None],
+) -> Tuple[int, bool]:
+    """Score le debit video. Rend `(delta de sous-score, is_4k_light)`.
+
+    Extrait de `_score_video` le 2026-08-29 : appliquer enfin la penalite
+    « 4K Light probable » (T-DOM-1) portait la fonction de 175 a 190 lignes pour
+    un plafond gele a 175. Le cliquet demande de DECOUPER plutot que de monter
+    le plafond, et le bloc formait deja une unite — le seuil est calcule juste
+    avant par l'appelant, ici on ne fait que le confronter au debit mesure.
+
+    Le delta est RENDU au lieu de muter `video_sub` : c'est ce qui permet de
+    verifier, dans un test, que le chiffre annonce par `add_reason` est bien
+    celui qui est applique — l'invariant que ce lot vient de retablir.
+    """
+    delta = 0
+    is_4k_light = False
+    if bitrate_kbps is None:
+        delta -= 8
+        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
+            is_4k_light = True
+            # T-DOM-1 : ce `-4` partait dans `reasons` — ce que l'utilisateur
+            # LIT — sans jamais toucher `video_sub`. Mesure : toggle ON 40,
+            # toggle OFF 40, ecart NUL, et la ligne « -4 4K Light probable »
+            # bien affichee. Deux consequences : le reglage `enable_4k_light`
+            # etait INERTE ici, et l'explication de score MENTAIT.
+            #
+            # La branche `elif` ci-dessous ne souffre pas du defaut, et porte
+            # meme le commentaire « Hotfix coherence (2026-06-04) : aligner
+            # add_reason delta sur l'increment reel applique a video_sub ».
+            # Le correctif existait donc a DEUX lignes d'ici.
+            #
+            # La valeur reste 4, celle qui etait deja annoncee : la rendre
+            # vraie est un correctif, la remplacer par `penalty_4k_light`
+            # (plus severe, pilote par le profil) serait un arbitrage produit.
+            delta -= 4
+            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
+        add_reason(-8, "Debit video non detecte")
+    elif threshold_kbps > 0:
+        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
+        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
+        # l'increment reel applique a video_sub. Avant, les factors reportaient
+        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
+        # faussait les weighted_delta et le top_positive de explain_score.
+        if ratio >= 1.35:
+            delta += 18
+            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
+        elif ratio >= 1.15:
+            delta += 14
+            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 1.0:
+            delta += 10
+            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 0.85:
+            delta += 6
+            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        elif ratio >= 0.70:
+            delta += 1
+            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        else:
+            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
+                is_4k_light = True
+                dynamic_penalty = penalty_4k_light
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
+                delta -= dynamic_penalty
+                if release_4k_light_hint:
+                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
+                else:
+                    add_reason(
+                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
+                    )
+            else:
+                dynamic_penalty = low_bitrate_penalty
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
+                delta -= dynamic_penalty
+                add_reason(
+                    -dynamic_penalty,
+                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
+                )
+        if resolution_rank >= 2160 and ratio >= 1.15:
+            delta += 4
+            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
+    return delta, is_4k_light
+
+
 def _score_video(
     video: Dict[str, Any],
     prof: Dict[str, Any],
@@ -1047,24 +1251,40 @@ def _score_video(
     resolution_rank = _resolution_rank(resolution_label)
 
     video_sub = 8.0
+    # Hotfix coherence (2026-06-04) etendu au bloc RESOLUTION (audit 2026-08-31).
+    # Ce bloc etait le dernier de `_score_video` a publier un delta different de
+    # celui qu'il applique : +34/+24/+14/+4 sur `video_sub`, mais +16/+11,
+    # +10/+7, +5 et -6 dans `add_reason` -- donc dans `factors`, dans `reasons`
+    # ET dans `explanation.weighted_delta` (qui pondere le delta ANNONCE pour
+    # classer top_positive / top_negative). La SD cumulait le pire cas : elle
+    # apparaissait comme la PENALITE la plus lourde du rapport (-6) alors que le
+    # code lui accorde un bonus (+4).
+    #
+    # On aligne l'annonce sur l'application, jamais l'inverse : changer
+    # l'increment reel deplacerait les tiers de toute la bibliotheque, ce qui
+    # est un arbitrage produit, pas un correctif. La distinction probe / nom
+    # n'existait QUE dans l'annonce (l'increment est identique dans les deux
+    # branches) : elle reste dans le LIBELLE, qui est le seul endroit ou elle
+    # etait vraie, et `sources.video` / `detected.resolution_source` la portent
+    # deja pour les consommateurs.
     if resolution_label == "2160p":
         video_sub += 34
         if resolution_source == "probe":
-            add_reason(+16, "Resolution 2160p mesuree")
+            add_reason(+34, "Resolution 2160p mesuree")
         else:
-            add_reason(+11, "Resolution 2160p deduite du nom")
+            add_reason(+34, "Resolution 2160p deduite du nom")
     elif resolution_label == "1080p":
         video_sub += 24
         if resolution_source == "probe":
-            add_reason(+10, "Resolution 1080p mesuree")
+            add_reason(+24, "Resolution 1080p mesuree")
         else:
-            add_reason(+7, "Resolution 1080p deduite du nom")
+            add_reason(+24, "Resolution 1080p deduite du nom")
     elif resolution_label == "720p":
         video_sub += 14
-        add_reason(+5, "Resolution 720p")
+        add_reason(+14, "Resolution 720p")
     else:
         video_sub += 4
-        add_reason(-6, "Resolution faible")
+        add_reason(+4, "Resolution faible")
 
     c_bonus = _codec_bonus(video_codec, prof)
     if c_bonus > 0:
@@ -1101,59 +1321,18 @@ def _score_video(
             reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
             threshold_kbps = adjusted
 
-    if bitrate_kbps is None:
-        video_sub -= 8
-        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
-            is_4k_light = True
-            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
-        add_reason(-8, "Debit video non detecte")
-    elif threshold_kbps > 0:
-        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
-        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
-        # l'increment reel applique a video_sub. Avant, les factors reportaient
-        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
-        # faussait les weighted_delta et le top_positive de explain_score.
-        if ratio >= 1.35:
-            video_sub += 18
-            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
-        elif ratio >= 1.15:
-            video_sub += 14
-            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 1.0:
-            video_sub += 10
-            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 0.85:
-            video_sub += 6
-            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        elif ratio >= 0.70:
-            video_sub += 1
-            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        else:
-            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
-                is_4k_light = True
-                dynamic_penalty = penalty_4k_light
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
-                video_sub -= dynamic_penalty
-                if release_4k_light_hint:
-                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
-                else:
-                    add_reason(
-                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
-                    )
-            else:
-                dynamic_penalty = low_bitrate_penalty
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
-                video_sub -= dynamic_penalty
-                add_reason(
-                    -dynamic_penalty,
-                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
-                )
-        if resolution_rank >= 2160 and ratio >= 1.15:
-            video_sub += 4
-            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
-
+    delta_debit, is_4k_light = _scorer_le_debit_video(
+        bitrate_kbps=bitrate_kbps,
+        threshold_kbps=threshold_kbps,
+        resolution_rank=resolution_rank,
+        resolution_label=resolution_label,
+        release_4k_light_hint=release_4k_light_hint,
+        toggles=toggles,
+        penalty_4k_light=penalty_4k_light,
+        low_bitrate_penalty=low_bitrate_penalty,
+        add_reason=add_reason,
+    )
+    video_sub += delta_debit
     if (has_dv or has_hdr10 or has_hdr10p) and (bit_depth > 0 and bit_depth <= 8):
         p_hdr8 = _to_int(vt.get("penalty_hdr_8bit"), 8)
         video_sub -= p_hdr8
@@ -1444,10 +1623,22 @@ def _normalize_probe_arg(x: Any) -> Dict[str, Any]:
 
 
 def _estimate_file_size(normalized_probe: Any, bitrate_kbps: Optional[int]) -> int:
-    """Estime la taille du fichier en octets depuis duration et bitrate."""
+    """Taille du fichier en octets : la MESURE si elle existe, sinon l'estimation.
+
+    Audit 2026-08-31 : cette fonction estimait toujours, alors que le dict
+    qu'elle recoit porte deja `container_size_bytes` — la taille EXACTE lue par
+    ffprobe (`format.size`, cf. infra/probe/_normalize_ffprobe.py:174, propagee
+    par _normalize_merge.py:108). L'estimation n'est pas seulement approximative,
+    elle est BIAISEE VERS LE BAS : elle n'utilise que le debit VIDEO
+    (`vr["bitrate_kbps"]`), donc elle ignore l'audio, les sous-titres et le
+    conteneur — plusieurs centaines de Mo sur un remux.
+    """
     # Fix audit 2026-05-26 (v1.5.7) hotfix dataclass : accepter NormalizedProbe
     # @dataclass natif (cinesort.infra.probe.service.ProbeService) en plus du dict.
     normalized_probe = _normalize_probe_arg(normalized_probe)
+    exact = _to_int(normalized_probe.get("container_size_bytes"), 0)
+    if exact > 0:
+        return exact
     dur = float(normalized_probe.get("duration_s") or 0)
     br = int(bitrate_kbps or 0)
     if dur > 0 and br > 0:
@@ -1471,6 +1662,51 @@ _PENALTY_COMMENTARY_ONLY = -15
 # ere/encode/commentary/genre) pour que les tokens premium menteurs ne
 # puissent pas remonter le score au-dessus du plancher voulu.
 _CAM_SUBSCORE_CEILING = 14.0
+
+
+def _apply_cam_subscore_floor(
+    *,
+    video_sub: float,
+    audio_sub: float,
+    cam_token: str,
+    factors: List[Dict[str, Any]],
+    reasons: List[str],
+    etape: str = "",
+    annoncer_meme_si_nul: bool = False,
+) -> Tuple[float, float]:
+    """Ecrase video_sub et audio_sub a `_CAM_SUBSCORE_CEILING`, et l'ANNONCE.
+
+    Audit 2026-08-31 (annonce vs fait). Les deux sites d'ecrasement publiaient
+    un facteur `{category: "video", delta: -30}` et la raison « -30 ... ». Or
+    -30 n'est ni la chute video ni la chute audio : l'operation n'est pas une
+    soustraction mais un PLAFONNEMENT a 14.0. Sur un « CAM.2160p.REMUX.TrueHD
+    .Atmos », la video tombait de 40 points et l'audio de 31 — et la chute
+    AUDIO n'etait annoncee par AUCUN facteur ni AUCUNE raison, si bien que le
+    bonus « +3 Atmos detecte dans le nom » restait affiche comme acquis alors
+    que l'ecrasement le neutralisait integralement.
+
+    On publie desormais la chute REELLE, par categorie. La PREMIERE application
+    annonce meme une chute nulle (`annoncer_meme_si_nul`) : la detection CAM
+    est un fait a afficher meme quand le fichier etait deja sous le plancher --
+    meme raisonnement que les entrees `floor_capped` de la hierarchie, ou
+    `from == to`. La RE-application F32, elle, ne parle que si elle mord, sinon
+    elle ne ferait que dupliquer la premiere ligne.
+    """
+    libelle = f"Captation degradee ({str(cam_token).upper() or 'CAM'}) - qualite reelle tres faible"
+    if etape:
+        libelle = f"{libelle} [{etape}]"
+    resultats: List[float] = []
+    for categorie, valeur in (("video", float(video_sub)), ("audio", float(audio_sub))):
+        chute = _CAM_SUBSCORE_CEILING - valeur if valeur > _CAM_SUBSCORE_CEILING else 0.0
+        if chute < 0:
+            valeur = _CAM_SUBSCORE_CEILING
+        if chute < 0 or annoncer_meme_si_nul:
+            delta = int(chute) if float(chute).is_integer() else chute
+            factors.append({"category": categorie, "delta": delta, "label": libelle})
+            reasons.append(f"{'+' if chute >= 0 else ''}{delta} {libelle}")
+        resultats.append(valeur)
+    return resultats[0], resultats[1]
+
 
 # F32 (revue R1) : les tokens CAM COURTS de ``release_name_parser._PATTERNS_CAM``
 # (CAM / TS / TC / WP / SCR) sont ambigus. Places en TETE du nom de fichier ils
@@ -1975,7 +2211,7 @@ def _build_quality_metrics_helper(
             "hdr_dolby_vision": vr["has_dv"],
             "hdr10_plus": vr["has_hdr10p"],
             "hdr10": vr["has_hdr10"],
-            "audio_tracks_count": len(audio_tracks),
+            "audio_tracks_count": _measured_audio_tracks_count(audio_tracks),
             # Fix ultra-audit 2026-08-03 : etiquette canonique (cf.
             # `_canonical_audio_codec`). Alimente le bucket audio du dashboard
             # (« DTS-HD MA » etait injoignable) et le pseudo-probe du
@@ -2143,28 +2379,56 @@ def _merge_probe_with_name_hints(
     # on synthetise une piste virtuelle pour permettre le scoring audio.
     audio_tracks = enriched["audio_tracks"]
     if not audio_tracks and name_info.audio_codec_hint:
-        synth_codec = _NAME_AUDIO_CODEC_TO_PROBE.get(name_info.audio_codec_hint, name_info.audio_codec_hint)
-        # Si atmos detecte, on enrichit le nom du codec pour que _audio_codec_bonus
-        # capture le label "atmos" (matche sur substring).
-        if name_info.audio_is_atmos and "atmos" not in synth_codec:
-            synth_codec = f"{synth_codec} atmos"
-        channels_int = _channels_str_to_int(name_info.audio_channels_hint)
-        if channels_int <= 0:
-            # Defaut sage : codec lossless multicanal supposes 5.1, sinon 2.0.
-            channels_int = 6 if name_info.audio_is_lossless else 2
-        synth_track = {
+        synth_track, channels_source = _synthesize_audio_track_from_name(name_info)
+        audio_tracks.append(synth_track)
+        filled_from_name.append("audio_track_synth")
+        # Symetrie avec `sources.video.codec` : le consommateur doit pouvoir
+        # distinguer une piste MESUREE d'une piste deduite du nom de release.
+        enriched["sources"]["audio"] = {
+            "tracks": "name_fallback",
+            "codec": "name_fallback",
+            "channels": channels_source,
+        }
+
+    return enriched, filled_from_name
+
+
+def _synthesize_audio_track_from_name(name_info: ReleaseNameInfo) -> Tuple[Dict[str, Any], str]:
+    """Piste audio virtuelle deduite du seul nom de release.
+
+    Retourne `(piste, provenance_des_canaux)`, la provenance valant
+    `"name_fallback"` quand le nom porte un token de canaux, et `"unknown"`
+    quand il n'en porte aucun.
+
+    Audit 2026-08-31 : cette fonction INVENTAIT le nombre de canaux
+    (`6 if audio_is_lossless else 2`, commentaire « Defaut sage »). Cette
+    valeur ne venait ni du fichier ni du nom, et ressortait pourtant comme un
+    fait mesure : `metrics.detected.audio_best_channels`, le bonus « Canaux
+    5.1 » de `_score_audio` (+6 par defaut, publie dans `reasons`) et le champ
+    `audio_channels` des regles utilisateur (custom_rules.py:38, donc des
+    regles qui declenchaient sur une observation qui n'a jamais eu lieu).
+    Un nombre de canaux INCONNU vaut desormais 0 : `_channels_bonus` rend
+    alors 0 sans emettre de raison, exactement comme pour un probe muet.
+    """
+    synth_codec = _NAME_AUDIO_CODEC_TO_PROBE.get(name_info.audio_codec_hint, name_info.audio_codec_hint)
+    # Si atmos detecte, on enrichit le nom du codec pour que _audio_codec_bonus
+    # capture le label "atmos" (matche sur substring).
+    if name_info.audio_is_atmos and "atmos" not in synth_codec:
+        synth_codec = f"{synth_codec} atmos"
+    channels_int = _channels_str_to_int(name_info.audio_channels_hint)
+    channels_source = "name_fallback" if channels_int > 0 else "unknown"
+    return (
+        {
             "codec": synth_codec,
-            "channels": channels_int,
+            "channels": max(0, channels_int),
             # Pas de bitrate (le scoring le tolere). Pas de language : on perdra
             # le bonus VO/VF mais c'est le tradeoff acceptable d'un fallback.
             "bitrate": 0,
             "language": "",
             "_source": "name_fallback",
-        }
-        audio_tracks.append(synth_track)
-        filled_from_name.append("audio_track_synth")
-
-    return enriched, filled_from_name
+        },
+        channels_source,
+    )
 
 
 def compute_quality_score(
@@ -2326,23 +2590,36 @@ def compute_quality_score(
     # on memorise le flag pour caper le tier final plus bas.
     cam_detected = bool(name_info.is_cam)
     if cam_detected:
-        cam_label = f"Captation degradee ({name_info.cam_token.upper() or 'CAM'}) - qualite reelle tres faible"
         # Plancher dur : peu importe les tokens premium menteurs, une CAM ne
         # peut pas avoir un bon subscore video/audio. (F32 : ce plancher est
         # RE-applique juste avant _apply_weights, car les compensations probe
         # et les helpers V4 qui suivent le contournaient.)
-        video_sub = min(float(video_sub), _CAM_SUBSCORE_CEILING)
-        audio_sub = min(float(audio_sub), _CAM_SUBSCORE_CEILING)
-        factors.append({"category": "video", "delta": -30, "label": cam_label})
-        reasons.append(f"-30 {cam_label}")
+        video_sub, audio_sub = _apply_cam_subscore_floor(
+            video_sub=video_sub,
+            audio_sub=audio_sub,
+            cam_token=name_info.cam_token,
+            factors=factors,
+            reasons=reasons,
+            annoncer_meme_si_nul=True,
+        )
 
     # Fix audit 2026-05-25 (v1.5.5) Vague K : bonus Atmos/DTS:X depuis le nom
     # de release quand le probe ne les a pas detectes (ex: piste TrueHD sans
     # side-data Atmos exposee). On n'ajoute que si l'audio sub n'a pas deja
     # capture ces formats.
     if name_info.audio_is_atmos or name_info.audio_is_dts_x:
-        # Verifier qu'on n'a pas deja un bonus atmos via le probe (best_audio)
-        best_codec_lower = str(best_audio.get("codec") or "").lower()
+        # Verifier qu'on n'a pas deja un bonus atmos via le probe (best_audio).
+        #
+        # Audit 2026-08-31 (double verite) : cette garde lisait le champ BRUT
+        # `best_audio['codec']`, alors que le bonus qu'elle est censee ne pas
+        # doubler est calcule par `_score_audio` (:1303) sur l'etiquette
+        # CANONIQUE `_canonical_audio_codec`. Or ffprobe ne met JAMAIS l'Atmos
+        # ni le DTS:X dans `codec` : il les range dans `is_atmos`, `is_dts_x` et
+        # `profile`. Sur un probe reel (`codec='truehd'`, `is_atmos=True`), la
+        # garde ne voyait donc rien et le +3 « Atmos detecte dans le nom »
+        # s'ajoutait au bonus `truehd atmos` deja accorde. Deux encodages du
+        # meme fait -> on lit desormais la seule etiquette qui porte la variante.
+        best_codec_lower = _canonical_audio_codec(best_audio)
         if (
             ("atmos" not in best_codec_lower)
             and ("dts:x" not in best_codec_lower)
@@ -2494,10 +2771,14 @@ def compute_quality_score(
     # de tier Bronze restent poses : on ne relache que l'ecrasement final, qui
     # est la seule partie que F32 a ajoutee.
     if cam_detected and _cam_signal_is_plausible(release_name):
-        if float(video_sub) > _CAM_SUBSCORE_CEILING:
-            video_sub = _CAM_SUBSCORE_CEILING
-        if float(audio_sub) > _CAM_SUBSCORE_CEILING:
-            audio_sub = _CAM_SUBSCORE_CEILING
+        video_sub, audio_sub = _apply_cam_subscore_floor(
+            video_sub=video_sub,
+            audio_sub=audio_sub,
+            cam_token=name_info.cam_token,
+            factors=factors,
+            reasons=reasons,
+            etape="re-application apres bonus",
+        )
 
     # --- Score pondere & tier ---
     score = _apply_weights(video_sub, audio_sub, extras_sub, prof["weights"])
@@ -2531,36 +2812,12 @@ def compute_quality_score(
     # != quality_reports, memo feedback_cinesort_design).
     hierarchy_config = prof.get("tier_hierarchy")
     if hierarchy_config:
-        # vr (video result) + best_audio + name_info disponibles dans ce scope.
-        # Fix trash-r6-001 (2026-06-04) : ne pas propager le token HDR canonique
-        # quand le flag provient du fallback nom de release. Sinon un fichier
-        # 720p AAC avec nom mentant '*.DV.*' obtient le floor 'dolby_vision' ->
-        # Gold a tort (promotion de 4 tiers sur un faux DV). Cf docstring
-        # tiers_helpers.py:502-504 ('DV seul ne sera applique qu'en presence
-        # de probe verifie') - garde-fou maintenant effectivement implemente.
-        # Backward compat : les profils sans tier_hierarchy.enabled=True ne sont
-        # PAS impactes (block deja gate par enabled cote _apply_tier_hierarchy).
-        hdr_source = ""
-        sources_video_local = sources.get("video") if isinstance(sources, dict) else None
-        if isinstance(sources_video_local, dict):
-            hdr_source = str(sources_video_local.get("hdr") or "").strip().lower()
-        hdr_is_probe = hdr_source != "name_fallback"
-        hierarchy_dimensions: Dict[str, Any] = {
-            "resolution_label": vr.get("resolution_label"),
-            "resolution_source": vr.get("resolution_source"),
-            "video_codec": vr.get("video_codec"),
-            "hdr": (
-                "dolby_vision"
-                if (vr.get("has_dv") and hdr_is_probe)
-                else "hdr10_plus"
-                if (vr.get("has_hdr10p") and hdr_is_probe)
-                else "hdr10"
-                if (vr.get("has_hdr10") and hdr_is_probe)
-                else ""
-            ),
-            "audio_codec": _hierarchy_audio_codec_token(best_audio),
-            "release_group": str(name_info.release_group or "").lower() if name_info else "",
-        }
+        hierarchy_dimensions = _build_hierarchy_dimensions(
+            vr=vr,
+            best_audio=best_audio,
+            name_info=name_info,
+            sources=sources,
+        )
         new_tier, hierarchy_decisions = _apply_tier_hierarchy(
             tier,
             hierarchy_dimensions,

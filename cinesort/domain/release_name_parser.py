@@ -173,6 +173,72 @@ _PATTERN_CHANNELS = re.compile(r"\b(?:7\.1|5\.1|5\.0|2\.1|2\.0|1\.0|6\.1)\b")
 _PATTERN_GROUP = re.compile(r"-([A-Za-z0-9_]+)(?:\.[A-Za-z0-9]{2,4})?$")
 
 
+def _parse_audio_hints(info: ReleaseNameInfo, text: str) -> None:
+    """Renseigne les champs audio de `info` depuis le nom de release.
+
+    Extrait de `parse_release_name` (cliquet de taille de fonction : la
+    documentation du repli DTS:X ci-dessous la faisait passer de 122 a 147
+    lignes ; le cliquet demande de DECOUPER, pas de monter le plafond).
+    """
+    # Audio : premier match wins pour codec/lossless, mais atmos/dts_x sont
+    # cumulatifs (peuvent coexister avec TrueHD ou DTS-HD MA).
+    #
+    # #771 : "Atmos" et "DTS:X" sont des COUCHES objet, pas des codecs porteurs.
+    # Elles ne prennent donc PAS le slot `audio_codec_hint`. Avant ce correctif
+    # elles le prenaient — et comme "atmos" est le PREMIER motif de la liste,
+    # deux consequences :
+    #   1. la branche de repli atmos -> truehd (plus bas) etait INATTEIGNABLE,
+    #      `audio_codec_hint` valant deja "atmos" en sortie de boucle ;
+    #   2. pire, une release lossy typique du web
+    #      ("Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-FLUX") ressortait
+    #      en codec="atmos" + audio_is_lossless=True, donc mappee sur TrueHD par
+    #      `quality_score._NAME_AUDIO_CODEC_TO_PROBE` : un EAC3 lossy score comme
+    #      un TrueHD lossless. Le porteur reel (eac3) est desormais retenu.
+    for pattern, codec, lossless in _PATTERNS_AUDIO:
+        if not re.search(pattern, text, re.IGNORECASE):
+            continue
+        if codec == "atmos":
+            info.audio_is_atmos = True
+            continue
+        if codec == "dts_x":
+            info.audio_is_dts_x = True
+            continue
+        if not info.audio_codec_hint:
+            info.audio_codec_hint = codec
+            info.audio_is_lossless = lossless
+
+    # Si atmos detecte mais aucun codec porteur trouve, defaulter sur truehd
+    # (atmos sans precision est typiquement TrueHD Atmos). Desormais ATTEIGNABLE.
+    if info.audio_is_atmos and not info.audio_codec_hint:
+        info.audio_codec_hint = "truehd"
+        info.audio_is_lossless = True
+
+    # Fix ultra-audit 2026-08-31 (#8). DTS:X est une couche objet SANS porteur
+    # propre, exactement comme l'Atmos ci-dessus — mais il n'avait aucun repli,
+    # et le `continue` de la boucle JETTE le `lossless=True` que porte pourtant
+    # deja sa ligne de `_PATTERNS_AUDIO`. La notion vivait donc a deux endroits
+    # qui divergent : un BOOLEEN ici (`audio_is_dts_x`), une CHAINE de codec
+    # cote scorer ('dts:x', rang 4 via `_AUDIO_CANONICAL_RANK_ALIAS`) que rien
+    # ne produisait jamais — l'entree `_NAME_AUDIO_CODEC_TO_PROBE["dts_x"]`
+    # etait morte.
+    #
+    # Deux formes, deux resultats faux (mesures) :
+    #   * "DTS-X" / "DTS:X" matchent AUSSI le motif generique `\bDTS\b` (tiret
+    #     et deux-points sont des frontieres de mot), donc le porteur retenu
+    #     etait un DTS **lossy** : `audio_codec_hint='dts'`, lossless=False ;
+    #   * "DTSX" colle ne matche `\bDTS\b` nulle part : AUCUN porteur, donc
+    #     aucune piste synthetisee par `_merge_probe_with_name_hints` et zero
+    #     point audio pour un remux 4K haut de gamme.
+    #
+    # Le coeur d'un flux DTS:X EST un DTS-HD MA : le depot l'encode deja
+    # (`_AUDIO_CANONICAL_RANK_ALIAS['dts:x'] = 'dts-hd ma'`). On ne promeut donc
+    # que l'absence de porteur ou le DTS generique produit par le token
+    # lui-meme ; un TrueHD ou un DTS-HD MA annonce dans le nom reste intact.
+    if info.audio_is_dts_x and info.audio_codec_hint in ("", "dts"):
+        info.audio_codec_hint = "dts_hd_ma"
+        info.audio_is_lossless = True
+
+
 def parse_release_name(name: str) -> ReleaseNameInfo:
     """Parse un nom de fichier de release et extrait toutes les specs.
 
@@ -245,38 +311,7 @@ def parse_release_name(name: str) -> ReleaseNameInfo:
             info.source_hint = "cam"
             break
 
-    # Audio : premier match wins pour codec/lossless, mais atmos/dts_x sont
-    # cumulatifs (peuvent coexister avec TrueHD ou DTS-HD MA).
-    #
-    # #771 : "Atmos" et "DTS:X" sont des COUCHES objet, pas des codecs porteurs.
-    # Elles ne prennent donc PAS le slot `audio_codec_hint`. Avant ce correctif
-    # elles le prenaient — et comme "atmos" est le PREMIER motif de la liste,
-    # deux consequences :
-    #   1. la branche de repli atmos -> truehd (plus bas) etait INATTEIGNABLE,
-    #      `audio_codec_hint` valant deja "atmos" en sortie de boucle ;
-    #   2. pire, une release lossy typique du web
-    #      ("Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.H.265-FLUX") ressortait
-    #      en codec="atmos" + audio_is_lossless=True, donc mappee sur TrueHD par
-    #      `quality_score._NAME_AUDIO_CODEC_TO_PROBE` : un EAC3 lossy score comme
-    #      un TrueHD lossless. Le porteur reel (eac3) est desormais retenu.
-    for pattern, codec, lossless in _PATTERNS_AUDIO:
-        if not re.search(pattern, text, re.IGNORECASE):
-            continue
-        if codec == "atmos":
-            info.audio_is_atmos = True
-            continue
-        if codec == "dts_x":
-            info.audio_is_dts_x = True
-            continue
-        if not info.audio_codec_hint:
-            info.audio_codec_hint = codec
-            info.audio_is_lossless = lossless
-
-    # Si atmos detecte mais aucun codec porteur trouve, defaulter sur truehd
-    # (atmos sans precision est typiquement TrueHD Atmos). Desormais ATTEIGNABLE.
-    if info.audio_is_atmos and not info.audio_codec_hint:
-        info.audio_codec_hint = "truehd"
-        info.audio_is_lossless = True
+    _parse_audio_hints(info, text)
 
     # Channels
     ch_match = _PATTERN_CHANNELS.search(text)

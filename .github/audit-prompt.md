@@ -180,8 +180,12 @@ CONTEXTE PROJET (structure, toujours valable) :
   `api.runtime` etait oubliee.
 - Imports differes : bornes par couche via le cliquet
   `test_lazy_imports_bounded`, PAS interdits. Cf la regle detaillee plus bas.
-- Tests : cf. bloc « mis a jour le 2026-08-02 » plus haut (6592 unitaires,
-  seuil de couverture 75%). Le chiffre « 4277 / 80% » de mai est perime.
+- Tests : **ce compte se REMESURE, il ne se recopie pas.** Il a deja pourri deux
+  fois : « 4277 » (mai 2026, encore injecte par claude.yml jusqu'au 2026-08-29) puis
+  « 6592 » (2026-08-02, la ligne que tu lis). Mesure du 2026-08-29 au perimetre CI :
+  **9281 passed**, seuil **--fail-under=75** (ci.yml:211).
+  Si un compte de tests ou de couverture fonde une conclusion, relance la commande de
+  CLAUDE.md au lieu de citer cette ligne.
 
 
 Analyse transverse (si target=transverse) :

@@ -671,7 +671,7 @@ function _buildInspectorSections(selectedRun) {
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-report" data-run-id="${escapeHtml(selectedRun.run_id)}" data-format="json" title="Télécharge le rapport de ce run au format JSON">⬇ Exporter en JSON</button>
           <button type="button" class="v5-btn v5-btn--ghost" data-historique-action="export-nfo" data-run-id="${escapeHtml(selectedRun.run_id)}" title="Écrit un fichier .nfo à côté de chaque film de ce run (lu par Kodi et Jellyfin)">🎬 Générer les .nfo</button>
           ${isApply && status !== "UNDONE" ? `<button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="undo-apply" data-run-id="${escapeHtml(selectedRun.run_id)}">↺ Annuler l'apply</button>` : (isApply && status === "UNDONE" ? `<span class="historique-inspector-disabled">↺ Déjà annulé</span>` : "")}
-          <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}">🗑 Supprimer ce run</button>
+          <button type="button" class="v5-btn v5-btn--ghost v5-btn--danger" data-historique-action="delete-run" data-run-id="${escapeHtml(selectedRun.run_id)}" data-undo-possible="${isApply && status !== "UNDONE" ? "1" : ""}">🗑 Supprimer ce run</button>
         </div>
       `,
     },
@@ -1640,19 +1640,45 @@ function _onActionClick(ev) {
         onConfirm: () => _doUndoApply(runId),
       });
       break;
-    case "delete-run":
+    case "delete-run": {
       // Action dangereuse — dangerConfirmModal + retention 90j auto (spec 09 §5).
+      //
+      // 2026-08-29 : ce texte etait faux DANS LES DEUX SENS. Il promettait une
+      // suppression qui n'a pas lieu — `history_support.delete_run` documente
+      // mot pour mot que « les fichiers d'etat sur disque (plan.jsonl,
+      // validation.json, ui_log.txt) NE sont PAS touches ». Et il taisait la
+      // seule consequence grave : `run.py` fait
+      // `DELETE FROM apply_batches WHERE run_id=?`, dont la cascade FK emporte
+      // `apply_operations` — le journal que les DEUX chemins d'undo lisent.
+      // Mesure du jour sur un store reel : 3 operations et un batch reversible
+      // AVANT, 0 et plus rien APRES.
+      //
+      // Pire, « Aucune modification sur les fichiers video du disque » rassurait
+      // au moment precis ou il fallait alerter. La regle n3 du produit exige que
+      // la CONSEQUENCE soit annoncee : elle l'etait, et elle etait fausse.
+      //
+      // `data-undo-possible` est pose au rendu, ou `isApply` et `status` sont
+      // deja en portee — le bouton voisin « Annuler l'apply » s'en sert.
+      const undoEncorePossible = target.dataset.undoPossible === "1";
       dangerConfirmModal({
         title: `Supprimer le run ${runId} de l'historique ?`,
         items: [`Run ${runId}`],
         consequence:
-          "Le run + son plan + son log seront supprimés définitivement. " +
+          (undoEncorePossible
+            ? "⚠ L'annulation de cet apply deviendra DÉFINITIVEMENT impossible : " +
+              "supprimer le run efface le journal qui la rend possible. " +
+              "Si vous pensiez pouvoir revenir en arrière, annulez l'apply AVANT. "
+            : "") +
+          "L'entrée disparaît de l'historique, avec son journal d'apply. " +
+          "Le plan, le log et le fichier de validation NE sont PAS supprimés : " +
+          "ils partiront à la rotation de rétention. " +
           "Aucune modification sur les fichiers vidéo du disque. Action NON réversible.",
         countdownSeconds: 3,
         confirmLabel: "✗ Supprimer le run",
         onConfirm: () => _doDeleteRun(runId),
       });
       break;
+    }
     case "reload-log":
       if (runId) {
         _historyStatsCache.delete(runId);

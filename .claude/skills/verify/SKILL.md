@@ -33,8 +33,14 @@ seuil de taille min du scan. Un dossier multi-vidéos ⇒ `collection` + `extra`
 
 ## Contrats d'API (pièges vécus)
 
-- Auth : `Authorization: Bearer <token>` — le **loopback 127.0.0.1 est exempté
-  par design** (issues #72/#73, gardes CSRF) : pas un bug.
+- Auth : `Authorization: Bearer <token>` sur **CHAQUE** appel.
+  ⚠️ **Corrigé le 2026-08-26** : ce fichier affirmait que « le loopback 127.0.0.1
+  est exempté par design (issues #72/#73) : pas un bug ». **Faux depuis le
+  2026-08-07** — le bypass loopback a été RETIRÉ (`rest_server.py::_check_auth`,
+  qui porte le commentaire du retrait). Il fermait l'accès sans jeton à
+  172 méthodes de façade, dont 20 destructives, pour tout processus capable
+  d'ouvrir une socket locale. Un appel sans en-tête `Bearer` rend donc
+  légitimement **401** : ce n'est pas une panne du bac à sable.
 - `run/start_plan` : `{"settings": {<echo complet de get_settings> +
   "library_path": "<lib>"}}` — `library_path` est requis par pydantic.
 - `run/get_status {"run_id":"latest"}` renvoie `run_id: null` une fois le run

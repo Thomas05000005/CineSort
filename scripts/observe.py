@@ -44,9 +44,17 @@ peuvent etre polluees par 3 sources de staleness :
 
 Le flag `--fresh` declenche AVANT le lancement de l'app :
     a. force mode `python app.py --dev` (jamais l'EXE pre-fix) ;
-    b. reset etat derive scope test_library (DB + runs/tri_films_*),
-       protege les donnees utilisateur reelles (`\\\\OMV\\Media` etc.) ;
-    c. purge WebView2 userdata (`webview/EBWebView` du LOCALAPPDATA cible).
+    b. reset etat derive du PERIMETRE `--library` (DB + runs/tri_films_*),
+       protege les donnees utilisateur reelles (`\\\\OMV\\Media` etc.) ET toute
+       autre bibliotheque, meme si son chemin porte `test_library` ;
+       sauvegarde prealable : `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` avec ses
+       sidecars `-wal`/`-shm`, et `runs.bak_BEFORE_FRESH_<ts>/` pour les
+       dossiers de run ;
+    c. purge WebView2 userdata (`webview/EBWebView` du LOCALAPPDATA cible),
+       en ne tuant que les hotes WebView2 rattaches a ce state.
+
+`--dry-run` combine a `--fresh` SIMULE la gate : `freshness_gate.json` liste
+`would_delete_run_ids` / `would_delete_run_dirs` sans rien detruire.
 
 Le flag n'a JAMAIS d'effet sur :
     - settings.json (etat operateur, garde la cle TMDb, le token REST, ...) ;
@@ -74,13 +82,15 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 # ---------------------------------------------------------------------------
 # Constantes [FIGE]
@@ -127,8 +137,24 @@ _RE_TOKEN_FIELD = re.compile(
     r"(\"(?:rest_api_token|api_key|tmdb_api_key|jellyfin_api_key|password)\"\s*:\s*\")[^\"]+(\")",
     re.IGNORECASE,
 )
-_RE_USER_HOME = re.compile(r"C:\\\\Users\\\\[^\\\\\"]+", re.IGNORECASE)
+# Chemin utilisateur, forme antislash. Le texte a scrubber arrive sous DEUX
+# formes : NATIVE (`C:\Users\bob`, le tail de cinesort.log, les messages
+# d'exception) et DEJA ECHAPPEE (`C:\\Users\\bob`, les payloads JSON de
+# network.json). L'ancien motif `r"C:\\\\Users\\\\[^\\\\\"]+"` portait QUATRE
+# antislashs reels entre `C:` et `Users`, donc en exigeait DEUX du moteur : il
+# ne mordait que sur la seconde forme, et laissait passer en clair tout chemin
+# Windows natif — l'exact contraire de ce que promet l'en-tete de section.
+# Sa substitution reposait de surcroit UN seul antislash la ou la source en
+# portait deux, ce qui rendait la ligne JSON indecodable (`\U` n'est pas une
+# echappement JSON valide). On capture donc le separateur TEL QU'IL EST et on
+# le repose a l'identique.
+_RE_USER_HOME = re.compile(r"(C:)(\\{1,2})(Users)(\\{1,2})([^\\/\"]+)", re.IGNORECASE)
 _RE_USER_HOME_FW = re.compile(r"C:/Users/[^/\"]+", re.IGNORECASE)
+
+
+def _redact_user_home(match: re.Match[str]) -> str:
+    """Remplace le nom d'utilisateur en conservant l'echappement d'origine."""
+    return f"{match.group(1)}{match.group(2)}{match.group(3)}{match.group(4)}<USER>"
 
 
 def scrub(text: str) -> str:
@@ -139,14 +165,241 @@ def scrub(text: str) -> str:
     out = _RE_BEARER.sub(r"\1<REDACTED>", out)
     out = _RE_NTOKEN_QS.sub(r"\1<REDACTED>", out)
     out = _RE_TOKEN_FIELD.sub(r"\1<REDACTED>\2", out)
-    out = _RE_USER_HOME.sub(r"C:\\Users\\<USER>", out)
+    out = _RE_USER_HOME.sub(_redact_user_home, out)
     out = _RE_USER_HOME_FW.sub("C:/Users/<USER>", out)
     return out
 
 
 # ---------------------------------------------------------------------------
+# Perimetre : comparaison de CHEMINS, jamais de sous-chaines [FIGE]
+# ---------------------------------------------------------------------------
+#
+# `--library` a longtemps ete un simple INTERRUPTEUR : la garde verifiait
+# `"test_library" in str(lib_abs).lower()`, puis les suppressions repartaient
+# du litteral `'%test_library%'`. Deux consequences mesurees :
+#   - `--library .../test_library_A` detruisait AUSSI `.../test_library_B` ;
+#   - `LIKE '%test_library%'` traite `_` comme un joker SQL, donc `testXlibrary`
+#     tombait dans le meme filet.
+# Le perimetre est desormais le chemin resolu de `--library`, compare segment
+# par segment.
+
+#: Caracteres qui ferment legitimement un chemin cite dans un journal.
+_SCOPE_BOUNDARY = "/\"' \t\r\n,;:)]}>|"
+
+#: Champs de `plan.jsonl` qui portent un chemin exploitable.
+_RUN_PLAN_PATH_FIELDS = (
+    "root_path",
+    "folder_path",
+    "src_path",
+    "dst_path",
+    "src",
+    "dst",
+    "path",
+    "source",
+    "target",
+)
+
+
+def _norm_path_for_scope(value: Any) -> str:
+    """Forme canonique d'un chemin pour comparaison (casse + separateur)."""
+    return str(value).replace("\\", "/").rstrip("/").lower()
+
+
+def _path_in_scope(candidate: Any, scope_norm: str) -> bool:
+    """True si `candidate` EST le perimetre, ou vit dedans (frontiere de segment)."""
+    if not scope_norm or not isinstance(candidate, str) or not candidate:
+        return False
+    norm = _norm_path_for_scope(candidate)
+    return norm == scope_norm or norm.startswith(scope_norm + "/")
+
+
+def _text_mentions_scope(text: str, scope_norm: str) -> bool:
+    """True si `text` cite le chemin COMPLET du perimetre, frontiere comprise.
+
+    Sans la frontiere, `.../test_library_A` matcherait `.../test_library_AB`.
+    """
+    if not scope_norm or not text:
+        return False
+    hay = text.replace("\\", "/").lower()
+    start = 0
+    while True:
+        idx = hay.find(scope_norm, start)
+        if idx < 0:
+            return False
+        end = idx + len(scope_norm)
+        if end >= len(hay) or hay[end] in _SCOPE_BOUNDARY:
+            return True
+        start = idx + 1
+
+
+def _read_head(path: Path, size: int = 256 * 1024) -> str:
+    """Lit la tete d'un fichier en texte tolerant. Vide si illisible."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(size).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _plan_jsonl_in_scope(plan: Path, scope_norm: str) -> bool:
+    """Relit `plan.jsonl` comme du JSON et confronte ses chemins au perimetre."""
+    # Lecture INTEGRALE, ligne a ligne. `_read_head` s'arretait a 256 Kio :
+    # un plan plus gros dont le chemin cible n'apparaissait qu'apres etait
+    # declare hors perimetre, et le run survivait a la purge. Le cout reste
+    # nul en pratique puisqu'on sort au premier chemin qui correspond.
+    try:
+        fh = plan.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    with fh:
+        return _plan_lignes_en_perimetre(fh, scope_norm)
+
+
+def _plan_lignes_en_perimetre(lignes: Iterable[str], scope_norm: str) -> bool:
+    """Coeur de `_plan_jsonl_in_scope`, separe pour rester testable a plat."""
+    for raw in lignes:
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue  # derniere ligne tronquee par la lecture partielle
+        if not isinstance(row, dict):
+            continue
+        if any(_path_in_scope(row.get(key), scope_norm) for key in _RUN_PLAN_PATH_FIELDS):
+            return True
+    return False
+
+
+def _fichier_mentionne_le_perimetre(chemin: Path, scope_norm: str) -> bool:
+    """Cherche le perimetre dans un journal texte, SANS le tronquer.
+
+    `_read_head` s'arretait a 256 Kio : un journal plus gros citant le chemin
+    plus loin faisait conclure « hors perimetre », et le run n'etait jamais
+    purge. On sort a la premiere ligne qui correspond.
+    """
+    try:
+        with chemin.open("r", encoding="utf-8", errors="replace") as fh:
+            for ligne in fh:
+                if _text_mentions_scope(ligne, scope_norm):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _run_dir_in_scope(run_dir: Path, scope_norm: str) -> bool:
+    """Le run PORTE-t-il sur le perimetre ?
+
+    Le declencheur historique etait `b"test_library" in chunk.lower()` sur
+    `plan.jsonl` OU `ui_log.txt` OU `summary.txt` : aucune analyse de chemin,
+    aucune frontiere de mot. Or `ui_log.txt` est un JOURNAL — une ligne qui
+    NOMME la bibliotheque d'un autre run suffisait a faire detruire celui-ci.
+    """
+    plan = run_dir / "plan.jsonl"
+    if plan.is_file() and _plan_jsonl_in_scope(plan, scope_norm):
+        return True
+    for name in ("ui_log.txt", "summary.txt"):
+        marker = run_dir / name
+        if marker.is_file() and _fichier_mentionne_le_perimetre(marker, scope_norm):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Helpers process / port
 # ---------------------------------------------------------------------------
+
+#: Nom d'image de l'hote WebView2. JAMAIS passe a `taskkill /IM` : ce nom est
+#: partage par Teams, Outlook, et toute application WebView2 de la machine.
+_WEBVIEW2_IMAGE = "msedgewebview2.exe"
+
+
+def _webview2_pids_in_scope(scope_dir: Path) -> tuple[list[int], str | None]:
+    """PIDs des hotes WebView2 dont la ligne de commande vise `scope_dir`.
+
+    `taskkill /F /IM msedgewebview2.exe` cible par NOM D'IMAGE, sans filtre de
+    PID ni de proprietaire, et `/F` interdit toute demande de sauvegarde : tout
+    hote WebView2 de la machine est emporte, pas seulement celui du run.
+    On resout donc les PID par leur `--user-data-dir`, qui porte le state cible.
+
+    Returns:
+        (pids, erreur) — `erreur` non nulle si l'inventaire n'a pas pu etre fait.
+    """
+    scope_norm = _norm_path_for_scope(scope_dir)
+    query = (
+        f"Get-CimInstance Win32_Process -Filter \"Name='{_WEBVIEW2_IMAGE}'\" | "
+        "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+    )
+    try:
+        cp = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", query],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        return [], scrub(str(exc))
+    raw = (cp.stdout or "").strip()
+    # Le code de retour AVANT le stdout : sans cela, un PowerShell en echec
+    # qui n'ecrit rien rend « aucun processus, aucune erreur » — plus aucun
+    # hote WebView2 n'est tue et rien ne le signale. Le kill global qui
+    # servait de filet a disparu, donc ce silence est desormais total.
+    if cp.returncode != 0:
+        detail = scrub((cp.stderr or "").strip()) or f"code {cp.returncode}"
+        return [], f"inventaire WebView2 en echec: {detail}"
+    if not raw:
+        return [], None
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        return [], f"inventaire WebView2 illisible: {exc}"
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return [], "inventaire WebView2 de forme inattendue"
+    pids: list[int] = []
+    for proc in data:
+        if not isinstance(proc, dict):
+            continue
+        # Frontiere de segment obligatoire : sans elle, un state voisin
+        # `<...>/CineSort2` tomberait dans le perimetre de `<...>/CineSort`.
+        if not _text_mentions_scope(str(proc.get("CommandLine") or ""), scope_norm):
+            continue
+        with contextlib.suppress(TypeError, ValueError):
+            pids.append(int(proc.get("ProcessId")))
+    return pids, None
+
+
+def _taskkill(args: list[str]) -> tuple[bool, str | None]:
+    """`taskkill` best-effort. rc==128 (« process not found ») = cas normal."""
+    try:
+        cp = subprocess.run(
+            ["taskkill", *args],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        return False, scrub(str(exc))
+    return cp.returncode == 0, None
+
+
+def _kill_webview2_in_scope(scope_dir: Path) -> dict[str, Any]:
+    """Tue les seuls hotes WebView2 rattaches a `scope_dir`."""
+    outcome: dict[str, Any] = {"pids": [], "killed": {}, "errors": []}
+    pids, err = _webview2_pids_in_scope(scope_dir)
+    if err:
+        outcome["errors"].append(f"{_WEBVIEW2_IMAGE}: {err}")
+    outcome["pids"] = pids
+    for pid in pids:
+        ok, kill_err = _taskkill(["/F", "/PID", str(pid)])
+        outcome["killed"][str(pid)] = ok
+        if kill_err:
+            outcome["errors"].append(f"{_WEBVIEW2_IMAGE}#{pid}: {kill_err}")
+    return outcome
 
 
 def _wait_for_port(host: str, port: int, timeout_s: int = 60) -> bool:
@@ -205,11 +458,13 @@ def _make_state_dir_isolated(out_dir: Path) -> Path:
 # ou %LOCALAPPDATA% si --use-local-state est fourni).
 
 
-def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
+def _purge_webview2_userdata(localappdata: Path, *, dry_run: bool = False) -> dict[str, Any]:
     """Supprime `<LOCALAPPDATA>\\CineSort\\webview\\` (cache WebView2 evergreen).
 
     Idempotent : si le dossier n'existe pas, retourne ok=True purged=False.
     Ne touche PAS aux autres dossiers (db, runs, logs, settings.json).
+
+    En `dry_run`, mesure et ANNONCE sans rien supprimer ni tuer.
 
     [HARNESS DIAG 2026-06-08 etape 2c+5] traite H4 staleness userdata.
     """
@@ -219,6 +474,7 @@ def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
         "target": str(target),
         "purged": False,
         "bytes_freed": 0,
+        "dry_run": bool(dry_run),
     }
     try:
         if not target.exists():
@@ -234,17 +490,12 @@ def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
         except OSError:
             pass
         result["bytes_freed"] = total
-        # Best effort kill des process WebView2 lies (silencieux).
-        with contextlib.suppress(FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "msedgewebview2.exe"],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
+        if dry_run:
+            result["would_purge"] = True
+            return result
+        # Best effort kill des SEULS hotes WebView2 du state cible (jamais /IM).
+        result["webview2_kill"] = _kill_webview2_in_scope(localappdata / "CineSort")
         # Suppression recursive.
-        import shutil
-
         shutil.rmtree(target, ignore_errors=True)
         result["purged"] = not target.exists()
         if not result["purged"]:
@@ -256,33 +507,204 @@ def _purge_webview2_userdata(localappdata: Path) -> dict[str, Any]:
     return result
 
 
+def _backup_db_with_sidecars(db_path: Path, ts: str) -> tuple[Path, list[str]]:
+    """Copie la DB **et ses sidecars WAL** avant tout DELETE.
+
+    TOUS les profils du produit imposent `journal_mode=WAL`
+    (`cinesort/infra/db/pragma_profile.py`). En WAL, les pages ecrites depuis
+    le dernier checkpoint vivent dans `cinesort.sqlite-wal`, pas dans le
+    `.sqlite`. Copier le seul fichier principal — ce que faisait le
+    `shutil.copy2(db_path, backup)` d'origine — produit donc une sauvegarde
+    ANTERIEURE a tout ce que la session courante a ecrit : la promesse
+    « backup auto » de l'aide de `--fresh` etait tenue sur le nom du fichier,
+    pas sur son contenu.
+
+    Le suffixe des sidecars est colle au nom du backup (`<backup>-wal`,
+    `<backup>-shm`) : c'est la seule forme que SQLite saura reprendre.
+    """
+    backup = db_path.with_suffix(f".sqlite.bak_BEFORE_FRESH_{ts}")
+    shutil.copy2(db_path, backup)
+    sidecars: list[str] = []
+    for suffix in ("-wal", "-shm"):
+        side = db_path.with_name(db_path.name + suffix)
+        if not side.is_file():
+            continue
+        dst = backup.with_name(backup.name + suffix)
+        shutil.copy2(side, dst)
+        sidecars.append(str(dst))
+    return backup, sidecars
+
+
+def _probe_cache_rowids_in_scope(cur: sqlite3.Cursor, scope_norm: str) -> list[int]:
+    """rowids de `probe_cache` dont le chemin vit dans le perimetre.
+
+    Le filtre d'origine etait `LOWER(path) LIKE '%test_library%'` : hors
+    perimetre (toute bibliotheque portant le marqueur y passait) ET trop large
+    (`_` est un joker SQL, donc `testXlibrary` matchait aussi).
+    """
+    try:
+        cur.execute("SELECT rowid, path FROM probe_cache")
+    except sqlite3.Error:
+        return []
+    return [rid for rid, path in cur.fetchall() if _path_in_scope(path, scope_norm)]
+
+
+def _delete_scope_rows(cur: sqlite3.Cursor, run_ids: list[str], scope_norm: str) -> dict[str, int]:
+    """Supprime les lignes du perimetre. `foreign_keys` DOIT etre ON (cf. appelant)."""
+    deleted: dict[str, int] = {}
+    if run_ids:
+        placeholders = ",".join("?" for _ in run_ids)
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        for tbl in [r[0] for r in cur.fetchall()]:
+            try:
+                cur.execute(f"PRAGMA table_info({tbl})")
+                cols = [c[1] for c in cur.fetchall()]
+                if "run_id" in cols:
+                    cur.execute(f"DELETE FROM {tbl} WHERE run_id IN ({placeholders})", run_ids)
+                    if cur.rowcount > 0:
+                        deleted[tbl] = cur.rowcount
+            except sqlite3.Error:
+                continue
+    rowids = _probe_cache_rowids_in_scope(cur, scope_norm)
+    purged = 0
+    # `executemany` sur `rowid = ?` plutot qu'un `IN` de longueur variable :
+    # meme travail, AUCUNE chaine SQL construite, et le decoupage en blocs de
+    # 500 disparait avec elle. Un `IN` variable oblige a fabriquer les `?`, ce
+    # que tout analyseur lit comme une concatenation ; la forme unitaire n'a
+    # pas ce defaut, pour une vraie raison et non par mise en silence.
+    cur.executemany("DELETE FROM probe_cache WHERE rowid = ?", [(r,) for r in rowids])
+    purged = max(cur.rowcount, 0)
+    if purged:
+        deleted["probe_cache_by_path"] = purged
+    return deleted
+
+
+def _reset_db_scope(
+    db_path: Path,
+    scope_norm: str,
+    result: dict[str, Any],
+    *,
+    dry_run: bool,
+    ts: str,
+) -> list[str]:
+    """Purge les lignes DB du perimetre. Retourne les run_ids concernes."""
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            # `PRAGMA foreign_keys` est OFF par defaut en SQLite, alors que le
+            # produit l'active systematiquement (infra/db/connection.py) et que
+            # `021_fk_cascade.sql` pose expres
+            # `apply_operations.batch_id -> apply_batches(batch_id) ON DELETE
+            # CASCADE`. Sans ce pragma, supprimer `apply_batches` (porteuse de
+            # run_id) laissait `apply_operations` — qui n'a PAS de colonne
+            # run_id — orpheline dans le journal d'undo.
+            conn.execute("PRAGMA foreign_keys = ON")
+            cur = conn.cursor()
+            cur.execute("SELECT run_id, root FROM runs")
+            run_ids = [rid for rid, root in cur.fetchall() if _path_in_scope(root, scope_norm)]
+            result["would_delete_run_ids"] = list(run_ids)
+            result["run_ids_scope"] = list(run_ids)
+            if dry_run:
+                result["db_rows_deleted"] = {}
+                conn.rollback()
+                return run_ids
+            backup, sidecars = _backup_db_with_sidecars(db_path, ts)
+            result["backup"] = str(backup)
+            result["backup_sidecars"] = sidecars
+            result["db_rows_deleted"] = _delete_scope_rows(cur, run_ids, scope_norm)
+            conn.commit()
+            return run_ids
+        finally:
+            conn.close()
+    except Exception as exc:
+        result["ok"] = False
+        result["error_db"] = scrub(str(exc))
+        return []
+
+
+def _reset_runs_scope(
+    runs_dir: Path,
+    scope_run_ids: set[str],
+    scope_norm: str,
+    result: dict[str, Any],
+    *,
+    dry_run: bool,
+    ts: str,
+) -> None:
+    """Sauvegarde puis supprime les dossiers de run du perimetre.
+
+    L'aide de `--fresh` annonce « reset DB+runs scope test_library (backup
+    auto) ». La sauvegarde n'existait que dans la branche DB : la branche
+    runs/ appelait `shutil.rmtree(run_dir, ignore_errors=True)` avec ZERO
+    sauvegarde. Chaque dossier est donc desormais COPIE d'abord, et n'est
+    detruit que si la copie a reussi.
+    """
+    backup_root = runs_dir.parent / f"runs.bak_BEFORE_FRESH_{ts}"
+    would: list[str] = []
+    deleted_runs = 0
+    errors: list[str] = []
+    for run_dir in sorted(runs_dir.glob("tri_films_*")):
+        if not run_dir.is_dir():
+            continue
+        run_id = run_dir.name[len("tri_films_") :]
+        if run_id not in scope_run_ids and not _run_dir_in_scope(run_dir, scope_norm):
+            continue
+        would.append(run_dir.name)
+        if dry_run:
+            continue
+        try:
+            shutil.copytree(run_dir, backup_root / run_dir.name, dirs_exist_ok=True)
+        except (OSError, shutil.Error) as exc:
+            # Pas de destruction sans sauvegarde : c'est la promesse de l'aide.
+            errors.append(f"{run_dir.name}: {scrub(str(exc))}")
+            continue
+        shutil.rmtree(run_dir, ignore_errors=True)
+        if not run_dir.exists():
+            deleted_runs += 1
+    result["would_delete_run_dirs"] = would
+    result["runs_deleted"] = deleted_runs
+    if errors:
+        result["ok"] = False
+        result["runs_backup_errors"] = errors
+    if not dry_run and backup_root.is_dir():
+        result["runs_backup"] = str(backup_root)
+
+
 def _reset_test_library_state(
     localappdata: Path,
     library: Path | None,
+    *,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Reset etat derive scope test_library.
+    """Reset etat derive scope `--library`.
 
-    Cible :
-        - runs `tri_films_*` qui referencent test_library
-        - lignes DB SQLite (runs/quality_reports/probe_cache/...) liees
+    Cible (et RIEN d'autre) :
+        - runs `tri_films_*` dont le plan porte sur la bibliotheque ciblee ;
+        - lignes DB SQLite (runs/quality_reports/probe_cache/...) liees.
 
     PROTEGE :
         - donnees utilisateur reelles (\\\\OMV\\Media, etc.) preservees ;
+        - toute AUTRE bibliotheque, meme si son chemin porte `test_library` ;
         - settings.json / omdb_cache.json / tmdb_cache.json non touches ;
-        - backup `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` cree avant tout DELETE.
+        - backup `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` (+ sidecars `-wal` /
+          `-shm`) et `runs.bak_BEFORE_FRESH_<ts>/` crees avant tout DELETE.
 
     [HARNESS DIAG 2026-06-08 etape 2b+5] traite H2 staleness DB/runs derives.
 
     Si la DB n'existe pas (premier run, isolation propre) -> no-op ok=True.
-    Si la library n'est pas test_library (ou non resolvable) -> skip reset DB,
-    purge seulement les runs orphelins eventuels.
+    Si la library n'est pas test_library (ou non resolvable) -> aucun reset.
+    En `dry_run`, rien n'est supprime : le rapport porte `would_delete_*`.
     """
     result: dict[str, Any] = {
         "ok": True,
         "scope": str(library) if library else None,
+        "dry_run": bool(dry_run),
         "runs_deleted": 0,
         "db_rows_deleted": {},
         "backup": None,
+        "backup_sidecars": [],
+        "would_delete_run_ids": [],
+        "would_delete_run_dirs": [],
         "skipped_reasons": [],
     }
     db_path = localappdata / "CineSort" / "db" / "cinesort.sqlite"
@@ -292,7 +714,8 @@ def _reset_test_library_state(
         result["skipped_reasons"].append("etat derive absent (premier run)")
         return result
 
-    # Resolution scope : seul un chemin contenant 'test_library' est reset.
+    # Resolution scope : seul un chemin contenant 'test_library' est reset, et
+    # le chemin RESOLU devient le perimetre reel des suppressions.
     scope_marker: str | None = None
     if library is not None:
         try:
@@ -304,97 +727,20 @@ def _reset_test_library_state(
         except OSError as exc:
             result["skipped_reasons"].append(f"library non resolvable: {exc}")
 
-    # Etape DB.
-    if db_path.is_file() and scope_marker:
+    if not scope_marker:
+        return result
+
+    scope_norm = _norm_path_for_scope(scope_marker)
+    result["scope_resolved"] = scope_marker
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    scope_run_ids: set[str] = set()
+    if db_path.is_file():
+        scope_run_ids = set(_reset_db_scope(db_path, scope_norm, result, dry_run=dry_run, ts=ts))
+
+    if runs_dir.is_dir():
         try:
-            import sqlite3
-
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup = db_path.with_suffix(f".sqlite.bak_BEFORE_FRESH_{ts}")
-            import shutil
-
-            shutil.copy2(db_path, backup)
-            result["backup"] = str(backup)
-            conn = sqlite3.connect(str(db_path))
-            try:
-                cur = conn.cursor()
-                # 1. Identifier les run_ids lies a test_library
-                # (run.root LIKE OU plan.jsonl evoque le scope).
-                cur.execute(
-                    "SELECT run_id FROM runs WHERE LOWER(root) LIKE ?",
-                    ("%test_library%",),
-                )
-                run_ids = [r[0] for r in cur.fetchall()]
-                deleted: dict[str, int] = {}
-                if run_ids:
-                    placeholders = ",".join("?" for _ in run_ids)
-                    # Inventorier tables avec colonne run_id.
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                    tables = [r[0] for r in cur.fetchall()]
-                    for tbl in tables:
-                        try:
-                            cur.execute(f"PRAGMA table_info({tbl})")
-                            cols = [c[1] for c in cur.fetchall()]
-                            if "run_id" in cols:
-                                cur.execute(
-                                    f"DELETE FROM {tbl} WHERE run_id IN ({placeholders})",
-                                    run_ids,
-                                )
-                                if cur.rowcount > 0:
-                                    deleted[tbl] = cur.rowcount
-                        except sqlite3.Error:
-                            continue
-                # probe_cache : DELETE par path LIKE
-                try:
-                    cur.execute(
-                        "DELETE FROM probe_cache WHERE LOWER(path) LIKE ?",
-                        ("%test_library%",),
-                    )
-                    if cur.rowcount > 0:
-                        deleted["probe_cache_by_path"] = cur.rowcount
-                except sqlite3.Error:
-                    pass
-                conn.commit()
-                result["db_rows_deleted"] = deleted
-                result["run_ids_scope"] = run_ids
-            finally:
-                conn.close()
-        except Exception as exc:
-            result["ok"] = False
-            result["error_db"] = scrub(str(exc))
-
-    # Etape runs/.
-    if runs_dir.is_dir() and scope_marker:
-        try:
-            import shutil
-
-            deleted_runs = 0
-            for run_dir in runs_dir.glob("tri_films_*"):
-                if not run_dir.is_dir():
-                    continue
-                # Detecter les runs lies a test_library via plan.jsonl ou ui_log.txt.
-                marker_found = False
-                for marker_file in ("plan.jsonl", "ui_log.txt", "summary.txt"):
-                    f = run_dir / marker_file
-                    if not f.is_file():
-                        continue
-                    try:
-                        # Lecture economique : 64 KB suffisent pour reperer le marker.
-                        with open(f, "rb") as fh:
-                            chunk = fh.read(64 * 1024)
-                        if b"test_library" in chunk.lower():
-                            marker_found = True
-                            break
-                    except OSError:
-                        continue
-                if marker_found:
-                    try:
-                        shutil.rmtree(run_dir, ignore_errors=True)
-                        if not run_dir.exists():
-                            deleted_runs += 1
-                    except OSError:
-                        pass
-            result["runs_deleted"] = deleted_runs
+            _reset_runs_scope(runs_dir, scope_run_ids, scope_norm, result, dry_run=dry_run, ts=ts)
         except Exception as exc:
             result["ok"] = False
             result["error_runs"] = scrub(str(exc))
@@ -441,7 +787,7 @@ def _rebuild_exe_if_needed() -> dict[str, Any]:
     return result
 
 
-def _kill_residual_processes() -> dict[str, Any]:
+def _kill_residual_processes(localappdata: Path) -> dict[str, Any]:
     """Pre-etape A0 : kill best-effort des process residuels d'un run anterieur.
 
     [HARNESS REMEDIATION ITER8B C1 2026-06-09] Le bilan ITER8B Section 2.1 a
@@ -467,6 +813,15 @@ def _kill_residual_processes() -> dict[str, Any]:
           `python app.py --dev` orphelin est negligeable (chaque run lance son
           propre subprocess et le tue en fin de capture via _start_app).
 
+    `msedgewebview2.exe` n'est PLUS tue par nom d'image : ce nom est partage
+    par Teams, Outlook et toute application WebView2 de la machine, et `/F`
+    interdit la sauvegarde. Les hotes sont resolus par PID via leur
+    `--user-data-dir`, qui pointe le state du run (cf. `_kill_webview2_in_scope`).
+
+    Args:
+        localappdata: racine du state cible (`<localappdata>/CineSort` sert de
+            perimetre pour la resolution des PID WebView2).
+
     Returns:
         dict { ok: bool, killed: { exe: bool, ... }, errors: [...] }
     """
@@ -475,21 +830,16 @@ def _kill_residual_processes() -> dict[str, Any]:
         "killed": {},
         "errors": [],
     }
-    # Liste figee : EXE livrable + WebView2. PAS python.exe (suicide-risk).
-    targets = ["CineSort.exe", "msedgewebview2.exe"]
-    for exe in targets:
-        try:
-            cp = subprocess.run(
-                ["taskkill", "/F", "/IM", exe],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            # rc==0 : au moins un process tue ; rc==128 : "process not found" (cas normal).
-            result["killed"][exe] = cp.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
-            result["killed"][exe] = False
-            result["errors"].append(f"{exe}: {scrub(str(exc))}")
+    # rc==0 : au moins un process tue ; rc==128 : "process not found" (cas normal).
+    ok, err = _taskkill(["/F", "/IM", "CineSort.exe"])
+    result["killed"]["CineSort.exe"] = ok
+    if err:
+        result["errors"].append(f"CineSort.exe: {err}")
+    scoped = _kill_webview2_in_scope(localappdata / "CineSort")
+    result["webview2_pids"] = scoped["pids"]
+    for pid, killed in scoped["killed"].items():
+        result["killed"][f"{_WEBVIEW2_IMAGE}#{pid}"] = killed
+    result["errors"].extend(scoped["errors"])
     return result
 
 
@@ -497,16 +847,22 @@ def run_freshness_gate(
     out_dir: Path,
     library: Path | None,
     use_local_state: bool,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Orchestre les pre-etapes freshness avant lancement observe.
 
     [OPERATIONNEL] s'execute si l'utilisateur a fourni `--fresh`.
 
     Sequence :
-        A0. kill process residuels (CineSort.exe + msedgewebview2.exe).
+        A0. kill process residuels (CineSort.exe + hotes WebView2 DU RUN).
         A.  H1 staleness EXE (informatif + force dev mode).
-        B.  H2 reset DB + runs scope test_library.
+        B.  H2 reset DB + runs scope `--library`.
         C.  H4 purge WebView2 userdata.
+
+    Avec `dry_run`, la sequence est SIMULEE : rien n'est tue, rien n'est
+    supprime, et le rapport porte ce qui SERAIT supprime (`would_delete_*`).
+    Auparavant `--dry-run` se contentait de DESACTIVER l'etape destructrice :
+    il n'existait donc aucun moyen de previsualiser l'effet de `--fresh`.
 
     Returns :
         gate_report dict serialise dans <out_dir>/freshness_gate.json.
@@ -524,13 +880,14 @@ def run_freshness_gate(
 
     report: dict[str, Any] = {
         "ok": True,
+        "dry_run": bool(dry_run),
         "scope_note": scope_note,
         "localappdata_target": str(local_appdata),
         "library": str(library) if library else None,
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
     print(
-        f"[observe.fresh] [OPERATIONNEL] gate localappdata={local_appdata} library={library}",
+        f"[observe.fresh] [OPERATIONNEL] gate localappdata={local_appdata} library={library} dry_run={bool(dry_run)}",
         file=sys.stderr,
     )
 
@@ -539,15 +896,18 @@ def run_freshness_gate(
     # documente dans BILAN_ITER8B_2026-06-08.md Sections 2.1+3.5 :
     # process lock sur WebView2 userdata residuel -> summary.json + screenshots
     # ABSENTS sur les 17 vues (capture ITER8_NONREG_GLOBAL initiale).
-    report["a0_kill_residual"] = _kill_residual_processes()
+    if dry_run:
+        report["a0_kill_residual"] = {"ok": True, "simule": True, "killed": {}, "errors": []}
+    else:
+        report["a0_kill_residual"] = _kill_residual_processes(local_appdata)
     # Pre-etape A : EXE staleness check (informatif + force dev mode plus tard).
     report["h1_exe"] = _rebuild_exe_if_needed()
-    # Pre-etape B : reset DB+runs scope test_library.
-    report["h2_state"] = _reset_test_library_state(local_appdata, library)
+    # Pre-etape B : reset DB+runs scope --library.
+    report["h2_state"] = _reset_test_library_state(local_appdata, library, dry_run=dry_run)
     if not report["h2_state"].get("ok"):
         report["ok"] = False
     # Pre-etape C : purge WebView2 userdata.
-    report["h4_webview2"] = _purge_webview2_userdata(local_appdata)
+    report["h4_webview2"] = _purge_webview2_userdata(local_appdata, dry_run=dry_run)
     if not report["h4_webview2"].get("ok"):
         report["ok"] = False
 
@@ -560,10 +920,19 @@ def run_freshness_gate(
     except OSError as exc:
         print(f"[observe.fresh] WARN ecriture gate report echouee: {exc}", file=sys.stderr)
 
+    state = report["h2_state"]
+    if dry_run:
+        print(
+            f"[observe.fresh] [OPERATIONNEL] gate SIMULE ok={report['ok']} "
+            f"runs_a_supprimer={state.get('would_delete_run_dirs')} "
+            f"run_ids_a_supprimer={state.get('would_delete_run_ids')}",
+            file=sys.stderr,
+        )
+        return report
     print(
         f"[observe.fresh] [OPERATIONNEL] gate ok={report['ok']} "
-        f"runs_del={report['h2_state'].get('runs_deleted')} "
-        f"db_del={sum(report['h2_state'].get('db_rows_deleted', {}).values())} "
+        f"runs_del={state.get('runs_deleted')} "
+        f"db_del={sum(state.get('db_rows_deleted', {}).values())} "
         f"webview_purged={report['h4_webview2'].get('purged')}",
         file=sys.stderr,
     )
@@ -1182,7 +1551,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Ne lance pas l'app, ecrit juste la structure + un manifeste.",
+        help=(
+            "Ne lance pas l'app, ecrit juste la structure + un manifeste. "
+            "Avec --fresh, SIMULE la gate : freshness_gate.json liste ce qui "
+            "serait supprime (would_delete_run_ids / would_delete_run_dirs) "
+            "sans rien detruire ni tuer."
+        ),
     )
     parser.add_argument(
         "--fresh",
@@ -1190,7 +1564,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Active le GATE FRAICHEUR avant lancement : "
             "(a) force python app.py --dev, "
-            "(b) reset DB+runs scope test_library (backup auto), "
+            "(b) reset DB+runs du perimetre --library (backup auto : DB + "
+            "sidecars -wal/-shm, et copie des dossiers de run), "
             "(c) purge WebView2 userdata. "
             "Voir docs/internal/observe_protocol.md."
         ),
@@ -1245,15 +1620,20 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     # GATE FRAICHEUR : pre-etapes avant lancement (etape 5 du diag).
-    if args.fresh and not args.dry_run:
+    # `--dry-run` SIMULE la gate (rapport `would_delete_*`) au lieu de la sauter :
+    # sans cela, `--fresh` n'etait pas previsualisable — soit on ne voyait rien,
+    # soit on detruisait pour de vrai.
+    if args.fresh:
         gate_report = run_freshness_gate(
             out_dir=out_dir,
             library=args.library,
             use_local_state=args.use_local_state,
+            dry_run=bool(args.dry_run),
         )
         summary["freshness_gate"] = gate_report
-        # Force le mode dev dans l'env du subprocess app (cf. _detect_app_command).
-        os.environ["CINESORT_OBSERVE_FORCE_DEV"] = "1"
+        if not args.dry_run:
+            # Force le mode dev dans l'env du subprocess app (cf. _detect_app_command).
+            os.environ["CINESORT_OBSERVE_FORCE_DEV"] = "1"
 
     if args.dry_run:
         (out_dir / "manifest.json").write_text(

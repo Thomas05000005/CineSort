@@ -73,6 +73,71 @@ def _audit_log(
         _logger.info("%s", message)
 
 
+def _verdict_dst_manquant(
+    dst: Path,
+    dst_path: str,
+    op_id: Any,
+    op_index: Any,
+    audit_fn: Optional[Callable[[str, str], None]],
+) -> Dict[str, Any]:
+    """Verdict quand la destination a annuler n'existe plus.
+
+    `Path.exists()` rend False dans DEUX situations que ce code confondait, et
+    l'une des deux n'est pas un saut legitime :
+
+      - le fichier a bouge ou a ete supprime, mais son DOSSIER est la : il n'y a
+        rien a restaurer, sauter est juste ;
+      - le dossier PARENT est injoignable — partage reseau tombe (winerror 53 ->
+        ENOENT), lecteur non pret (winerror 21), UNC mort : on ne SAIT PAS ce
+        qu'il y aurait a restaurer.
+
+    Confondre les deux faisait MENTIR le rollback. Chaine reproduite le
+    2026-08-29 avec la fonction de production, trois ops sur un volume absent :
+
+        ok=True, rollback_status=ROLLED_BACK_BY_ATOMIC,
+        counts={done: 0, skipped: 3, failed: 0}, « 0 revert / 3 skipped »
+
+    Trois films non restaures, annonces comme un succes franc.
+
+    LA CAUSE N'ETAIT PAS l'absence de `ROLLBACK_PARTIAL` — il existe et il est
+    atteignable (`failed > 0 et done > 0`). C'est qu'un `SKIPPED` n'entre dans
+    AUCUN des deux compteurs qui font basculer le verdict final. On corrige donc
+    a la CLASSIFICATION : le calcul du statut, lui, devient juste tout seul.
+
+    Discriminant mesure sur trois cas, dont un UNC reellement injoignable :
+    `dst.exists()` rend False partout, `dst.parent.is_dir()` rend True au
+    premier et False aux deux autres.
+
+    Contre-tests : `test_un_fichier_disparu_dans_un_dossier_PRESENT_reste_un_saut`
+    et `test_rollback_5_of_10_partial` (5 done + 5 skipped -> DONE), qui ne doit
+    surtout pas se retourner.
+    """
+    if not dst.parent.is_dir():
+        _audit_log(
+            audit_fn,
+            "ERROR",
+            f"rollback_forward: dossier de destination INJOIGNABLE op_id={op_id} "
+            f"dst={dst_path} — impossible de savoir s'il y a quelque chose a restaurer",
+        )
+        return {
+            "id": op_id,
+            "op_index": op_index,
+            "status": "FAILED",
+            "reason": "dst_parent_injoignable",
+        }
+    _audit_log(
+        audit_fn,
+        "WARN",
+        f"rollback_forward: dst manquant op_id={op_id} dst={dst_path} — skipped",
+    )
+    return {
+        "id": op_id,
+        "op_index": op_index,
+        "status": "SKIPPED",
+        "reason": "dst_missing",
+    }
+
+
 def _revert_one_op(
     op: Dict[str, Any],
     *,
@@ -137,17 +202,7 @@ def _revert_one_op(
     src = Path(src_path)
 
     if not dst.exists():
-        _audit_log(
-            audit_fn,
-            "WARN",
-            f"rollback_forward: dst manquant op_id={op_id} dst={dst_path} — skipped",
-        )
-        return {
-            "id": op_id,
-            "op_index": op_index,
-            "status": "SKIPPED",
-            "reason": "dst_missing",
-        }
+        return _verdict_dst_manquant(dst, dst_path, op_id, op_index, audit_fn)
 
     if src.exists():
         _audit_log(

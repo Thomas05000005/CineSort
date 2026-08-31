@@ -105,7 +105,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/run_flow_support.py", "_build_plan_job_fn"): 304,
     ("cinesort/ui/api/perceptual_support.py", "_execute_perceptual_analysis"): 298,
     ("cinesort/app/job_runner.py", "_run_worker"): 292,
-    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 275,
+    # 275 -> 265 : la decision « dst manquant » a ete extraite dans
+    # `_verdict_dst_manquant` le 2026-08-29 (un volume injoignable n'est plus
+    # confondu avec un fichier deja deplace). Plafond resserre sur la taille
+    # obtenue plutot que monte.
+    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 265,
     ("cinesort/domain/librarian.py", "generate_suggestions"): 272,
     ("cinesort/ui/api/run_flow_support.py", "job_fn"): 271,
     ("cinesort/app/runtime_probe_check.py", "cross_check_rows_with_probe"): 258,
@@ -190,11 +194,12 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/infra/jellyfin_client.py", "get_all_movies"): 128,
     ("cinesort/ui/api/tmdb_support.py", "search_tmdb"): 128,
     ("cinesort/app/plan_support_core.py", "_classify_and_plan_folder"): 127,
-    ("cinesort/infra/rest_server.py", "_handle_get"): 125,
     ("cinesort/app/quarantine_ttl.py", "purge_review_bucket"): 123,
     ("cinesort/domain/perceptual/av1_grain_metadata.py", "extract_av1_film_grain_params"): 123,
     ("cinesort/domain/core.py", "build_candidates_from_tmdb"): 122,
-    ("cinesort/domain/release_name_parser.py", "parse_release_name"): 122,
+    # `parse_release_name` est SORTIE de ce plafond le 2026-08-31 : 147 -> 91
+    # lignes, apres extraction de `_parse_audio_hints` (64). Le cliquet avait
+    # rougi a 147 > 122 en documentant le repli DTS:X ; il demande de DECOUPER.
     ("cinesort/ui/api/library_support.py", "set_film_tmdb_candidate"): 122,
     ("cinesort/domain/calibration.py", "suggest_weight_adjustment"): 121,
     ("cinesort/domain/perceptual/grain_classifier.py", "classify_grain_nature"): 121,
@@ -204,18 +209,25 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_podiums_support.py", "_get_library_podiums_impl"): 120,
     ("cinesort/infra/db/repositories/decisions.py", "upgrade_deferred_to_accepted"): 118,
     ("cinesort/app/watchlist.py", "compare_watchlist"): 117,
-    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 117,
+    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 109,
     ("cinesort/domain/duplicate_compare.py", "compare_by_criteria"): 116,
     ("cinesort/domain/video_hash.py", "extract_video_thumbnails"): 116,
-    ("cinesort/infra/integrations/poster_proxy.py", "serve_poster"): 114,
+    # 114 -> 108 : la route jaquettes a ete documentee et durcie le 2026-08-29,
+    # ce qui l'a fait deborder (140). Plutot que monter le plafond, trois blocs
+    # ont ete extraits (`_force_demande`, `_invalider_le_cache`,
+    # `_servir_sans_cle_tmdb`). Le plafond est resserre sur la taille obtenue.
+    ("cinesort/infra/integrations/poster_proxy.py", "serve_poster"): 108,
     # 114 -> 172 : un undo qui n'a restaure AUCUN fichier ne consomme plus
     # l'annulation. Le cas et sa justification tiennent en une trentaine de
     # lignes de commentaire — c'est le prix pour que personne ne les reperde.
-    # +2 le 2026-08-19 : le triangle sur l'undo. Une ligne pour la photo des
-    # `undo_status` AVANT la boucle (elle doit etre prise avant, donc elle ne
-    # peut pas vivre ailleurs), une pour l'appel au verdict. Les deux sont
-    # irreductibles ; les contorsionner coutait plus que la hausse.
-    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 174,
+    # 172 -> 161 le 2026-08-31 : le triangle sur l'undo ajoutait deux lignes
+    # irreductibles (la photo des `undo_status` AVANT la boucle, et l'appel au
+    # verdict), et une premiere version de cette PR portait donc le plafond a
+    # 174. Le cliquet ne monte pas : `_payload_de_fin_d_undo` a ete EXTRAITE a
+    # la place. Ce bloc ne consultait que des variables locales deja calculees,
+    # donc rien ne le retenait ici — la fonction passe SOUS son plafond
+    # historique au lieu de le repousser.
+    ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 161,
     ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 114,
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
     ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 114,

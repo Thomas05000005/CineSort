@@ -1,8 +1,11 @@
 [project]
 name = "cinesort"
 # v1.5.2-beta - lue depuis VERSION pour build, dupliquee ici pour PEP 621.
-# Garder ces deux valeurs synchronisees lors d'un bump (scripts/bump_version.py
-# couvre VERSION + ce champ).
+# Garder ces deux valeurs synchronisees lors d'un bump. Le garde qui le verifie
+# est `tests/test_pyproject_pep621_v77.py::test_project_version_aligned_on_version_file`.
+# 2026-08-29 : cette ligne renvoyait a un `scripts/bump_version.py` qui « couvre
+# VERSION + ce champ ». Ce script n'a JAMAIS existe : `git log --all --
+# scripts/bump_version.py` rend zero commit sur tout l'historique.
 version = "1.5.2-beta"
 description = "CineSort - tri et renommage automatique de bibliotheques de films (Windows desktop, Python 3.13, pywebview)."
 readme = "README.md"
@@ -103,8 +106,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 # Phase 0.4 vérif totale : le périmètre de test vit ici, plus seulement dans ci.yml.
-# Pas d'addopts pour ne pas changer le comportement CI (--ignore=tests/e2e --timeout=60
-# restent explicites dans .github/workflows/ci.yml).
+# Pas d'addopts pour ne pas changer le comportement CI : les --ignore=tests/e2e*
+# restent explicites dans .github/workflows/ci.yml.
+# 2026-08-29 : ce commentaire annoncait aussi « --timeout=60 [reste] explicite
+# dans ci.yml ». FAUX a deux titres — le plugin pytest-timeout n'est pas
+# installe (le drapeau rend « unrecognized arguments », exit 4, ZERO test
+# execute), et ci.yml n'en porte aucune occurrence : le seul « timeout=600 »
+# qu'on y trouve est dans un commentaire, pour tests/e2e_desktop.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

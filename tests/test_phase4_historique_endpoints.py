@@ -225,6 +225,30 @@ class DeleteRunTests(unittest.TestCase):
         self.assertIn("introuvable", resp.get("message", "").lower())
 
     def test_delete_cascades_apply_batches_and_operations(self) -> None:
+        """La cascade purge le journal — et rend donc l'undo IMPOSSIBLE.
+
+        2026-08-29 : ce test verifiait que les LIGNES disparaissent. Il ne disait
+        rien de ce que leur disparition SIGNIFIE, et c'est la que le produit
+        ment. Les deux assertions sur `get_last_reversible_apply_batch` sont
+        ajoutees pour porter la consequence, pas seulement le mecanisme.
+
+        `run.py` fait `DELETE FROM apply_batches WHERE run_id=?` ; la cascade FK
+        de la migration 021 emporte `apply_operations`, le journal que les DEUX
+        chemins d'undo lisent (`undo_last_apply` et `undo_selected_rows` passent
+        tous deux par `get_last_reversible_apply_batch` + `list_apply_operations`).
+        Aucun repli n'existe : `apply_audit.jsonl` sert a la tracabilite, jamais
+        a restaurer.
+
+        Rien cote backend ne refuse la suppression d'un run dont l'apply est
+        encore dans sa fenetre de 24 h (`UNDO_DEADLINE_SECONDS`), et le bouton
+        « Supprimer ce run » est rendu SANS condition la ou son voisin
+        « Annuler l'apply » l'est. Le cron de retention 90 j emprunte le meme
+        chemin (`cleanup_old_runs` -> `delete_run`).
+
+        C'est un CONSTAT, pas une exigence de correctif : si quelqu'un pose un
+        jour une garde (refus, conservation du journal, avertissement), qu'il
+        vienne mettre ce test a jour au lieu de decouvrir la regle.
+        """
         now = time.time()
         _insert_run(self.store, "20260517_154004", started_ts=now - 600, ended_ts=now - 540)
         batch_id = self.store.apply.insert_apply_batch(
@@ -242,11 +266,23 @@ class DeleteRunTests(unittest.TestCase):
             reversible=True,
         )
 
+        # PRE-CONDITION : sans elle, les assertions d'apres pourraient etre
+        # satisfaites par un apply qui n'a jamais ete annulable.
+        self.assertIsNotNone(
+            self.store.apply.get_last_reversible_apply_batch("20260517_154004"),
+            "pre-condition : l'apply doit etre annulable AVANT la suppression",
+        )
+
         resp = self.api.run.delete_run("20260517_154004")
         self.assertTrue(resp.get("ok"), resp)
         # Verifie que apply_batches et apply_operations sont bien purges.
         self.assertEqual(self.store.apply.list_apply_batches_for_run(run_id="20260517_154004"), [])
         self.assertEqual(self.store.apply.list_apply_operations(batch_id=batch_id), [])
+        # ... et ce que cela veut dire pour l'utilisateur.
+        self.assertIsNone(
+            self.store.apply.get_last_reversible_apply_batch("20260517_154004"),
+            "supprimer le run rend l'apply DEFINITIVEMENT non annulable",
+        )
 
     def test_delete_does_not_touch_video_files(self) -> None:
         """Les fichiers du root ne doivent JAMAIS etre supprimes."""

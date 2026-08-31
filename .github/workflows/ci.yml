@@ -67,11 +67,39 @@ jobs:
             **/pyproject.toml
             **/uv.lock
 
-      - name: Run uv lock
+      # 2026-08-29 : ce job s'appelait « Generate/Verify uv.lock » et ne
+      # VERIFIAIT rien — `run: uv lock` nu REGENERE le fichier, donc il reussit
+      # toujours, quel que soit l'etat du lockfile commite.
+      #
+      # Ce que ca coutait, mesure le jour ou le drapeau a ete pose :
+      # `uv lock --check` sortait deja en ERREUR sur HEAD. Le lockfile etait
+      # perime depuis #1112 — il enregistrait `pytest-playwright >=0.8.0,<0.9`
+      # quand `pyproject.toml:64` et `requirements-dev.txt:13` disent `<0.10`.
+      # Le job passait au vert sur cette derive depuis des semaines, parce qu'il
+      # la corrigeait en memoire au lieu de la signaler.
+      #
+      # La branche « genere si absent » de l'intention d'origine est conservee :
+      # un depot sans lockfile obtient son artefact au lieu d'un echec seche.
+      # Et sur echec, on regenere QUAND MEME pour uploader la version correcte —
+      # sinon l'artefact serait le fichier perime, donc inutile au dev.
+      - name: Verifier que uv.lock est a jour
         shell: bash
-        run: uv lock
+        run: |
+          if [ ! -f uv.lock ]; then
+            echo "::warning::uv.lock absent — genere et uploade en artefact, a committer."
+            uv lock
+            exit 0
+          fi
+          if uv lock --check; then
+            echo "uv.lock est a jour."
+            exit 0
+          fi
+          echo "::error::uv.lock est PERIME par rapport aux manifestes. La version correcte est uploadee en artefact : recuperez-la, ou relancez 'uv lock' localement et committez."
+          uv lock
+          exit 1
 
       - name: Upload uv.lock artifact
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: uv-lock

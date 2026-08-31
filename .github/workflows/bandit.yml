@@ -80,8 +80,9 @@ jobs:
         #   avec args controles, pas user input)
         # --skip B311 : random pour usages non-cryptos (UI animations)
         # Output SARIF pour integration GitHub Security tab.
-        # `|| true` : ne bloque pas le CI tant qu'on travaille la dette,
-        # les findings restent visibles dans l'onglet Security.
+        # `|| true` ici est NORMAL : bandit sort non-zero des qu'il trouve quoi
+        # que ce soit, et cette etape doit produire le SARIF quoi qu'il arrive.
+        # Ce qui BLOQUE est le cliquet plus bas, pas cette etape.
         run: |
           bandit -r cinesort/ \
             --skip B101,B404,B603,B311 \
@@ -94,3 +95,48 @@ jobs:
         with:
           sarif_file: bandit-results.sarif
           category: bandit
+
+      # === CLIQUET (2026-08-29) ====================================
+      # Ce check est REQUIS par la protection de `main`. Avant ce jour il ne
+      # pouvait pas echouer : le `|| true` ci-dessus avalait tout, et la
+      # protection annoncait donc un garde qui n'en etait pas un.
+      #
+      # Retirer le `|| true` d'un coup aurait rendu `main` rouge : mesure du
+      # 2026-08-29, 33 findings au niveau exige (-ll -ii), dont 1 HIGH/HIGH.
+      # On fige donc le compte et on interdit qu'il MONTE — meme parti que
+      # `tests/contract_baselines/css_used_undefined.json` et que le budget de
+      # taille des fonctions.
+      #
+      # Une BAISSE fait aussi echouer, avec le nouveau chiffre a inscrire : un
+      # gain non verrouille se reperd. C'est deliberement le meme comportement
+      # que `test_allowlist_has_no_stale_entries`.
+      #
+      # Le compte se lit dans le SARIF deja produit — verifie identique au
+      # comptage JSON (33 = 33), donc pas de second passage de bandit.
+      - name: Cliquet — le nombre de findings ne doit pas bouger
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, sys
+
+          PLAFOND = 33  # mesure du 2026-08-29, bandit>=1.7,<2, drapeaux ci-dessus
+
+          with open("bandit-results.sarif", encoding="utf-8") as fh:
+              sarif = json.load(fh)
+          n = sum(len(run.get("results", [])) for run in sarif.get("runs", []))
+          print(f"bandit : {n} finding(s), plafond {PLAFOND}")
+
+          if n > PLAFOND:
+              sys.exit(
+                  f"REGRESSION : {n} findings pour un plafond de {PLAFOND}. "
+                  "Corriger le nouveau finding, ou (si justifie) monter PLAFOND "
+                  "dans .github/workflows/bandit.yml — ce qui doit rester un "
+                  "choix explicite en review."
+              )
+          if n < PLAFOND:
+              sys.exit(
+                  f"GAIN A VERROUILLER : {n} findings, le plafond en annonce "
+                  f"{PLAFOND}. Abaisser PLAFOND a {n} dans "
+                  ".github/workflows/bandit.yml pour que ce gain ne se reperde pas."
+              )
+          PY

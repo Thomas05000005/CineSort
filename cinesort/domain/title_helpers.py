@@ -8,7 +8,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
-from cinesort.domain.scene_parser import parse_scene_title
+from cinesort.domain.scene_parser import (
+    _PROVIDER_IMDB_TAG_RE,
+    _PROVIDER_TMDB_TAG_RE,
+    parse_scene_title,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +30,13 @@ PAREN_YEAR_RE = re.compile(r"[\(\[\{]\s*(19\d{2}|20\d{2})\s*[\)\]\}]")
 #   {tmdb-12345}, [tmdb-12345], [tmdbid-12345], {tmdb:12345}
 #   [imdbid-tt1234567], {imdb-tt1234567}, [imdb:tt1234567]
 # Permet l'auto-link deterministe au scan en plus du parsing NFO sidecar.
-_TMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*tmdb(?:id)?[\-:_]\s*(\d{1,9})\s*[\}\]]",
-    re.IGNORECASE,
-)
-_IMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*imdb(?:id)?[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
-    re.IGNORECASE,
-)
+#
+# Fix ultra-audit 2026-08-31 (#9) : ce module en portait une RECOPIE, plus
+# stricte que celle de `naming.py` (pas de `\s*` avant le separateur) alors que
+# les deux commentaires promettaient la meme tolerance. Un seul porteur
+# desormais : `scene_parser`, feuille du domaine que ce module importe deja.
+_TMDB_TAG_RE = _PROVIDER_TMDB_TAG_RE
+_IMDB_TAG_RE = _PROVIDER_IMDB_TAG_RE
 
 
 @dataclass(frozen=True)

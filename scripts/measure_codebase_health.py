@@ -128,7 +128,22 @@ def analyze_python_file(path: Path) -> Dict[str, object]:
 
 
 def run_ruff_select(select: str, paths: Iterable[Path]) -> int:
-    """Compte les violations Ruff pour une règle donnée. Retourne -1 si erreur."""
+    """Compte les violations Ruff pour une règle donnée. Retourne -1 si erreur.
+
+    « Erreur » doit couvrir la panne la plus probable : **ruff absent de
+    l'interpréteur**. Elle ne passait par aucune des gardes précédentes.
+    `sys.executable` existe toujours, donc `except FileNotFoundError` ne pouvait
+    pas se déclencher ; et `python -m <module absent>` rend **rc=1 avec un
+    stdout vide** (mesuré le 2026-08-31), or rc=1 est aussi le code d'un ruff
+    qui a trouvé des violations. Le `json.loads(proc.stdout or "[]")` d'origine
+    transformait donc ce stdout vide en **0 violation** : le rapport annonçait
+    une codebase propre sans avoir rien mesuré.
+
+    Seule la sortie sépare les deux cas. En `--output-format json`, ruff écrit
+    toujours un tableau JSON — `[]` compris (vérifié le 2026-08-31, rc=0). Un
+    stdout vide signifie donc que ruff n'a pas tourné, jamais qu'il n'a rien
+    trouvé.
+    """
     args = [
         sys.executable,
         "-m",
@@ -149,13 +164,20 @@ def run_ruff_select(select: str, paths: Iterable[Path]) -> int:
             check=False,
             cwd=str(REPO_ROOT),
         )
-    except FileNotFoundError:
+    except OSError:
+        # FileNotFoundError seule ne suffit pas : PermissionError, OSError
+        # « executable trop long », etc. sont aussi des non-mesures.
         return -1
     if proc.returncode not in (0, 1):
         return -1
+    if not (proc.stdout or "").strip():
+        # Ruff n'a pas produit de JSON : il n'a pas tourné.
+        return -1
     try:
-        data = json.loads(proc.stdout or "[]")
+        data = json.loads(proc.stdout)
     except json.JSONDecodeError:
+        return -1
+    if not isinstance(data, list):
         return -1
     return len(data)
 
@@ -165,27 +187,111 @@ def run_ruff_select(select: str, paths: Iterable[Path]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def count_test_skips(tests_dir: Path) -> Dict[str, int]:
-    """Compte les @unittest.skip / @pytest.mark.skip et leurs raisons."""
-    skips = Counter()
+#: Suffixes de décorateur reconnus comme « ce test est désactivé ».
+#: `skipif`/`skipunless` sont conditionnels mais désactivent bel et bien le test
+#: sur la machine où la condition est vraie — ils comptent.
+_SKIP_LEAF_NAMES = {"skip", "skipif", "skipunless"}
+
+#: Préfixes admis devant le nom de feuille. `""` couvre l'import direct
+#: (`from unittest import skipUnless` → `@skipUnless(...)`).
+_SKIP_PREFIXES = {"", "unittest", "pytest.mark"}
+
+
+def _repo_relative(path: Path) -> str:
+    """Chemin POSIX relatif au dépôt, ou chemin absolu si le fichier est hors dépôt.
+
+    Sans ce repli, le compteur lève `ValueError` dès qu'on le pointe ailleurs
+    que sur l'arbre du dépôt — c'est-à-dire qu'on ne peut pas le mesurer sur un
+    jeu d'essai.
+    """
+    try:
+        return path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _decorator_dotted_name(node: ast.expr) -> str:
+    """Nom pointé d'un décorateur, appelé ou non : `pytest.mark.skipif`, `skip`…"""
+    if isinstance(node, ast.Call):
+        node = node.func
+    parts: List[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _skip_reason(node: ast.expr, leaf: str) -> str:
+    """Raison littérale d'un décorateur de skip, chaîne vide si non littérale.
+
+    `reason=` prime ; à défaut on prend l'argument positionnel qui porte la
+    raison — le 1er pour `skip`, le 2e pour `skipif`/`skipunless` dont le 1er
+    est la condition.
+    """
+    if not isinstance(node, ast.Call):
+        return ""
+    for kw in node.keywords:
+        if kw.arg == "reason" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            return kw.value.value.strip()
+    index = 0 if leaf == "skip" else 1
+    if len(node.args) > index:
+        arg = node.args[index]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value.strip()
+    return ""
+
+
+def _iter_skip_decorators(tree: ast.AST) -> Iterable[str]:
+    """Rend la raison (possiblement vide) de chaque décorateur de skip de l'arbre."""
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for deco in node.decorator_list:
+            dotted = _decorator_dotted_name(deco)
+            prefix, _, leaf = dotted.rpartition(".")
+            if leaf.lower() in _SKIP_LEAF_NAMES and prefix in _SKIP_PREFIXES:
+                yield _skip_reason(deco, leaf.lower())
+
+
+def count_test_skips(tests_dir: Path) -> Dict[str, object]:
+    """Compte les décorateurs de skip et leurs raisons.
+
+    Familles reconnues : `@skip` / `@skipIf` / `@skipUnless` (import direct),
+    `@unittest.skip*` et `@pytest.mark.skip*`.
+
+    La lecture passe par l'**AST**, pas par un motif de texte. L'ancien motif
+    `@(unittest\\.)?skip(...)` exigeait que `skip` suive immédiatement `@` ou
+    `@unittest.` : il ne pouvait structurellement pas voir `@pytest.mark.skip`,
+    alors que la docstring l'annonçait déjà. Mesure du 2026-08-31 sur `tests/` :
+    il rendait **27** là où **39** décorateurs existent — les 13 `@pytest.mark.*`
+    étaient invisibles — et l'un de ces 27 n'était pas un décorateur mais une
+    **mention en commentaire** (`tests/test_naming_properties.py:24`), le motif
+    n'étant ancré nulle part.
+
+    `unparsed_files` expose les fichiers que l'AST n'a pas pu lire : un fichier
+    ignoré en silence est une nouvelle cécité.
+    """
+    skips: Counter = Counter()
     reasons: Dict[str, int] = defaultdict(int)
-    pattern = re.compile(r"@(unittest\.)?skip(\(['\"]([^'\"]*)['\"]\))?")
+    unparsed: List[str] = []
     for path in iter_files(tests_dir, ["py"]):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+        except (OSError, SyntaxError, ValueError):
+            unparsed.append(_repo_relative(path))
             continue
-        for match in pattern.finditer(text):
-            skips[str(path.relative_to(REPO_ROOT).as_posix())] += 1
-            reason = (match.group(3) or "").strip()
+        for reason in _iter_skip_decorators(tree):
+            skips[_repo_relative(path)] += 1
             if reason:
                 # Tronquer pour grouper
-                short = reason[:60]
-                reasons[short] += 1
+                reasons[reason[:60]] += 1
     return {
         "total": sum(skips.values()),
         "by_file": dict(skips),
         "by_reason_short": dict(reasons),
+        "unparsed_files": unparsed,
     }
 
 
@@ -291,15 +397,32 @@ def gather_js_metrics(web_dir: Path) -> Dict[str, object]:
     return {"file_count": len(files), "total_loc": total_loc}
 
 
-def gather_duplicate_components(web_dir: Path) -> List[str]:
-    """Liste les composants présents à la fois dans web/components/ et web/dashboard/components/."""
+def gather_duplicate_components(web_dir: Path) -> Dict[str, object]:
+    """Composants présents à la fois dans web/components/ et web/dashboard/components/.
+
+    Rend un **verdict**, pas une liste : « aucun doublon » et « le dossier
+    desktop n'existe pas » ne sont pas le même fait. `web/components/` a disparu
+    de l'arbre (mesure 2026-08-31 : `web/` ne contient plus que `dashboard/` et
+    `shared/`), donc la version d'origine sortait toujours par le `return []` de
+    tête et le rapport imprimait « 0 » — un compte, pour une mesure qui n'avait
+    pas eu lieu. Un détecteur qui ne peut rendre qu'UNE valeur ne mesure rien.
+    """
     desktop_dir = web_dir / "components"
     dashboard_dir = web_dir / "dashboard" / "components"
-    if not desktop_dir.is_dir() or not dashboard_dir.is_dir():
-        return []
+    missing = [
+        rel
+        for d, rel in ((desktop_dir, "web/components"), (dashboard_dir, "web/dashboard/components"))
+        if not d.is_dir()
+    ]
+    if missing:
+        return {"measurable": False, "duplicates": [], "missing_dirs": missing}
     desktop_names = {p.name for p in desktop_dir.glob("*.js")}
     dashboard_names = {p.name for p in dashboard_dir.glob("*.js")}
-    return sorted(desktop_names & dashboard_names)
+    return {
+        "measurable": True,
+        "duplicates": sorted(desktop_names & dashboard_names),
+        "missing_dirs": [],
+    }
 
 
 def gather_migrations(infra_db_dir: Path) -> List[str]:
@@ -312,6 +435,63 @@ def gather_migrations(infra_db_dir: Path) -> List[str]:
 # ---------------------------------------------------------------------------
 # Format markdown
 # ---------------------------------------------------------------------------
+
+
+def _duplicate_cell(dup: Dict[str, object]) -> str:
+    """Cellule du rapport pour les composants dupliqués : un compte, ou l'aveu."""
+    if dup.get("measurable"):
+        return str(len(dup.get("duplicates") or []))
+    absents = ", ".join(str(d) for d in (dup.get("missing_dirs") or [])) or "?"
+    return f"non mesuré ({absents} absent)"
+
+
+def _skip_section(tests: Dict[str, object]) -> List[str]:
+    """Section « Raisons de skip » + avertissement sur les fichiers illisibles."""
+    skips = tests["skips"]
+    out: List[str] = []
+    unparsed = skips.get("unparsed_files") or []
+    if unparsed:
+        out.append(f"> ⚠ {len(unparsed)} fichier(s) de test non analysables (AST) — non comptés : {unparsed[:5]}")
+        out.append("")
+    if not skips["by_reason_short"]:
+        return out
+    out.append("### Raisons de skip les plus fréquentes")
+    out.append("")
+    out.append("| Raison (extrait) | Occurrences |")
+    out.append("|------------------|-------------|")
+    for reason, count in sorted(skips["by_reason_short"].items(), key=lambda kv: -kv[1])[:15]:
+        out.append(f"| `{reason}` | {count} |")
+    out.append("")
+    return out
+
+
+#: Règles Ruff mesurées, dans l'ordre du rapport, avec leur libellé.
+RUFF_RULES: Tuple[Tuple[str, str], ...] = (
+    ("BLE001", "blind except (`except Exception`)"),
+    ("PLR2004", "magic value comparison"),
+    ("PLR0913", "too many arguments (>5)"),
+    ("C901", "complexity > 10"),
+    ("SIM105", "try/except/pass → suppress"),
+    ("ARG001", "argument inutilisé"),
+    ("B007", "variable de boucle inutilisée"),
+    ("RUF100", "`# noqa` inutile"),
+)
+
+
+def _ruff_section(ruff: Dict[str, int]) -> List[str]:
+    """Tableau Ruff. Une valeur < 0 signifie « ruff n'a pas tourné », pas « 0 »."""
+    out: List[str] = []
+    out.append("## Qualité (Ruff)")
+    out.append("")
+    out.append("Comptés en activant **uniquement** la règle (config actuelle ignore probablement) :")
+    out.append("")
+    out.append("| Règle Ruff | Description | Violations |")
+    out.append("|------------|-------------|------------|")
+    for rule, label in RUFF_RULES:
+        value = ruff.get(rule, -1)
+        out.append(f"| `{rule}` | {label} | {value if value >= 0 else 'erreur ruff'} |")
+    out.append("")
+    return out
 
 
 def format_report(data: Dict[str, object]) -> str:
@@ -341,50 +521,18 @@ def format_report(data: Dict[str, object]) -> str:
     out.append(f"| LOC JS total | {js['total_loc']:,} |")
     out.append(f"| Fichiers Python > 500L | {len(py['large_files_500'])} |")
     out.append(f"| Migrations SQL | {len(data['migrations'])} |")
-    out.append(f"| Composants JS dupliqués (desktop ↔ dashboard) | {len(data['duplicate_components'])} |")
+    out.append(f"| Composants JS dupliqués (desktop ↔ dashboard) | {_duplicate_cell(data['duplicate_components'])} |")
     out.append("")
     out.append("## Tests")
     out.append("")
     out.append("| Métrique | Valeur |")
     out.append("|----------|--------|")
     out.append(f"| Fonctions test_* totales | {tests['test_function_count']} |")
-    out.append(f"| Tests skip cumulés (@skip / @unittest.skip) | {tests['skips']['total']} |")
+    out.append(f"| Tests skip cumulés (@unittest.skip* / @pytest.mark.skip*) | {tests['skips']['total']} |")
     out.append("")
 
-    if tests["skips"]["by_reason_short"]:
-        out.append("### Raisons de skip les plus fréquentes")
-        out.append("")
-        out.append("| Raison (extrait) | Occurrences |")
-        out.append("|------------------|-------------|")
-        sorted_reasons = sorted(
-            tests["skips"]["by_reason_short"].items(),
-            key=lambda kv: -kv[1],
-        )
-        for reason, count in sorted_reasons[:15]:
-            out.append(f"| `{reason}` | {count} |")
-        out.append("")
-
-    out.append("## Qualité (Ruff)")
-    out.append("")
-    out.append("Comptés en activant **uniquement** la règle (config actuelle ignore probablement) :")
-    out.append("")
-    out.append("| Règle Ruff | Description | Violations |")
-    out.append("|------------|-------------|------------|")
-    out.append(
-        f"| `BLE001` | blind except (`except Exception`) | {ruff['BLE001'] if ruff['BLE001'] >= 0 else 'erreur ruff'} |"
-    )
-    out.append(f"| `PLR2004` | magic value comparison | {ruff['PLR2004'] if ruff['PLR2004'] >= 0 else 'erreur ruff'} |")
-    out.append(
-        f"| `PLR0913` | too many arguments (>5) | {ruff['PLR0913'] if ruff['PLR0913'] >= 0 else 'erreur ruff'} |"
-    )
-    out.append(f"| `C901` | complexity > 10 | {ruff['C901'] if ruff['C901'] >= 0 else 'erreur ruff'} |")
-    out.append(
-        f"| `SIM105` | try/except/pass → suppress | {ruff['SIM105'] if ruff['SIM105'] >= 0 else 'erreur ruff'} |"
-    )
-    out.append(f"| `ARG001` | argument inutilisé | {ruff['ARG001'] if ruff['ARG001'] >= 0 else 'erreur ruff'} |")
-    out.append(f"| `B007` | variable de boucle inutilisée | {ruff['B007'] if ruff['B007'] >= 0 else 'erreur ruff'} |")
-    out.append(f"| `RUF100` | `# noqa` inutile | {ruff['RUF100'] if ruff['RUF100'] >= 0 else 'erreur ruff'} |")
-    out.append("")
+    out.extend(_skip_section(tests))
+    out.extend(_ruff_section(ruff))
 
     out.append("## Anti-patterns mesurés par AST")
     out.append("")
@@ -444,10 +592,10 @@ def format_report(data: Dict[str, object]) -> str:
             out.append(f"| `{path}` | {loc} |")
         out.append("")
 
-    if data["duplicate_components"]:
+    if data["duplicate_components"].get("duplicates"):
         out.append("### Composants JS dupliqués (présents desktop ET dashboard)")
         out.append("")
-        for name in data["duplicate_components"]:
+        for name in data["duplicate_components"]["duplicates"]:
             out.append(f"- `{name}`")
         out.append("")
 
@@ -527,11 +675,14 @@ def main(argv: List[str]) -> int:
     sys.stderr.write("Migrations SQL...\n")
     migrations = gather_migrations(infra_db_dir)
 
-    sys.stderr.write("Ruff (8 règles)...\n")
+    sys.stderr.write(f"Ruff ({len(RUFF_RULES)} règles)...\n")
     ruff_results: Dict[str, int] = {}
-    for rule in ("BLE001", "PLR2004", "PLR0913", "C901", "SIM105", "ARG001", "B007", "RUF100"):
+    for rule, _label in RUFF_RULES:
         ruff_results[rule] = run_ruff_select(rule, [cinesort_dir])
-        sys.stderr.write(f"  {rule}: {ruff_results[rule]}\n")
+        value = ruff_results[rule]
+        sys.stderr.write(f"  {rule}: {value if value >= 0 else 'ERREUR (ruff n a pas tourne)'}\n")
+    if all(v < 0 for v in ruff_results.values()):
+        sys.stderr.write("  ⚠ Aucune règle Ruff mesurée — ruff est-il installé dans cet interpréteur ?\n")
 
     data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

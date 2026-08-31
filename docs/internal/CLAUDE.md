@@ -15,6 +15,11 @@
 > à chaque session. L'historique ancien est dans
 > [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
 
+> 🔴 **Chiffres périmés — vérifié le 2026-08-26.** Ce fichier date du 2026-08-03 et plusieurs
+> de ses valeurs ont dérivé. Les corrections ponctuelles ci-dessous ont été appliquées, mais
+> **la section « Sessions récentes » n'a pas été re-vérifiée**. L'état courant fait foi dans
+> [`REVUE_TOTALE_2026-08-26.md`](./REVUE_TOTALE_2026-08-26.md).
+
 ---
 
 ## Instructions
@@ -53,11 +58,14 @@
   effacés, 2 fichiers de tests ne collectaient plus, et pytest s'arrêtait AVANT d'exécuter quoi que
   ce soit — un « 0 échec » trompeur sur une batterie amputée. Les deux modules sont désormais en
   `per-file-ignores` F401.
-- **ruff est ÉPINGLÉ EXACTEMENT** (`ruff==0.15.22`). Trois versions coexistaient — hook pre-commit
-  `0.15.6`, `uv.lock` `0.15.16`, CI `0.15.22` via une borne flottante : un développeur formatait avec
-  une version que la CI rejetait. La garde `test_ruff_version_is_identical_everywhere` échoue si le
-  hook et `requirements-dev.txt` divergent. Toute montée doit être **délibérée**, avec le
-  reformatage dans le même commit.
+- **ruff est ÉPINGLÉ EXACTEMENT — `ruff==0.16.3`** (mesuré le 2026-08-26 dans
+  `requirements-dev.txt:17` et `.pre-commit-config.yaml:18`).
+  ⚠️ Ce fichier a longtemps annoncé `0.15.22` : il était donc lui-même un **sixième point
+  d'ancrage**, périmé, et le suivre faisait reformater tout le dépôt avec une version que la CI
+  rejette. *Historique : en juin 2026, trois versions coexistaient (hook `0.15.6`, `uv.lock`
+  `0.15.16`, CI `0.15.22` via une borne flottante) — c'est ce qui a motivé l'épinglage.*
+  La garde `test_ruff_version_is_identical_everywhere` échoue si les cinq ancrages divergent.
+  Toute montée doit être **délibérée**, avec le reformatage dans le même commit.
 - **Le bot d'audit quotidien est BORNÉ.** Il tourne en Opus 5 / `--effort max`, et son document
   d'instructions (`.github/audit-prompt.md`) impose désormais un **budget d'ouverture** : au plus
   3 PR et 5 issues par exécution, **zéro** tant que le total ouvert dépasse 150, et un ordre de
@@ -146,7 +154,7 @@ Le cycle historique `domain -> app` a ete brise en mai 2026 (issue #83, phases A
 - **SQLite WAL** (31 migrations, schema v31 — derniere: `031_tri_etat_decisions.sql`)
 - **Dependances clefs** : `requests`, `rapidfuzz` (matching), `segno` (QR), `onnxruntime` + `numpy` (LPIPS perceptuel)
 - **Probe** : ffprobe + mediainfo (binaires externes)
-- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **~497 fichiers test_*.py** (446 racine + sous-dossiers), **6062 tests collectés** (unitaires + contrats CI + chaînes Lot D + sweeps runtime Lot C). Les 74 fichiers morts « Legacy frontend removed » ont été supprimés (Phase 0.4). Config pytest dans `[tool.pytest.ini_options]`. **Lancer avec `.venv/Scripts/python.exe` (3.13)** — le `python` global est un 3.12 qui produit des faux échecs ; périmètre CI = `--ignore` e2e/e2e_dashboard/e2e_desktop/manual/live/stress, SANS `--timeout`.
+- **Tests** : pytest (>= 9.0.3) + hypothesis + Playwright (E2E dashboard) — **~497 fichiers test_*.py** (446 racine + sous-dossiers), **9276 items collectés** (`--collect-only -q`, 2026-08-26 ; ce fichier disait 6062) (unitaires + contrats CI + chaînes Lot D + sweeps runtime Lot C). Les 74 fichiers morts « Legacy frontend removed » ont été supprimés (Phase 0.4). Config pytest dans `[tool.pytest.ini_options]`. **Lancer avec `.venv/Scripts/python.exe` (3.13)** — le `python` global est un 3.12 qui produit des faux échecs ; périmètre CI = `--ignore` e2e/e2e_dashboard/e2e_desktop/manual/live/stress, SANS `--timeout`.
 - **Qualite** : ruff (lint + format), import-linter, pre-commit, codecov (coverage), bandit, mypy
 - **Build** : PyInstaller (~54 MB onefile EXE Windows — **`dist/CineSort.exe` est le livrable final**, `build/CineSort/` est intermediaire PyInstaller a ignorer)
 
@@ -181,7 +189,7 @@ Ces regles sont issues des memoires user persistantes et doivent etre respectees
 
 ## API REST (architecture dispatcher)
 
-Dispatcher unique : `cinesort/infra/rest_server.py` (1193 lignes, HTTP stdlib, pas de Flask/FastAPI).
+Dispatcher unique : `cinesort/infra/rest_server.py` (**1800 lignes** au 2026-08-26, HTTP stdlib, pas de Flask/FastAPI).
 
 ### Format d'URL canonique
 - **Actif** : `POST /api/<facade>/<methode>` avec body JSON (params kwargs)
@@ -518,7 +526,7 @@ get_tmdb_posters, smart_playlists (CRUD), list_films_with_history, export_full_l
 
 | Workflow | Trigger | Role |
 |----------|---------|------|
-| `ci.yml` | push main + PR | lint (ruff) + format + **import-linter** + tests + coverage 80% + build EXE + smoke |
+| `ci.yml` | push main + PR | lint (ruff) + format + **import-linter** + tests + coverage **75 %** (`--fail-under=75`, ci.yml:211 ; le « 80 % » ecrit partout ailleurs est faux) + build EXE + smoke |
 | `audit-module.yml` | cron daily 04h UTC + manual | Audit Claude par couche (rotation lun-ven) avec prompt dans `.github/audit-prompt.md` (46 categories, 6 personas) |
 | `claude.yml` | @mention + cron weekly (lundi 04h UTC) | Claude Code Action sur PR/issue |
 | `codeql.yml`, `bandit.yml`, `gitleaks.yml`, `pip-audit.yml`, `mypy.yml` | push + PR | Security + typing |
@@ -533,9 +541,9 @@ Configuration appliquee aux workflows GitHub Actions Claude (`claude.yml` et `au
 
 | Parametre | Valeur |
 |-----------|--------|
-| **Model** | `claude-opus-4-8` (Claude Opus 4.8 — latest) |
+| **Model** | `audit-module.yml` : **`claude-opus-5`** · `claude.yml` : `claude-opus-4-8` (les deux differaient, ce tableau ne l'annoncait pas) |
 | **Thinking budget** | `--max-thinking-tokens 200000` (max) |
-| **Effort** | `ultra` (qualite maximale, aucune limite de tokens) |
+| **Effort** | `audit-module.yml` : **`max`** · `claude.yml` : voir le workflow (le `ultra` annonce ici n'est pas une valeur valide) |
 | **Daily run** | `.github/workflows/audit-module.yml` (cron `0 4 * * *`, audit quotidien par couche) |
 | **Weekly run** | `.github/workflows/claude.yml` (cron `0 4 * * 1`, Claude Code Action) |
 
@@ -555,13 +563,12 @@ Historique antérieur : 2026-07-09 campagne vérif totale (`f486f98`, tag verif-
 
 ---
 
-## Issues ouvertes (3)
+## Issues ouvertes
 
-| # | Sujet | Statut | Effort |
-|---|-------|--------|--------|
-| #14 | Umbrella audit | A laisser ouverte | — |
-| #85 | Mixins SQLite -> Repositories (B8 cleanup) | Repositories faits (B1-B7), reste suppression mixins | 3-4h, 1 PR |
-| (autres) | — | — | — |
+⚠️ **Cette section etait fausse.** Elle annoncait « (3) » et presentait #14 et #85 comme
+ouvertes : **les deux sont FERMEES** (verifie le 2026-08-26). Le backlog reel est de **16 issues
+et 22 PR ouvertes** — voir [`REVUE_TOTALE_2026-08-26.md`](./REVUE_TOTALE_2026-08-26.md), qui le
+detaille et le priorise. Ne pas retablir un tableau ici : il redeviendra faux.
 
 ---
 
@@ -570,7 +577,8 @@ Historique antérieur : 2026-07-09 campagne vérif totale (`f486f98`, tag verif-
 ```bash
 # Quality gate locale
 check_project.bat                                                # Windows : compile + lint + format + tests + coverage
-python -m pytest tests/ --ignore=tests/e2e --timeout=60 -q       # Tests rapides
+# ⚠ PAS de --timeout : pytest-timeout n'est pas installe -> exit 4, ZERO test execute.
+python -m pytest tests/ --ignore=tests/e2e -q                     # Tests rapides
 
 # Architecture
 lint-imports                                                     # 3 contracts (domain/infra/app boundaries)

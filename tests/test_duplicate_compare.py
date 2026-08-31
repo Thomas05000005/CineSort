@@ -8,7 +8,7 @@ Couvre :
 - Audio canaux : 7.1 vs 5.1 → A gagne
 - Bitrate : meme codec, A plus haut → A gagne ; codecs differents → skip
 - Egalite parfaite → tie
-- Probe manquante : criteres connus seulement
+- Probe manquante : criteres connus seulement (aucun connu -> tie, cf. #20)
 - Deux probes manquantes → tie
 - 3 fichiers → rank_duplicates ordonne
 - Score pondere correct
@@ -106,6 +106,93 @@ class VideoCodecCompareTests(unittest.TestCase):
         self.assertEqual(r.winner, "a")
 
 
+class CodecHorsTableTests(unittest.TestCase):
+    """Un codec ABSENT de la table ne doit pas etre traite comme le PIRE.
+
+    `_video_codec_rank_value` faisait `_VIDEO_CODEC_RANK.get(codec, 0)` sur une
+    table de dix etiquettes (av1, hevc, h265, x265, h264, x264, avc, mpeg4,
+    xvid, divx). Tout autre codec REEL tombait donc a 0, soit SOUS xvid et divx
+    qui valent 1.
+
+    Codecs concernes, mesures le 2026-08-29 : vc1 (Blu-ray), mpeg2video (DVD),
+    vp9, prores, wmv3, msmpeg4v3 — tous rendus 0.
+
+    CONSEQUENCE MESUREE, avec un probe construit par `_build_pseudo_probe`
+    (run_flow_support.py, le SEUL producteur de probes du comparateur) :
+
+        A = Blu-ray VC-1  1080p 25,0 Mbps  21,0 Go
+        B = DivX          1080p  1,5 Mbps   1,3 Go
+
+        Resolution   1080p / 1080p        egalite     0
+        Codec video  ?     / xvid         B         -15
+        Bitrate      25,0  / 1,5 Mbps     unknown     0
+        Taille       21,0  / 1,3 Go       egalite     0   (informatif par design)
+        --> verdict global : « Garder B, archiver A »
+
+    Le produit recommandait donc d'archiver le Blu-ray au profit du DivX, en
+    AFFICHANT les deux debits juste a cote de sa recommandation. Et ce verdict
+    est applicable en masse via « Auto-decider tous », qui deplace les perdants
+    en `_review/_duplicates_user_decided/` a l'apply.
+
+    Le remede n'invente aucun rang : « je ne connais pas ce codec » et « ce
+    codec est le pire » sont deux affirmations differentes. La fonction rendait
+    deja `None` pour un codec VIDE — l'inconnu recoit le meme traitement, et
+    `_compare_criterion` le rend alors `unknown` a 0 point, chemin deja exerce.
+
+    NE PAS « corriger » aussi le saut du bitrate entre codecs differents : il
+    est DELIBERE et garde par `test_different_codec_skip_bitrate`. Comparer
+    5 Mbps de HEVC a 20 Mbps de h264 n'a pas de sens.
+    """
+
+    HORS_TABLE = ("vc1", "mpeg2video", "vp9", "prores", "wmv3", "msmpeg4v3")
+
+    def test_un_codec_hors_table_ne_perd_pas_contre_xvid(self) -> None:
+        for codec in self.HORS_TABLE:
+            with self.subTest(codec=codec):
+                criteres = compare_by_criteria(
+                    _probe(height=1080, codec=codec, bitrate=25000000),
+                    _probe(height=1080, codec="xvid", bitrate=1500000),
+                )
+                c = next(x for x in criteres if x.name == "video_codec")
+                self.assertEqual(
+                    c.winner,
+                    "unknown",
+                    f"`{codec}` inconnu doit rendre un verdict inconnu, pas une defaite",
+                )
+                self.assertEqual(c.points_delta, 0)
+
+    def test_le_bluray_vc1_n_est_plus_archive_au_profit_du_divx(self) -> None:
+        """Le cas complet : le verdict global ne doit plus designer le DivX."""
+        r = compare_duplicates(
+            _probe(height=1080, codec="vc1", bitrate=25000000, audio_codec="dts", channels=6),
+            _probe(height=1080, codec="mpeg4", bitrate=1500000, audio_codec="dts", channels=6),
+        )
+        self.assertNotEqual(r.winner, "b", "le DivX ne doit plus gagner contre un Blu-ray VC-1")
+
+    def test_les_codecs_connus_gardent_leur_rang(self) -> None:
+        """CONTRE-TEST : rendre l'inconnu neutre ne doit pas neutraliser le connu.
+
+        Vert avant comme apres. Si ce test rougit, le remede est alle trop loin
+        et a desarme le critere pour tout le monde.
+        """
+        criteres = compare_by_criteria(
+            _probe(height=1080, codec="hevc"),
+            _probe(height=1080, codec="xvid"),
+        )
+        c = next(x for x in criteres if x.name == "video_codec")
+        self.assertEqual(c.winner, "a")
+        self.assertGreater(c.points_delta, 0)
+
+    def test_un_codec_vide_reste_inconnu(self) -> None:
+        """CONTRE-TEST : le comportement deja correct du codec ABSENT est preserve."""
+        criteres = compare_by_criteria(
+            _probe(height=1080, codec=""),
+            _probe(height=1080, codec="hevc"),
+        )
+        c = next(x for x in criteres if x.name == "video_codec")
+        self.assertEqual(c.winner, "unknown")
+
+
 class AudioCompareTests(unittest.TestCase):
     """Audio : TrueHD 7.1 vs AC3 5.1 → A gagne."""
 
@@ -170,13 +257,36 @@ class ProbeManquanteTests(unittest.TestCase):
     """Gestion des probes manquantes."""
 
     def test_one_probe_missing(self) -> None:
-        """Une probe manquante → criteres connus seulement, A gagne par defaut si il a des donnees."""
+        """Une probe entierement absente -> TOUS les criteres s'abstiennent, donc tie.
+
+        Ce test attendait `winner == "a"` et son propre commentaire disait
+        pourquoi : « A a des donnees concretes (canaux 8 vs 0) ». C'etait le
+        constat #20 de l'ultra-audit 2026-08-31 ecrit en assertion. Les CINQ
+        autres criteres s'abstenaient deja face a une probe absente
+        (`_hdr_rank_value`, `_video_codec_rank_value`, `_audio_codec_rank_value`
+        rendent None ; le bitrate a sa branche `unknown`) : seul le critere des
+        canaux tranchait, et uniquement parce que son site d'appel coercait
+        `int(... or 0)` AVANT `_compare_criterion`, transformant une absence de
+        mesure en la PIRE valeur possible.
+
+        Le verdict honnete d'une comparaison ou l'on ne sait RIEN de B est
+        « Qualite equivalente, garder les deux ». L'inverse envoyait B en
+        _review/_duplicates_user_decided/ au premier « Auto-decider tous ».
+        (Aucun impact production : `run_flow_support._enrich_one_group` refuse
+        deja d'appeler le comparateur quand une probe est None.)
+        """
         r = compare_duplicates(
             _probe(height=1080, codec="hevc", audio_codec="truehd", channels=8),
             None,
         )
-        # A a des donnees concretes (canaux 8 vs 0) → A gagne
-        self.assertEqual(r.winner, "a")
+        self.assertEqual(r.winner, "tie")
+        self.assertTrue(
+            all(c.winner in {"unknown", "tie"} for c in r.criteria),
+            [(c.name, c.winner, c.points_delta) for c in r.criteria],
+        )
+        canaux = next(c for c in r.criteria if c.name == "audio_channels")
+        self.assertEqual((canaux.value_a, canaux.value_b), ("7.1", "?"))
+        self.assertEqual(canaux.points_delta, 0)
 
     def test_both_probes_missing(self) -> None:
         r = compare_duplicates(None, None)
