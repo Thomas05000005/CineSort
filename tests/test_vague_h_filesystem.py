@@ -383,8 +383,7 @@ class TestSha1QuickTimeout(unittest.TestCase):
         self.assertEqual(
             resultat,
             "",
-            "budget de 0 s : le temps imparti est ecoule des le depart, "
-            "l'egalite doit compter",
+            "budget de 0 s : le temps imparti est ecoule des le depart, l'egalite doit compter",
         )
 
     def test_un_budget_NON_nul_laisse_le_hash_se_calculer(self) -> None:
