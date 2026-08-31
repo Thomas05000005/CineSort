@@ -76,9 +76,23 @@ on:
   # quelqu'un qui y pense un jour ou GitHub tombe.
   #
   # Deuxieme passage, le 2026-08-14 : 56 detections, memes familles qu'au
-  # premier, ZERO secret reel. Les 56 empreintes sont figees dans
-  # `.gitleaksignore` — sans quoi ce rendez-vous serait rouge chaque semaine
-  # pour rien.
+  # premier. Les 56 empreintes sont figees dans `.gitleaksignore` — sans quoi ce
+  # rendez-vous serait rouge chaque semaine pour rien.
+  #
+  # CE PARAGRAPHE DISAIT « ZERO secret reel », ET C'ETAIT FAUX. Un jeton REST
+  # ACTIF etait publie dans deux documents, entre BACKTICKS, en prose. Le scan
+  # ne l'avait pas manque par negligence de relecture : AUCUNE des ~150 regles
+  # par defaut ne mord sur cette forme, `generic-api-key` exigeant un indice
+  # lexical (`token = ...`) que la prose ne fournit pas. « Zero detection » a
+  # ete lu comme « zero secret » — c'est la meme confusion que le point 1
+  # ci-dessus, d'un cran plus haut : un vert ne dit rien de ce que le detecteur
+  # ne sait pas voir.
+  #
+  # `.gitleaks.toml` ajoute depuis lors la regle qui manquait, calibree contre
+  # la DISTRIBUTION des `token_urlsafe` et non contre l'unique exemplaire connu
+  # (voir l'en-tete de ce fichier-la). Le scan hebdomadaire restera ROUGE tant
+  # que les deux lignes ne seront pas ECRASEES : c'est voulu, et ces deux
+  # detections ne sont deliberement pas figees.
   schedule:
     - cron: "17 4 * * 1" # lundi 04h17 UTC, hors des heures de file
   workflow_dispatch:
@@ -133,3 +147,11 @@ jobs:
           # bloque QUE sur findings nouveaux non whitelistes.
           GITLEAKS_ENABLE_COMMENTS: true
           GITLEAKS_ENABLE_SUMMARY: true
+          # DESIGNE EXPLICITEMENT LA CONFIG. gitleaks trouve `.gitleaks.toml`
+          # tout seul quand il est a la racine, mais cette detection est
+          # implicite : un deplacement de fichier, ou un changement de
+          # repertoire de travail de l'action, ferait retomber le scan sur les
+          # seules regles par defaut — SANS erreur, et donc sans qu'on le voie.
+          # Une regle qui cesse de s'appliquer en silence est le defaut meme que
+          # ce fichier corrige.
+          GITLEAKS_CONFIG: .gitleaks.toml
