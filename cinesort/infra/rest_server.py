@@ -1630,11 +1630,18 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             # une garde existante », applique a une valeur plutot qu'a une garde.
             status = _statut_metier(result)
             self._respond_json(status, result)
-            logger.info("REST POST /api/%s -> %d (%.0fms)", method_name, status, (time.monotonic() - _t0) * 1000)
+            logger.info(
+                "REST POST /api/%s -> %d (%.0fms)",
+                _pour_journal(method_name),
+                status,
+                (time.monotonic() - _t0) * 1000,
+            )
         except TypeError as exc:
             self._respond_json(400, {"ok": False, "message": f"Parametres invalides: {exc}"})
             logger.warning(
-                "REST POST /api/%s -> 400 params invalides (%.0fms)", method_name, (time.monotonic() - _t0) * 1000
+                "REST POST /api/%s -> 400 params invalides (%.0fms)",
+                _pour_journal(method_name),
+                (time.monotonic() - _t0) * 1000,
             )
         # Fix audit 2026-05-24 : ConnectionAbortedError/ConnectionResetError
         # arrivent quand le client (WebView2) ferme la socket avant que le
@@ -1652,7 +1659,12 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # except Exception intentionnel : boundary top-level
         except Exception as exc:
             # M8 : ne pas exposer le message d'exception au client (peut contenir des chemins, SQL, etc.)
-            logger.exception("REST 500 method=%s (%.0fms): %s", method_name, (time.monotonic() - _t0) * 1000, exc)
+            logger.exception(
+                "REST 500 method=%s (%.0fms): %s",
+                _pour_journal(method_name),
+                (time.monotonic() - _t0) * 1000,
+                exc,
+            )
             # Client deja parti -> on ne peut plus repondre, on ignore.
             with contextlib.suppress(ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
                 self._respond_json(500, {"ok": False, "message": "Erreur interne"})
