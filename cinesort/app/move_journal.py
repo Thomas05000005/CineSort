@@ -321,19 +321,130 @@ def atomic_move(
     deplacement et le `record_apply_op` du call site.
     """
     move_fn = shutil.move if allow_copy_fallback else _rename_or_cross_device_copy
-    store = getattr(record_op, "journal_store", None)
-    batch_id = getattr(record_op, "journal_batch_id", None)
-    if store is None:
-        move_fn(str(src), str(dst))
-        return
-    with journaled_move(
-        store,
+    with journal_pose_autour(
+        record_op,
         src=src,
         dst=dst,
         op_type=op_type,
-        batch_id=batch_id,
         src_sha1=src_sha1,
         src_size=src_size,
         row_id=row_id,
     ):
         move_fn(str(src), str(dst))
+
+
+@contextmanager
+def journal_pose_autour(
+    record_op: Any,
+    *,
+    src: Union[Path, str],
+    dst: Union[Path, str],
+    op_type: str,
+    src_sha1: Optional[str] = None,
+    src_size: Optional[int] = None,
+    row_id: Optional[str] = None,
+    liberer_si_rien_n_a_bouge: bool = False,
+) -> Iterator[Optional[int]]:
+    """Pose le journal write-ahead autour d'un deplacement fait par L'APPELANT.
+
+    `atomic_move` convient quand le deplacement est un `shutil.move` ordinaire.
+    Certains call sites n'en sont pas : `apply_single` passe par
+    `renommer_avec_reprise` (reprise sur la course Windows de quelques
+    microsecondes, #965) ou par `_case_only_rename_with_rollback` (renommage a
+    casse seule, en deux temps, avec retour arriere). Les faire passer par
+    `atomic_move` ETEINDRAIT ces comportements.
+
+    Ce gestionnaire separe donc les deux roles : il fournit le journal, et
+    laisse l'appelant deplacer comme il sait le faire.
+
+    Sans store (record_op nu, cas des tests), il devient un no-op transparent —
+    meme tolerance que `atomic_move`, dont il est desormais l'implementation.
+
+    Usage :
+        with journal_pose_autour(record_op, src=a, dst=b, op_type="MOVE_DIR"):
+            renommer_avec_reprise(a, b)
+    """
+    store = getattr(record_op, "journal_store", None)
+    if store is None:
+        yield None
+        return
+    try:
+        with journaled_move(
+            store,
+            src=src,
+            dst=dst,
+            op_type=op_type,
+            batch_id=getattr(record_op, "journal_batch_id", None),
+            src_sha1=src_sha1,
+            src_size=src_size,
+            row_id=row_id,
+        ) as pending_id:
+            yield pending_id
+    except Exception:
+        # `Exception`, PAS `BaseException` : un KeyboardInterrupt ou un
+        # SystemExit, c'est l'application qui MEURT — precisement l'instant ou
+        # le journal sert. Laisser l'entree est alors le comportement juste :
+        # la reconciliation du prochain demarrage tranchera, et elle a plus de
+        # chances d'aboutir que des ecritures faites pendant l'arret.
+        if liberer_si_rien_n_a_bouge:
+            _liberer_si_le_disque_le_prouve(store, src=src, dst=dst)
+        raise
+
+
+def _present(chemin: Union[Path, str]) -> Optional[bool]:
+    """True / False si le disque a REPONDU, None s'il n'a pas pu.
+
+    Trois reponses, pas deux. `Path.exists()` n'en rend que deux et fait passer
+    une partie des echecs de lecture pour une absence — cf. le commentaire dans
+    `_liberer_si_le_disque_le_prouve`.
+
+    `FileNotFoundError` et `NotADirectoryError` sont les seules a signifier
+    reellement « absent » : un parent qui n'est pas un dossier place le chemin
+    hors du systeme de fichiers aussi surement qu'une absence.
+    """
+    try:
+        Path(chemin).stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError:
+        return None
+    return True
+
+
+def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: Union[Path, str]) -> None:
+    """Retire l'entree pending SI le disque prouve que rien n'a bouge.
+
+    `journaled_move` laisse l'entree en place sur exception, et il a raison pour
+    un `shutil.move` : celui-ci peut copier a moitie puis echouer, donc seule la
+    reconciliation au prochain demarrage peut trancher.
+
+    Un `rename` pur, lui, ne connait pas de demi-etat. Quand il echoue — le cas
+    NORMAL sous Windows, ou VLC ou l'indexeur tiennent un handle — la source est
+    toujours a sa place et la cible n'existe pas. Ce n'est pas une supposition :
+    c'est une lecture du disque, faite apres coup.
+
+    Sans cela, chaque fichier verrouille laisserait un pending derriere lui, et
+    la reconciliation du demarrage suivant aurait a trier des fantomes. Sur une
+    bibliotheque reelle, les fichiers verrouilles sont la norme, pas l'exception.
+
+    Prudence deliberee : sur un systeme de fichiers insensible a la casse, un
+    renommage a casse seule voit `dst.exists()` vrai meme quand rien n'a bouge.
+    La condition est alors fausse, l'entree reste, et la reconciliation tranche —
+    le comportement conservateur, celui d'avant.
+    """
+    # `Path.exists()` ne convient PAS ici : il AVALE une partie des OSError et
+    # rend False, ce qui confond « absent » et « je n'ai pas pu lire ». Mesure
+    # sur le Python de ce depot (3.13) : `_IGNORED_ERRNOS = ENOENT, ENOTDIR,
+    # EBADF, WSAELOOP` et `_IGNORED_WINERRORS = [21, 123, 1921]`. Le 21 est
+    # ERROR_NOT_READY — le mode d'echec d'un partage SMB tombe, c'est-a-dire
+    # l'environnement meme de ce produit. Source locale + destination sur un
+    # partage qui vient de tomber : la source repond True, la cible False sans
+    # erreur, et on libererait sur une lecture qui n'a jamais abouti.
+    if _present(src) is not True or _present(dst) is not False:
+        return
+    for entree in store.apply.list_pending_moves():
+        if entree.get("src_path") == str(src) and entree.get("dst_path") == str(dst):
+            try:
+                store.apply.delete_pending_move(entree["id"])
+            except Exception:  # noqa: BLE001 - best-effort, jamais bloquant
+                _logger.exception("journal: liberation du pending %s impossible", entree.get("id"))

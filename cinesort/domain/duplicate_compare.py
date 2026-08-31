@@ -450,10 +450,42 @@ def _hdr_label(rank: Optional[int]) -> str:
 
 
 def _video_codec_rank_value(video: Dict[str, Any]) -> Optional[int]:
+    """Rang du codec video, ou `None` si on ne sait pas le situer.
+
+    2026-08-29 : cette fonction rendait `.get(codec, 0)`. Or 0 n'est pas une
+    absence de rang, c'est le rang le PLUS BAS — sous `xvid` et `divx`, qui
+    valent 1. Tout codec reel absent de la table de dix etiquettes perdait donc
+    systematiquement contre un DivX : mesure du jour, `vc1` (Blu-ray),
+    `mpeg2video` (DVD), `vp9`, `prores`, `wmv3` et `msmpeg4v3` rendaient tous 0.
+
+    CONSEQUENCE MESUREE, sur un probe construit par `_build_pseudo_probe`
+    (le seul producteur de probes de ce comparateur) :
+
+        A = Blu-ray VC-1 1080p 25,0 Mbps 21,0 Go
+        B = DivX         1080p  1,5 Mbps  1,3 Go
+        -> critere codec : A='?' B='xvid' gagnant=B, -15 points
+        -> verdict global : « Garder B, archiver A »
+
+    Le comparateur recommandait d'archiver le Blu-ray au profit du DivX, en
+    affichant les deux debits juste a cote. Et « Auto-decider tous » applique ce
+    verdict en masse.
+
+    Le remede n'INVENTE aucun rang : donner une place a VC-1 ou MPEG-2 est un
+    arbitrage produit, pas une correction de defaut. Il se contente de
+    distinguer « inconnu » de « pire » — distinction que la fonction faisait
+    deja pour un codec VIDE. `_compare_criterion` rend alors `unknown` a 0
+    point, chemin deja exerce par le cas du codec absent.
+
+    NE PAS etendre ce remede au saut du bitrate entre codecs differents : il est
+    DELIBERE et garde par `test_different_codec_skip_bitrate`. Comparer 5 Mbps
+    de HEVC a 20 Mbps de h264 n'a pas de sens.
+
+    Garde : `tests/test_duplicate_compare.py::CodecHorsTableTests`.
+    """
     codec = str(video.get("codec") or "").strip().lower()
     if not codec:
         return None
-    return _VIDEO_CODEC_RANK.get(codec, 0)
+    return _VIDEO_CODEC_RANK.get(codec)
 
 
 def _video_codec_label(rank: Optional[int]) -> str:

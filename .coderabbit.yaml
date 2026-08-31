@@ -1,65 +1,97 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
 # Configuration CodeRabbit pour CineSort
 # https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# 2026-08-29 : CE FICHIER ETAIT IGNORE A 90 %.
+#
+# Tout vivait sous une cle racine `review:` (singulier) plus deux cles racine
+# `path_filters:` et `path_instructions:`. Le schema n'accepte a la racine que
+# `chat, code_generation, early_access, enable_free_tier, inheritance,
+# issue_enrichment, knowledge_base, language, reviews, tone_instructions` :
+# les trois etaient donc jetees en silence, avec les quarante lignes qu'elles
+# portaient — le profil `assertive`, l'exclusion de `docs/internal/**` et les
+# QUATRE instructions par type de fichier (migrations SQL, DPAPI, settings,
+# tests).
+#
+# Le symptome etait visible depuis des mois sans etre lu : chaque PR affichait
+# « Review profile: CHILL », c'est-a-dire le DEFAUT du schema, pas le
+# `assertive` demande ici.
+#
+# Trois cles n'ont AUCUN equivalent dans le schema et sont retirees plutot que
+# deplacees (verifie sur les 297 chemins du schema v2, le 2026-08-29) :
+#   `incremental_review`          -> devient `reviews.auto_review.auto_incremental_review`
+#   `auto_resolve_review_threads` -> n'existe pas
+#   `review_comments.style`       -> n'existe pas
+#
+# La ligne `$schema` en tete fait valider ce fichier par l'editeur. Le garde
+# `test_coderabbit_config_utilise_des_cles_reconnues` le fait en CI.
 
-language: fr-FR  # Reviews en francais
+language: fr-FR # Reviews en francais
 
-# Style des reviews
-review:
-  # auto_review : declenche review automatique sur chaque PR ouverte
+reviews:
+  # Profil : "quiet" | "chill" (defaut) | "assertive".
+  # `assertive` = plus de feedback technique, utile en beta.
+  profile: assertive
+
   auto_review:
     enabled: true
-    drafts: false  # pas de review sur les PRs draft
+    drafts: false # pas de review sur les PR draft
+    # Reviewer les commits pousses APRES la review initiale.
+    auto_incremental_review: true
 
-  # Profil : "chill" (concis, pas pinailleur) vs "assertive" (rigoureux)
-  profile: assertive  # plus de feedback technique, utile pour beta
+  # Filtres : sur quels fichiers reviewer.
+  path_filters:
+    - "!**/*.lock"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+    - "!.venv/**"
+    - "!build/**"
+    - "!dist/**"
+    - "!packages/**"
+    - "!docs/internal/**"
+    - "!tests/manual/**"
+    - "!web/preview/**" # mock data pour preview UI
 
-  # Reviewer les commits push apres la review initiale ?
-  incremental_review: true
+  # Instructions par type de fichier.
+  path_instructions:
+    - path: "cinesort/infra/db/migrations/*.sql"
+      instructions: |
+        Migration SQL CineSort : verifie que la migration est ATOMIQUE (transaction-safe),
+        RETROCOMPAT (n'ecrase pas les donnees existantes sans le marquer explicitement),
+        et IDEMPOTENTE (re-rejouer ne casse pas). Le user_version doit etre incremente.
+        Ordre impose : CREATE TABLE puis CREATE INDEX, IF NOT EXISTS partout, et la
+        migration doit etre eprouvee sur une base PRE-EXISTANTE, pas seulement fraiche.
 
-  # Resoudre les commentaires automatiquement quand le code est modifie
-  auto_resolve_review_threads: true
+    - path: "cinesort/infra/local_secret_store.py"
+      instructions: |
+        Module DPAPI Windows : verifie que TOUT secret stocke utilise protect_secret()
+        avec un purpose unique. Aucun secret en clair dans les logs (utiliser
+        scrub_secrets()). Rappel 2026-08-29 : le scrubber ne rediger que sur une
+        AFFECTATION `...=valeur` ; un secret ecrit en prose lui echappe, et gitleaks
+        aussi.
 
-  # Type de commentaires
-  review_comments:
-    style: line  # commentaires ligne par ligne (vs commentaire global)
+    - path: "cinesort/ui/api/settings_support.py"
+      instructions: |
+        Module settings : verifie que les changements ajoutent l'entree dans
+        _LITERAL_DEFAULTS (table declarative) et pas dans le code orchestrateur,
+        sauf si derive (alias, compute, secret).
 
-# Filtres : sur quels fichiers reviewer
-path_filters:
-  - "!**/*.lock"
-  - "!**/*.min.js"
-  - "!**/*.min.css"
-  - "!.venv/**"
-  - "!build/**"
-  - "!dist/**"
-  - "!packages/**"
-  - "!docs/internal/**"
-  - "!tests/manual/**"
-  - "!web/preview/**"  # mock data pour preview UI
+    - path: "tests/**/*.py"
+      instructions: |
+        Tests CineSort : doivent isoler l'etat global (setUp/tearDown), ne pas
+        manipuler sys.modules (cf issue #4, pollution inter-tests), et utiliser des
+        temp dirs. Un correctif n'est prouve que si son test a ete vu ROUGE sans lui :
+        signale tout test dont l'assertion porte sur une CHAINE DE CODE SOURCE, elle
+        tombe quand le code s'ameliore et ne detecte rien quand il casse.
 
-# Custom instructions par type de fichier
-path_instructions:
-  - path: "cinesort/infra/db/migrations/*.sql"
-    instructions: |
-      Migration SQL CineSort : verifie que la migration est ATOMIQUE (transaction-safe),
-      RETROCOMPAT (n'ecrase pas les donnees existantes sans le marquer explicitement),
-      et IDEMPOTENTE (re-rejouer ne casse pas). Le user_version doit etre incremente.
+    - path: "cinesort/app/apply_core.py"
+      instructions: |
+        Chemin qui DEPLACE des fichiers de l'utilisateur. Verifie que tout
+        deplacement passe par move_journal.atomic_move (journal write-ahead, donc
+        annulable). Un `except OSError` autour d'un acces SQLite est un defaut :
+        sqlite3.Error n'herite PAS d'OSError.
 
-  - path: "cinesort/infra/local_secret_store.py"
-    instructions: |
-      Module DPAPI Windows : verifie que TOUT secret stocke utilise protect_secret()
-      avec un purpose unique. Aucun secret en clair dans logs (utiliser scrub_secrets()).
-
-  - path: "cinesort/ui/api/settings_support.py"
-    instructions: |
-      Module settings : verifie que les changements ajoutent l'entree dans
-      _LITERAL_DEFAULTS (table declarative) et pas dans le code orchestrateur,
-      sauf si derive (alias, compute, secret).
-
-  - path: "tests/**/*.py"
-    instructions: |
-      Tests CineSort : doivent isoler etat global (setUp/tearDown), pas manipuler
-      sys.modules (cf issue #4 pollution inter-tests), et utiliser des temp dirs.
-
-# Chat : permet @coderabbitai dans les PRs
+# Chat : permet @coderabbitai dans les PR.
 chat:
-  auto_reply: true  # repondre aux questions @coderabbitai
+  auto_reply: true

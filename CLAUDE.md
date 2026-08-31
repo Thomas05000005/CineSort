@@ -88,7 +88,9 @@ plus de `web/views/` ni `web/components/` de premier niveau — ne pas chercher 
 duplication desktop/dashboard, elle n'existe plus.
 
 **API REST** : `POST /api/<facade>/<methode>`. Les chemins historiques
-`/api/<methode>` renvoient 404.
+`/api/<methode>` renvoient **410 Gone** (`rest_server.py:1341`), avec un message
+qui guide vers la facade. Ce fichier a longtemps dit 404 : un 410 se distingue
+d'un 404 pour un client, et `docs/internal/CLAUDE.md:190` disait deja 410.
 
 ## Pieges qui ont deja coute cher
 
@@ -151,15 +153,45 @@ qu'il ne subit plus la charge de ses voisins, pas parce qu'il est sain.
    et de tomber sur le dossier d'un test VOISIN en cours de renommage. Nettoyer
    le tmpdir d'un test qui a pilote l'API passe par
    `tests/_helpers.py::cleanup_test_tree`, qui joint ces threads d'abord.
-3. **Le `WinError 5` lui-meme reste INEXPLIQUE (#965)** — et c'est la SEULE
-   cause connue de cette signature. Il se reproduit a **33 %** dans un `%TEMP%`
-   neuf et vide, sur `apply` (renommage d'un DOSSIER de film), y compris sur le
-   garde anti-destruction de la racine de bibliotheque. Ce n'est donc ni un
-   defaut d'`undo`, ni un effet de la charge, ni un effet de la saturation.
+3. **Le `WinError 5` est CARACTERISE et MITIGE (#965, #973).** Ce paragraphe l'a
+   longtemps dit « INEXPLIQUE » et commandait de l'instrumenter : c'est perime
+   depuis le 2026-08-06, et le travail a bien ete fait. Il se reproduit a
+   **33 %** dans un `%TEMP%` neuf et vide, sur `apply` (renommage d'un DOSSIER
+   de film), y compris sur le garde anti-destruction de la racine de
+   bibliotheque : ni un defaut d'`undo`, ni un effet de la charge, ni un effet
+   de la saturation.
 
-   Deja ecarte par lecture, ne pas y revenir : `sha1_quick` ferme son handle
-   (`with`), et les deux `os.scandir` sans context manager sont fermes en
-   `finally`. Reste a instrumenter quel handle est ouvert a l'instant du rename.
+   **Ce qui a tranche** — mesure sur `main`, `%TEMP%` neuf, machine au repos :
+
+   ```
+   sans instrumentation                          : 8 echecs / 20
+   avec une simple enveloppe Python sur `rename` : 0 echec  / 20
+   Fisher exact bilateral                        : p ~ 0,004
+   ```
+
+   Le seul fait d'ajouter un appel de fonction Python AVANT le renommage fait
+   disparaitre l'echec : la fenetre de course se compte donc en **microsecondes**
+   — un handle est en cours de liberation sur un ENFANT du dossier (sous
+   Windows, un fichier ouvert sans `FILE_SHARE_DELETE` empeche le renommage de
+   son parent), et l'appel arrive juste avant que la fermeture ne soit
+   effective. Remede en place : `move_journal.renommer_avec_reprise`, six
+   paliers plafonnes a ~0,3 s, generalise par #973 aux **9** renommages de
+   dossier (doublons ecartes, marques pour suppression, collection, quarantaine,
+   nettoyage, rollback, undo). Il ne MASQUE pas un vrai verrou : un dossier tenu
+   par un autre processus epuise les paliers et l'exception d'origine est
+   relancee telle quelle.
+
+   Trois causes ECARTEES par la mesure, ne pas y revenir : la saturation de
+   `%TEMP%` (p = 0,38, cf. point 1) ; un cycle de references retenant un objet
+   fichier (`gc.collect()` avant chaque renommage ne previent rien — 3/25 contre
+   4/25) ; et `sha1_quick`, qui ferme son handle (`with`), les deux `os.scandir`
+   sans context manager etant fermes en `finally`.
+
+   **Ce qui reste ouvert** : QUEL handle, precisement. Le mecanisme est etabli,
+   son porteur ne l'est pas — d'ou la piste des processus de session, plus bas.
+
+   **Si la signature revient MALGRE la reprise**, c'est un verrou *persistant* —
+   une bete differente — et il faut rouvrir #965 avec cette information.
 
    **« Rejouer en isolation » ne prouve RIEN sur cette famille** : le meme
    fichier est vert seul et rouge en suite complete, et le cas de #965 est rouge
@@ -367,7 +399,84 @@ la cascade du 2026-08-04, campagne close depuis. L'une d'elles appelle
 lance en session doit avoir une condition d'arret, et une fin de campagne doit
 inclure son extinction. Un `Get-Process python` en debut de session longue les
 revele — ils tiennent aussi des handles, ce qui en fait une piste plausible,
-non encore mesuree, pour le `WinError 5` du point 3.
+non encore mesuree, pour le PORTEUR du handle du point 3 (le mecanisme, lui, est
+etabli et mitige).
+
+**UN SECRET EN PROSE ECHAPPE A GITLEAKS, ET LE SCRUBBER EST BORGNE SUR
+`ntoken=`.** Le 2026-08-26 : le jeton Bearer REST **actif** de l'utilisateur
+etait en clair dans `docs/internal/BILAN_ITER4_2026-06-08.md:272` et
+`BILAN_ITER13_2026-06-08.md:1174`, suivis a HEAD d'un depot **PUBLIC**, depuis
+67 jours. Trois gardes verts l'ont laisse passer, chacun pour une raison propre :
+
+- **gitleaks ne l'a jamais vu.** Le secret est ecrit en prose entre backticks,
+  sans operateur d'affectation — la regle generique en exige un. Il n'etait
+  **pas** dans `.gitleaksignore` : ce n'etait donc pas une exemption assumee mais
+  une **non-detection**. Un fichier d'exemptions fait croire que ce qui n'y
+  figure pas a ete examine.
+- **`log_scrubber.py:41` ne redige pas `ntoken=`.** Son motif porte un `\b` en
+  amont, ajoute deliberement « pour eviter de matcher `mytoken=` ». Or le boot
+  desktop passe le jeton sous ce nom exact (`app.py:846`), et
+  `rest_server.py:543` journalise la ligne de requete brute. Demonstration avec
+  la regex reelle : `?token=X` -> redige, `?ntoken=X` -> **intact**. La
+  precaution anti-faux-positif d'une garde est ce qui aveugle l'autre.
+- **DEUX des SEPT checks REQUIS ne pouvaient pas echouer** : `bandit.yml` et
+  `mypy.yml` finissaient par `|| true`. **Lire la COMMANDE d'un check requis,
+  jamais son nom dans la liste.** Corrige le 2026-08-29 par un cliquet sur le
+  COMPTE : la montee echoue, la baisse aussi — un gain non verrouille se reperd.
+
+  **Et le plafond se mesure DANS LES CONDITIONS DU JOB.** Celui de mypy a
+  d'abord ete pose a 70, mesure en local ; le cliquet a rougi des sa premiere
+  execution reelle a 75. Trois instruments, trois reponses : `mypy` nu sur
+  Windows rend 70, avec les deps de production 59, et avec `--platform linux`
+  75 — parce que ce produit est truffe de branches `sys.platform == "win32"`
+  que mypy elague selon la CIBLE. La commande exacte est ecrite dans
+  `mypy.yml`. bandit, lui, est AST-pur : ni deps ni plateforme, son 33 etait
+  bon du premier coup.
+
+  Ce paragraphe a longtemps dit **TROIS**, en comptant `pip-audit.yml:87`. FAUX,
+  et la facon dont l'erreur a survecu compte plus que l'erreur : verifier que la
+  chaine `continue-on-error` EXISTE dans un fichier ne dit pas ce qu'elle
+  GOUVERNE. `pip-audit.yml` a un job et trois etapes ; les deux audits de
+  PRODUCTION tournent en `--strict` et bloquent, seul celui des dependances de
+  DEV est exempte. **Un `grep` qui trouve la chaine attendue confirme la
+  presence, jamais la portee.**
+
+**Un secret en query string fuit cote CLIENT.** Sur 129 889 fichiers balayes
+sous `%LOCALAPPDATA%/CineSort`, **24** portaient la valeur : 6 `settings.json.bak*`,
+13 sauvegardes SQLite, le journal, et **4 artefacts WebView2** (`History`,
+`Top Sites`, `Favicons`, `Local Storage/leveldb`). Chiffrer le stockage (DPAPI
+sur `rest_api_token_secret`, SEC-2) ne dit RIEN sur le transit. Et trois de ces
+sauvegardes sont hors rotation pour un caractere : `SETTINGS_BACKUP_PREFIX` vaut
+`.bak.` et elles s'appellent `.bak_ITER7_pre`.
+
+(Ma premiere sonde avait rendu **0** : j'avais exclu les dossiers `cache` et
+limite les extensions. Chercher un secret par sa VALEUR, sans perimetre choisi.)
+
+**UN RUN DE WORKFLOW PEUT EXISTER SANS JAMAIS TOURNER.** Le 2026-08-26, sept PR
+etaient BLOCKED avec **0 des 7 checks requis** — non pas rouges, **absents**.
+Leurs 10 a 44 runs existaient, parques en `conclusion=action_required`.
+Discriminant mesure : le **`triggering_actor` du push**. L'evenement `opened` a
+pour acteur `claude[bot]` et demarre ; chaque `synchronize` suivant a pour acteur
+`github-actions[bot]` et se fait parquer.
+
+Trois pieges de lecture, tous payes ce jour-la :
+
+- **`mergeable: MERGEABLE` ne parle QUE des conflits de fichiers**, jamais des
+  checks. Lire `mergeStateStatus`.
+- **`gh pr checks` dedoublonne les check-runs cote client**, et
+  `statusCheckRollup.state` rend `SUCCESS` interroge seul et `FAILURE` interroge
+  avec `contexts(first:100)` — **sur le meme commit**. Seul le rendu HTML a
+  tranche.
+- **Une premiere lecture accusait le NOMBRE DE COMMITS** et se verifiait 15/15…
+  sur un echantillon CHOISI (les PR >= #1124). Elargi, il rend sept
+  contre-exemples (#1099, #1104…). Le remede qu'elle dictait — squasher, ou
+  fermer/rouvrir — visait le mauvais mecanisme. **La cause racine reste non
+  mesuree** : l'API n'expose pas le reglage d'approbation.
+
+**`stale.yml` porte `delete-branch: true`** (30 j -> stale, +7 j -> close). Cinq
+des sept PR gelees sont des rapports d'audit qui n'existent QUE sur leur branche
+— le motif exact de #1089. `exempt-pr-labels` contient deja `blocked` : poser ce
+label est la parade.
 
 ### Le triangle : annonce / journal / disque
 
@@ -433,6 +542,63 @@ le CENTRE DE NOTIFICATIONS, seul a survivre a la fermeture de l'ecran d'apply.
 Un test (`LeVerdictNAtteintAUCUNEcranTests`) CONSTATE l'absence de lecteur cote
 front, pour que le jour ou un ecran le lira, quelqu'un vienne mettre ce constat
 a jour au lieu de le decouvrir.
+
+**`same-site` N'EST PAS UNE FRONTIERE SUR `127.0.0.1`.** Le « site » au sens
+Fetch Metadata est le domaine enregistrable : **le port n'en fait pas partie**.
+Mesure au navigateur reel (2026-08-29, deux serveurs locaux 18801/18802) : une
+image demandee a un AUTRE PORT porte `Sec-Fetch-Site: same-site`, jamais
+`cross-site`. `_poster_trusted_caller` acceptait `same-site` : tout autre service
+web tournant sur la machine de l'utilisateur etait donc FIABLE, avec `force=1` et
+le fetch TMDb — et pouvait lire le cache de jaquettes id par id, donc enumerer la
+bibliotheque. La valeur qui porte la meme frontiere qu'`_allowed_origin` (lequel,
+lui, contraint le port) est **`same-origin`**.
+
+Deux corollaires payes le meme jour :
+
+- **un repli par IP annule un durcissement d'en-tete.** Exiger `same-origin` sans
+  toucher au `return self._client_ip() in _LOCAL_CLIENT_IPS` laissait un
+  navigateur `same-site` en loopback redevenir fiable. Des qu'un `Sec-Fetch-Site`
+  est present, l'appelant EST un navigateur et se prononce lui-meme. C'est
+  l'ECRITURE DU TEST qui l'a revele, pas la lecture ;
+- **une preuve qui enumere les cas qu'on avait en tete n'est pas une preuve.**
+  Le diagnostic d'origine (`docs/internal/r8/r8_f3_poster_trusted_diff.py`, que
+  nul workflow ne lance) testait `same-origin` et `cross-site` — les deux
+  extremes d'un en-tete qui a QUATRE valeurs. Celle du milieu ouvrait le trou.
+
+**UN CORRECTIF DE SECURITE PEUT INTRODUIRE UN ReDoS, ET AUCUN TEST NE LE VERRA.**
+Le 2026-08-29, boucher le scrubber sur `ntoken=` demandait de retirer un `\b`.
+Prefixer le motif par `[\w-]*` pour englober le nom complet du parametre rend une
+sortie **strictement identique** — et fait passer 40 000 caracteres sans
+correspondance de **0,91 ms a 24 338 ms**. Cette version a bloque la batterie des
+12 fichiers lies : 371 s de CPU pour 439 s ecoulees, sans terminer.
+
+Les quatre variantes de motif etaient fonctionnellement VERTES : seule une mesure
+de TEMPS pouvait les separer. Quand un motif s'applique a de l'entree controlee
+par l'appelant — une ligne de requete, un nom de fichier —, sa complexite fait
+partie de sa surface d'attaque. Et **un test qui n'en finit pas ressemble a un
+test lent** : la difference se lit au compteur CPU, pas au chronometre.
+
+**`.get(cle, 0)` CONFOND « INCONNU » ET « PIRE ».** Dans le comparateur de
+doublons, `_video_codec_rank_value` rendait 0 pour tout codec absent d'une table
+de dix etiquettes — donc SOUS `xvid` (1). Mesure : `vc1`, `mpeg2video`, `vp9`,
+`prores`, `wmv3` rendaient tous 0, et le verdict d'un Blu-ray VC-1 25 Mbps 21 Go
+contre un DivX 1,5 Mbps 1,3 Go etait **« Garder B, archiver A »**, les deux debits
+affiches juste a cote. La fonction savait pourtant rendre `None` — elle le faisait
+deja pour un codec VIDE. Sur un chemin qui deplace des fichiers, l'absence de
+connaissance doit produire un refus de trancher, pas un jugement.
+
+**LE DEPOT STOCKE DU LF** (`core.autocrlf=true`, aucun `.gitattributes`) : la
+copie de travail est en CRLF, l'index en LF. La discipline binaire sur les fins de
+ligne protege donc la COPIE DE TRAVAIL, jamais le commit — `git add` normalise de
+toute facon. Le controle qui prouve qu'une edition est locale est le
+**`git diff --numstat` identique avec et sans `--ignore-cr-at-eol`**.
+
+Et ce controle **ne voit pas** une insertion qui coupe une fonction en deux :
+inserer entre deux lignes rend « N ajoutees, **0 retiree** » alors que le test
+voisin a perdu une assertion (vecu le 2026-08-29). Meme famille que « ne jamais
+inserer entre un decorateur et sa fonction ». Le garde qui mord est un controle
+**AST** : comparer, avant/apres, le nombre d'instructions du corps de chaque
+fonction preexistante.
 
 ## Conventions
 
@@ -510,13 +676,15 @@ alternes** sans profileur (cf. `scripts/mesure_cout_connexion.py`).
 ## Etat
 
 Version **1.5.2-beta** (les jalons se marquent par des tags `+build`, la version
-ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9131 tests**
+ne bouge pas). Seuil de couverture CI : **75 %**. Perimetre CI : **9279 tests**
 (`passed`, mesure de la CI sur `main` fusionne le 2026-08-16 ; s'y ajoutent
 20 skipped, 2 xfailed et 1635 subtests). Ce nombre se remesure, il ne se recopie
 pas — et il se remesure **par la meme commande**, sinon on compare un compte
 d'items (`--collect-only`) a un compte de `passed`.
 
-Le TOTAL d'items est stable (9140) mais la repartition passed/skipped **depend de
+Le TOTAL d'items vaut **9276** (`--collect-only -q`, mesure du 2026-08-26 ; il
+disait 9140 le 2026-08-16, donc il n'est pas « stable », il croit). La
+repartition passed/skipped **depend de
 la machine** : plusieurs `skipUnless` portent sur l'environnement (`fpcalc.exe`
 present, `CINESORT_API_TOKEN` pose, rapport Lighthouse deja genere, symlinks
 sur Windows non eleve). Un ecart de quelques unites entre deux postes ne signale
@@ -662,6 +830,18 @@ avaient **verifies mais laisses sans PR**, faute de budget d'ouverture.
   deja calcule (l'ouverture de l'ecran Doublons) et non au scan, ou il couterait
   « ~1000 films + un parcours disque » (#406). L'absence vaut **INCONNU**, pas
   zero : l'ecran a trois etats.
+
+**ET UNE PR OUVERTE PEUT DEJA PORTER LE CORRECTIF.** Le 2026-08-29, un lot a
+reimplemente `sqlite3.Error` sur `cinesort_api.py::log_api_exception`... que la
+PR #1128, ouverte depuis huit jours, corrigeait deja — et mieux : elle traitait
+aussi `_find_run_row` et `quality_audit_support._recompute_worker`, avec un
+fichier de test dedie de 260 lignes. Le merge a produit un conflit sur la ligne
+exacte, et la branche a du ceder.
+
+La regle « re-mesurer avant de coder, y compris sur une issue ouverte » existait
+deja (voir juste en dessous). Il lui manquait sa variante la plus couteuse : les
+PR EN COURS. Avant d'attaquer un constat de la file de travail,
+`gh pr list --search "<mot-cle du defaut>"` coute dix secondes.
 
 **TROIS ISSUES OUVERTES ETAIENT DEJA CORRIGEES** — #984, #972, #1002. Mesurees
 avant d'ecrire une ligne : la garde d'unicite de #984 existe
@@ -809,6 +989,22 @@ l'artefact frere `CineSort-exe` de `ci.yml` qui porte le MEME binaire.
 permanent d'environ **36 Go**. Si ce poste redevient genant, la variable a
 regarder est le NOMBRE de runs, pas la duree.
 
+Remesure du 2026-08-26 : **41,05 Go vivants** sur 1 892 artefacts, dont 39,61 Go
+pour 188 `windows-build-artifacts`. Le chiffre ci-dessus tient donc. **Et la
+retention n'est PAS retroactive** : elle est fixee A L'UPLOAD. Les artefacts
+anterieurs a #1087 gardent leurs 90 jours quoi qu'on regle aujourd'hui — la
+majeure partie de ces 39,6 Go date du 9 au 15 aout et vivra jusqu'a mi-novembre.
+Aucun reglage ne les touchera ; seule une suppression explicite le ferait.
+(Une revue automatisee a rendu ici « 3,18 Go », faux d'un facteur 13, et a
+propose de corriger ce paragraphe : c'est LUI qui avait raison. Remesurer avant
+de « corriger » un chiffre qui derange.)
+
+**`git branch -r` MENT sur ce poste** : il rend **620** refs remote-tracking
+locales pour **63** branches reellement presentes sur `origin`
+(`git ls-remote --heads origin | wc -l`, 2026-08-26). Les refs perimees ne sont
+jamais elaguees. Toute remesure du rangement ci-dessous faite avec `git branch -r`
+compte donc dix fois trop — `git fetch --prune` d'abord, ou interroger `origin`.
+
 **Branches conservees.** 105 -> 41 distantes, 444 -> 84 locales. Ce qui reste
 n'est pas du residu : **4 branches portent un correctif absent de `main`** et
 qui s'y applique encore — `fix/audit-2026-05-30-core-min-vs-sorted`,
@@ -851,8 +1047,11 @@ Mesure du 2026-08-03 : **230 fichiers Python, 91 224 LOC**. Les regles ruff
 tolerees (hors barriere CI) donnent la forme de la dette : `PLR2004` 394
 (constantes magiques), `RUF100` 185 (noqa devenus inutiles), `C901` 168
 (complexite), `PLR0913` 153 (trop de parametres), `BLE001` 41 (except nu).
-Neuf modules depassent 1 000 lignes, tous dans `ui/api/` et `app/` — c'est la
-que la refonte paie le plus. Le plan associe est
+**Dix-neuf** modules depassent 1 000 lignes (dont **onze** au-dela de 1 500),
+et pas seulement dans `ui/api/` et `app/` — mesure du 2026-08-26, contre « neuf,
+tous dans ui/api et app » ecrit ici. Les FONCTIONS sont bornees par un cliquet
+depuis #778 ; les MODULES ne le sont par rien, et aucun n'a diminue. Le plan
+associe est
 `docs/internal/audit_v7_8_0/REMEDIATION_PLAN_v7_8_0.md`.
 
 `tests/test_doc_consistency.py` verifie que cette section reste presente et que

@@ -11,7 +11,7 @@ import re
 # testing patche dataclasses.is_dataclass -> les tests cassent (preuve).
 from dataclasses import asdict as _asdict
 from dataclasses import is_dataclass as _is_dc
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.confidence_thresholds import confidence_label_fr
@@ -99,7 +99,13 @@ DEFAULT_PROFILE_VERSION = 1
 # codec). Les flags d'encode changent donc les scores deja persistes des films
 # cinemascope, des 4K severement re-encodees et des 1080p en codec exotique :
 # sans ce bump, ces rapports resteraient caches avec leur ancien verdict.
-SCORING_RULES_VERSION = 3
+# 3 -> 4 le 2026-08-29 : deux correctifs CHANGENT des scores et des paliers —
+# la penalite « 4K Light probable » etait annoncee sans etre appliquee, et
+# FLAC/PCM n'avaient aucun bonus. Sans cette incrementation,
+# `quality_report_support` rend un CACHE HIT sur tout rapport deja persiste
+# (`existing_rules_version == str(SCORING_RULES_VERSION)`) et le correctif
+# reste invisible en production sur les bibliotheques deja scorees.
+SCORING_RULES_VERSION = 4
 QUALITY_PRESET_REMUX_STRICT = "remux_strict"
 QUALITY_PRESET_EQUILIBRE = "equilibre"
 QUALITY_PRESET_LIGHT = "light"
@@ -486,6 +492,14 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     ab = profile["audio_bonuses"]
     for key in ("truehd_atmos_bonus", "dts_hd_ma_bonus", "dts_bonus", "aac_bonus"):
         ab[key] = max(0, _to_int(ab.get(key), base["audio_bonuses"][key]))
+    # `flac_pcm_bonus` est OPTIONNELLE — elle n'est dans aucun preset, son repli
+    # est calcule — mais pas dispensee de validation : sans cela une valeur non
+    # numerique dans un profil utilisateur atteignait `int()` PENDANT le scoring
+    # et levait ValueError. Le repli n'est pas 0 : ramener un lossless a zero
+    # violerait l'invariant que cette cle existe precisement pour tenir.
+    if "flac_pcm_bonus" in ab:
+        repli = max(1, _to_int(ab.get("dts_hd_ma_bonus"), 0) - 2)
+        ab["flac_pcm_bonus"] = max(0, _to_int(ab.get("flac_pcm_bonus"), repli))
     channels_raw = ab.get("channels_bonus_map")
     channels = base["audio_bonuses"]["channels_bonus_map"].copy()
     if isinstance(channels_raw, dict):
@@ -927,6 +941,20 @@ def _audio_codec_bonus(codec: str, profile: Dict[str, Any]) -> Tuple[int, str]:
         if lossy is None:
             lossy = max(1, int(bonuses["truehd_atmos_bonus"]) // 2)
         return int(lossy), "Audio Atmos (lossy)"
+    if c in ("flac", "pcm") or c.startswith("lpcm") or c.startswith("pcm"):
+        # T-DOM-1 : cette table CONTREDISAIT `codec_ranks`. FLAC et PCM y ont
+        # le rang 3 depuis l'audit du 2026-08-19 — au-dessus de DTS (2) et de
+        # l'AAC (1) — mais ils n'avaient AUCUNE entree ici, donc bonus 0 :
+        # deux formats SANS PERTE classes sous des formats AVEC PERTE.
+        #
+        # La valeur suit le rang plutot que de l'inventer : entre `dts_bonus`
+        # (rang 2) et `dts_hd_ma_bonus` (rang 4). Le repli calcule preserve les
+        # profils utilisateur deja enregistres, qui n'ont pas cette cle — meme
+        # idiome que `atmos_lossy_bonus` juste au-dessus.
+        lossless_simple = bonuses.get("flac_pcm_bonus")
+        if lossless_simple is None:
+            lossless_simple = max(1, int(bonuses["dts_hd_ma_bonus"]) - 2)
+        return int(lossless_simple), "Audio lossless (FLAC/PCM)"
     if "hra" in c and "dts" in c:
         # DTS-HD HRA = lossy haut-debit, distinct de DTS-HD MA (lossless).
         # Fallback dts_bonus si profil ne definit pas dts_hd_hra_bonus.
@@ -1010,6 +1038,102 @@ def _title_in_folder(folder_name: str, title: str) -> bool:
     nf = re.sub(r"[^a-z0-9]+", " ", folder_name.lower()).strip()
     nt = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
     return bool(nt) and (nt in nf)
+
+
+def _scorer_le_debit_video(
+    *,
+    bitrate_kbps: Optional[int],
+    threshold_kbps: int,
+    resolution_rank: int,
+    resolution_label: str,
+    release_4k_light_hint: bool,
+    toggles: Dict[str, Any],
+    penalty_4k_light: int,
+    low_bitrate_penalty: int,
+    add_reason: Callable[[int, str], None],
+) -> Tuple[int, bool]:
+    """Score le debit video. Rend `(delta de sous-score, is_4k_light)`.
+
+    Extrait de `_score_video` le 2026-08-29 : appliquer enfin la penalite
+    « 4K Light probable » (T-DOM-1) portait la fonction de 175 a 190 lignes pour
+    un plafond gele a 175. Le cliquet demande de DECOUPER plutot que de monter
+    le plafond, et le bloc formait deja une unite — le seuil est calcule juste
+    avant par l'appelant, ici on ne fait que le confronter au debit mesure.
+
+    Le delta est RENDU au lieu de muter `video_sub` : c'est ce qui permet de
+    verifier, dans un test, que le chiffre annonce par `add_reason` est bien
+    celui qui est applique — l'invariant que ce lot vient de retablir.
+    """
+    delta = 0
+    is_4k_light = False
+    if bitrate_kbps is None:
+        delta -= 8
+        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
+            is_4k_light = True
+            # T-DOM-1 : ce `-4` partait dans `reasons` — ce que l'utilisateur
+            # LIT — sans jamais toucher `video_sub`. Mesure : toggle ON 40,
+            # toggle OFF 40, ecart NUL, et la ligne « -4 4K Light probable »
+            # bien affichee. Deux consequences : le reglage `enable_4k_light`
+            # etait INERTE ici, et l'explication de score MENTAIT.
+            #
+            # La branche `elif` ci-dessous ne souffre pas du defaut, et porte
+            # meme le commentaire « Hotfix coherence (2026-06-04) : aligner
+            # add_reason delta sur l'increment reel applique a video_sub ».
+            # Le correctif existait donc a DEUX lignes d'ici.
+            #
+            # La valeur reste 4, celle qui etait deja annoncee : la rendre
+            # vraie est un correctif, la remplacer par `penalty_4k_light`
+            # (plus severe, pilote par le profil) serait un arbitrage produit.
+            delta -= 4
+            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
+        add_reason(-8, "Debit video non detecte")
+    elif threshold_kbps > 0:
+        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
+        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
+        # l'increment reel applique a video_sub. Avant, les factors reportaient
+        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
+        # faussait les weighted_delta et le top_positive de explain_score.
+        if ratio >= 1.35:
+            delta += 18
+            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
+        elif ratio >= 1.15:
+            delta += 14
+            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 1.0:
+            delta += 10
+            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
+        elif ratio >= 0.85:
+            delta += 6
+            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        elif ratio >= 0.70:
+            delta += 1
+            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
+        else:
+            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
+                is_4k_light = True
+                dynamic_penalty = penalty_4k_light
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
+                delta -= dynamic_penalty
+                if release_4k_light_hint:
+                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
+                else:
+                    add_reason(
+                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
+                    )
+            else:
+                dynamic_penalty = low_bitrate_penalty
+                if ratio < 0.55:
+                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
+                delta -= dynamic_penalty
+                add_reason(
+                    -dynamic_penalty,
+                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
+                )
+        if resolution_rank >= 2160 and ratio >= 1.15:
+            delta += 4
+            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
+    return delta, is_4k_light
 
 
 def _score_video(
@@ -1101,59 +1225,18 @@ def _score_video(
             reasons.append(f"Seuil bitrate ajusté pour genre '{primary_genre}' : {threshold_kbps} → {adjusted} kb/s")
             threshold_kbps = adjusted
 
-    if bitrate_kbps is None:
-        video_sub -= 8
-        if resolution_rank >= 2160 and release_4k_light_hint and bool(toggles.get("enable_4k_light", True)):
-            is_4k_light = True
-            add_reason(-4, "4K Light probable (tag release) sans debit mesure")
-        add_reason(-8, "Debit video non detecte")
-    elif threshold_kbps > 0:
-        ratio = float(bitrate_kbps) / float(max(1, threshold_kbps))
-        # Hotfix coherence (2026-06-04) : aligner add_reason delta sur
-        # l'increment reel applique a video_sub. Avant, les factors reportaient
-        # un delta MOINS important que l'impact reel sur le sous-score, ce qui
-        # faussait les weighted_delta et le top_positive de explain_score.
-        if ratio >= 1.35:
-            video_sub += 18
-            add_reason(+18, f"Debit excellent pour {resolution_label} ({bitrate_kbps} kb/s >= {threshold_kbps} kb/s)")
-        elif ratio >= 1.15:
-            video_sub += 14
-            add_reason(+14, f"Debit eleve pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 1.0:
-            video_sub += 10
-            add_reason(+10, f"Debit correct pour {resolution_label} ({bitrate_kbps} kb/s)")
-        elif ratio >= 0.85:
-            video_sub += 6
-            add_reason(+6, f"Debit proche du seuil {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        elif ratio >= 0.70:
-            video_sub += 1
-            add_reason(+1, f"Debit limite pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)")
-        else:
-            if resolution_rank >= 2160 and bool(toggles.get("enable_4k_light", True)):
-                is_4k_light = True
-                dynamic_penalty = penalty_4k_light
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, penalty_4k_light + 3)
-                video_sub -= dynamic_penalty
-                if release_4k_light_hint:
-                    add_reason(-dynamic_penalty, f"4K Light confirme (tag + debit {bitrate_kbps} kb/s)")
-                else:
-                    add_reason(
-                        -dynamic_penalty, f"4K Light: debit faible pour 2160p ({bitrate_kbps}/{threshold_kbps} kb/s)"
-                    )
-            else:
-                dynamic_penalty = low_bitrate_penalty
-                if ratio < 0.55:
-                    dynamic_penalty = max(dynamic_penalty, low_bitrate_penalty + 4)
-                video_sub -= dynamic_penalty
-                add_reason(
-                    -dynamic_penalty,
-                    f"Debit trop faible pour {resolution_label} ({bitrate_kbps}/{threshold_kbps} kb/s)",
-                )
-        if resolution_rank >= 2160 and ratio >= 1.15:
-            video_sub += 4
-            add_reason(+4, "UHD propre: debit soutenu pour 2160p")
-
+    delta_debit, is_4k_light = _scorer_le_debit_video(
+        bitrate_kbps=bitrate_kbps,
+        threshold_kbps=threshold_kbps,
+        resolution_rank=resolution_rank,
+        resolution_label=resolution_label,
+        release_4k_light_hint=release_4k_light_hint,
+        toggles=toggles,
+        penalty_4k_light=penalty_4k_light,
+        low_bitrate_penalty=low_bitrate_penalty,
+        add_reason=add_reason,
+    )
+    video_sub += delta_debit
     if (has_dv or has_hdr10 or has_hdr10p) and (bit_depth > 0 and bit_depth <= 8):
         p_hdr8 = _to_int(vt.get("penalty_hdr_8bit"), 8)
         video_sub -= p_hdr8

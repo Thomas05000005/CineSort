@@ -88,3 +88,145 @@ class RealReleaseStillCleanedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MotsAmbigusDeLaListeINCONDITIONNELLETests(unittest.TestCase):
+    """T-DOM-1 : `_NOISE_RE` retirait des mots qui sont de vrais titres de films.
+
+    `_NOISE_RE` s'applique PARTOUT dans le nom, y compris AVANT le token annee —
+    c'est-a-dire a l'interieur du titre lui-meme. Une poignee de ses ~50 jetons
+    sont des mots courants :
+
+        Cam (2018)              -> ''              le titre ENTIER disparaissait
+        Opus (2025)             -> ''              idem
+        Internal Affairs (1990) -> 'Affairs 1990'
+        Complete Unknown (2016) -> 'Unknown 2016'
+
+    Le depot connaissait deja le probleme et l'avait resolu : `_AFTER_YEAR_NOISE`
+    ne retire ses jetons que s'ils apparaissent APRES l'annee — « The French
+    Connection 2 1975 » garde son « French ». Trois jetons (`cam`, `proper`,
+    `repack`) figuraient dans les DEUX listes.
+
+    Mais l'ordre du pipeline decide : `_NOISE_RE` est l'etape 3, le traitement
+    position-aware l'etape 7. La liste inconditionnelle consommait les jetons
+    quatre etapes avant que la position-aware puisse les voir. Une garde en
+    aveuglait une autre en s'executant AVANT elle, en lui retirant sa matiere —
+    et la docstring de l'etape 7, qui enumere « FRENCH, CUT, EDITION, WEB »,
+    n'en mentionnait aucun : le code disait deja que ce chemin etait mort.
+
+    Les deux moities de cette classe comptent autant l'une que l'autre. Deplacer
+    les jetons sans verifier qu'ils sont TOUJOURS retires apres l'annee
+    remplacerait un defaut par un autre : des tags scene laisses dans le titre,
+    et une recherche TMDb ratee pour une autre raison.
+    """
+
+    #: Titre attendu -> nom de fichier. Films reels, verifiables.
+    TITRES_REELS = {
+        "Cam": "Cam (2018).mkv",
+        "Cam 2018": "Cam.2018.1080p.WEB-DL.x264-GROUP.mkv",
+        "Opus": "Opus (2025).mkv",
+        "Internal Affairs 1990": "Internal.Affairs.1990.1080p.BluRay.x264.mkv",
+        "Complete Unknown 2016": "Complete.Unknown.2016.1080p.WEB-DL.mkv",
+        "Hybrid 2007": "Hybrid.2007.720p.mkv",
+        "Limited 2019": "Limited.2019.1080p.mkv",
+        "Proper 2022": "Proper.2022.1080p.mkv",
+    }
+
+    #: Le sens inverse : ces memes jetons, APRES l'annee, restent des tags scene.
+    TAGS_APRES_ANNEE = (
+        "Movie.2019.LIMITED.1080p.BluRay.mkv",
+        "Movie.2019.PROPER.1080p.mkv",
+        "Movie.2019.COMPLETE.BluRay.mkv",
+        "Movie.2019.INTERNAL.1080p.mkv",
+        "Movie.2019.CAM.mkv",
+        "Movie.2019.1080p.Opus.mkv",
+        "Movie.2019.HYBRID.1080p.mkv",
+    )
+
+    def test_un_mot_ambigu_AVANT_l_annee_appartient_au_titre(self) -> None:
+        for attendu, fichier in self.TITRES_REELS.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
+    def test_le_meme_mot_APRES_l_annee_reste_un_tag_scene(self) -> None:
+        for fichier in self.TAGS_APRES_ANNEE:
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), "Movie 2019")
+
+    def test_un_mot_ambigu_AU_MILIEU_du_titre_est_intouchable(self) -> None:
+        """L'ancrage `$` de `_TRAILING_AMBIGU_RE`, ne dependant d'aucun autre test.
+
+        Sans ce garde, « A Complete Unknown » (2024, le biopic Dylan) devient
+        « A Unknown » : le jeton est precede d'un caractere non blanc, donc la
+        garde « pas le seul jeton » le laisse passer, et seule la fin de chaine
+        l'arrete.
+
+        Ce test est ne d'un mutant SURVIVANT : retirer le `$` laissait toute la
+        batterie verte, parce qu'aucun cas n'avait de jeton ambigu AILLEURS
+        qu'en fin de nom.
+        """
+        cas = {
+            "A.Complete.Unknown.2024.1080p.WEB-DL.mkv": "A Complete Unknown 2024",
+            "The.Internal.Affairs.1990.1080p.mkv": "The Internal Affairs 1990",
+            "Une.Limited.Histoire.2011.720p.mkv": "Une Limited Histoire 2011",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
+    def test_une_annee_PARENTHESEE_ancre_le_titre(self) -> None:
+        """Le dernier trou de la regle trailing, signale par une revue automatique.
+
+        Quand `_PAREN_YEAR_RE` trouve une annee entre parentheses, le pipeline
+        garde TOUT CE QUI LA PRECEDE et jette le reste. Ce qui subsiste est donc
+        le titre PAR CONSTRUCTION : les tags qui suivaient l'annee sont deja
+        coupes. Un jeton ambigu qui traine a la fin appartient au titre.
+
+        Sans cette ancre, « Mission Complete (2020) » rendait « Mission » — et
+        ce n'etait PAS une regression de la correction des jetons ambigus :
+        mesure sur `origin/main`, le comportement etait identique, `_NOISE_RE`
+        retirant `complete` partout.
+
+        La revue se trompait sur son exemple — « Complete Unknown (2016) » sort
+        intact, `unknown` n'etant pas un jeton ambigu — mais avait raison sur le
+        mecanisme. Ecarter le signal parce que sa demonstration etait fausse
+        aurait laisse le defaut en place.
+        """
+        cas = {
+            "Mission Complete (2020).mkv": "Mission Complete",
+            "Operation Hybrid (2019).mkv": "Operation Hybrid",
+            "The Internal (2015).mkv": "The Internal",
+            "Complete Unknown (2016).mkv": "Complete Unknown",
+            "A Complete Unknown (2024).mkv": "A Complete Unknown",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
+    def test_un_tag_APRES_l_annee_parenthesee_part_quand_meme(self) -> None:
+        """Temoin : l'ancre ne doit pas rendre la regle inoperante.
+
+        Un tag ecrit apres l'annee parenthesee est coupe par le strip d'annee
+        lui-meme, bien avant la regle trailing. Sans ce temoin, l'ancre serait
+        indistinguable d'une desactivation pure et simple.
+        """
+        cas = {
+            "Movie (2019) PROPER.mkv": "Movie",
+            "Movie (2019) LIMITED 1080p.mkv": "Movie",
+            "Batman - Begins PROPER.mkv": "Batman - Begins",
+        }
+        for fichier, attendu in cas.items():
+            with self.subTest(fichier=fichier):
+                self.assertEqual(parse_scene_title(fichier), attendu)
+
+    def test_les_tags_NON_ambigus_restent_inconditionnels(self) -> None:
+        """Temoin : le gros de `_NOISE_RE` ne doit pas bouger.
+
+        Aucun film ne s'appelle « x265 » ni « DTS-HD ». Les deplacer aussi
+        serait une regression silencieuse — ces jetons apparaissent parfois
+        AVANT l'annee dans les nommages personnels.
+        """
+        self.assertEqual(parse_scene_title("Dune.2021.2160p.UHD.BluRay.x265.mkv"), "Dune 2021")
+        self.assertEqual(parse_scene_title("Heat.1995.1080p.mkv"), "Heat 1995")
+        self.assertEqual(parse_scene_title("Interstellar.2014.1080p.BluRay.x264.mkv"), "Interstellar 2014")
+        self.assertEqual(parse_scene_title("Camino.2008.1080p.mkv"), "Camino 2008")

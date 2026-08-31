@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import time
 import unittest
 
 from cinesort.infra.log_scrubber import (
@@ -34,6 +35,70 @@ class ScrubSecretsFunctionTests(unittest.TestCase):
         result = scrub_secrets(text)
         self.assertIn("[REDACTED]", result)
         self.assertNotIn("SECRETKEY42", result)
+
+    def test_ntoken_en_query_string_est_redige(self) -> None:
+        """Le boot desktop passe le jeton REST sous `?ntoken=` (app.py:846), et
+        `rest_server.log_message` journalise la ligne de requete brute. Le `\b`
+        du motif amont, ajoute pour eviter de mordre `mytoken=`, laissait passer
+        ce nom exact : c'est le nom que le PRODUIT emploie.
+        """
+        faux = "A" * 32
+        result = scrub_secrets(f'REST "GET /dashboard/?ntoken={faux}&native=1 HTTP/1.1"')
+        self.assertNotIn(faux, result, f"le jeton a fuite : {result}")
+        self.assertIn("ntoken=[REDACTED]", result)
+        # Le nom du parametre et le reste de la ligne restent lisibles : rediger
+        # ne doit pas rendre le journal inutilisable pour le diagnostic.
+        self.assertIn("native=1", result)
+        self.assertIn("/dashboard/", result)
+
+    def test_noms_de_parametre_composes_sont_rediges(self) -> None:
+        """Tout prefixe finissant par un caractere de mot desarmait le `\b` — et
+        `_` en est un. Les noms les plus standards de l'industrie passaient nus.
+        """
+        faux = "A" * 32
+        for nom in (
+            "access_token",
+            "refresh_token",
+            "id_token",
+            "auth_token",
+            "bearer_token",
+            "session_token",
+            "ntoken",
+            "napikey",
+            "private_token",
+            "personal_access_token",
+        ):
+            with self.subTest(parametre=nom):
+                result = scrub_secrets(f"GET /x?{nom}={faux}")
+                self.assertNotIn(faux, result, f"`{nom}=` laisse fuiter sa valeur")
+                self.assertIn(f"{nom}=[REDACTED]", result)
+
+    def test_motif_de_query_string_ne_redose_pas(self) -> None:
+        r"""Ce filtre traite des lignes de requete, donc du texte que l'APPELANT
+        controle. Prefixer le motif de query string par `[\w-]*` pour englober le
+        nom complet du parametre rend la sortie strictement IDENTIQUE, mais fait
+        passer ce cas de 0,9 ms a 24 338 ms (mesure du 2026-08-28, 40 000
+        caracteres sans correspondance). Le budget est volontairement large :
+        l'echec qu'il vise est un facteur 10 000, pas quelques pourcents.
+        """
+        sujet = "a" * 40_000 + "!"
+        debut = time.perf_counter()
+        scrub_secrets(sujet)
+        ecoule = time.perf_counter() - debut
+        self.assertLess(
+            ecoule,
+            2.0,
+            f"scrub_secrets a mis {ecoule:.2f}s sur 40 000 caracteres : "
+            "un motif a probablement gagne un quantificateur non borne",
+        )
+
+    def test_un_mot_finissant_par_token_hors_affectation_reste_intact(self) -> None:
+        """CONTRE-TEST : elargir le prefixe ne doit pas se mettre a rediger de la
+        prose. Le motif ne doit mordre que sur une AFFECTATION `...=valeur`.
+        Vert AVANT comme APRES le correctif : c'est un temoin, pas une preuve.
+        """
+        text = "Le jeton (token) a ete regenere ; voir authtoken et api_key dans la doc."
+        self.assertEqual(scrub_secrets(text), text)
 
     def test_jellyfin_authorization_header(self) -> None:
         text = 'HTTP error: Authorization: MediaBrowser Token="jelly_secret_xyz"'
@@ -189,6 +254,17 @@ class ScrubFilterIntegrationTests(unittest.TestCase):
         output = self.stream.getvalue()
         self.assertIn("[REDACTED]", output)
         self.assertNotIn("mySecretKey123", output)
+
+    def test_ligne_de_requete_rest_ne_fuit_pas_le_jeton(self) -> None:
+        """Chaine de PRODUCTION : la forme exacte de `rest_server.log_message`,
+        soit `logger.debug("REST %s", format % args)`, sur l'URL de boot desktop.
+        Eprouver la regex seule ne dit rien du site d'appel.
+        """
+        faux = "C" * 32
+        self.logger.debug("REST %s", f'"GET /dashboard/?ntoken={faux}&native=1 HTTP/1.1"')
+        sortie = self.stream.getvalue()
+        self.assertNotIn(faux, sortie, f"le jeton a fuite dans le log : {sortie}")
+        self.assertIn("ntoken=[REDACTED]", sortie)
 
     def test_filter_scrubs_args(self) -> None:
         # Args sont substitues a getMessage() — on doit aussi les scrubber

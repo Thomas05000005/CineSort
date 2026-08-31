@@ -15,10 +15,10 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Thomas05000005/CineSort/badge)](https://scorecard.dev/viewer/?uri=github.com/Thomas05000005/CineSort)
 [![codecov](https://codecov.io/gh/Thomas05000005/CineSort/graph/badge.svg)](https://codecov.io/gh/Thomas05000005/CineSort)
 [![DeepSource](https://app.deepsource.com/gh/Thomas05000005/CineSort.svg/?label=active+issues&show_trend=true)](https://app.deepsource.com/gh/Thomas05000005/CineSort/)
-[![Tests](https://img.shields.io/badge/tests-4277%20passing-brightgreen.svg)](#tests-et-qualité)
+[![Tests](https://img.shields.io/badge/tests-9281%20passing-brightgreen.svg)](#tests-et-qualité)
 [![Architecture](https://img.shields.io/badge/architecture-import--linter-blue.svg)](#-architecture)
 
-> ⚠️ **v1.2.0-beta** — itération beta publique. Le code est mature (~50 000 lignes, 4277 tests, audit complet, architecture en couches verrouillée), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. **Ne pas activer en production critique sans dry-run préalable.**
+> ⚠️ **v1.5.2-beta** — itération beta publique. Le code est mature (~137 000 lignes Python + JS hors tests, 9 281 tests, audit complet, architecture en couches verrouillée), mais la beta sert à recueillir des retours sur des bibliothèques réelles avant la v1.0 stable. **Ne pas activer en production critique sans dry-run préalable.**
 >
 > 🛡️ **Vague Q stabilisée** — la build courante consolide **5 rounds adversarial bug-hunt + 7 hotfixes** (convergence R1=10 crit → audit final 0 crit, post-fix rates 79 % / 93 % / 100 % / 100 % / 92 %).
 
@@ -155,7 +155,7 @@ Toute régression bloque le merge automatiquement.
 
 ### Patterns en place
 - **Repository pattern** pour SQLite : `store.probe`, `store.scan`, `store.quality`, etc. (composition > héritage MRO)
-- **Strangler Fig + Facade** sur CineSortApi : 5 facades (`run`, `settings`, `quality`, `integrations`, `library`)
+- **Strangler Fig + Facade** sur CineSortApi : 6 facades (`run`, `settings`, `quality`, `integrations`, `library`, `runtime`)
 - **Module-style imports** pour les modules mockés en test (préserve `patch("cinesort.X.Y")`)
 
 ## 🌐 Dashboard distant
@@ -176,7 +176,7 @@ Accessible depuis tout navigateur du réseau local à `http://<ip-pc>:8642/dashb
 - **Dépendances applicatives** : `requests`, `rapidfuzz` (matching fuzzy), `segno` (QR code)
 - **Analyse perceptuelle** : `onnxruntime` + `numpy` (LPIPS AlexNet ONNX 9.4 MB)
 - **Probe vidéo** : ffprobe + mediainfo (binaires embarqués dans l'EXE)
-- **Qualité** : `ruff` (lint + format), `import-linter`, `pre-commit`, `pytest` (≥ 9.0.3), `hypothesis`, `coverage` (seuil CI 80%)
+- **Qualité** : `ruff` (lint + format), `import-linter`, `pre-commit`, `pytest` (≥ 9.0.3), `hypothesis`, `coverage` (seuil CI 75%)
 - **Security** : `bandit`, `mypy`, `pip-audit`, `gitleaks`, `CodeQL`, `OpenSSF Scorecard`
 - **Build** : `PyInstaller` 6.10+ (~50 MB onefile EXE Windows)
 
@@ -184,16 +184,16 @@ Accessible depuis tout navigateur du réseau local à `http://<ip-pc>:8642/dashb
 
 ```bash
 check_project.bat                                # CI locale : compile + lint + format + import-linter + tests + coverage
-python -m pytest tests/ --timeout=60 -q          # Tests rapides (sans e2e/live)
+python -m pytest tests/ -q                       # Tests rapides (sans e2e/live)
 python tests/e2e/run_e2e.py                      # E2E dashboard (Playwright)
 lint-imports                                     # Verifie les 3 contracts d'architecture
 ```
 
 Garanties CI bloquantes :
-- **80 % de couverture** minimum
+- **75 % de couverture** minimum (`--fail-under=75`, ci.yml:211)
 - **Lint Ruff** propre (lint + format)
 - **import-linter** : 3 contracts d'architecture en couches (domain/infra/app)
-- **0 régression** sur 4277 tests unitaires
+- **0 régression** sur 9 281 tests unitaires (mesure du 2026-08-29 ; ce compte se remesure, il ne se recopie pas)
 - **EXE < 60 MB**
 - **CodeQL + Bandit + pip-audit + gitleaks + mypy**
 
@@ -280,7 +280,7 @@ Voir [ROADMAP.md](docs/internal/ROADMAP.md). En résumé :
 |-----------|--------|
 | **Cycle `domain → app` brisé** | ✅ mai 2026 (issue #83, phases A1-A8) |
 | **Architecture verrouillée en CI** | ✅ `import-linter` (3 contracts KEPT) |
-| **God class CineSortApi → 5 facades** | ✅ mai 2026 (issue #84, 10 PRs Strangler Fig) |
+| **God class CineSortApi → 6 facades** | ✅ mai 2026 (issue #84, 10 PRs Strangler Fig) ; `runtime` ajoutée depuis |
 | **Mixins SQLite → Repository pattern** | 🔶 7 Repositories en place, suppression mixins prévue (issue #85 phase B8) |
 | **Logging structuré API** | ✅ 198 sites migrés (issue #103) |
 

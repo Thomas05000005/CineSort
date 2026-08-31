@@ -2,7 +2,11 @@
 # https://docs.codecov.com/docs/codecov-yaml
 
 coverage:
-  # Seuil global : 80% (aligne avec --fail-under=80 dans ci.yml)
+  # Seuil codecov : 80%. C'est un reglage DISTINCT de la porte CI, qui
+  # vaut --fail-under=75 (ci.yml:211). Le commentaire disait « aligne avec
+  # --fail-under=80 dans ci.yml » : cette valeur n'a jamais existe la-bas.
+  # Garder 80 ici est un choix (viser plus haut que la porte) ; ce qui
+  # etait faux, c'est de le presenter comme un alignement.
   range: "70...100"
   round: nearest
   precision: 1

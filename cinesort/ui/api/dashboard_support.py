@@ -1862,8 +1862,8 @@ def _compute_active_insights(
             }
         )
 
-    # 3c. Sante bibliotheque faible (health_low).
-    health = int(librarian_data.get("health_score") or 100)
+    # 3c. Sante faible. `to_int` : 0 est la PIRE sante, pas une absence (cf. son test).
+    health = to_int(librarian_data.get("health_score"), 100)
     if health < 60:
         insights.append(
             {

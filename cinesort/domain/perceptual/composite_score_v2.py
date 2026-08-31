@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..codec_ranks import est_lossless
 from .constants import (
     ADJUSTMENT_AV1_AFGS1_BONUS,
     ADJUSTMENT_DV_PROFILE_5_MALUS,
@@ -623,7 +624,7 @@ def apply_contextual_adjustments(
     # fake-lossless + warning ne se declenchaient jamais.
     audio_tracks = (normalized_probe or {}).get("audio_tracks") or []
     has_lossless_codec = any(
-        str((t or {}).get("codec", "")).lower() in ("flac", "truehd", "dts-hd ma", "mlp")
+        est_lossless(str((t or {}).get("codec", "")), str((t or {}).get("title", "")))
         for t in (audio_tracks if isinstance(audio_tracks, list) else [])
     )
     # Retrouver audio_subs.spectral_cutoff
