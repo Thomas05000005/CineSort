@@ -121,6 +121,128 @@ def _startup_error(message: str, exc: Exception | None = None) -> None:
         print(f"Details: {crash_path}")
 
 
+import hashlib
+import hmac
+from urllib.parse import quote
+
+
+def empreinte_jeton(jeton: str) -> str:
+    """Identifie un jeton sans en reveler un seul caractere.
+
+    HMAC et non `sha256(jeton)` : CodeQL `py/weak-sensitive-data-hashing` ne
+    reproche pas l'algorithme, il reproche le GESTE — hacher un secret avec une
+    primitive RAPIDE laisse une attaque par dictionnaire sur l'empreinte. Le
+    secret devient donc la CLE, et le message est un domaine constant.
+
+    Meme parti que `cinesort/app/plan_support_core.py`, qui a ferme l'alerte
+    CodeQL #264 le meme jour sur l'empreinte de la cle TMDb. Le suffixe de
+    version permet de faire tourner le domaine sans toucher au reste.
+    """
+    return hmac.new(
+        key=jeton.encode("utf-8", "replace"),
+        msg=b"cinesort:boot_token_fingerprint:v1",
+        digestmod=hashlib.sha256,
+    ).hexdigest()[:12]
+
+
+def diagnostic_jeton(jeton: str) -> str:
+    """Tout ce qu'on peut dire d'un jeton de boot SANS l'ecrire.
+
+    CodeQL `py/clear-text-logging-sensitive-data` a signale QUATRE expressions
+    de `main()` qui journalisaient le jeton en clair sous `CINESORT_DEBUG` :
+
+        codepoints={cps}                 la liste des codepoints de CHAQUE
+                                         caractere — le jeton dans une autre
+                                         notation
+        NON-ASCII ... char={c!r}         le caractere lui-meme
+        url-encoded ntoken={enc!r}       le jeton encode, entier
+        -> {enc}                         le jeton encode, entier, a nouveau
+
+    Elles existaient pour une raison REELLE (2026-06-07) : les puces U+2022 du
+    masquage de secret arrivaient jusqu'ici, `quote` les transformait en
+    `%E2%80%A2`, et le frontend rejetait le jeton — d'ou un diagnostic sur les
+    codepoints et les %-escapes.
+
+    Aucune de ces questions ne demande LA VALEUR :
+
+      - corruption entre `_start_rest_server` et ici  -> comparer une EMPREINTE ;
+      - BOM ou codepoint > 0x7F                       -> position + codepoint ;
+      - %-escapes introduits par `quote`              -> un COMPTE.
+
+    Un `token_urlsafe` est ASCII pur par construction : un caractere non-ASCII
+    n'est donc pas du jeton, c'est la corruption elle-meme, et son codepoint est
+    exactement le signal cherche.
+
+    Le resultat est aussi PLUS utile que l'ancien dump : deux empreintes se
+    comparent d'un coup d'oeil, deux listes de codepoints non.
+    """
+    encode = quote(jeton)
+    non_ascii = [(i, f"U+{ord(c):04X}") for i, c in enumerate(jeton) if ord(c) > 0x7F]
+    empreinte = empreinte_jeton(jeton)
+    return (
+        f"len={len(jeton)} len_encode={len(encode)} empreinte={empreinte} "
+        f"ascii_pur={not non_ascii} pourcents={encode.count('%')} non_ascii={non_ascii}"
+    )
+
+
+def url_de_boot_natif(proto: str, port: int, jeton: str) -> str:
+    """L'URL que WebView2 charge au demarrage. Le jeton passe par le FRAGMENT.
+
+    T-SEC-5. Un fragment n'est PAS envoye au serveur. Mesure sur un socket nu :
+
+        `?ntoken=X&native=1`  ->  GET /dashboard/?ntoken=X&native=1
+        `?native=1#ntoken=X`  ->  GET /dashboard/?native=1
+
+    La ligne de requete cesse donc de porter le jeton — elle qui etait
+    journalisee telle quelle par `rest_server`, et que `log_scrubber` ne
+    redigeait PAS sous ce nom (son motif porte un `\b` en amont, ajoute pour ne
+    pas mordre `mytoken=`, et qui l'aveugle sur `ntoken=`).
+
+    `?native=1` RESTE dans la query : ce n'est pas un secret, et
+    `_detectNativeBoot` le lit avant meme de regarder le jeton.
+
+    Extraite de `main()` : le cliquet de taille a rougi (535 > 525) sur le seul
+    ajout du commentaire ci-dessus. La reponse du depot a une fonction trop
+    longue est d'extraire, et cette extraction rend la partie sensible du lot
+    directement testable — `tests/test_boot_natif_jeton.py` l'appelle au lieu
+    de chercher une sous-chaine dans le source.
+    """
+    base = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
+    if not jeton:
+        return base
+    return f"{base}#ntoken={quote(jeton)}"
+
+
+def url_de_boot_redigee(proto: str, port: int, jeton: str) -> str:
+    """La meme URL, jeton tronque, pour le journal de diagnostic.
+
+    DERIVEE de `url_de_boot_natif` et non reecrite : la version precedente
+    imprimait `?ntoken=...&native=1` — la forme d'AVANT ce lot. Un message de
+    diagnostic qui decrit une URL que le code ne construit plus est pire que
+    pas de message : il envoie chercher le defaut au mauvais endroit.
+    """
+    # ELLE NE CONSTRUIT JAMAIS L'URL COMPLETE.
+    #
+    # La version precedente faisait `url_de_boot_natif(proto, port, jeton)` puis
+    # decoupait sur `#ntoken=` pour retirer le secret. CodeQL
+    # `py/clear-text-logging` a suivi ce flux jusqu'au `print`, et il ne
+    # signalait pas un faux positif : la chaine contenant le jeton EXISTAIT
+    # vraiment, on la tranchait apres coup. « Construire puis retrancher » est
+    # plus faible que « ne jamais construire » — il suffit qu'un jour quelqu'un
+    # journalise la valeur intermediaire, ou qu'une exception passe entre les
+    # deux, pour que le secret sorte.
+    #
+    # Ici le jeton n'atteint que `empreinte_jeton`, qui n'en rend qu'un HMAC.
+    base = url_de_boot_natif(proto, port, "")
+    if not jeton:
+        return base
+    # L'EMPREINTE, et non les huit premiers caracteres comme dans la version
+    # heritee : huit caracteres d'un `token_urlsafe` de trente-deux, c'est
+    # divulguer une partie du secret. L'empreinte repond a la MEME question
+    # (« lequel des jetons est-ce ? ») sans en reveler un seul caractere.
+    return f"{base}#ntoken=<empreinte {empreinte_jeton(jeton)}>"
+
+
 def reglage_entier(settings: dict, cle: str, defaut: int) -> int:
     """Lit un reglage entier en distinguant ABSENT de ZERO.
 
@@ -327,23 +449,20 @@ def _start_rest_server(api: CineSortApi, settings: dict | None = None) -> object
     _DEBUG_TOKEN = str(os.environ.get("CINESORT_DEBUG") or "").strip().lower() in {"1", "true", "yes", "on", "debug"}
 
     def _dbg_codepoints(label: str, value: str) -> None:
-        """Logue codepoint-par-codepoint un token, signale tout > 0x7F."""
+        """Trace le jeton SANS l'ecrire (CodeQL py/clear-text-logging).
+
+        Elle imprimait la liste des codepoints de chaque caractere, puis chaque
+        caractere non-ASCII un a un. SECONDE copie du meme motif : `main()` en
+        portait trois autres. Le defaut n'etait pas une ligne mais une HABITUDE.
+
+        `diagnostic_jeton` repond aux memes questions et rend en plus une
+        EMPREINTE — ce que la liste de codepoints promettait sans le rendre
+        lisible : comparer ce jeton-ci a celui d'un autre point de la chaine.
+        """
         if not _DEBUG_TOKEN:
             return
         try:
-            length = len(value)
-            cps = [f"U+{ord(c):04X}" for c in value]
-            non_ascii = [(i, c, ord(c)) for i, c in enumerate(value) if ord(c) > 0x7F]
-            print(f"[DEBUG-TOKEN] {label} len={length}", file=sys.stderr)
-            print(f"[DEBUG-TOKEN] {label} codepoints={cps}", file=sys.stderr)
-            if non_ascii:
-                for i, c, o in non_ascii:
-                    print(
-                        f"[DEBUG-TOKEN] {label} NON-ASCII pos={i} char={c!r} U+{o:04X}",
-                        file=sys.stderr,
-                    )
-            else:
-                print(f"[DEBUG-TOKEN] {label} 100% ASCII OK", file=sys.stderr)
+            print(f"[DEBUG-TOKEN] {label} {diagnostic_jeton(value)}", file=sys.stderr)
         except Exception as _dbg_exc:  # noqa: BLE001 — debug only
             print(f"[DEBUG-TOKEN] {label} dump failed: {_dbg_exc}", file=sys.stderr)
 
@@ -864,46 +983,35 @@ def main() -> None:
             }
             if _DEBUG_NB:
                 try:
-                    cps = [f"U+{ord(c):04X}" for c in _desktop_dashboard_token]
-                    non_ascii = [(i, c, ord(c)) for i, c in enumerate(_desktop_dashboard_token) if ord(c) > 0x7F]
                     print(
-                        f"[DEBUG-NTOKEN] _desktop_dashboard_token len={len(_desktop_dashboard_token)} codepoints={cps}",
+                        f"[DEBUG-NTOKEN] jeton recu : {diagnostic_jeton(_desktop_dashboard_token)}",
                         file=sys.stderr,
                     )
-                    for i, c, o in non_ascii:
-                        print(
-                            f"[DEBUG-NTOKEN] NON-ASCII pos={i} char={c!r} U+{o:04X}",
-                            file=sys.stderr,
-                        )
                 except Exception as _dbg_exc:  # noqa: BLE001 — debug only
                     print(f"[DEBUG-NTOKEN] dump failed: {_dbg_exc}", file=sys.stderr)
             if _desktop_dashboard_token:
                 _encoded_token = quote(_desktop_dashboard_token)
-                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?ntoken={_encoded_token}&native=1"
-                # ITER15 5.2 : reduire verbosite — l'URL main_url avec ntoken
-                # tronque est un detail de boot natif normal, pas une condition
-                # d'erreur. Logge uniquement en mode CINESORT_DEBUG. Le bypass
-                # loopback rend de toute facon l'absence de token benigne en
-                # local. GARDE-FOU : ne change pas la matrice auth iter5/iter14.
+                main_url = url_de_boot_natif(proto, port, _desktop_dashboard_token)
+                # ITER15 5.2 : reduire verbosite — l'URL avec le jeton tronque
+                # est un detail de boot natif normal, pas une condition
+                # d'erreur. Logge uniquement en mode CINESORT_DEBUG.
+                # GARDE-FOU : ne change pas la matrice auth iter5/iter14.
                 if _DEBUG_NB:
                     print(
-                        f"[REST] main_url = {proto}://127.0.0.1:{port}/dashboard/?ntoken={_desktop_dashboard_token[:8]}...&native=1",
+                        f"[REST] main_url = {url_de_boot_redigee(proto, port, _desktop_dashboard_token)}",
                         file=sys.stderr,
                     )
-                    print(
-                        f"[DEBUG-NTOKEN] url-encoded ntoken={_encoded_token!r} "
-                        f"(len_raw={len(_desktop_dashboard_token)} len_encoded={len(_encoded_token)})",
-                        file=sys.stderr,
-                    )
-                    # Detecter si l'encodage a transforme un % qui revele BOM/non-ASCII
+                    # `diagnostic_jeton` porte deja le compte de %-escapes et la
+                    # liste des codepoints non-ASCII : la valeur encodee n'ajoute
+                    # rien au diagnostic, elle n'ajoutait que la fuite.
                     if "%" in _encoded_token:
                         print(
-                            f"[DEBUG-NTOKEN] ATTENTION : ntoken contient %-escapes "
-                            f"(probable codepoint > 0x7F encode) -> {_encoded_token}",
+                            "[DEBUG-NTOKEN] ATTENTION : le jeton contient des %-escapes "
+                            f"(probable codepoint > 0x7F) — {diagnostic_jeton(_desktop_dashboard_token)}",
                             file=sys.stderr,
                         )
             else:
-                main_url = f"{proto}://127.0.0.1:{port}/dashboard/?native=1"
+                main_url = url_de_boot_natif(proto, port, "")
                 # ITER15 5.2 + 5.4 : token vide reste une condition d'erreur (en
                 # mode web/LAN, l'utilisateur ne peut pas se connecter ; en mode
                 # natif, le bypass loopback peut sauver mais reste un signal
