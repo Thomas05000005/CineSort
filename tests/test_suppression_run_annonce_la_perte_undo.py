@@ -78,6 +78,24 @@ const buildEmptyState = () => "";
 _EXTRA = """
 export const __onActionClick = _onActionClick;
 export const __consequence = _consequenceSuppressionRun;
+
+// INSTRUMENTATION DU SITE D'APPEL.
+//
+// Comparer `modale.consequence === __consequence(true)` compare deux CHAINES :
+// un mutant qui recopie le texte en dur dans `dangerConfirmModal({...})` rend
+// la meme valeur et passe l'assertion. C'est une egalite de valeur, pas
+// d'identite, et JS n'offre pas la seconde sur des primitives.
+//
+// On remplace donc la fonction par une doublure qui rend une SENTINELLE
+// impossible a produire autrement. Une declaration `function f(){}` cree une
+// liaison REASSIGNABLE dans son scope, et ce bloc est concatene dans le meme
+// module que la source : la reaffectation atteint donc le site d'appel reel.
+const __vraieConsequence = _consequenceSuppressionRun;
+export const __instrumenter = () => {
+  _consequenceSuppressionRun = (undoEncorePossible) =>
+    "SENTINELLE#" + String(undoEncorePossible);
+};
+export const __restaurer = () => { _consequenceSuppressionRun = __vraieConsequence; };
 """
 
 # Sortie explicite apres l'emission, comme `test_historique_doublons_affirmation`
@@ -101,8 +119,16 @@ const evenement = (action, runId, undoPossible) => ({
 // passer une fonction qui ignore son argument et rend toujours la meme chose.
 M.__onActionClick(evenement("delete-run", "run-42", "1"));
 M.__onActionClick(evenement("delete-run", "run-43", "0"));
+// Troisieme et quatrieme clics, fonction INSTRUMENTEE : ce que la modale
+// recoit doit etre ce que la fonction PRODUIT, pas un texte identique.
+M.__instrumenter();
+M.__onActionClick(evenement("delete-run", "run-44", "1"));
+M.__onActionClick(evenement("delete-run", "run-45", "0"));
+M.__restaurer();
 const avec = globalThis.__modales[0] || null;
 const sans = globalThis.__modales[1] || null;
+const sentinelle_avec = globalThis.__modales[2] || null;
+const sentinelle_sans = globalThis.__modales[3] || null;
 __emit({
   nb_modales: globalThis.__modales.length,
   consequence: avec ? String(avec.consequence || "") : null,
@@ -110,6 +136,8 @@ __emit({
   titre: avec ? String(avec.title || "") : null,
   cablee: !!(avec && avec.consequence === M.__consequence(true)),
   cablee_sans_undo: !!(sans && sans.consequence === M.__consequence(false)),
+  sentinelle_avec: sentinelle_avec ? String(sentinelle_avec.consequence || "") : null,
+  sentinelle_sans: sentinelle_sans ? String(sentinelle_sans.consequence || "") : null,
 });
 """
 
@@ -132,7 +160,7 @@ class LaModaleDeSuppressionAnnonceLaPerteDeLUndoTests(unittest.TestCase):
         porteraient sur `None` et passeraient pour de mauvaises raisons."""
         self.assertEqual(
             self.modale["nb_modales"],
-            2,
+            4,
             "aucune confirmation demandee avant une suppression definitive (regle n3)",
         )
         self.assertIn("run-42", self.modale["titre"])
@@ -215,6 +243,24 @@ class LaModaleDeSuppressionAnnonceLaPerteDeLUndoTests(unittest.TestCase):
         self.assertTrue(
             self.modale["cablee_sans_undo"],
             f"le handler ne transmet pas `undoEncorePossible` : recu {self.modale['consequence_sans_undo']!r}",
+        )
+
+    def test_le_handler_APPELLE_la_fonction_et_ne_recopie_pas_son_texte(self) -> None:
+        """L'egalite de CHAINES ne prouve pas le cablage.
+
+        `modale.consequence === __consequence(true)` compare deux valeurs
+        primitives : un mutant qui recopie le texte en dur dans
+        `dangerConfirmModal({...})` rend la meme chaine et passe l'assertion.
+        JS n'offre pas d'identite sur des primitives.
+
+        Le driver remplace donc la fonction par une doublure qui rend une
+        SENTINELLE, impossible a produire autrement, et refait les deux clics.
+        Ce que la modale recoit alors ne peut venir que de l'appel."""
+        self.assertEqual(self.modale["sentinelle_avec"], "SENTINELLE#true")
+        self.assertEqual(
+            self.modale["sentinelle_sans"],
+            "SENTINELLE#false",
+            "le handler ne transmet pas `undoEncorePossible` a la fonction",
         )
 
 

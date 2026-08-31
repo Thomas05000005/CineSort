@@ -105,6 +105,35 @@ _PRELUDE = r"""
 // --- prelude harnais (injecte) ---
 globalThis.__emit = (obj) => { process.stdout.write("<<<JSON>>>" + JSON.stringify(obj) + "<<<END>>>"); };
 globalThis.__sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// `process.exit()` NE VIDE PAS le pipe. Quatorze fichiers de test terminent
+// leur driver par `process.exit(0)` juste apres `__emit` — un motif recopie de
+// proche en proche — pour couper court a une minuterie restee armee. Quand
+// stdout est un PIPE (ce qui est le cas sous `subprocess.run`), l'ecriture est
+// asynchrone : sortir immediatement peut tronquer le JSON deja ecrit. Le
+// harnais rapporte alors « driver node n'a rien emis », un echec qui n'a rien a
+// voir avec le test.
+//
+// On rend donc `process.exit` sur-mesure ici plutot que dans les quatorze
+// fichiers : le drainage est une propriete du HARNAIS, pas de chaque driver.
+// `write("")` rappelle son callback une fois le tampon vide.
+//
+// Le `setTimeout` de secours couvre le cas ou le callback ne viendrait jamais
+// (pipe ferme en face) : sans lui, le driver resterait pendu jusqu'au timeout
+// du subprocess. `unref()` l'empeche a son tour de retenir la boucle
+// d'evenements, donc il ne change rien a une sortie naturelle.
+(() => {
+  const sortieReelle = process.reallyExit ? process.reallyExit.bind(process) : null;
+  const exitOriginal = process.exit.bind(process);
+  let enCours = false;
+  process.exit = (code) => {
+    if (enCours) { return (sortieReelle || exitOriginal)(code); }
+    enCours = true;
+    const filet = setTimeout(() => (sortieReelle || exitOriginal)(code), 2000);
+    if (filet.unref) { filet.unref(); }
+    process.stdout.write("", () => { clearTimeout(filet); exitOriginal(code); });
+  };
+})();
 """
 
 
