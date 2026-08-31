@@ -280,6 +280,39 @@ class CountV2TierSinceNeScanNePlusToutTests(_BaseReelle):
             f"l'index ne couvre pas `row_id` : chaque entree trouvee coutera une remontee de ligne. Plan : {plan}",
         )
 
+    def test_l_EGALITE_sur_le_tier_est_un_terme_de_RECHERCHE(self) -> None:
+        """AJOUTE APRES QU'UN MUTANT A SURVECU, et c'est tout son interet.
+
+        L'assertion `COVERING INDEX` ci-dessus ne voit PAS l'ordre des colonnes.
+        Un index `(ts, global_tier_v2, row_id)` reste couvrant — SQLite parcourt
+        l'intervalle de `ts` dans l'index et filtre le tier au passage — et le
+        plan porte toujours le mot `COVERING`. Le mutant passait donc.
+
+        Il est pourtant une regression MESUREE (200 000 lignes, ms/appel) :
+
+            tier       (tier, ts, row_id)   (ts, tier, row_id)
+            platinum          1,2                 13,8
+            gold             46,3                 63,4
+            silver           43,4                 56,6
+            bronze           16,0                 27,8
+            reject            4,8                 15,7
+
+        Un predicat d'EGALITE place apres un predicat d'INTERVALLE cesse d'etre
+        un terme de recherche : SQLite ne peut plus sauter directement au groupe
+        du tier. Le plan le dit, et c'est la seule chose qui les separe —
+        `(global_tier_v2=? AND ts>?)` contre `(ts>?)` tout court.
+        """
+        self._semer()
+
+        plan = self._plan(self._sql_de_production(), ("reject", 0.0))
+
+        self.assertIn(
+            "global_tier_v2=?",
+            plan,
+            f"l'egalite sur le tier n'est pas un terme de recherche de l'index — elle est "
+            f"probablement placee APRES l'intervalle sur `ts`. Plan : {plan}",
+        )
+
     def test_la_variante_avec_until_ts_est_couverte_AUSSI(self) -> None:
         """Le second appelant (`quality_audit_support`) ajoute `AND ts < ?`."""
         self._semer()
