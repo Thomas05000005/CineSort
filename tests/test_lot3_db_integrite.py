@@ -39,7 +39,10 @@ from cinesort.app.apply_batches_reconciliation import _list_inprogress_rollbacks
 from cinesort.infra.db.migration_manager import _split_sql_statements
 from cinesort.infra.db.sqlite_store import SQLiteStore
 
-_MIG_DIR = Path("cinesort/infra/db/migrations")
+# Resolu depuis `__file__` et NON depuis le repertoire courant : un chemin
+# relatif ferait dependre la lecture de la migration de l'endroit d'ou pytest
+# est lance, et le fichier introuvable rendrait un echec qui accuse la migration.
+_MIG_DIR = Path(__file__).resolve().parents[1] / "cinesort" / "infra" / "db" / "migrations"
 
 
 class _BaseReelle(unittest.TestCase):
