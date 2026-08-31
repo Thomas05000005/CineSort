@@ -147,14 +147,20 @@ def deux_biblios(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def test_scrub_redige_un_chemin_windows_natif() -> None:
+    """Le nom d'utilisateur est SYNTHETIQUE, et doit le rester.
+
+    Ce depot est PUBLIC et `test_release_hygiene.test_no_personal_strings_in_repo`
+    interdit tout chemin personnel reel. Un nom d'utilisateur reel poserait
+    ici exactement la donnee que le scrubber existe pour retirer.
+    """
     """Un chemin Windows NATIF (un seul antislash) doit etre redige.
 
     Le motif exigeait DEUX antislashs litteraux, donc ne mordait que sur du
     texte deja echappe. Le tail de `cinesort.log`, lui, est du texte natif.
     """
-    ligne = "ouverture C:\\Users\\blanc\\AppData\\Local\\CineSort\\logs\\cinesort.log"
+    ligne = "ouverture C:\\Users\\utilisateur_test\\AppData\\Local\\CineSort\\logs\\cinesort.log"
     sortie = observe.scrub(ligne)
-    assert "blanc" not in sortie, sortie
+    assert "utilisateur_test" not in sortie, sortie
     assert "<USER>" in sortie, sortie
 
 
@@ -164,9 +170,9 @@ def test_scrub_preserve_l_echappement_json() -> None:
     Le remplacement posait UN antislash la ou la source en portait DEUX : la
     ligne JSON devenait indecodable (`\\U` n'est pas une echappement JSON).
     """
-    ligne = json.dumps({"path": "C:\\Users\\blanc\\AppData"})
+    ligne = json.dumps({"path": "C:\\Users\\utilisateur_test\\AppData"})
     sortie = observe.scrub(ligne)
-    assert "blanc" not in sortie, sortie
+    assert "utilisateur_test" not in sortie, sortie
     assert json.loads(sortie)["path"] == "C:\\Users\\<USER>\\AppData"
 
 
