@@ -674,12 +674,20 @@ async function _loadCompareList() {
   _state.compareInFlight = true;
   const { runId, rowId } = _state;
   const listEl = _modalEl && _modalEl.querySelector("[data-perceptual-compare-list]");
+  // LOT 5-B : la garde `if (!_state)` ci-dessus est AVANT l'await, or cette
+  // liste est pre-chargee a l'ouverture (`void _loadCompareList()`) et
+  // `closePerceptualModal()` pose `_state = null` — Echap juste apres l'ouverture
+  // est donc le cas nominal. On memorise la session et on re-verifie APRES
+  // l'await avant toute ecriture (sinon TypeError, y compris dans le `catch`).
+  const sessionRef = _state;
+  const memeSession = () => _state === sessionRef;
   try {
     const res = await apiPost("library/get_library_filtered", {
       run_id: runId,
       page_size: 500,
       page: 1,
     });
+    if (!memeSession()) return;
     const payload = res && res.data != null ? res.data : res;
     if (!payload || payload.ok === false) {
       _state.compareInFlight = false;
@@ -695,6 +703,7 @@ async function _loadCompareList() {
     _state.compareInFlight = false;
     _renderCompareListItems(_state.compareRows);
   } catch (err) {
+    if (!memeSession()) return;
     _state.compareInFlight = false;
     if (listEl) {
       listEl.innerHTML = `<li class="perceptual-compare-loading">Erreur : ${escapeHtml(err && err.message ? err.message : String(err))}</li>`;

@@ -587,31 +587,43 @@ async function _decideWinner(side) {
   }
   _state.decisionInFlight = true;
   _refreshFooter();
+  // LOT 5-A : Echap (`_onKeydown`) et le clic backdrop appellent
+  // `closeDuplicateComparatorModal()` sans regarder `decisionInFlight`, et cette
+  // fonction pose `_state = null`. Tout ce qui suit l'`await` doit donc lire des
+  // COPIES prises avant, et ne reecrire dans `_state` que si la session est
+  // toujours la meme (ni fermee, ni remplacee par une reouverture).
+  const sessionRef = _state;
+  const { runId, groupKey, comparison, onDecided } = sessionRef;
+  const memeSession = () => _state === sessionRef;
   try {
     const res = await apiPost("run/mark_duplicate_winner", {
-      run_id: _state.runId,
-      group_key: _state.groupKey,
+      run_id: runId,
+      group_key: groupKey,
       winner_row_id: winnerRow,
       notes: null,
     });
     const data = _payload(res);
     if (data.ok === false) {
       showToast({ type: "error", text: data.message || data.error || "Échec décision" });
-      _state.decisionInFlight = false;
-      _refreshFooter();
+      if (memeSession()) {
+        _state.decisionInFlight = false;
+        _refreshFooter();
+      }
       return;
     }
-    const savings = data.size_savings || (_state.comparison && _state.comparison.size_savings) || 0;
+    const savings = data.size_savings || (comparison && comparison.size_savings) || 0;
     let toastText = `✓ Décidé : Garder ${sideLabel}`;
     if (savings > 0) {
       toastText += ` · ${_fmtSize(savings)} récupérables`;
     }
     showToast({ type: "success", text: toastText });
-    // Callback pour que la vue parente actualise la carte sans recharger
-    if (typeof _state.onDecided === "function") {
+    // Callback pour que la vue parente actualise la carte sans recharger.
+    // Il part MEME si la modale a ete fermee entre-temps : le serveur a
+    // enregistre le gagnant, la vue parente doit le refleter.
+    if (typeof onDecided === "function") {
       try {
-        _state.onDecided({
-          groupKey: _state.groupKey,
+        onDecided({
+          groupKey,
           // legacy : winnerSide = "a"|"b". En 3+ : on expose aussi winnerIndex.
           winnerSide: side === "a" || side === "b" ? side : "a",
           winnerIndex,
@@ -622,11 +634,14 @@ async function _decideWinner(side) {
         console.warn("[duplicate-comparator-modal] onDecided callback error:", cbErr);
       }
     }
-    closeDuplicateComparatorModal();
+    // Ne fermer que NOTRE session : sinon on fermerait la modale rouverte entre-temps.
+    if (memeSession()) closeDuplicateComparatorModal();
   } catch (err) {
     showToast({ type: "error", text: err && err.message ? err.message : String(err) });
-    _state.decisionInFlight = false;
-    _refreshFooter();
+    if (memeSession()) {
+      _state.decisionInFlight = false;
+      _refreshFooter();
+    }
   }
 }
 
