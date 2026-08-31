@@ -43,9 +43,12 @@ class ScanRepository(_BaseRepository):
         settings ne referencent plus le root ou si le chemin a ete normalise
         differemment. Cette methode supprime tout, sans filtre.
 
-        Tolerance : chaque table est purgee dans son propre try/except. Si une
-        table n'existe pas (migration partielle, install ancienne, DB foireuse),
-        on enregistre 0 et on continue plutot que de bloquer toute la purge.
+        Tolerance : chaque table est purgee dans son propre try/except, et cette
+        tolerance est BORNEE a « table absente » (migration partielle, install
+        ancienne). On enregistre alors 0 et on continue plutot que de bloquer
+        toute la purge. Toute autre `OperationalError` (base verrouillee, E/S,
+        schema invalide) REMONTE : rendre 0 signifierait « rien a supprimer »
+        alors que rien n'a ete supprime, et le rapport de purge mentirait.
 
         Retourne le nombre de lignes supprimees par table.
         """
@@ -53,9 +56,24 @@ class ScanRepository(_BaseRepository):
         def _safe_delete(conn: Any, table: str) -> int:
             try:
                 return int(conn.execute(f"DELETE FROM {table}").rowcount or 0)
-            except sqlite3.OperationalError:
-                # Table manquante (ex: migration non encore passee sur cette DB).
-                # On recree la table puis on retourne 0.
+            except sqlite3.OperationalError as exc:
+                # UNIQUEMENT « table absente » (ex: migration pas encore passee
+                # sur cette base) : elle ne contient alors rien a purger, 0 est
+                # la verite.
+                #
+                # Un `except` large avalait aussi « database is locked », un
+                # schema invalide ou une erreur d'E/S : la purge n'avait PAS eu
+                # lieu et le rapport annoncait quand meme 0 ligne supprimee,
+                # indiscernable d'une table deja vide. L'appelant
+                # (`reset_incremental_cache`) en concluait un rescan complet
+                # force, alors que le cache etait intact — le rescan suivant
+                # repartait du cache perime.
+                #
+                # Meme discrimination que `run_id_est_utilise` / `delete_run`
+                # (repositories/run.py) : on reutilise leur `_is_missing_table_error`
+                # plutot que d'en reecrire une variante qui pourrait diverger.
+                if not self._is_missing_table_error(exc, table):
+                    raise
                 return 0
 
         def op(conn: Any) -> Dict[str, int]:
