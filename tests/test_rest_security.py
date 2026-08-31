@@ -423,6 +423,48 @@ class RestSecurityHttpTests(unittest.TestCase):
 
         self.assertIn("TimeoutError", str(ctx.exception), "le message ne nomme pas la panne rencontree")
 
+    def test_500_no_exception_leak_sur_la_frontiere_GET(self) -> None:
+        """Le JUMEAU GET, et il manquait.
+
+        `test_500_no_exception_leak` couvre la frontiere `except Exception` de
+        `_handle_post`. Mesure du 2026-08-31 : muter la frontiere de
+        `_handle_get` (celle de `/api/poster`) pour qu'elle rende
+        `f"Erreur interne: {exc!r}"` laissait les 20 tests de ce fichier VERTS.
+
+        Deux frontieres, deux redactions distinctes du meme message : couvrir
+        l'une ne dit rien de l'autre. Celle-ci porte en plus un champ
+        `category`, donc son corps n'est meme pas identique.
+        """
+        detail_interne = "sqlite:////home/victime/.cinesort/state.db"
+        message_panne = f"cache posters illisible [{detail_interne}]"
+
+        # AUTO-CONTROLE DU DETECTEUR, comme pour le jumeau POST : on prouve que
+        # `assertNotIn` sait voir la fuite AVANT de s'en servir pour l'exclure.
+        self.assertIn(detail_interne, json.dumps({"message": message_panne}, ensure_ascii=False))
+
+        from cinesort.infra.integrations import poster_proxy
+
+        originale = poster_proxy.serve_poster
+
+        def _explose(*_a, **_k):
+            raise RuntimeError(message_panne)
+
+        poster_proxy.serve_poster = _explose
+        try:
+            with self.assertLogs("cinesort.infra.rest_server", level=logging.ERROR):
+                status, data, _ = self._request("GET", "/api/poster?id=550&size=w342")
+        finally:
+            poster_proxy.serve_poster = originale
+
+        self.assertEqual(status, 500, f"la panne injectee doit atteindre la frontiere 500 (recu {status}: {data})")
+        msg = str(data.get("message", ""))
+        self.assertEqual(msg, "Erreur interne")
+
+        # Le corps ENTIER : cette frontiere pose aussi `category`, et un futur
+        # champ `detail` fuirait sans que l'assertion ci-dessus bronche.
+        self.assertNotIn(detail_interne, json.dumps(data, ensure_ascii=False))
+        self.assertNotIn("Traceback", json.dumps(data, ensure_ascii=False))
+
     def test_path_traversal_post_harmless(self) -> None:
         """Path traversal dans le body : pas de crash et RIEN n'est reflechi.
 
