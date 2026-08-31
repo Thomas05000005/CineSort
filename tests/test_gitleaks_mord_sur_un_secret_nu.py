@@ -138,11 +138,7 @@ class LaRegleMordSurUnSecretNuTests(unittest.TestCase):
         distribution revele qu'il en rate un tiers."""
         for taille in (24, 32):
             with self.subTest(token_urlsafe=taille):
-                rates = sum(
-                    1
-                    for _ in range(_N)
-                    if not self.moteur.mord(f"`{secrets.token_urlsafe(taille)}`")
-                )
+                rates = sum(1 for _ in range(_N) if not self.moteur.mord(f"`{secrets.token_urlsafe(taille)}`"))
                 self.assertLess(
                     rates / _N,
                     0.02,
