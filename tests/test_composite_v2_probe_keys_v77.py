@@ -12,6 +12,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from cinesort.domain.codec_ranks import est_lossless
 from cinesort.domain.perceptual.composite_score_v2 import (
     _score_hdr,
     apply_contextual_adjustments,
@@ -85,6 +86,123 @@ class FakeLosslessAudioTracksTests(unittest.TestCase):
         )
         sub = next(s for s in audio_out if s.name == "spectral_cutoff")
         self.assertEqual(sub.value, 40.0, "pas de malus si la cle audio_tracks est absente")
+
+
+class LeCodecEstLuSOUS_SA_FORME_BRUTETests(unittest.TestCase):
+    """La regle fake-lossless comparait le codec BRUT a une liste de 4 chaines.
+
+    `("flac", "truehd", "dts-hd ma", "mlp")`, en egalite EXACTE sur ce que rend
+    ffprobe. Or ffprobe ne dit pas « pcm » : il dit `pcm_s24le`, `pcm_s16le`,
+    `pcm_bluray`. Aucune de ces formes n'appartenait a la liste, donc le malus
+    « fake lossless » ne pouvait PAS se declencher sur un remux PCM — le format
+    ou il compte le plus, puisqu'un vrai PCM est enorme et un faux saute aux
+    yeux au spectre.
+
+    C'est la QUATRIEME table du depot qui encode « ce codec est-il sans perte »,
+    et la seule a le faire par egalite sur la forme brute. `codec_ranks` porte
+    deja un motif `("pcm", 3, "PCM")` avec le commentaire « couvre lpcm /
+    pcm_s24le / pcm_bluray » : la connaissance existait, elle n'etait pas
+    partagee.
+
+    Meme famille que le defaut corrige juste au-dessus dans ce fichier — la
+    fonction lisait la mauvaise CLE ; ici elle lit la bonne cle mais compare mal
+    sa VALEUR.
+    """
+
+    def _audio_subs(self):
+        return [SubScore(name="spectral_cutoff", value=40.0, weight=1.0, confidence=1.0, label_fr="Coupe")]
+
+    def _malus_applique(self, codec: str) -> bool:
+        _v, audio_out, _trace = apply_contextual_adjustments(
+            [],
+            self._audio_subs(),
+            None,
+            {"audio_tracks": [{"codec": codec}]},
+            None,
+            None,
+            [],
+            False,
+            "modern",
+        )
+        return next(s for s in audio_out if s.name == "spectral_cutoff").value < 40.0
+
+    def test_les_formes_reelles_de_pcm_declenchent_le_malus(self) -> None:
+        for brut in ("pcm_s24le", "pcm_s16le", "pcm_bluray", "lpcm", "PCM"):
+            with self.subTest(codec=brut):
+                self.assertTrue(
+                    self._malus_applique(brut),
+                    f"{brut} est SANS PERTE et ffprobe l'ecrit ainsi : le malus doit mordre",
+                )
+
+    def test_un_codec_AVEC_PERTE_ne_declenche_rien(self) -> None:
+        """Temoin. Sans lui, « corriger » pourrait vouloir dire mordre partout."""
+        for brut in ("aac", "ac3", "eac3", "mp3", "opus"):
+            with self.subTest(codec=brut):
+                self.assertFalse(
+                    self._malus_applique(brut),
+                    f"{brut} est AVEC PERTE : un spectre coupe y est normal, pas suspect",
+                )
+
+    def test_les_formes_deja_couvertes_le_restent(self) -> None:
+        """`mlp` en fait partie : l'ancienne liste le connaissait.
+
+        `mlp` (Meridian Lossless Packing, le coeur du TrueHD) est un
+        `codec_name` ffprobe a part entiere et n'a AUCUNE entree dans
+        `AUDIO_CODEC_RANK_PATTERNS`. Le retirer en passant a la table aurait ete
+        une regression silencieuse : il est traite explicitement.
+        """
+        for brut in ("flac", "truehd", "dts-hd ma", "mlp"):
+            with self.subTest(codec=brut):
+                self.assertTrue(self._malus_applique(brut))
+
+    def test_le_TITRE_ne_peut_pas_rendre_un_lossy_lossless(self) -> None:
+        """Le titre d'une piste est du texte LIBRE ; le codec, lui, est un fait.
+
+        Signale par une revue automatique sur cette PR, et reproduit :
+        `est_lossless("ac3", "PCM")` rendait True. La premiere version
+        concatenait codec et titre AVANT d'appliquer les motifs, si bien qu'un
+        flux avec perte dont le titre mentionne un format sans perte passait
+        pour sans perte — et recevait a tort le malus fake-lossless.
+
+        Ce n'est pas theorique : les titres de piste viennent de MediaInfo ou de
+        la main de l'utilisateur, et « PCM master », « FLAC 5.1 », « TrueHD »
+        y figurent couramment sur des flux ac3 ou eac3 de commentaire.
+
+        Le titre n'est consulte que pour Atmos, parce qu'Atmos EST parfois
+        signale la et nulle part ailleurs. Meme la, c'est le codec qui tranche :
+        seul un porteur TrueHD rend l'Atmos sans perte.
+        """
+        for codec, titre in (
+            ("ac3", "PCM"),
+            ("aac", "FLAC 5.1"),
+            ("mp3", "TrueHD"),
+            ("eac3", "DTS-HD MA"),
+            ("opus", "PCM master"),
+        ):
+            with self.subTest(codec=codec, titre=titre):
+                self.assertFalse(
+                    est_lossless(codec, titre),
+                    f"codec={codec!r} est AVEC PERTE : le titre {titre!r} ne peut pas le changer",
+                )
+
+    def test_le_titre_reste_lu_pour_ATMOS_seulement(self) -> None:
+        """Temoin de la reserve : sans lui, "n utilise pas le titre" serait
+        indistinguable de "ignore le titre partout", ce qui perdrait l'Atmos
+        signale hors du champ codec."""
+        self.assertTrue(est_lossless("truehd", "Atmos 7.1"))
+        self.assertFalse(est_lossless("eac3", "Atmos 7.1"))
+
+    def test_atmos_est_tranche_par_son_PORTEUR_pas_par_son_nom(self) -> None:
+        """Le mot « atmos » ne dit pas si le flux est sans perte.
+
+        Porte par du TrueHD il l'est ; porte par de l'E-AC-3 (JOC, streaming) il
+        ne l'est pas. La table des rangs place pourtant `atmos` en tete, ce qui
+        aurait classe les deux pareil. On applique la regle qu'
+        `audio_analysis._classify_codec` utilise deja : c'est le TrueHD qui
+        decide.
+        """
+        self.assertTrue(self._malus_applique("truehd atmos"), "TrueHD Atmos est SANS PERTE")
+        self.assertFalse(self._malus_applique("eac3 atmos"), "E-AC-3 Atmos (JOC) est AVEC PERTE")
 
 
 if __name__ == "__main__":
