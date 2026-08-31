@@ -37,7 +37,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 from cinesort.infra.state import atomic_write_json, default_state_dir, is_atomic_tmp_name
 
@@ -201,19 +201,42 @@ def upsert_disk_cache(
         return False
 
 
-def clear_disk_cache() -> int:
-    """Purge tout le cache disque probe. Retourne le nombre de fichiers supprimes.
+class PurgeDisque(NamedTuple):
+    """Ce que la purge du miroir disque a REELLEMENT fait.
 
-    Best-effort : les fichiers en cours d'utilisation (lock Windows) sont
-    ignores silencieusement.
+    `clear_disk_cache` ne rendait que `supprimes`. Or les fichiers que l'OS
+    refuse d'effacer restent des entrees de repli VALIDES : le prochain scan
+    les relit et les re-promeut en base. Les taire faisait promettre a
+    l'appelant un re-probe complet qui n'avait pas lieu.
+
+    `balayage_complet` est le troisieme etat, celui qu'un simple compteur
+    d'echecs ne sait pas dire : quand l'iteration elle-meme s'arrete, les
+    entrees non visitees survivent SANS avoir ete comptees. Rendre `echecs=0`
+    serait alors une affirmation, pas une mesure.
     """
-    if not _disk_cache_enabled():
-        return 0
-    removed = 0
+
+    supprimes: int
+    echecs: int
+    balayage_complet: bool
+
+    @property
+    def integrale(self) -> bool:
+        """Vrai seulement si le miroir est CERTAINEMENT vide."""
+        return self.balayage_complet and self.echecs == 0
+
+
+def clear_disk_cache_detaille() -> PurgeDisque:
+    """Purge tout le cache disque probe et rend le detail de ce qui a resiste.
+
+    Meme geste que `clear_disk_cache`, dont elle est le corps : seul le
+    compte-rendu differe. Voir `PurgeDisque`.
+    """
+    supprimes = 0
+    echecs = 0
     try:
         cache_dir = _cache_dir()
         if not cache_dir.is_dir():
-            return 0
+            return PurgeDisque(0, 0, True)
         for entry in cache_dir.iterdir():
             # Le glob historique `*.json` laissait DEFINITIVEMENT derriere lui
             # les `.tmp` orphelins d'un crash : leur nom etant unique, ils ne
@@ -222,21 +245,44 @@ def clear_disk_cache() -> int:
                 continue
             try:
                 entry.unlink()
-                removed += 1
+                supprimes += 1
             except OSError:
+                # Le `continue` reste la bonne decision : echouer ici perdrait
+                # la purge base deja faite. Ce qui change, c'est qu'on COMPTE.
+                echecs += 1
                 continue
     except OSError as exc:
         logger.debug("Cache probe disque purge partielle err=%s", exc)
-    return removed
+        return PurgeDisque(supprimes, echecs, False)
+    return PurgeDisque(supprimes, echecs, True)
+
+
+def clear_disk_cache() -> int:
+    """Purge tout le cache disque probe. Retourne le nombre de fichiers supprimes.
+
+    Best-effort : les fichiers en cours d'utilisation (lock Windows) sont
+    ignores silencieusement. Un appelant qui doit ANNONCER le resultat a
+    l'utilisateur veut `clear_disk_cache_detaille` : ce compteur-ci ne dit rien
+    de ce qui a resiste.
+
+    NE consulte PAS `_disk_cache_enabled()`, contrairement a `get_disk_cache` et
+    `upsert_disk_cache` : le drapeau gouverne la PRODUCTION d'entrees, pas leur
+    nettoyage. `CINESORT_PROBE_DISK_CACHE=0` est precisement pose par quelqu'un
+    qui ne veut plus de ce cache — lui refuser d'effacer ce qu'il a deja produit
+    inverse l'intention du reglage, et rendait `0` (« rien a supprimer ») sur un
+    repertoire plein.
+    """
+    return clear_disk_cache_detaille().supprimes
 
 
 def prune_disk_cache(*, retention_days: int = 90) -> int:
     """Supprime les entrees cache disque non-touchees depuis `retention_days`.
 
     Symetrique de `ProbeRepository.prune_probe_cache` cote DB. Best-effort.
+
+    Comme `clear_disk_cache`, ne consulte PAS `_disk_cache_enabled()` : un
+    nettoyage doit pouvoir nettoyer meme quand le cache est desactive.
     """
-    if not _disk_cache_enabled():
-        return 0
     retention = max(1, int(retention_days))
     cutoff = time.time() - (retention * 24 * 3600)
     removed = 0

@@ -24,6 +24,7 @@ import cinesort.domain.core as core
 import cinesort.infra.jellyfin_client as _jellyfin_mod
 import cinesort.infra.network_utils as _network_utils_mod
 import cinesort.infra.plex_client as _plex_mod
+import cinesort.infra.probe.disk_cache as _probe_disk_cache
 import cinesort.infra.radarr_client as _radarr_mod
 import cinesort.infra.rest_server as _rest_server_mod
 import cinesort.infra.state as state
@@ -265,6 +266,30 @@ def _profil_actif_ou_defaut(actif: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if isinstance(decode, dict) and decode:
             return decode
     return default_quality_profile()
+
+
+def _message_de_purge_probe(base: int, disque: "_probe_disk_cache.PurgeDisque") -> str:
+    """Le message est le SEUL canal qui atteint l'utilisateur.
+
+    L'ecran rend `message` (`parametres.js`, `rendu: "message"`) et ne lit ni
+    `entries_deleted` ni `disk_entries_deleted`. Il ne doit donc promettre un
+    re-probe complet que si le miroir disque est CERTAINEMENT vide : toute
+    entree de repli survivante sera relue et re-promue en base au scan suivant,
+    et le film ne sera pas re-sonde.
+    """
+    total = base + disque.supprimes
+    tete = f"Cache probe purge : {total} entrees supprimees."
+    if disque.integrale:
+        return f"{tete} Relance un scan pour re-probe les films."
+    if not disque.balayage_complet:
+        return (
+            f"{tete} Le balayage du miroir disque n'a pas pu aller a son terme : "
+            "des entrees peuvent subsister et etre reutilisees au prochain scan."
+        )
+    return (
+        f"{tete} {disque.echecs} entree(s) disque n'ont pas pu etre supprimees "
+        "(fichier verrouille) et seront reutilisees au prochain scan."
+    )
 
 
 class CineSortApi:
@@ -2035,9 +2060,33 @@ class CineSortApi:
     def _purge_probe_cache_impl(self) -> Dict[str, Any]:
         """Fix audit 2026-05-25 (v1.5.5) Vague K (FIX 5) : purge totale du cache probe.
 
-        Utile quand un settings.json obsolete a pollue le cache avec des
-        resultats FAILED dus a un path ffprobe/mediainfo introuvable. Apres
-        purge, le prochain scan relance toutes les probes proprement.
+        Apres purge, le prochain scan relance toutes les probes proprement.
+
+        Le motif d'origine — « un settings.json obsolete a pollue le cache avec
+        des resultats FAILED dus a un path ffprobe/mediainfo introuvable » — n'est
+        plus atteignable depuis le FIX 4 de la meme vague : `probe_file` saute
+        l'ecriture du cache quand `_is_tool_unavailable_failure` est vrai
+        (`service.py`). Les motifs qui restent sont ceux ou l'entree est valide
+        mais qu'on veut re-sonder : un outil de sonde AJOUTE apres coup (la cle
+        de cache porte le REGLAGE `probe_backend`, pas la liste des binaires
+        reellement trouves), une montee de version de ffprobe/MediaInfo, ou un
+        simple « repartir propre ».
+
+        LE CACHE PROBE A DEUX MOITIES, et cette route n'en vidait qu'une (audit
+        2026-08-28). `ProbeService._upsert_probe_cache_combined` ecrit la MEME
+        entree dans la base ET dans `<state_dir>/cache/probe/<hash>.json` ; en
+        lecture, `_get_probe_cache_combined` interroge la base PUIS retombe sur
+        le disque. Vider la seule base ne purgeait donc rien de durable : au
+        premier acces suivant, le miss base faisait repondre le disque, qui
+        RE-PROMOUVAIT l'entree en base (`service.py`, warm-up). La purge etait
+        annulee entree par entree, et « relance un scan pour re-probe » etait
+        faux — le scan relisait le disque au lieu de re-sonder.
+
+        Les deux moities sont donc purgees ici, et le compte rendu les
+        distingue : `entries_deleted` reste le compte BASE (des lecteurs
+        existants s'en servent), `disk_entries_deleted` porte le disque.
+        L'echec du disque ne fait pas echouer la route — la purge base a deja
+        eu lieu, et mentir sur elle serait le defaut inverse.
         """
         _log = logging.getLogger(__name__)
         try:
@@ -2060,11 +2109,28 @@ class CineSortApi:
                 level="error",
                 log_module=__name__,
             )
-        _log.info("api: purge_probe_cache entries_deleted=%d", deleted)
+        try:
+            disque = _probe_disk_cache.clear_disk_cache_detaille()
+        except Exception:  # noqa: BLE001 - le miroir disque ne doit pas invalider la purge base deja faite
+            _log.exception("api: purge_probe_cache echec purge du miroir disque")
+            # Le miroir n'a PAS ete balaye : `integrale` doit valoir faux, sinon
+            # le message promettrait un re-probe complet sur un miroir intact.
+            disque = _probe_disk_cache.PurgeDisque(0, 0, False)
+        _log.info(
+            "api: purge_probe_cache entries_deleted=%d disk_entries_deleted=%d "
+            "disk_entries_kept=%d disk_scan_complete=%s",
+            deleted,
+            disque.supprimes,
+            disque.echecs,
+            disque.balayage_complet,
+        )
         return {
             "ok": True,
             "entries_deleted": deleted,
-            "message": (f"Cache probe purge : {deleted} entrees supprimees. Relance un scan pour re-probe les films."),
+            "disk_entries_deleted": disque.supprimes,
+            "disk_entries_kept": disque.echecs,
+            "disk_scan_complete": disque.balayage_complet,
+            "message": _message_de_purge_probe(deleted, disque),
         }
 
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:
