@@ -585,7 +585,12 @@ def _update_splash(splash_window: object, step: int, text: str, percent: int) ->
     import json
 
     try:
-        splash_window.evaluate_js(  # type: ignore[union-attr]
+        # `attr-defined`, PAS `union-attr` : `splash_window` est type `object`,
+        # donc mypy ne connait aucun attribut dessus. L'annotation d'origine
+        # nommait un code qui ne se produit pas ici — un `type: ignore` qui vise
+        # le mauvais code ne couvre RIEN, et mypy le dit lui-meme :
+        # « Error code "attr-defined" not covered by "type: ignore" comment ».
+        splash_window.evaluate_js(  # type: ignore[attr-defined]
             f"updateProgress({step}, {json.dumps(str(text))}, {percent})"
         )
     except Exception:
