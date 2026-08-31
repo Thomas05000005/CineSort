@@ -16,7 +16,9 @@ Garanties testees :
 4. **Qualite marquee EXPLICITEMENT "indisponible"** :
    - `probe_quality == "FAILED"` propage dans library_support et quality_audit_support
    - `quality_unavailable == True`
-   - UI affiche "Indispo" / "Indisponible" (testable via grep qualite.js)
+   - UI affiche "Indispo" / "Indisponible" : verifie en EXECUTANT qualite.js
+     sous Node (harnais tests/_jsexec.py), PAS par grep du source — un grep
+     restait vert avec `const qualityUnavailable = false;` en production.
 5. **Apply n'opere PAS sur metadonnees qualite non lues** : apply_core
    n'a aucune reference a probe/quality/tier/score.
 6. **dry-run reste dry-run** : aucune ecriture introduite par les
@@ -32,6 +34,8 @@ from __future__ import annotations
 import re
 import unittest
 from pathlib import Path
+
+from tests._jsexec import require_node, run_module_test
 
 _REPO = Path(__file__).resolve().parent.parent
 _LIBRARY_SUPPORT = _REPO / "cinesort" / "ui" / "api" / "library_support.py"
@@ -78,48 +82,148 @@ class TestProbeQualityExposeParUI(unittest.TestCase):
         self.assertIn('"quality_unavailable"', src)
 
 
+# ---------------------------------------------------------------------------
+# 4. L'UI AFFICHE "Indispo" — verifie en EXECUTANT qualite.js
+# ---------------------------------------------------------------------------
+#
+# Historique (lot 7, 2026-08-31) : cette classe ne faisait que chercher les
+# chaines "Indispo", "Indisponible", "quality_unavailable" et un motif
+# `probe_quality...toUpperCase() === "FAILED"` dans le SOURCE de qualite.js.
+# Elle promettait « l'UI AFFICHE Indispo » et ne prouvait que « le fichier
+# CONTIENT ces octets ».
+#
+# Mesure : en remplacant la ligne 224 de `views/qualite.js` par
+# `const qualityUnavailable = false;` — c'est-a-dire en faisant afficher a
+# l'ecran le score Silver-cap trompeur que toute cette iteration cherche a
+# eviter — les 16 tests du fichier restaient VERTS. Les gabarits de secours
+# (`Indispo`, `Indisponible`) sont dans des litteraux de template qui, eux, ne
+# bougent pas : le grep les voit toujours, l'utilisateur ne les voit plus.
+#
+# Reecrit sur le harnais `tests/_jsexec.py` : la VRAIE source de
+# `views/qualite.js` est executee sous Node (seuls ses imports sont stubbes) et
+# on lit le HTML rendu par `_renderRejectSection` / `_buildInspectorSections`.
+
+_QUALITE_STUBS = r"""
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const apiPost = async () => ({ status: 200, data: { ok: true } });
+const getNavSignal = () => null;
+const navigateTo = () => {};
+const rightPanel = { setSections: () => {}, setTitle: () => {}, setExpandedWidth: () => {} };
+const dangerConfirmModal = () => {};
+const showToast = () => {};
+const openQualiteFiltersDrawer = () => {};
+const emptyFilters = () => ({ decades: [], genres: [], sources: [], audio_languages: [], period_days: 30 });
+globalThis.window = globalThis.window || { addEventListener() {}, removeEventListener() {}, location: { hash: "#/qualite" } };
+globalThis.document = globalThis.document || {
+  querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+  addEventListener() {}, removeEventListener() {},
+};
+"""
+
+# Trois films Reject qui couvrent les trois etats possibles de la mesure :
+#   r1 : probe FAILED signale par le backend (`quality_unavailable`)
+#   r2 : mesure REELLE -> le score doit s'afficher
+#   r3 : `probe_quality` en minuscules -> la comparaison est insensible a la casse
+# r1 et r3 portent DELIBEREMENT un `score_v2` : c'est exactement le score
+# trompeur que l'ecran ne doit pas montrer.
+_QUALITE_DRIVER = r"""
+const films = [
+  { row_id: "r1", title: "Probe injoignable", year: 2001, quality_unavailable: true, score_v2: 42, tier: "reject", warnings: ["w1", "w2"] },
+  { row_id: "r2", title: "Mesure reelle", year: 2002, quality_unavailable: false, score_v2: 37, tier: "reject", warnings: [] },
+  { row_id: "r3", title: "Probe failed minuscule", year: 2003, probe_quality: "failed", score_v2: 55, tier: "reject", warnings: [] },
+];
+const stats = { tier_distribution: { reject: 3 } };
+M.__testing__.state.rejectFilms = films;
+M.__testing__.state.stats = stats;
+const cartes = M.__testing__.renderRejectSection(stats);
+
+M.__testing__.state.inspectorSection = "distribution";
+M.__testing__.state.inspectorPayload = { tier: "reject", films };
+const listeInspecteur = M.__testing__.buildInspectorSections().map((s) => String(s.html || "")).join("");
+
+M.__testing__.state.inspectorSection = "reject_card";
+M.__testing__.state.inspectorPayload = { film: films[0] };
+const ficheInspecteur = M.__testing__.buildInspectorSections().map((s) => String(s.html || "")).join("");
+
+__emit({ cartes, listeInspecteur, ficheInspecteur });
+"""
+
+
 class TestUIAfficheIndispo(unittest.TestCase):
-    """qualite.js doit afficher 'Indispo' / 'Indisponible' visible."""
+    """qualite.js doit RENDRE 'Indispo' / 'Indisponible', pas seulement le contenir."""
 
-    def setUp(self) -> None:
-        self.assertTrue(_QUALITE_JS.is_file())
-        self.src = _QUALITE_JS.read_text(encoding="utf-8")
+    _res: dict | None = None
 
-    def test_indispo_dans_qualite_js(self) -> None:
-        """Le mot 'Indispo' doit apparaitre pour les cartes Reject."""
+    def _rendu(self) -> dict:
+        require_node(self)
+        if TestUIAfficheIndispo._res is None:
+            TestUIAfficheIndispo._res = run_module_test(
+                _QUALITE_JS,
+                stubs=_QUALITE_STUBS,
+                extra="",
+                driver=_QUALITE_DRIVER,
+            )
+        return TestUIAfficheIndispo._res
+
+    def test_la_carte_reject_rend_indispo_pour_chaque_probe_perdu(self) -> None:
+        """ROUGE si `quality_unavailable` cesse d'etre lu : le badge disparait."""
+        html = self._rendu()["cartes"]
+        badge = (
+            '<span class="qualite-reject-score qualite-reject-unavailable"'
+            ' title="Probe indisponible : qualite non mesuree">Indispo</span>'
+        )
+        self.assertEqual(
+            html.count(badge),
+            2,
+            "les 2 films sans mesure (flag backend + probe_quality='failed') doivent porter le badge Indispo",
+        )
         self.assertIn(
-            "Indispo",
-            self.src,
-            "qualite.js doit afficher 'Indispo' quand quality_unavailable",
+            '<span class="qualite-reject-warnings" title="Qualite non verifiee">⚠ Qualite indisponible</span>',
+            html,
+            "la carte doit DIRE que la qualite n'a pas ete verifiee",
         )
 
-    def test_indisponible_dans_qualite_js(self) -> None:
-        """Le mot 'Indisponible' (long) pour l'inspector."""
+    def test_aucun_score_invente_pour_un_probe_perdu(self) -> None:
+        """Le score Silver-cap trompeur ne doit JAMAIS s'afficher."""
+        html = self._rendu()["cartes"]
+        # Bornage sur le badge COMPLET : un `assertNotIn("42", html)` rougirait
+        # sur le "42" d'un autre attribut (index, annee, largeur...).
+        self.assertNotIn('<span class="qualite-reject-score" title="Score V2">42</span>', html)
+        self.assertNotIn('<span class="qualite-reject-score" title="Score V2">55</span>', html)
+        # Controle positif OBLIGATOIRE : sans lui, un rendu vide passerait.
+        self.assertIn('<span class="qualite-reject-score" title="Score V2">37</span>', html)
+
+    def test_la_ligne_n_est_pas_perdue(self) -> None:
+        """Garantie 1 : l'item reste AFFICHE, identifie, cliquable."""
+        html = self._rendu()["cartes"]
+        for titre in ("Probe injoignable", "Mesure reelle", "Probe failed minuscule"):
+            self.assertIn(f'<span class="qualite-reject-title">{titre}</span>', html)
+        for row_id in ("r1", "r2", "r3"):
+            self.assertIn(f'data-qualite-reject-card="{row_id}"', html)
+
+    def test_l_inspecteur_rend_indisponible_et_pas_un_score(self) -> None:
+        """Meme regle dans la liste par tier de l'inspecteur droit."""
+        html = self._rendu()["listeInspecteur"]
+        badge = (
+            '<span class="qualite-inspector-score qualite-reject-unavailable"'
+            ' title="Probe indisponible">Indisponible</span>'
+        )
+        self.assertEqual(html.count(badge), 2)
+        self.assertIn('<span class="qualite-inspector-score">37/100</span>', html)
+        self.assertNotIn('<span class="qualite-inspector-score">42/100</span>', html)
+        self.assertNotIn('<span class="qualite-inspector-score">55/100</span>', html)
+
+    def test_la_fiche_inspecteur_marque_le_tier_comme_estime(self) -> None:
+        """Sans mesure, le tier affiche vient du NOM : il est annonce 'estime'."""
+        html = self._rendu()["ficheInspecteur"]
         self.assertIn(
-            "Indisponible",
-            self.src,
-            "qualite.js doit afficher 'Indisponible' dans l'inspector",
+            '<span class="qualite-reject-unavailable" title="Probe indisponible apres retry+breaker">Indisponible</span>',
+            html,
         )
-
-    def test_quality_unavailable_lu_dans_qualite_js(self) -> None:
-        """qualite.js doit lire le champ quality_unavailable expose par le backend."""
-        self.assertIn(
-            "quality_unavailable",
-            self.src,
-            "qualite.js doit lire quality_unavailable pour decider l'affichage",
-        )
-
-    def test_probe_quality_failed_lu_dans_qualite_js(self) -> None:
-        """qualite.js doit accepter probe_quality == 'FAILED' comme fallback."""
-        # Cherche au moins un test "FAILED" lie a probe_quality.
-        pattern = re.compile(
-            r'probe_quality[^"]*"[^"]*"\s*\)?\.toUpperCase\(\)\s*===\s*"FAILED"',
-            re.DOTALL,
-        )
-        self.assertIsNotNone(
-            pattern.search(self.src),
-            "qualite.js doit verifier probe_quality.toUpperCase() === 'FAILED'",
-        )
+        self.assertIn("<em>(estime)</em>", html)
+        self.assertNotIn("42/100", html)
 
 
 class TestApplyDecouvert(unittest.TestCase):

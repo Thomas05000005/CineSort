@@ -7,6 +7,7 @@ cross-volume, undo dst_path vide.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 import sys
@@ -63,6 +64,34 @@ def _log_noop(level: str, msg: str) -> None:
     pass
 
 
+@contextlib.contextmanager
+def _dossier_verrouille(nom: str):
+    """Simule UN dossier tenu par un autre processus, a la couche REELLE.
+
+    `shutil.move` n'est pas ce qui deplace un dossier de film sous la meme
+    racine : `apply_single` appelle `move_journal.renommer_avec_reprise`, qui
+    appelle `Path.rename`. Les deux tests de verrouillage de ce fichier
+    posaient un `mock.patch("shutil.move")` qui n'etait JAMAIS APPELE — mesure
+    sur `main` : renames=5, errors=0, skip_reasons={}, error_messages=[]. La
+    panne qu'ils pretendaient injecter n'avait simplement pas lieu.
+
+    `winerror=32` est le code Windows « le fichier est utilise par un autre
+    processus » : c'est l'un des deux que `renommer_avec_reprise` reessaie, la
+    ladder de reprise complete est donc traversee avant l'abandon. Sur POSIX
+    l'attribut `winerror` n'existe pas et l'exception remonte immediatement —
+    dans les deux cas, ce row-la echoue et les autres continuent.
+    """
+    vrai_rename = Path.rename
+
+    def _rename_refuse(self, cible, *args, **kwargs):
+        if self.name == nom:
+            raise PermissionError(13, "le fichier est utilise par un autre processus", None, 32)
+        return vrai_rename(self, cible, *args, **kwargs)
+
+    with mock.patch.object(Path, "rename", _rename_refuse):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Base : setup commun pour les tests d'integration apply
 # ---------------------------------------------------------------------------
@@ -115,7 +144,22 @@ class _ApplyRobustnessBase(unittest.TestCase):
 
 class ApplyPermissionErrorTests(_ApplyRobustnessBase):
     def test_apply_permission_error_one_file(self) -> None:
-        """Mock shutil.move pour lever PermissionError sur 1 fichier — les autres passent."""
+        """1 dossier verrouille -> 1 erreur RAPPORTEE, les 4 autres appliques.
+
+        DEUX DEFAUTS CORRIGES ICI (lot 7, 2026-08-31).
+
+        1. LA PANNE N'ARRIVAIT PAS. Le `mock.patch("shutil.move")` n'etait
+           jamais appele (cf. `_dossier_verrouille`) : les 5 films passaient,
+           errors=0.
+        2. L'ASSERTION ETAIT UNE TAUTOLOGIE. `assertGreaterEqual(errors +
+           len(skip_reasons), 0)` porte sur une somme de compteurs positifs :
+           elle est vraie de TOUTE execution, y compris de celle qui ne fait
+           rien — et elle l'etait de fait, avec 0 + 0 >= 0.
+
+        Ce que le test PRETEND verifier, et verifie maintenant : l'echec est
+        NOMME (errors, skip_reason, message lisible) et il est CONFINE (les
+        quatre autres films arrivent a destination).
+        """
         for i in range(5):
             _create_file(self.root / f"Film{i}.2020.1080p" / f"Film{i}.2020.1080p.mkv")
 
@@ -124,23 +168,30 @@ class ApplyPermissionErrorTests(_ApplyRobustnessBase):
         decisions = self._decisions_for_all(run_id, api)
         self.assertGreaterEqual(len(decisions), 5)
 
-        # Mock shutil.move pour le 1er appel reel uniquement (autres films OK)
-        calls = {"n": 0}
-        orig_move = shutil.move
-
-        def _flaky_move(src, dst, *args, **kwargs):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise PermissionError("acces refuse (mock)")
-            return orig_move(src, dst, *args, **kwargs)
-
-        with mock.patch("shutil.move", side_effect=_flaky_move):
+        verrouille = "Film2.2020.1080p"
+        with _dossier_verrouille(verrouille):
             result = api._apply_impl(run_id, decisions, False, False)
 
         self.assertTrue(result.get("ok"), result)
-        # Le rapport doit mentionner l'erreur (errors > 0 ou skip_reasons non vide)
         res = result.get("result", {})
-        self.assertGreaterEqual(res.get("errors", 0) + len(res.get("skip_reasons") or {}), 0)
+
+        # 1. L'echec est COMPTE. Sans cette egalite, un `res.errors += 1`
+        #    retire de la clause PermissionError de `apply_core` passerait.
+        self.assertEqual(res.get("errors"), 1, f"une seule erreur attendue : {res}")
+        self.assertEqual(res.get("skip_reasons"), {"skip_erreur_precedente": 1}, res)
+
+        # 2. L'echec est EXPLIQUE. Un compteur « Erreurs : 1 » sans une seule
+        #    ligne de texte laisse l'utilisateur sans recours.
+        messages = res.get("error_messages") or []
+        self.assertEqual(len(messages), 1, messages)
+        self.assertIn(verrouille, messages[0], f"le message doit NOMMER le dossier en cause : {messages[0]}")
+
+        # 3. L'echec est CONFINE : les 4 autres films sont bien appliques.
+        self.assertEqual(res.get("renames", 0) + res.get("moves", 0), 4, res)
+        self.assertEqual(res.get("total_rows"), 5, res)
+        restants = sorted(p.name for p in self.root.iterdir())
+        self.assertIn(verrouille, restants, "le dossier verrouille doit rester intact a sa place")
+        self.assertNotIn("Film1.2020.1080p", restants, "les autres dossiers doivent avoir ete renommes")
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +454,18 @@ class CaseOnlyRenameTests(_ApplyRobustnessBase):
 
 class FileLockedTests(_ApplyRobustnessBase):
     def test_file_locked_by_another_process(self) -> None:
-        """Fichier verrouille (mock PermissionError) : autres fichiers pas affectes."""
+        """Fichier verrouille : le batch continue et RIEN n'est a moitie fait.
+
+        MEMES DEUX DEFAUTS que `test_apply_permission_error_one_file` (lot 7,
+        2026-08-31) : le `mock.patch("shutil.move")` ne se declenchait jamais,
+        et `assertGreaterEqual(renames + moves, 0)` est vraie de toute
+        execution — elle valait 3 >= 0 alors qu'AUCUN verrou n'avait eu lieu.
+
+        L'angle propre a ce test est l'etat du DISQUE : le film verrouille
+        reste entier a sa place (son fichier video n'est ni renomme ni
+        deplace — regle inviolable n2), les autres arrivent a destination, et
+        le batch n'est pas avorte.
+        """
         for i in range(3):
             _create_file(self.root / f"Film{i}.2020" / f"Film{i}.2020.mkv")
 
@@ -411,22 +473,33 @@ class FileLockedTests(_ApplyRobustnessBase):
         run_id = self._scan_to_done(api)
         decisions = self._decisions_for_all(run_id, api)
 
-        calls = {"n": 0}
-        orig_move = shutil.move
+        verrouille = "Film1.2020"
+        video_verrouillee = self.root / verrouille / f"{verrouille}.mkv"
+        octets_avant = video_verrouillee.read_bytes()
 
-        def _locked_on_first(src, dst, *args, **kwargs):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise PermissionError("WinError 32: utilise par un autre processus")
-            return orig_move(src, dst, *args, **kwargs)
-
-        with mock.patch("shutil.move", side_effect=_locked_on_first):
+        with _dossier_verrouille(verrouille):
             result = api._apply_impl(run_id, decisions, False, False)
 
         self.assertTrue(result.get("ok"), result)
-        # Au moins certains fichiers doivent avoir ete deplaces
         res = result.get("result", {})
-        self.assertGreaterEqual(res.get("renames", 0) + res.get("moves", 0), 0)
+
+        # 1. Le batch n'est pas avorte : les 3 rows ont ete considerees.
+        self.assertEqual(res.get("total_rows"), 3, res)
+        self.assertEqual(res.get("considered_rows"), 3, res)
+
+        # 2. L'echec est nomme, une seule fois.
+        self.assertEqual(res.get("errors"), 1, res)
+        self.assertIn(verrouille, " ".join(res.get("error_messages") or []), res)
+
+        # 3. Le disque : le film verrouille est INTACT a sa place d'origine,
+        #    fichier video compris ; les 2 autres ont bouge.
+        self.assertTrue(video_verrouillee.is_file(), "le fichier video verrouille a disparu")
+        self.assertEqual(video_verrouillee.read_bytes(), octets_avant)
+        self.assertEqual(res.get("renames", 0) + res.get("moves", 0), 2, res)
+        restants = sorted(p.name for p in self.root.iterdir())
+        self.assertIn(verrouille, restants)
+        self.assertNotIn("Film0.2020", restants)
+        self.assertNotIn("Film2.2020", restants)
 
 
 # ---------------------------------------------------------------------------
