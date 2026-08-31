@@ -324,8 +324,27 @@ class RestSecurityHttpTests(unittest.TestCase):
         finally:
             module.HTTPConnection = vraie_classe
 
-        self.assertEqual(tentatives["n"], 2, "le helper n'a pas REESSAYE apres l'expiration")
-        self.assertIn(status, (200, 400, 404, 410, 500), "la seconde tentative n'a pas abouti")
+        # BORNER, PAS EPINGLER. `== 2` n'epinglait pas ce que ce test mesure
+        # (« le helper a-t-il reessaye ? ») mais la FIABILITE DU TRANSPORT LOCAL,
+        # que le test ne controle pas : seule la PREMIERE construction expire par
+        # injection, la seconde delegue au vrai socket. Sous charge, cette
+        # seconde tentative peut echouer pour de bon, et le helper consomme alors
+        # la troisieme que `range(3)` lui accorde — comportement CORRECT, que
+        # `test_trois_expirations_de_suite_LEVENT` affirme d'ailleurs juste en
+        # dessous. Les deux tests se contredisaient sur le meme contrat.
+        #
+        # Mesure : echec observe en CI le 2026-08-29 (run 32449781016) sur une
+        # PR de DOCUMENTATION, `3 != 2`, seul rouge de 9254 tests.
+        #
+        # L'encadrement reste mordant aux deux bouts : sans retry le compteur
+        # vaut 1, et un retry sans plafond le fait depasser 3.
+        self.assertGreaterEqual(
+            tentatives["n"], 2, "le helper n'a pas REESSAYE apres l'expiration"
+        )
+        self.assertLessEqual(
+            tentatives["n"], 3, "le plafond de 3 tentatives de `_request` est franchi"
+        )
+        self.assertIn(status, (200, 400, 404, 410, 500), "aucune tentative n'a abouti")
 
     def test_trois_expirations_de_suite_LEVENT_en_nommant_la_panne(self) -> None:
         """Reessayer indefiniment masquerait un serveur reellement mort. Au bout
