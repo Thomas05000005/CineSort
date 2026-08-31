@@ -37,7 +37,33 @@ import re
 import unittest
 from pathlib import Path
 
-_RACINE = Path("cinesort")
+_REPERTOIRE_DU_DEPOT = Path(__file__).resolve().parents[1]
+
+# PERIMETRE. Longtemps `Path("cinesort")` seul — et `app.py`, point d'entree de
+# l'application, echappait donc a ce cliquet comme a CINQ autres controles
+# statiques (recense dans `tests/test_bandit_perimetre_couvre_le_code.py`).
+#
+# L'elargissement est GRATUIT et c'est ce qui le rend utile : il revele
+# ZERO site nouveau (mesure du 2026-08-31, temoin positif ci-dessous a l'appui).
+# Un perimetre qu'on elargit le jour ou il coute quelque chose ne s'elargit
+# jamais ; celui-ci se ferme pendant qu'il est gratuit, et c'est demain qu'il
+# servira — le jour ou quelqu'un ecrira un `except OSError` dans `app.py`.
+_RACINES = ("cinesort", "app.py", "scripts")
+
+
+def _fichiers_python() -> list[Path]:
+    """Les fichiers du perimetre. Une racine peut etre un FICHIER (`app.py`) :
+    `Path("app.py").rglob("*.py")` ne rend rien, en silence.
+    """
+    fichiers: list[Path] = []
+    for racine in _RACINES:
+        chemin = _REPERTOIRE_DU_DEPOT / racine
+        if chemin.is_dir():
+            fichiers.extend(chemin.rglob("*.py"))
+        elif chemin.is_file():
+            fichiers.append(chemin)
+    return sorted(fichiers)
+
 
 # Ce nombre ne se recopie pas : il se remesure, et il ne doit JAMAIS remonter.
 #
@@ -58,6 +84,10 @@ _RACINE = Path("cinesort")
 #       radar, `resolved_store.run.insert_error` et
 #       `default_store.run.list_pending_runs` ;
 #   59  apres correction de six sites (regle inviolable n4).
+#   59  le 2026-08-31, apres ELARGISSEMENT du perimetre a `app.py` et
+#       `scripts/` : le nombre ne bouge pas, ces deux racines n'ont aucun site
+#       a risque. C'est un elargissement gratuit, pas une absence de mesure —
+#       `test_le_perimetre_VOIT_bien_app_py` l'epingle.
 PLAFOND = 59
 
 
@@ -101,12 +131,12 @@ def _touche_le_store(corps: list) -> bool:
 
 def _sites_a_risque() -> list[str]:
     out: list[str] = []
-    for chemin in sorted(_RACINE.rglob("*.py")):
+    for chemin in _fichiers_python():
         try:
             arbre = ast.parse(chemin.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        rel = chemin.as_posix()
+        rel = chemin.relative_to(_REPERTOIRE_DU_DEPOT).as_posix()
         for noeud in ast.walk(arbre):
             if not isinstance(noeud, ast.Try):
                 continue
@@ -126,6 +156,19 @@ class CliquetSqliteErrorTests(unittest.TestCase):
         """Sans ca, une regex ou un critere casse rendrait le cliquet complaisant :
         zero site trouve fait passer n'importe quel plafond."""
         self.assertGreater(len(_sites_a_risque()), 0)
+
+    def test_le_perimetre_VOIT_bien_app_py(self) -> None:
+        """Le compte est reste a 59 apres l'elargissement. Un zero a toujours
+        deux lectures : « rien a signaler » ou « personne n'a regarde ». Ce
+        test tranche — sans lui, une racine mal orthographiee rendrait un
+        perimetre silencieusement ampute et un cliquet toujours vert.
+        """
+        fichiers = _fichiers_python()
+        noms = {f.relative_to(_REPERTOIRE_DU_DEPOT).as_posix() for f in fichiers}
+
+        self.assertIn("app.py", noms)
+        self.assertTrue(any(n.startswith("scripts/") for n in noms), "scripts/ absent du perimetre")
+        self.assertTrue(any(n.startswith("cinesort/") for n in noms), "cinesort/ absent du perimetre")
 
     def test_la_population_ne_REMONTE_pas(self) -> None:
         sites = _sites_a_risque()
