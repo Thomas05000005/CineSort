@@ -308,10 +308,16 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # Tailles MESUREES a cette date, marge zero. Aucune de ces fonctions n'est
     # benie : le cliquet descendant les fera baisser des qu'on les decoupera.
     # ------------------------------------------------------------------
-    ("app.py", "main"): 525,
+    # 525 -> 524 : extraction d'`url_de_boot_natif` (T-SEC-5). Le cliquet a
+    # rougi a la HAUSSE sur le seul ajout d'un commentaire (535 > 525), puis a
+    # la BAISSE une fois l'extraction faite. C'est son interet : le gain est
+    # verrouille au lieu de rester disponible pour la prochaine rallonge.
+    ("app.py", "main"): 514,
     ("app.py", "_startup"): 155,
     ("app.py", "main_api"): 144,
-    ("app.py", "_start_rest_server"): 127,
+    # 127 -> 124 : `_dbg_codepoints` delegue desormais a `diagnostic_jeton` au
+    # lieu de reimplementer un dump de codepoints (CodeQL py/clear-text-logging).
+    ("app.py", "_start_rest_server"): 124,
     ("scripts/observe.py", "observe_dashboard"): 524,
     ("scripts/_iter10_gate_lisibilite.py", "main"): 358,
     ("scripts/i18n_full_sync.py", "transform_radarr_js"): 147,

@@ -114,7 +114,22 @@ const NATIVE_FLAG_KEY = "cinesort.native";
 (function _detectNativeBoot() {
   try {
     const params = new URLSearchParams(window.location.search);
-    const ntoken = params.get("ntoken");
+    // T-SEC-5 : le jeton arrive par le FRAGMENT, plus jamais par la query.
+    //
+    // Un fragment n'est PAS envoye au serveur. Mesure sur un socket nu :
+    //   `?ntoken=X&native=1`  ->  GET /dashboard/?ntoken=X&native=1
+    //   `?native=1#ntoken=X`  ->  GET /dashboard/?native=1
+    // Le jeton quitte donc la ligne de requete, qui etait journalisee telle
+    // quelle par `rest_server.py` et que `log_scrubber` ne redigeait PAS sous
+    // ce nom (son motif porte un `\b` en amont, ajoute pour ne pas mordre
+    // `mytoken=` — et qui l'aveugle sur `ntoken=`).
+    //
+    // Le hash devient donc le canal du jeton : il ne peut pas porter EN PLUS
+    // une route. C'est sans consequence — `app.py` n'en emet jamais, et le
+    // code d'origine forcait deja `#/accueil` dans les deux cas qu'il
+    // rencontrait (hash vide, ou `#/login` restaure par WebView2).
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const ntoken = fragment.get("ntoken");
     const nativeFromQuery = params.get("native") === "1";
     let nativeFromStorage = false;
     try { nativeFromStorage = localStorage.getItem(NATIVE_FLAG_KEY) === "1"; } catch { /* no-op */ }
@@ -127,23 +142,22 @@ const NATIVE_FLAG_KEY = "cinesort.native";
     }
     if (ntoken) {
       setToken(ntoken, true);  // persist (setToken appelle markTokenReady en interne)
-      // Purger le token de l'URL pour ne pas le laisser dans l'historique.
-      const url = new URL(window.location.href);
-      url.searchParams.delete("ntoken");
-      // Quand on a un ntoken valide en boot natif, on force /accueil pour
-      // eviter que le router envoie vers /login. Sans ce fix :
-      //   - si hash vide : currentHash() retourne "/login" par defaut
-      //   - si hash = "#/login" (restore webview2 cache) : le router reste
-      //     sur la page login meme avec un token valide
-      // On considere que /login n'a aucun sens en mode natif puisque le
-      // token est deja fourni. On garde le hash uniquement s'il pointe
-      // vers une page valide (pas /login).
-      const currentHash = window.location.hash;
-      const targetHash = (!currentHash || currentHash === "#/login")
-        ? "#/accueil"
-        : currentHash;
-      // Garder ?native=1 si present
-      window.history.replaceState({}, "", url.pathname + (native ? "?native=1" : "") + targetHash);
+      // L'URL est RECONSTRUITE, elle n'est pas nettoyee.
+      //
+      // La version precedente appelait `url.searchParams.delete("ntoken")` sous
+      // le commentaire « purger le token de l'URL » — et cette ligne ne faisait
+      // RIEN : seul `url.pathname` etait relu, jamais `url.search`. Mesure :
+      // la remplacer par `void 0` laissait les huit tests du harnais VERTS.
+      // Elle est retiree plutot que corrigee ; ce qui purge, et qui purgeait
+      // deja, c'est cette reconstruction. Ne pas la remplacer par un
+      // `url.toString()` « equivalent » : il REINTRODUIRAIT le fragment.
+      //
+      // `#/accueil` inconditionnel : le hash vient de servir au jeton, il ne
+      // porte donc aucune route. Le code d'origine gardait un hash « valide »,
+      // mais les deux seuls cas qu'il rencontrait — hash vide, ou `#/login`
+      // restaure par WebView2 — menaient deja tous les deux a `#/accueil`.
+      // `/login` n'a de toute facon aucun sens en natif : le jeton est fourni.
+      window.history.replaceState({}, "", window.location.pathname + (native ? "?native=1" : "") + "#/accueil");
     } else {
       // V1.5.0 fix bug #1 : pas de ntoken dans l'URL. Soit on a deja un
       // token en storage (boot natif sur reload WebView2 cache, ou mode

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""LE FILET, pose AVANT de toucher au transit du jeton (T-SEC-5).
+"""Le jeton du boot natif ne transite QUE par le fragment (T-SEC-5).
 
 Pourquoi ce fichier existe
 --------------------------
@@ -13,10 +13,25 @@ La reponse est le FRAGMENT (`#ntoken=...`) : il n'est jamais envoye au serveur.
 Mais il entre en collision avec le routeur, qui utilise deja le hash
 (`#/accueil`, `#/login`), et `_detectNativeBoot` n'avait AUCUN test.
 
-Ce fichier ne corrige rien. Il FIGE le comportement actuel, pour que le
-correctif suivant ait quelque chose a casser. C'est l'ordre impose : le filet
-d'abord, la preuve ensuite — un test ecrit APRES le correctif ne prouve que ce
-que le correctif fait, jamais ce qu'il a change sans le vouloir.
+CE FICHIER A ETE ECRIT EN DEUX TEMPS, et l'ordre etait le sujet.
+
+L'etape 1 ne corrigeait rien : elle figeait le comportement d'alors, pour que le
+correctif ait quelque chose a casser. Un test ecrit APRES un correctif ne prouve
+que ce que le correctif fait, jamais ce qu'il a change sans le vouloir.
+
+Le passage au fragment a fait rougir CINQ de ses tests — un par changement de
+comportement. Chacun a ete traite separement, jamais efface en bloc :
+
+    le jeton lu dans la query        -> inverse : la query n'est PLUS lue
+    l'URL purgee du jeton            -> l'URL ne le porte NULLE PART
+    la ligne de purge morte          -> retiree ; c'est la RECONSTRUCTION qui purge
+    le hash `#/login` -> `#/accueil` -> inchange, mais la forme d'URL change
+    le fragment ignore               -> inverse : le fragment EST le canal
+
+Et l'etape 1 avait deja rapporte quelque chose qu'aucune relecture n'avait vu :
+`url.searchParams.delete("ntoken")`, commentee « purger le token de l'URL »,
+ne faisait RIEN — seul `url.pathname` etait relu. La remplacer par `void 0`
+laissait les huit tests verts. Elle est retiree.
 
 Comment le harnais tient
 ------------------------
@@ -184,86 +199,385 @@ class LeHarnaisTientTests(unittest.TestCase):
         self.assertEqual(etat["chargementAtteint"], "module-end-reached")
 
 
-class LeBootNatifActuelTests(unittest.TestCase):
-    """Le comportement d'AUJOURD'HUI, fige. Aucune de ces assertions ne dit
-    qu'il est bon — seulement qu'il est celui-la.
+class LeJetonNeTransiteQueParLeFRAGMENTTests(unittest.TestCase):
+    """LE CONTRAT APRES T-SEC-5. Chacune de ces assertions remplace une
+    assertion de l'etape 1, et le remplacement est DELIBERE : le filet a
+    rougi cinq fois, une fois par changement de comportement, et chaque rouge
+    a ete traite separement au lieu d'etre efface en bloc.
     """
 
     def setUp(self) -> None:
         _jsexec.require_node(self)
 
-    def test_le_jeton_de_la_QUERY_est_lu_et_persiste(self) -> None:
-        etat = _boot("http://127.0.0.1:8642/dashboard/?ntoken=JETON-DE-TEST&native=1")
+    def test_le_jeton_du_FRAGMENT_est_lu_et_persiste(self) -> None:
+        etat = _boot("http://127.0.0.1:8642/dashboard/?native=1#ntoken=JETON-DE-TEST")
 
         self.assertEqual(etat["setToken"], [{"valeur": "JETON-DE-TEST", "persiste": True}])
         self.assertTrue(etat["natif"])
         self.assertEqual(etat["drapeauStocke"], "1")
 
-    def test_l_URL_est_PURGEE_du_jeton(self) -> None:
-        """Le code purge deja `?ntoken=` de l'URL « pour ne pas le laisser dans
-        l'historique ». Cette purge arrive APRES que WebView2 a enregistre la
-        navigation : elle nettoie la barre d'adresse, pas l'historique. C'est
-        precisement ce que le passage au fragment corrigera.
+    def test_le_jeton_de_la_QUERY_n_est_PLUS_lu(self) -> None:
+        """INVERSION ASSUMEE de `test_le_jeton_de_la_QUERY_est_lu_et_persiste`.
+
+        Garder la query en repli aurait garde le defaut : une URL heritee, un
+        signet, un raccourci, et le jeton repart dans la ligne de requete. Le
+        canal est unique par choix.
         """
         etat = _boot("http://127.0.0.1:8642/dashboard/?ntoken=JETON-DE-TEST&native=1")
 
+        self.assertEqual(etat["setToken"], [])
+
+    def test_l_URL_finale_ne_porte_le_jeton_NULLE_PART(self) -> None:
+        etat = _boot("http://127.0.0.1:8642/dashboard/?native=1#ntoken=JETON-DE-TEST")
+
+        self.assertNotIn("JETON-DE-TEST", etat["urlFinale"])
         self.assertNotIn("ntoken", etat["urlFinale"])
-        self.assertIn("native=1", etat["urlFinale"])
+        self.assertEqual(etat["replaceState"], ["/dashboard/?native=1#/accueil"])
 
-    def test_la_ligne_QUI_PURGE_est_morte(self) -> None:
-        """TROUVAILLE DU HARNAIS, et la raison d'ecrire un filet avant un correctif.
-
-        `url.searchParams.delete("ntoken")` porte le commentaire « purger le
-        token de l'URL pour ne pas le laisser dans l'historique ». Cette ligne
-        NE FAIT RIEN : l'URL finale est reconstruite a partir de `url.pathname`
-        et d'un `?native=1` ecrit en dur, et `url.search` n'est jamais relu.
-
-        Mesure : remplacer l'appel par `void 0` laisse les HUIT tests de ce
-        fichier VERTS, alors que muter le parametre lu, l'appel a `setToken` ou
-        le hash force en tue un ou trois. La purge existe — elle vient de la
-        RECONSTRUCTION, pas de la ligne qui pretend la faire.
-
-        La consequence n'est pas cosmetique : quelqu'un qui lit ce code croit
-        qu'une purge explicite protege l'historique, et pourrait remplacer la
-        reconstruction par un `url.toString()` « equivalent » — qui, lui,
-        REINTRODUIRAIT le jeton, la ligne morte ne le retirant pas la ou il
-        compte. Ce test epingle l'etat reel pour que le lot suivant tranche :
-        soit la ligne devient effective, soit elle part avec son commentaire.
+    def test_le_hash_devient_ACCUEIL(self) -> None:
+        """Le hash a servi au jeton, il ne porte donc aucune route. Le code
+        d'origine « preservait un hash valide », mais les deux seuls cas qu'il
+        rencontrait — hash vide, ou `#/login` restaure par WebView2 — menaient
+        deja tous les deux a `#/accueil`.
         """
-        etat = _boot("http://127.0.0.1:8642/dashboard/?ntoken=JETON-DE-TEST&native=1")
+        etat = _boot("http://127.0.0.1:8642/dashboard/?native=1#ntoken=JETON-DE-TEST")
 
-        # L'URL passee a `replaceState` est construite de toutes pieces : elle
-        # ne contient QUE le chemin, `?native=1` et le hash de route.
-        self.assertEqual(len(etat["replaceState"]), 1, etat["replaceState"])
-        self.assertEqual(etat["replaceState"][0], "/dashboard/?native=1#/accueil")
+        self.assertTrue(str(etat["urlFinale"]).endswith("#/accueil"), etat["urlFinale"])
 
-    def test_le_hash_LOGIN_est_remplace_par_accueil(self) -> None:
-        etat = _boot("http://127.0.0.1:8642/dashboard/?ntoken=JETON-DE-TEST&native=1#/login")
-
-        self.assertTrue(etat["urlFinale"].endswith("#/accueil"), etat["urlFinale"])
-
-    def test_un_hash_de_route_VALIDE_est_conserve(self) -> None:
-        etat = _boot("http://127.0.0.1:8642/dashboard/?ntoken=JETON-DE-TEST&native=1#/qualite")
-
-        self.assertTrue(etat["urlFinale"].endswith("#/qualite"), etat["urlFinale"])
-
-    def test_sans_ntoken_setToken_n_est_PAS_appele(self) -> None:
-        """Contre-epreuve : sans elle, un harnais qui n'executerait jamais la
-        branche `if (ntoken)` passerait les tests ci-dessus par accident.
+    def test_sans_jeton_setToken_n_est_PAS_appele(self) -> None:
+        """Contre-epreuve : sans elle, un harnais qui n'entrerait jamais dans
+        la branche `if (ntoken)` passerait tout le reste par accident.
         """
         etat = _boot("http://127.0.0.1:8642/dashboard/?native=1")
 
         self.assertEqual(etat["setToken"], [])
 
-    def test_le_FRAGMENT_n_est_pas_lu_aujourd_hui(self) -> None:
-        """L'etat de depart du correctif a venir. `#ntoken=...` est ignore :
-        c'est ce que la PR suivante doit faire changer, et ce test devra alors
-        etre inverse — deliberement, pas par surprise.
+    def test_une_ROUTE_dans_le_hash_n_est_pas_prise_pour_un_jeton(self) -> None:
+        """`#/accueil` parse en `URLSearchParams` donne une cle `/accueil` sans
+        valeur. Si `get("ntoken")` y rendait autre chose que `null`, un reload
+        WebView2 appellerait `setToken` avec n'importe quoi.
         """
-        etat = _boot("http://127.0.0.1:8642/dashboard/?native=1#ntoken=JETON-DE-TEST")
+        for hash_de_route in ("#/accueil", "#/login", "#/qualite"):
+            with self.subTest(hash=hash_de_route):
+                etat = _boot(f"http://127.0.0.1:8642/dashboard/?native=1{hash_de_route}")
+                self.assertEqual(etat["setToken"], [])
 
-        self.assertEqual(etat["setToken"], [])
+
+class LeServeurNeVOITJamaisLeJetonTests(unittest.TestCase):
+    """La propriete qui justifie tout le lot, MESUREE — pas invoquee.
+
+    Un fragment n'est pas envoye au serveur. C'est la specification HTTP, mais
+    le depot a paye assez cher des proprietes « evidentes » non mesurees pour
+    que celle-ci vive dans la suite plutot que dans un message de commit.
+
+    Aucun composant CineSort ici : un socket nu, pour que le test mesure le
+    PROTOCOLE et non une implementation qui pourrait le contourner.
+
+    CE QUE CE TEST MESURE EXACTEMENT : qu'un client HTTP CONFORME n'envoie pas
+    le fragment. Le client est `urllib`, pas WebView2 — la propriete tient de la
+    RFC 3986 §3.5 (« le fragment est separe du reste de l'URI AVANT tout
+    dereferencement »), et tout client conforme s'y tient, Chromium compris.
+    Mais c'est une DEDUCTION sur WebView2, pas une mesure de WebView2. Ce que ce
+    test prouve sans reserve, c'est que le SERVEUR ne peut pas recevoir le
+    fragment ; ce qu'il ne dit pas, c'est ce que le navigateur en garde dans son
+    propre historique.
+    """
+
+    def test_la_ligne_de_requete_perd_le_jeton(self) -> None:
+        import socket
+        import threading
+        import urllib.error
+        import urllib.request
+
+        recues: list[str] = []
+        serveur = socket.socket()
+        serveur.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        serveur.bind(("127.0.0.1", 0))
+        serveur.listen(2)
+        port = serveur.getsockname()[1]
+
+        def servir() -> None:
+            for _ in range(2):
+                try:
+                    client, _adresse = serveur.accept()
+                except OSError:
+                    return
+                with client:
+                    recues.append(client.recv(4096).decode("latin-1").splitlines()[0])
+                    client.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+
+        fil = threading.Thread(target=servir, daemon=True)
+        fil.start()
+        try:
+            for suffixe in ("?ntoken=JETON-TEMOIN&native=1", "?native=1#ntoken=JETON-TEMOIN"):
+                with contextlib_suppress():
+                    # `noqa` couvre ruff, `nosec` couvre bandit : poser
+                    # l'une ne fait pas taire l'autre, et le meme appel change
+                    # de libelle a chaque outil. Ici le schema est un litteral
+                    # `http://` et l'hote est le socket ouvert quelques lignes
+                    # plus haut : aucune entree exterieure n'atteint cette URL.
+                    # Temoin : sans la marque, bandit rend 1 resultat B310 sur
+                    # cette ligne exacte ; avec, 0 sur 280 lignes scannees.
+                    urllib.request.urlopen(  # nosec B310  # noqa: S310
+                        f"http://127.0.0.1:{port}/dashboard/{suffixe}", timeout=5
+                    ).read()
+            fil.join(timeout=5)
+        finally:
+            serveur.close()
+
+        self.assertEqual(len(recues), 2, recues)
+        par_query, par_fragment = recues
+        self.assertIn("JETON-TEMOIN", par_query, "temoin positif : la query, elle, porte bien le jeton")
+        self.assertNotIn("JETON-TEMOIN", par_fragment, par_fragment)
+
+    def test_app_py_emet_bien_un_FRAGMENT(self) -> None:
+        """L'URL est APPELEE, plus cherchee dans le source.
+
+        La premiere version de ce test grepait `main_url = f` dans `app.py` et
+        verifiait l'absence de `?ntoken=`. L'extraction d'`url_de_boot_natif`
+        (imposee par le cliquet de taille) a fait disparaitre cette ligne : le
+        test serait devenu un FAUX VERT — zero ligne trouvee, zero assertion
+        violee. Un test qui compare une chaine de code source tombe quand le
+        code s'ameliore et ne detecte rien quand il casse.
+        """
+        from app import url_de_boot_natif
+
+        url = url_de_boot_natif("http", 8642, "JETON-DE-TEST")
+
+        self.assertIn("#ntoken=JETON-DE-TEST", url)
+        self.assertNotIn("?ntoken=", url)
+        self.assertNotIn("&ntoken=", url)
+        # `?native=1` reste dans la query : ce n'est pas un secret, et
+        # `_detectNativeBoot` le lit avant meme de regarder le jeton.
+        self.assertIn("?native=1", url.split("#", 1)[0])
+
+    def test_sans_jeton_l_URL_ne_porte_aucun_fragment(self) -> None:
+        """Contre-epreuve : sans elle, une fonction qui collerait toujours un
+        `#ntoken=` — meme vide — passerait le test precedent.
+        """
+        from app import url_de_boot_natif
+
+        self.assertNotIn("#", url_de_boot_natif("http", 8642, ""))
+
+    def test_le_journal_de_diagnostic_DERIVE_l_URL(self) -> None:
+        """La version precedente imprimait `?ntoken=...&native=1` — la forme
+        d'AVANT ce lot. Un message de diagnostic qui decrit une URL que le code
+        ne construit plus envoie chercher le defaut au mauvais endroit.
+        """
+        from app import empreinte_jeton, url_de_boot_natif, url_de_boot_redigee
+
+        jeton = "JETON-DE-TEST-COMPLET"
+        redigee = url_de_boot_redigee("http", 8642, jeton)
+
+        # INVERSION ASSUMEE : cette assertion exigeait `jeton[:8] in redigee`,
+        # parce que c'etait le comportement d'avant. CodeQL
+        # `py/clear-text-logging` l'a signale et il avait raison — huit
+        # caracteres d'un `token_urlsafe` de trente-deux, c'est divulguer une
+        # partie du secret. L'empreinte repond a la MEME question sans en
+        # reveler un seul caractere.
+        self.assertNotIn(jeton, redigee)
+        for depart in range(len(jeton) - 5):
+            with self.subTest(morceau=jeton[depart : depart + 6]):
+                self.assertNotIn(jeton[depart : depart + 6], redigee)
+        self.assertIn(empreinte_jeton(jeton), redigee)
+        self.assertTrue(redigee.startswith(url_de_boot_natif("http", 8642, "")))
+
+    def test_l_empreinte_est_un_HMAC_pas_un_hash_du_secret(self) -> None:
+        """CodeQL `py/weak-sensitive-data-hashing` ne reproche pas SHA-256 : il
+        reproche de hacher un SECRET avec une primitive rapide, ce qui laisse
+        une attaque par dictionnaire sur l'empreinte. Le secret doit etre la
+        CLE, pas le message — meme parti que `plan_support_core.py`, qui a
+        ferme l'alerte #264 le meme jour.
+        """
+        import hashlib
+        import hmac
+
+        from app import empreinte_jeton
+
+        jeton = "JETON-DE-TEST-COMPLET"
+
+        self.assertNotEqual(
+            empreinte_jeton(jeton),
+            hashlib.sha256(jeton.encode()).hexdigest()[:12],
+            "l'empreinte est un sha256 nu du secret : c'est le geste que CodeQL refuse",
+        )
+        self.assertEqual(
+            empreinte_jeton(jeton),
+            hmac.new(
+                key=jeton.encode("utf-8", "replace"),
+                msg=b"cinesort:boot_token_fingerprint:v1",
+                digestmod=hashlib.sha256,
+            ).hexdigest()[:12],
+        )
+        self.assertNotEqual(empreinte_jeton("A"), empreinte_jeton("B"))
 
 
-if __name__ == "__main__":
-    unittest.main()
+def contextlib_suppress():
+    """`contextlib.suppress(Exception)`, nomme pour que l'intention se lise :
+    l'appel PEUT echouer (le faux serveur ferme la connexion), seul compte ce
+    que le socket a RECU.
+    """
+    import contextlib
+
+    return contextlib.suppress(Exception)
+
+
+class LeDiagnosticNEcritJamaisLeJetonTests(unittest.TestCase):
+    """CodeQL `py/clear-text-logging-sensitive-data` a signale QUATRE
+    expressions de `main()` qui journalisaient le jeton sous `CINESORT_DEBUG` :
+    la liste de ses codepoints, ses caracteres non-ASCII un a un, et DEUX fois
+    sa forme encodee.
+
+    Elles existaient pour une raison reelle (2026-06-07 : les puces U+2022 du
+    masquage de secret arrivaient jusqu'au boot et `quote` les transformait en
+    `%E2%80%A2`). Aucune de ces questions ne demandait la VALEUR.
+    """
+
+    def test_le_diagnostic_ne_contient_pas_le_jeton(self) -> None:
+        from app import diagnostic_jeton
+
+        jeton = "JETON-SECRET-DE-TEST-abc123"
+        rendu = diagnostic_jeton(jeton)
+
+        self.assertNotIn(jeton, rendu)
+        for morceau in (jeton[:8], jeton[-8:], jeton[10:20]):
+            with self.subTest(morceau=morceau):
+                self.assertNotIn(morceau, rendu)
+
+    def test_il_distingue_les_DEUX_corruptions_historiques(self) -> None:
+        """Contre-epreuve : un diagnostic qui ne dirait rien serait aussi sans
+        fuite. Il doit nommer la corruption, position et codepoint compris.
+        """
+        from app import diagnostic_jeton
+
+        puce = diagnostic_jeton("abc\u2022def")
+        self.assertIn("ascii_pur=False", puce)
+        self.assertIn("U+2022", puce)
+        self.assertIn("(3,", puce)
+
+        bom = diagnostic_jeton("\ufeffabcdef")
+        self.assertIn("U+FEFF", bom)
+        self.assertIn("(0,", bom)
+
+    def test_un_jeton_SAIN_est_annonce_sain(self) -> None:
+        """L'autre sens : sans lui, un diagnostic qui crierait toujours
+        « corrompu » passerait le test precedent.
+        """
+        from app import diagnostic_jeton
+
+        rendu = diagnostic_jeton("aBc-123_xyz")
+
+        self.assertIn("ascii_pur=True", rendu)
+        self.assertIn("pourcents=0", rendu)
+        self.assertIn("non_ascii=[]", rendu)
+
+    def test_l_empreinte_DISTINGUE_deux_jetons(self) -> None:
+        """Le remplacant du dump de codepoints : ce qu'on cherchait etait
+        « est-ce le MEME jeton qu'a l'autre bout ? ». Une empreinte repond, et
+        se compare d'un coup d'oeil.
+        """
+        from app import diagnostic_jeton
+
+        self.assertNotEqual(diagnostic_jeton("jeton-A"), diagnostic_jeton("jeton-B"))
+        self.assertEqual(diagnostic_jeton("jeton-A"), diagnostic_jeton("jeton-A"))
+
+    def test_aucun_PRINT_de_app_py_ne_formate_le_jeton(self) -> None:
+        """Garde de non-retour, pose a l'AST et non au grep.
+
+        Le defaut n'etait pas une ligne mais une HABITUDE : CINQ expressions
+        ecrites a des moments differents, dans DEUX fonctions, toutes pour
+        diagnostiquer le meme bug de 2026-06-07. Une premiere version de ce
+        garde cherchait les motifs ligne par ligne — et accusait la docstring de
+        `diagnostic_jeton`, qui DECRIT les expressions retirees. Un garde qui
+        mord la documentation de son propre correctif finit desactive.
+
+        Il n'inspecte donc que les ARGUMENTS des appels a `print` : c'est la
+        seule chose qui atteint reellement stderr.
+        """
+        import ast
+
+        source = (_RACINE / "app.py").read_text(encoding="utf-8")
+        arbre = ast.parse(source)
+
+        interdits = ("codepoints=", "_encoded_token", "char={c", "{value}", "{token}")
+        coupables = []
+        for noeud in ast.walk(arbre):
+            if not (isinstance(noeud, ast.Call) and isinstance(noeud.func, ast.Name) and noeud.func.id == "print"):
+                continue
+            for argument in noeud.args:
+                extrait = ast.get_source_segment(source, argument) or ""
+                for motif in interdits:
+                    if motif in extrait:
+                        coupables.append(f"app.py:{noeud.lineno} {motif} dans {extrait[:60]}")
+
+        self.assertEqual(
+            coupables,
+            [],
+            "un print d'app.py reformate une valeur derivee du jeton : " + " | ".join(coupables),
+        )
+
+    def test_le_garde_AST_voit_bien_les_print(self) -> None:
+        """Contre-epreuve du garde : `ast.get_source_segment` rend None si le
+        module n'a pas ete parse avec `type_comments`, ou si les positions sont
+        absentes. Un garde qui n'inspecte rien rend zero coupable — et zero
+        ressemble a « rien a signaler ».
+        """
+        import ast
+
+        source = (_RACINE / "app.py").read_text(encoding="utf-8")
+        arbre = ast.parse(source)
+
+        appels = [
+            n
+            for n in ast.walk(arbre)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "print"
+        ]
+        self.assertGreater(len(appels), 20, f"{len(appels)} appels a print trouves : extraction suspecte")
+        extraits = [ast.get_source_segment(source, a) for n in appels for a in n.args]
+        self.assertTrue(any(extraits), "aucun argument de print n'a pu etre relu depuis le source")
+
+    def test_l_URL_redigee_ne_FABRIQUE_jamais_la_chaine_complete(self) -> None:
+        """« Construire puis retrancher » est plus faible que « ne jamais
+        construire ».
+
+        La version precedente appelait `url_de_boot_natif(proto, port, jeton)`
+        puis decoupait sur `#ntoken=`. CodeQL `py/clear-text-logging` a suivi ce
+        flux jusqu'au `print` — et ne signalait PAS un faux positif : la chaine
+        contenant le jeton existait vraiment, on la tranchait apres coup. Il
+        suffit qu'un jour quelqu'un journalise la valeur intermediaire, ou
+        qu'une exception passe entre les deux, pour que le secret sorte.
+
+        Ce test lit l'AST : le seul argument que `url_de_boot_redigee` a le
+        droit de passer a `url_de_boot_natif` est la chaine VIDE.
+        """
+        import ast
+
+        source = (_RACINE / "app.py").read_text(encoding="utf-8")
+        arbre = ast.parse(source)
+
+        fonction = next(
+            n for n in ast.walk(arbre) if isinstance(n, ast.FunctionDef) and n.name == "url_de_boot_redigee"
+        )
+        appels = [
+            n
+            for n in ast.walk(fonction)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "url_de_boot_natif"
+        ]
+
+        self.assertEqual(len(appels), 1, "extraction suspecte : un seul appel est attendu")
+        dernier = appels[0].args[-1]
+        self.assertIsInstance(dernier, ast.Constant, ast.get_source_segment(source, dernier))
+        self.assertEqual(dernier.value, "", "le jeton ne doit JAMAIS entrer dans l'URL construite ici")
+
+    def test_le_jeton_n_atteint_que_l_EMPREINTE(self) -> None:
+        """Contre-epreuve du precedent : il verifie ou le jeton ne va PAS ;
+        celui-ci verifie qu'il va bien quelque part, sinon la fonction aurait
+        cesse d'identifier quoi que ce soit.
+        """
+        from app import empreinte_jeton, url_de_boot_redigee
+
+        a = url_de_boot_redigee("http", 8642, "jeton-A")
+        b = url_de_boot_redigee("http", 8642, "jeton-B")
+
+        self.assertNotEqual(a, b, "deux jetons differents rendent la meme trace : elle n'identifie rien")
+        self.assertIn(empreinte_jeton("jeton-A"), a)
