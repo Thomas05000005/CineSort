@@ -109,7 +109,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # `_verdict_dst_manquant` le 2026-08-29 (un volume injoignable n'est plus
     # confondu avec un fichier deja deplace). Plafond resserre sur la taille
     # obtenue plutot que monte.
-    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 265,
+    # 265 -> 188 le 2026-08-31 : #1192 a EXTRAIT `_mettre_de_cote_le_src_reapparu`
+    # et `_ecarter_un_backup_orphelin` en corrigeant la garde anti-TOCTOU, sans
+    # inscrire le gain. Le cliquet bidirectionnel de #1188 — fusionne le meme
+    # jour, quelques minutes AVANT — l'a fait rougir des la premiere batterie
+    # cumulative. Deux PR justes separement, incompatibles ensemble ; c'est
+    # exactement ce que ce controle-la existe pour dire.
+    ("cinesort/app/apply_rollback.py", "_revert_one_op"): 188,
     ("cinesort/domain/librarian.py", "generate_suggestions"): 272,
     ("cinesort/ui/api/run_flow_support.py", "job_fn"): 271,
     ("cinesort/app/runtime_probe_check.py", "cross_check_rows_with_probe"): 258,
