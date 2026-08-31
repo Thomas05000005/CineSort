@@ -21,12 +21,15 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+import os
 
 from cinesort.infra.db.migration_manager import MigrationManager
 
 REPO = Path(__file__).resolve().parents[4]  # proofs/audit_horizons/internal/docs/<racine>
 MIG_DIR = REPO / "cinesort" / "infra" / "db" / "migrations"
-_STATE_DB = Path("C:/Users/blanc/AppData/Local/CineSort/db")
+# Derive de l'environnement : le chemin absolu d'origine portait un nom
+# d'utilisateur REEL dans un depot PUBLIC, et ne valait que sur une machine.
+_STATE_DB = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "CineSort" / "db"
 # DB peuplee courante (1027 films) + un backup VIEUX SCHEMA reel (v1.6.2, 30 mai).
 REAL_DB = _STATE_DB / "cinesort.sqlite"
 OLD_DB = _STATE_DB / "cinesort.sqlite.bak_avant_v162_20260530_172150"

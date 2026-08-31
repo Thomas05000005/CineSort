@@ -1,7 +1,7 @@
 """Lot C (verif totale 2026-07) — Sweep runtime Playwright : #/processing + #/historique.
 
 Lancer :
-    "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+    "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
         tests/e2e_dashboard/test_lotc_sweep_processing_historique.py -q
 
 Regles du sweep (plan Lot C) :

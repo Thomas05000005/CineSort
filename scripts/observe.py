@@ -45,7 +45,7 @@ peuvent etre polluees par 3 sources de staleness :
 Le flag `--fresh` declenche AVANT le lancement de l'app :
     a. force mode `python app.py --dev` (jamais l'EXE pre-fix) ;
     b. reset etat derive du PERIMETRE `--library` (DB + runs/tri_films_*),
-       protege les donnees utilisateur reelles (`\\\\OMV\\Media` etc.) ET toute
+       protege les donnees utilisateur reelles (`\\\\<nas>\\Media` etc.) ET toute
        autre bibliotheque, meme si son chemin porte `test_library` ;
        sauvegarde prealable : `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` avec ses
        sidecars `-wal`/`-shm`, et `runs.bak_BEFORE_FRESH_<ts>/` pour les
@@ -674,7 +674,7 @@ def _reset_test_library_state(
         - lignes DB SQLite (runs/quality_reports/probe_cache/...) liees.
 
     PROTEGE :
-        - donnees utilisateur reelles (\\\\OMV\\Media, etc.) preservees ;
+        - donnees utilisateur reelles (\\\\<nas>\\Media, etc.) preservees ;
         - toute AUTRE bibliotheque, meme si son chemin porte `test_library` ;
         - settings.json / omdb_cache.json / tmdb_cache.json non touches ;
         - backup `cinesort.sqlite.bak_BEFORE_FRESH_<ts>` (+ sidecars `-wal` /

@@ -7,7 +7,7 @@ export const meta = {
   ],
 }
 
-const REPO = 'C:/Users/blanc/projects/CineSort'
+const REPO = 'C:/Users/<utilisateur>/projects/CineSort'
 
 const CONTEXT = `
 CineSort = app desktop Windows de tri de films. F4 = RÉSULTATS FAUX SILENCIEUX (l'app affiche

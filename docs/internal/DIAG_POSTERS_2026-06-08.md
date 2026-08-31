@@ -61,7 +61,7 @@ Pour voir des URLs TMDb dans le DOM, il faut **d'abord** que `tmdb_id` et `poste
 **NON.**
 
 Preuves :
-- Les roots scannes sont sur **filesystem local NTFS** : `C:\Users\blanc\projects\CineSort\test_library\RootA` et `test_library\RootB` (section 1.5, log `_scan_run.log` L18, L24-L26). Aucun UNC `\\server\share\...`, aucun mount SMB.
+- Les roots scannes sont sur **filesystem local NTFS** : `C:\Users\<utilisateur>\projects\CineSort\test_library\RootA` et `test_library\RootB` (section 1.5, log `_scan_run.log` L18, L24-L26). Aucun UNC `\\server\share\...`, aucun mount SMB.
 - Le scan est alle au bout sans hang en 12.4s (section 1.3-1.4). Si un cluster probe SMB etait non resilient, on attendrait soit un timeout, soit un freeze sur un fichier, soit une erreur reseau. Aucune des trois n'apparait dans les logs.
 - Aucune erreur de type `OSError`, `WinError 64/53/67`, `ConnectionResetError`, `smb`, ou stacktrace probe (`ffprobe` / `mediainfo`) n'est presente dans `_scan_run.log` ni `cinesort.log.tail.txt`.
 - Le profil SQLite `nas_smb` ou `nas_smb_slow` (`infra/db/pragma_profile.py`, VO-A) n'est PAS reference dans les logs : aucun message `pragma_history` ne signale une bascule vers un profil SMB.
@@ -139,8 +139,8 @@ Les 2 roots passes par le script ont bien ete scannes :
 
 ```
 L18: [iter2-scan] roots = [
-       'C:\\Users\\blanc\\projects\\CineSort\\test_library\\RootA',
-       'C:\\Users\\blanc\\projects\\CineSort\\test_library\\RootB'
+       'C:\\Users\\<utilisateur>\\projects\\CineSort\\test_library\\RootA',
+       'C:\\Users\\<utilisateur>\\projects\\CineSort\\test_library\\RootB'
      ]
 L24: idx=9/9   cur='[Root 1/2] ...\test_library\RootA\Movies\t...'
 L25: idx=6/8   cur='[Root 2/2] ...\test_library\RootB\Movies\T...'
@@ -440,13 +440,13 @@ Categorie causale : **HORS scope POSTERS_ABSENTS**.
 
 ### 4.1 Methodologie
 
-Sonde live executee depuis la branche `loop/correction-2026-06` avec le venv du projet (`C:/Users/blanc/projects/CineSort/.venv`) le 2026-06-08. Aucun fix applique : test diagnostic seul, cache TMDb redirige vers `%TEMP%\cinesort_diag_tmdb_cache.json` pour ne pas polluer le cache utilisateur (`%LOCALAPPDATA%\CineSort\.cache\tmdb_cache.json`). La cle n'a jamais ete imprimee : on log uniquement longueur et booleens (cf section 4.5 sur le scrub).
+Sonde live executee depuis la branche `loop/correction-2026-06` avec le venv du projet (`C:/Users/<utilisateur>/projects/CineSort/.venv`) le 2026-06-08. Aucun fix applique : test diagnostic seul, cache TMDb redirige vers `%TEMP%\cinesort_diag_tmdb_cache.json` pour ne pas polluer le cache utilisateur (`%LOCALAPPDATA%\CineSort\.cache\tmdb_cache.json`). La cle n'a jamais ete imprimee : on log uniquement longueur et booleens (cf section 4.5 sur le scrub).
 
 Note importante : `TmdbClient` n'expose pas de `from_settings()` (verifie par Grep sur tout `cinesort/`). Pour reproduire fidelement le chemin runtime de l'EXE, on passe par `settings_support.extract_tmdb_key_from_settings_payload(data)` qui appelle `unprotect_secret(blob_b64, purpose=TMDB_KEY_PURPOSE)` (memoire DPAPI + memoire `settings utf-8-sig`), puis on instancie `TmdbClient(api_key=..., cache_path=...)` comme `film_support.py` L93, `library_actions_support.py` L423, `library_audit_support.py` L242, `run_flow_support.py` L207, `tmdb_support.py` L57/L148.
 
 ### 4.2 Etat du settings.json (sans valeur)
 
-Lu depuis `C:/Users/blanc/AppData/Local/CineSort/settings.json` avec encoding `utf-8-sig` (tolerance BOM, cf memoire `cinesort_settings_utf8_bom`) :
+Lu depuis `C:/Users/<utilisateur>/AppData/Local/CineSort/settings.json` avec encoding `utf-8-sig` (tolerance BOM, cf memoire `cinesort_settings_utf8_bom`) :
 
 | Champ | Valeur observee |
 |---|---|

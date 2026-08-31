@@ -1,4 +1,4 @@
-REPO = C:\Users\blanc\projects\CineSort
+REPO = C:\Users\<utilisateur>\projects\CineSort
 Captures STRUCTURELLES (read-only, grep + line-read) — baseline_r8
 
 

@@ -2,7 +2,7 @@
 Script: reproduit par tests/test_lotd_chain_scoring.py (biblio virtuelle jetable, probe_backend=none)
 
 save_settings ok: True 
-settings state_dir: C:\Users\blanc\AppData\Local\Temp\cinesort_lotd_scoring_14x640zt\state | probe_backend: none
+settings state_dir: C:\Users\<utilisateur>\AppData\Local\Temp\cinesort_lotd_scoring_14x640zt\state | probe_backend: none
 start_plan: True 
 run done, error: None
 rows: 3

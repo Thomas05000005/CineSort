@@ -55,7 +55,7 @@ Le gate `--fresh` NE TOUCHE JAMAIS :
 - `settings.json` (etat operateur : cle TMDb, token REST, roots) ;
 - `omdb_cache.json`, `tmdb_cache.json` (caches partages indexes par titre) ;
 - les donnees utilisateur reelles hors scope `test_library`, notamment
-  `\\OMV\Media\Films`, `\\OMV\Media\downloads` et tout autre root configure.
+  `\\<nas>\Media\Films`, `\\<nas>\Media\downloads` et tout autre root configure.
 
 Implementation : le reset DB filtre par `runs.root LIKE %test_library%`,
 le reset disque par detection de `test_library` dans `plan.jsonl`/`ui_log.txt`.

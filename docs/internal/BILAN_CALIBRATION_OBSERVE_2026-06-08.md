@@ -53,7 +53,7 @@ fallback_file:// | meta index.html L11 uniquement | self data: | OUI bloque | pa
 
 ## NOUVELLE CAPTURE AVANT
 
-Chemin : `C:/Users/blanc/projects/CineSort/docs/internal/observe/2026-06-08_195000/`
+Chemin : `C:/Users/<utilisateur>/projects/CineSort/docs/internal/observe/2026-06-08_195000/`
 
 Sommaire :
 - `scan_complete = false` (capture calibree AVANT correction, comme prevu : on capture l'etat-bug)
@@ -180,7 +180,7 @@ Preuves combinees (`csp_violations` + `image_requests`) :
 | 27 | `test_phase5_traitement_complete.py::test_unmount_cleans_polling` | unmountTraitement ne contient pas _stopPolling | traitement/unmount-polling |
 | 28 | `test_quality_score.py::test_analyze_quality_batch_rejects_concurrent_launch` | concurrent launch quality batch n'est plus rejete | quality/concurrent-guard |
 | 29 | `test_refactor_84_progress_v77.py::test_lazy_imports_bounded` | 121 lazy imports > borne 69 (regression #84/#83) | refactor/lazy-imports-bound |
-| 30 | `test_release_hygiene.py::test_no_personal_strings_in_repo` | `users\blanc` present dans scripts/scan_smoketest_lib.py et scan_smoketest_parallel.py | hygiene/personal-strings |
+| 30 | `test_release_hygiene.py::test_no_personal_strings_in_repo` | `users\<utilisateur>` present dans scripts/scan_smoketest_lib.py et scan_smoketest_parallel.py | hygiene/personal-strings |
 | 31 | `test_release_hygiene.py::test_returns_false_on_failure_and_logs` | record_apply_op n'emet plus ERROR log on failure | hygiene/error-logging |
 | 32 | `test_settings_robustness.py::test_secrets_masked_in_get_settings` | secrets masques avec bullets U+2022 (mojibake) | settings/secret-mask-encoding |
 | 33 | `test_unified_ui_contracts.py::test_app_injects_token_for_native_mode` | `__CINESORT_NATIVE__` absent de app.py | ui/native-token-injection |
@@ -189,7 +189,7 @@ Preuves combinees (`csp_violations` + `image_requests`) :
 
 | # | Symptome | Hypothese racine | Tag | Marqueur |
 |---|---|---|---|---|
-| 1 | `get_quality_report failed run_id=20260607_142449_050 row_id=T|b4f7bd4f` | MediaInfo.exe timeout 30s en dur (`tooling.py` L55) sur UNC `\\OMV\Media` 4K H265, pas de retry ni cache | quality/mediainfo-unc-timeout | [HYPOTHESE] |
+| 1 | `get_quality_report failed run_id=20260607_142449_050 row_id=T|b4f7bd4f` | MediaInfo.exe timeout 30s en dur (`tooling.py` L55) sur UNC `\\<nas>\Media` 4K H265, pas de retry ni cache | quality/mediainfo-unc-timeout | [HYPOTHESE] |
 | 2 | `get_quality_report failed row_id=C|3d53c61 'Bande Demo ILM.mkv'` | MediaInfo timeout 30s sur UNC meme petit fichier -> handshake SMB/OMV indisponible (pas la taille) | quality/mediainfo-unc-timeout | [HYPOTHESE] |
 | 3 | `get_quality_report failed x12 occurrences 16:20-16:29 row_id C|*` | repetition meme racine MediaInfo timeout UNC + boucle UI polling retente sans backoff | quality/mediainfo-polling-backoff | [HYPOTHESE] |
 | 4 | `REST 500 method=quality/get_perceptual_report (183482ms) 'The Abyss QTZ x265'` | ffmpeg loudnorm timeout 60s sur UNC, `-map 0:a:4` lit fichier entier via SMB, 4K 100Go+, 183s = 3x = retry implicite ou multi-pistes | quality/ffmpeg-loudnorm-unc-timeout | [HYPOTHESE] |
@@ -197,7 +197,7 @@ Preuves combinees (`csp_violations` + `image_requests`) :
 | 6 | `API_EXCEPTION endpoint=apply meme run_id 8s apres req=99ab03a1` | retry utilisateur sans correction state, meme echec, absence feedback UI explicite | apply/plan-missing-feedback | [OPERATIONNEL] |
 | 7 | `REST 500 method=library/search_tmdb` | `'CineSortApi' object has no attribute '_normalize_user_path'` - methode supprimee/renommee mais search_tmdb la reference encore (probablement deja fixe section F) | library/search-tmdb-attr | [OPERATIONNEL] |
 | 8 | `REST 500 method=integrations/test_jellyfin_connection x3` | `ReadTimeoutError host=192.168.1.34:8096 timeout=5s` trop court pour `/Users/.../Items Recursive=true`, Jellyfin LAN indisponible/ralenti | integrations/jellyfin-timeout | [HYPOTHESE] |
-| 9 | **SYNTHESE 6 racines distinctes (24 erreurs)** | cluster dominant subprocess timeout sur SMB `\\OMV\Media` 17/24 = 71%, racine commune I/O reseau SMB non-resilient (pas timeout adaptatif, pas cache probe, pas circuit-breaker) | infra/smb-resilience | [HYPOTHESE] |
+| 9 | **SYNTHESE 6 racines distinctes (24 erreurs)** | cluster dominant subprocess timeout sur SMB `\\<nas>\Media` 17/24 = 71%, racine commune I/O reseau SMB non-resilient (pas timeout adaptatif, pas cache probe, pas circuit-breaker) | infra/smb-resilience | [HYPOTHESE] |
 
 ---
 

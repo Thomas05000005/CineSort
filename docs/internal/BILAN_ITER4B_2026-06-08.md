@@ -27,7 +27,7 @@
 | GATE | Etat | Preuve |
 |---|---|---|
 | GATE Archi (`lint-imports`) | **VERT** | `Contracts: 3 kept, 0 broken` (capture jointe au commit `9c806129`) |
-| GATE Non-regression Posters (mesure fraiche) | **VERT** | 9 vues OK / 0 KO — capture : `C:/Users/blanc/projects/CineSort/docs/internal/observe/2026-06-08_ITER4B_POSTERS_RECHECK` |
+| GATE Non-regression Posters (mesure fraiche) | **VERT** | 9 vues OK / 0 KO — capture : `C:/Users/<utilisateur>/projects/CineSort/docs/internal/observe/2026-06-08_ITER4B_POSTERS_RECHECK` |
 
 - **Acceptation conjointe** : **OK ENSEMBLE** (lint-imports VERT *et* mesure fraiche posters OK — c'est la condition stricte des memoires, pas une OU disjonction).
 - Acquis comportement re-mesure : `a37852aa` (posters racine C), `242cf339` (CSP img-src), `7df3af3e` (fix ii.b), `6193e02b` (harness frais), `06f74ad` (#15), `#2` (vert) — tous **PRESERVES INTACTS**.
@@ -87,7 +87,7 @@ Branche : `loop/correction-2026-06` — aucune publication, comportement stricte
 
 ### 1.1 Commande et sortie (FIGE)
 
-Commande: `lint-imports` (lancee dans `C:/Users/blanc/projects/CineSort`, branche `loop/correction-2026-06`).
+Commande: `lint-imports` (lancee dans `C:/Users/<utilisateur>/projects/CineSort`, branche `loop/correction-2026-06`).
 
 Note: `python -m importlinter` n'est PAS executable (le package n'a pas de `__main__`). Seul le CLI `lint-imports` fonctionne.
 
@@ -243,7 +243,7 @@ si le module domain disparait, `ImportError` au chargement du module
 | Backward compat re-export | `from cinesort.app._fuzzy_utils import normalize_for_fuzzy` retourne meme objet que `from cinesort.domain._fuzzy_normalize import normalize_for_fuzzy` | `BACKWARD_COMPAT_OK` (identite verifiee via `is`) |
 | Comportement `_normalize_title_for_fuzzy` | input `'Le Seigneur des Anneaux: La Communauté'` -> `'le seigneur des anneaux la communaute'` (lowercase + strip accents + strip `:`) ; input `''` -> `''` ; input `None` -> `''` | `NORMALIZE_BEHAVIOR_OK` |
 | Tests fuzzy + duplicate_multi_signal | `python -m pytest tests/ -k "fuzzy or duplicate_multi_signal or _fuzzy_utils" -q --timeout=60` | **32 passed, 74 skipped, 0 failed** |
-| **lint-imports** | `lint-imports` (cwd `C:/Users/blanc/projects/CineSort`) | **3 kept, 0 broken** (Domain pure KEPT, Infra bounded KEPT, App bounded KEPT) |
+| **lint-imports** | `lint-imports` (cwd `C:/Users/<utilisateur>/projects/CineSort`) | **3 kept, 0 broken** (Domain pure KEPT, Infra bounded KEPT, App bounded KEPT) |
 
 ### 2.4 Acquis posters preserves (FIGE)
 
@@ -282,7 +282,7 @@ _Mesure fraiche : 2026-06-09._
 ### Commande executee
 
 ```
-cd C:/Users/blanc/projects/CineSort
+cd C:/Users/<utilisateur>/projects/CineSort
 lint-imports
 ```
 
@@ -371,7 +371,7 @@ _Mesure fraiche : 2026-06-09 07:39 (post-refactor archi etape 2)._
 
 - URL : `POST http://127.0.0.1:8642/api/run/start_plan`
 - Headers : `Authorization: Bearer <token>` + `Content-Type: application/json`
-- Body : `{"settings":{"library_path":"C:/Users/blanc/projects/CineSort/test_library"}}`
+- Body : `{"settings":{"library_path":"C:/Users/<utilisateur>/projects/CineSort/test_library"}}`
 - Reponse 200 : `run_id="20260609_073917_071"`,
   `run_dir=...CineSort/runs/tri_films_20260609_073917_071`.
 - Wait scan complete : `done=true, idx=6/17` (scan termine <30 s).
@@ -600,7 +600,7 @@ _Mesure fraiche : 2026-06-09 08:15-08:45._
 
 ### 4.1 Re-run lint-imports (FIGE)
 
-Commande : `lint-imports` (cwd `C:/Users/blanc/projects/CineSort`, branche
+Commande : `lint-imports` (cwd `C:/Users/<utilisateur>/projects/CineSort`, branche
 `loop/correction-2026-06`, HEAD `9c80612`).
 
 Sortie :

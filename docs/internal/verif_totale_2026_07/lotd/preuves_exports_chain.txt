@@ -17,13 +17,13 @@ bad nfo run: {'ok': False, 'message': 'Run introuvable.'}
 DONE
 
 --- explore_exports2.py (titres ; et guillemets via nfo -> sanitisation windows_safe, quoting CSV) ---
-row: S|bc4e5e4 | title: 'Amélie, la belle' | source: nfo | nfo: C:\Users\blanc\AppData\Local\Temp\cinesort_lotd_exp2_e0kigq3g\root\Amelie.2001\Amelie.2001.nfo
+row: S|bc4e5e4 | title: 'Amélie, la belle' | source: nfo | nfo: C:\Users\<utilisateur>\AppData\Local\Temp\cinesort_lotd_exp2_e0kigq3g\root\Amelie.2001\Amelie.2001.nfo
 row: S|e5c128b8 | title: 'Film; le retour' | source: name | nfo: None
 
 --- lignes brutes CSV (extrait) ---
 'run_id;row_id;kind;folder;video;proposed_title;proposed_year;proposed_source;confidence;confidence_label;decision_ok;decision_title;decision_year;quality_status;quality_score;quali'
 ''
-'20260708_220438_986;S|bc4e5e4;single;C:\\Users\\blanc\\AppData\\Local\\Temp\\cinesort_lotd_exp2_e0kigq3g\\root\\Amelie.2001;Amelie.2001.mkv;Amélie, la belle;2001;nfo;79;med;False;Amélie, l'
+'20260708_220438_986;S|bc4e5e4;single;C:\\Users\\<utilisateur>\\AppData\\Local\\Temp\\cinesort_lotd_exp2_e0kigq3g\\root\\Amelie.2001;Amelie.2001.mkv;Amélie, la belle;2001;nfo;79;med;False;Amélie, l'
 ''
 
 n header cols: 30

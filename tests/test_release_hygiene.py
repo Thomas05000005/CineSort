@@ -7,38 +7,44 @@ from pathlib import Path
 
 # --- Perimetre du scan PII (cf. test_no_personal_strings_in_repo) ------------
 
-# Prefixes exclus du scan parce qu'ils ne partent PAS dans la release : le zip
-# source les retire explicitement (`SOURCE_EXCLUDE_PATH_PATTERNS` dans
-# scripts/package_zip.py, verifie par le test) et le bundle PyInstaller
-# n'embarque que web/, locales/, presets/ et migrations/ (cf CineSort.spec).
-# Ce sont des captures d'enquete (traces pytest, sorties de scripts de diag)
-# qui contiennent legitimement des chemins absolus de la machine de dev :
-# les nettoyer detruirait la valeur de preuve du materiau.
-RELEASE_EXCLUDED_PREFIXES = ("docs/internal/",)
+# CE PREFIXE A ETE EXCLU PENDANT DES MOIS, ET LE RAISONNEMENT ETAIT FAUX.
+#
+# Il disait : `docs/internal/` ne part PAS dans la release — le zip source le
+# retire (`SOURCE_EXCLUDE_PATH_PATTERNS`, verifie plus bas) et le bundle
+# PyInstaller n'embarque que web/, locales/, presets/ et migrations/. Tout cela
+# est VRAI. Et sans rapport : CE DEPOT EST PUBLIC. « Pas dans l'archive » ne
+# veut pas dire « pas publie » — chaque fichier de `docs/internal/` est
+# consultable sur github.com.
+#
+# Le test s'appelle « hygiene de RELEASE » et mesurait la frontiere de la
+# RELEASE ; la surface d'exposition, elle, est le DEPOT. Un garde peut etre
+# correct dans son propre cadre et aveugle a ce qui compte.
+#
+# Ce que l'exclusion couvrait, mesure le 2026-08-31 avant nettoyage : 103
+# marqueurs personnels sur 26 fichiers de `docs/internal/` (67 en separateur
+# POSIX, 31 en separateur Windows, 5 chemins UNC du NAS) — plus, dans les deux
+# bilans de juin, le JETON REST alors ACTIF de l'utilisateur, publie 72 jours.
+# Tout est redige dans le meme lot, et le jeton a ete revoque par rotation.
+#
+# L'argument « nettoyer detruirait la valeur de preuve du materiau » etait le
+# bon reflexe applique a la mauvaise donnee : un nom d'utilisateur n'est pas
+# une preuve. La FORME du chemin est conservee, seule l'identite disparait.
+RELEASE_EXCLUDED_PREFIXES: tuple[str, ...] = ()
 
-# Dette PII pre-existante, gelee le 2026-08-03. Ces fichiers-la partent bien
-# dans le zip source : ils DOIVENT etre nettoyes, ce n'est pas une exemption
-# de principe. La liste ne doit que RETRECIR ; tout nouveau fichier fuyant une
-# chaine personnelle fait rougir le test, ce qui est le role du garde-fou.
-# (Ce sont des chemins de bibliotheque de test codes en dur dans des tests de
-# chaine et deux scripts de smoketest : la correction consiste a les passer
-# par variable d'environnement / tmp_path.)
-KNOWN_PII_DEBT_2026_08_03 = frozenset(
-    {
-        "scripts/scan_smoketest_lib.py",
-        "scripts/scan_smoketest_parallel.py",
-        "tests/e2e_dashboard/test_lotc_sweep_accueil.py",
-        "tests/e2e_dashboard/test_lotc_sweep_parametres.py",
-        "tests/e2e_dashboard/test_lotc_sweep_processing_historique.py",
-        "tests/e2e_dashboard/test_lotc_sweep_traitement.py",
-        "tests/test_jellyfin_sync_transient_retry.py",
-        "tests/test_lotd_chain_doublons.py",
-        "tests/test_lotd_chain_exports.py",
-        "tests/test_lotd_chain_integrations.py",
-        "tests/test_lotd_chain_rest.py",
-        "tests/test_lotd_chain_scoring.py",
-    }
-)
+# Dette PII gelee le 2026-08-03, SOLDEE le 2026-08-31. La liste ne pouvait que
+# retrecir ; elle est vide. Les douze fichiers portaient un chemin absolu de la
+# machine de developpement et ils PARTAIENT dans le zip source : ils etaient
+# donc PLUS exposes que ceux de `docs/internal/`, pas moins.
+#
+# Deux traitements, selon ce que la chaine faisait :
+#   - dans une docstring ou un commentaire (la majorite) : le segment de login
+#     est remplace, la forme du chemin reste lisible ;
+#   - dans une CONSTANTE EXECUTABLE (5 sites : `LIB_ROOT` des deux smoketests,
+#     `REPO_ROOT` de m7_db, `_STATE_DB` et `db` de deux scripts de preuve),
+#     rediger aurait casse l'outil. Elles derivent desormais de l'environnement
+#     (`Path.home()`, `LOCALAPPDATA`, `Path(__file__)`), ce qui vise le MEME
+#     emplacement pour l'auteur et fonctionne pour tout le monde.
+KNOWN_PII_DEBT_2026_08_03: frozenset[str] = frozenset()
 
 
 def _git_tracked_files(repo_root: Path) -> list[str] | None:
@@ -105,7 +111,7 @@ class ReleaseHygieneTests(unittest.TestCase):
         # lui-meme ne matche pas (sinon ce serait recursif).
         user_login = "".join(["bl", "anc"])
         forbidden_tokens = [
-            # Chemin Windows perso: c:\users\blanc, /users/blanc/, users\blanc
+            # Chemin Windows perso: c:\users\<utilisateur>, /users/<utilisateur>/, users\<utilisateur>
             "users\\" + user_login,
             "users/" + user_login,
             "users\\\\" + user_login,

@@ -28,7 +28,11 @@ from cinesort.ui.api.cinesort_api import CineSortApi  # noqa: E402
 
 _core.MIN_VIDEO_BYTES = 1024
 
-LIB_ROOT = r"C:\Users\blanc\test_cinesort_lib"
+# Meme emplacement qu'avant pour l'auteur (~/test_cinesort_lib), mais derive
+# du profil courant au lieu d'un chemin absolu portant un nom d'utilisateur
+# REEL dans un depot PUBLIC. `CINESORT_SMOKETEST_LIB` permet de viser une
+# autre bibliotheque sans editer le script.
+LIB_ROOT = os.environ.get("CINESORT_SMOKETEST_LIB") or str(Path.home() / "test_cinesort_lib")
 STATE_DIR = Path(tempfile.gettempdir()) / "cinesort_smoketest_state_par"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 

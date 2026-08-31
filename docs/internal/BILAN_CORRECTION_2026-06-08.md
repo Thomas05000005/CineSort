@@ -14,7 +14,7 @@ H1: L'EXE dist/CineSort.exe est anterieur au commit fix ii.b (7df3af3e) et donc 
 
 | Element | Valeur |
 |---|---|
-| Chemin EXE | `C:\Users\blanc\projects\CineSort\dist\CineSort.exe` |
+| Chemin EXE | `C:\Users\<utilisateur>\projects\CineSort\dist\CineSort.exe` |
 | EXE LastWriteTime | **2026-06-08 11:56:47** (heure locale, TZ +0200) |
 | Taille EXE | 59 613 955 octets (~56,9 MiB) |
 | Commit fix ii.b | `7df3af3e3c384bb82233b43b2242af37e3298d36` |
@@ -22,7 +22,7 @@ H1: L'EXE dist/CineSort.exe est anterieur au commit fix ii.b (7df3af3e) et donc 
 | Date commit (author/committer) | **2026-06-08 23:22:52 +0200** |
 
 Commandes utilisees:
-- `ls -la C:/Users/blanc/projects/CineSort/dist/CineSort.exe`
+- `ls -la C:/Users/<utilisateur>/projects/CineSort/dist/CineSort.exe`
 - `git log --format="%ai %H %s" -1 7df3af3e`
 
 ### Comparaison et calcul d'ecart
@@ -82,7 +82,7 @@ def _detect_app_command(prefer_exe: bool = True) -> tuple[list[str], str]:
 
 - `dist/CineSort.exe` PRESENT (cf. section 1a, 2026-06-08 11:56:47, 59,6 MB).
 - `app.py` PRESENT a la racine projet.
-- Donc dans l'invocation par defaut `python scripts/observe.py --library test_library --modes dashboard`, la branche EXE est prise -> `mode_label == "exe"`, subprocess lance `C:\Users\blanc\projects\CineSort\dist\CineSort.exe`.
+- Donc dans l'invocation par defaut `python scripts/observe.py --library test_library --modes dashboard`, la branche EXE est prise -> `mode_label == "exe"`, subprocess lance `C:\Users\<utilisateur>\projects\CineSort\dist\CineSort.exe`.
 
 ### Conclusion (FIGE)
 

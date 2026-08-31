@@ -1,7 +1,7 @@
 ==========================================================================
 BASELINE R8 — cap_tv_parity : parite APPLY TV vs FILM (etat CASSE)
 ==========================================================================
-repo_root = C:\Users\blanc\projects\CineSort
+repo_root = C:\Users\<utilisateur>\projects\CineSort
 
 --- BLOC COMPORTEMENTAL #1 : apply_tv_episode(dry_run=False) ---
 AVANT: ['lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.mkv', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.nfo', 'lib\\_inbox\\Showname.S01E01.1080p.HDTV.x264-GRP.srt']

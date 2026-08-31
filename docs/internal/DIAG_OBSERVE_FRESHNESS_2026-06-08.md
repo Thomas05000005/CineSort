@@ -36,7 +36,7 @@
 - Gate KO atteint : **non**
 - KO comptes : 0
 - csp_img : 0
-- Capture : `C:/Users/blanc/projects/CineSort/docs/internal/observe/2026-06-08_FRESHNESS_REMEASURE`
+- Capture : `C:/Users/<utilisateur>/projects/CineSort/docs/internal/observe/2026-06-08_FRESHNESS_REMEASURE`
 - Caveat : mesure en localhost (127.0.0.1) - le navigateur webview2 a ete purge mais le binding `127.0.0.1` + CSP locale peut masquer un cas reel. Une mesure complementaire en mode `python app.py --dev` + library reelle reste a planifier hors session.
 
 ### Commits harness eventuels
@@ -113,12 +113,12 @@ finale (en attente etape 2b/3).
   l'etat derive (DB SQLite + runs/) est PROPRE pour `test_library/`.
 - Sinon : les caches incrementaux et plans residuels pollueraient la mesure
   et masqueraient le symptome reel (DOM vide ou rempli).
-- Contrainte : ne PAS toucher aux donnees utilisateur reelles (`\\OMV\Media`).
+- Contrainte : ne PAS toucher aux donnees utilisateur reelles (`\\<nas>\Media`).
 
 **Inventaire avant reset** :
-- DB : `C:\Users\blanc\AppData\Local\CineSort\db\cinesort.sqlite`
+- DB : `C:\Users\<utilisateur>\AppData\Local\CineSort\db\cinesort.sqlite`
   - 26 runs total, 2937 quality_reports, 1052 probe_cache rows
-- Runs disque : `C:\Users\blanc\AppData\Local\CineSort\runs\`
+- Runs disque : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\`
   - 21 dossiers `tri_films_*` au total
 - Caches partages (NON touches) : `omdb_cache.json`, `tmdb_cache.json` (0 ref test_library, indexes par titre/imdb_id)
 - Settings (NON touche) : `settings.json` (contient roots test_library mais c'est config user)
@@ -127,7 +127,7 @@ finale (en attente etape 2b/3).
 - DB `runs.root LIKE test_library%` : 5 runs (`195253_291`, `200113_033`, `203922_241`, `204214_637`, `204713_259`)
 - Disque scan binaire de tous `tri_films_*` pour ref `test_library` : 7 dossiers
   - Les 5 ci-dessus + `203353_555` + `211945_637`
-- Les 2 supplementaires (`203353_555`, `211945_637`) ont `runs.root = \\OMV\Media\Films`
+- Les 2 supplementaires (`203353_555`, `211945_637`) ont `runs.root = \\<nas>\Media\Films`
   dans la DB MAIS sont des scans multi-root incluant test_library :
   - `203353_555/ui_log.txt` : "ROOTS=[\\OMV, \\OMV downloads, ...test_library]" (3 roots)
   - `211945_637/plan.jsonl` : 17 rows, TOUTES `source_root = test_library\RootA\Movies`
@@ -143,7 +143,7 @@ finale (en attente etape 2b/3).
 **Suppressions DB (transactional)** :
 ```
 DELETE FROM <table> WHERE run_id IN (7 ids)  -- pour 11 tables
-DELETE FROM probe_cache WHERE path LIKE 'C:\Users\blanc\projects\CineSort\test_library%'
+DELETE FROM probe_cache WHERE path LIKE 'C:\Users\<utilisateur>\projects\CineSort\test_library%'
 ```
 Resultats :
 - `runs` : 7 supprimees (26 -> 19)
@@ -158,15 +158,15 @@ Resultats :
 - DB : `SELECT COUNT(*) FROM runs WHERE run_id IN (...)` = 0
 - DB : `SELECT COUNT(*) FROM probe_cache WHERE path LIKE test_library%` = 0
 - Disque : aucun `tri_films_*` residuel contenant `test_library`
-- Donnees utilisateur (`\\OMV\Media\Films`, `\\OMV\Media\downloads`) intactes :
+- Donnees utilisateur (`\\<nas>\Media\Films`, `\\<nas>\Media\downloads`) intactes :
   19 runs preserves, 2903 quality_reports preserves, 1035 probe_cache preserves
 - Caches OMDb/TMDB : non touches (partages, indexes par titre)
 - Settings : non touche
 
 **Fichiers / chemins** :
-- DB : `C:\Users\blanc\AppData\Local\CineSort\db\cinesort.sqlite`
-- Backup : `C:\Users\blanc\AppData\Local\CineSort\db\cinesort.sqlite.bak_BEFORE_RESET_test_library_20260608`
-- Runs supprimes : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_{195253_291,200113_033,203353_555,203922_241,204214_637,204713_259,211945_637}`
+- DB : `C:\Users\<utilisateur>\AppData\Local\CineSort\db\cinesort.sqlite`
+- Backup : `C:\Users\<utilisateur>\AppData\Local\CineSort\db\cinesort.sqlite.bak_BEFORE_RESET_test_library_20260608`
+- Runs supprimes : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_{195253_291,200113_033,203353_555,203922_241,204214_637,204713_259,211945_637}`
 
 **Marqueurs** : [OPERATIONNEL] reset effectif. [FIGE] backup preserve avant reset.
 Donnees utilisateur preserved=True.
@@ -196,7 +196,7 @@ Donnees utilisateur preserved=True.
   - `msedgewebview2` : 12 instances (verifie via CommandLine -> 0 lie a CineSort,
     autres apps : Teams, VSCode, etc.)
   - `CineSort` : 0 (deja arrete)
-- Cache localise : `C:\Users\blanc\AppData\Local\CineSort\webview\`
+- Cache localise : `C:\Users\<utilisateur>\AppData\Local\CineSort\webview\`
   - Sous-dossier unique : `EBWebView/` (convention WebView2 evergreen)
   - Taille : **37.86 MB** (sessionStorage + Cache HTTP + IndexedDB)
 - Convention pywebview : par defaut `<LOCALAPPDATA>\<AppName>\webview\EBWebView`
@@ -211,9 +211,9 @@ Donnees utilisateur preserved=True.
 2. `Remove-Item -Path "$env:LOCALAPPDATA\CineSort\webview" -Recurse -Force`
 
 **Verifications post-purge** :
-- `Test-Path C:\Users\blanc\AppData\Local\CineSort\webview` = **False**
-- `Test-Path C:\Users\blanc\AppData\Local\CineSort\webview\EBWebView` = **False**
-- Dossiers restants dans `C:\Users\blanc\AppData\Local\CineSort\` :
+- `Test-Path C:\Users\<utilisateur>\AppData\Local\CineSort\webview` = **False**
+- `Test-Path C:\Users\<utilisateur>\AppData\Local\CineSort\webview\EBWebView` = **False**
+- Dossiers restants dans `C:\Users\<utilisateur>\AppData\Local\CineSort\` :
   `db/`, `logs/`, `runs/` (3 sous-dossiers, plus de `webview/`)
 - Donnees utilisateur intactes : settings.json, omdb_cache.json, tmdb_cache.json
   non touches.
@@ -227,8 +227,8 @@ Donnees utilisateur preserved=True.
   (aucun filtre/selection residuel).
 
 **Fichiers / chemins** :
-- Cache purge : `C:\Users\blanc\AppData\Local\CineSort\webview\` (toute la branche)
-- Avant : `C:\Users\blanc\AppData\Local\CineSort\webview\EBWebView\` (37.86 MB)
+- Cache purge : `C:\Users\<utilisateur>\AppData\Local\CineSort\webview\` (toute la branche)
+- Avant : `C:\Users\<utilisateur>\AppData\Local\CineSort\webview\EBWebView\` (37.86 MB)
 - Apres : absent.
 
 **Marqueurs** : [OPERATIONNEL] purge effectuee et verifiee. Aucun fix source produit.
@@ -256,7 +256,7 @@ utilisateur preserved=True.
   `/api/run/get_status`, AUCUN fix source produit, AUCUNE publication.
 
 **Sequence executee** :
-1. Token lu : `C:\Users\blanc\AppData\Local\CineSort\settings.json` (lecture
+1. Token lu : `C:\Users\<utilisateur>\AppData\Local\CineSort\settings.json` (lecture
    binaire + strip BOM EF BB BF + parse JSON). `rest_api_token` non-vide,
    `rest_api_port=8642`.
 2. Lancement app : `python app.py --api` (mode REST sans UI, code source courant
@@ -268,9 +268,9 @@ utilisateur preserved=True.
    (`{"ok": true, "version": "1.5.2-beta", "ts": 1780955778.43, ...}`).
 4. POST start_plan : `POST /api/run/start_plan` avec
    header `Authorization: Bearer <token>` et body
-   `{"settings":{"library_path":"C:/Users/blanc/projects/CineSort/test_library"}}`.
+   `{"settings":{"library_path":"C:/Users/<utilisateur>/projects/CineSort/test_library"}}`.
    - Reponse : `{"ok": true, "run_id": "20260608_235635_141",
-     "run_dir": "C:\\Users\\blanc\\AppData\\Local\\CineSort\\runs\\tri_films_20260608_235635_141"}`
+     "run_dir": "C:\\Users\\<utilisateur>\\AppData\\Local\\CineSort\\runs\\tri_films_20260608_235635_141"}`
 5. Polling : `POST /api/run/get_status {"run_id":"20260608_235635_141"}`.
    - Run termine quasi-instantanement (15 dossiers, 17 rows generes).
    - Status final : `{"ok": true, "running": false, "done": true,
@@ -283,7 +283,7 @@ utilisateur preserved=True.
 - Le body `start_plan {"settings":{"library_path":"..."}}` n'override PAS les
   roots persistants dans `settings.json` (les 4 roots configures : 2 OMV + 2
   test_library/RootA et RootB).
-- ROOTS=[\\OMV\Media\Films, \\OMV\Media\downloads, RootA/Movies, RootB/Movies]
+- ROOTS=[\\<nas>\Media\Films, \\<nas>\Media\downloads, RootA/Movies, RootB/Movies]
   (4 roots tentes).
 - Roots OMV : inaccessibles (network share off) -> skip avec WARN.
 - Roots test_library : 2/4 scannes -> 15 dossiers decouverts, 17 rows
@@ -291,13 +291,13 @@ utilisateur preserved=True.
   une collection a generee 2+1 lignes vs 1 dossier).
 
 **Plan localise** :
-- Run dir : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\`
+- Run dir : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\`
 - Fichiers presents :
   - `plan.jsonl` : 17 rows (RootA 9 + RootB 8), header verifie row_id S|...
   - `summary.txt` : 17 lignes, 11 surs, 6 a verifier, 0 ignorees, NFO=1 TMDb=0 Nom=15
   - `ui_log.txt` : trace des 17 events scan
 - Chemin canonique plan.jsonl :
-  `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
+  `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
 
 **Stats run** :
 - Dossiers scannes : 15 (RootA 9 + RootB 6)
@@ -309,18 +309,18 @@ utilisateur preserved=True.
   (le film Parasite n'a pas matche un patron annee unique, fallback name only)
 
 **Fichiers / chemins** :
-- Token source : `C:\Users\blanc\AppData\Local\CineSort\settings.json`
-- App stdout : `C:\Users\blanc\projects\CineSort\docs\internal\observe\2d_app_stdout.log`
-- App stderr : `C:\Users\blanc\projects\CineSort\docs\internal\observe\2d_app_stderr.log`
-- Plan jsonl : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
-- Summary : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\summary.txt`
-- UI log : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\ui_log.txt`
+- Token source : `C:\Users\<utilisateur>\AppData\Local\CineSort\settings.json`
+- App stdout : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\observe\2d_app_stdout.log`
+- App stderr : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\observe\2d_app_stderr.log`
+- Plan jsonl : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
+- Summary : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\summary.txt`
+- UI log : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\ui_log.txt`
 
 **Marqueurs** : [OPERATIONNEL] scan relance a neuf, plan.jsonl genere, app
 arretee proprement. [FIGE] run_id `20260608_235635_141` definitif comme
 reference post-fix pour etapes 3-4. Cache incremental hits=0 confirme que le
 reset 2b a bien purge l'etat derive. AUCUN fix source. AUCUNE publication.
-Donnees utilisateur (`\\OMV\Media`) preserved=True (skip due unreachable mais
+Donnees utilisateur (`\\<nas>\Media`) preserved=True (skip due unreachable mais
 pas modifiees).
 
 **Suite immediate (etape 3 / 4)** :
@@ -410,8 +410,8 @@ matchable vs controle negatif.
   est en cause, ce qui est etat operateur, pas etat derive a reset.
 
 **Fichiers / chemins inspectes** :
-- Plan jsonl : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
-- Summary : `C:\Users\blanc\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\summary.txt`
+- Plan jsonl : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\plan.jsonl`
+- Summary : `C:\Users\<utilisateur>\AppData\Local\CineSort\runs\tri_films_20260608_235635_141\summary.txt`
 - (lecture seule, aucune modification)
 
 **Marqueurs** : [OPERATIONNEL] inspection complete. [HYPOTHESE] rupture
@@ -445,7 +445,7 @@ python scripts/observe.py --library test_library --modes both \
     --timestamp 2026-06-08_FRESHNESS_REMEASURE
 ```
 
-**Sortie** : `C:\Users\blanc\projects\CineSort\docs\internal\observe\2026-06-08_FRESHNESS_REMEASURE\`
+**Sortie** : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\observe\2026-06-08_FRESHNESS_REMEASURE\`
 
 **Resultat global** :
 - `summary.json` -> `dashboard.mode == "dev"` (FIGE : confirme 2a operationnel, EXE pre-fix
@@ -574,7 +574,7 @@ avec le harness actuel.
 - Donnees utilisateur preserved=True (etat reel `%LOCALAPPDATA%\CineSort` non touche).
 
 **Fichiers / chemins (mesure)** :
-- Sortie capture : `C:\Users\blanc\projects\CineSort\docs\internal\observe\2026-06-08_FRESHNESS_REMEASURE\`
+- Sortie capture : `C:\Users\<utilisateur>\projects\CineSort\docs\internal\observe\2026-06-08_FRESHNESS_REMEASURE\`
 - Summary : `<sortie>\summary.json` (manifest, dashboard, desktop, cinesort_log_source)
 - Settings isole inspecte : `<sortie>\CineSort\settings.json`
 - Log app tail : `<sortie>\cinesort.log.tail.txt`
@@ -717,7 +717,7 @@ python scripts/observe.py --library test_library --fresh --dry-run  # 2eme run
 **Verification garde-fous** (a executer en live separement) :
 ```
 # library hors scope test_library -> reset DB skip
-python scripts/observe.py --library "\\OMV\Media\Films" --fresh --dry-run
+python scripts/observe.py --library "\\<nas>\Media\Films" --fresh --dry-run
 # Attendu : freshness_gate.json.h2_state.skipped_reasons contient
 # "library hors scope test_library, donnees utilisateur PROTEGEES"
 ```

@@ -7,7 +7,7 @@ export const meta = {
   ],
 }
 
-const REPO = 'C:/Users/blanc/projects/CineSort'
+const REPO = 'C:/Users/<utilisateur>/projects/CineSort'
 
 const CONTEXT = `
 CineSort = app desktop locale Windows, REST sur 127.0.0.1:8642 (cinesort/infra/rest_server.py,

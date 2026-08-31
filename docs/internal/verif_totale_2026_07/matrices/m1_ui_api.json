@@ -2,7 +2,7 @@
   "meta": {
     "generated_at": "2026-07-08T10:30:14.982735+00:00",
     "script": "docs/internal/verif_totale_2026_07/scripts_matrices/m1_ui_api.py",
-    "root": "C:\\Users\\blanc\\projects\\CineSort",
+    "root": "C:\\Users\\<utilisateur>\\projects\\CineSort",
     "js_files_scanned": 74,
     "apipost_call_sites": 193,
     "forward_rows": 198,

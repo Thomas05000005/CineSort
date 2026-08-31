@@ -1,8 +1,8 @@
 ============================= test session starts =============================
-platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\blanc\projects\CineSort\.venv\Scripts\python.exe
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\<utilisateur>\projects\CineSort\.venv\Scripts\python.exe
 cachedir: .pytest_cache
 hypothesis profile 'default'
-rootdir: C:\Users\blanc\projects\CineSort
+rootdir: C:\Users\<utilisateur>\projects\CineSort
 configfile: pyproject.toml
 plugins: hypothesis-6.152.9, asyncio-1.3.0, base-url-2.1.0, playwright-0.8.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
@@ -14,7 +14,7 @@ tests/test_lotd_chain_doublons.py::LotDDupTitleYearIdentityGuardTests::test_meme
 tests/test_lotd_chain_doublons.py::R8028FilesIdenticalQuickGuardTests::test_r8_028_middle_of_file_blind_spot XFAIL [100%]
 
 =========================== short test summary info ===========================
-XFAIL tests/test_lotd_chain_doublons.py::LotDDupBucketViewerGuardTests::test_loser_visible_dans_viewer_quarantaine - [LOTD-DUP-BUCKET-VIEWER] le loser a bien ete deplace par apply vers <state_dir>/runs/tri_films_<run>/_review/_duplicates_user_decided/ (apply_support.py:1540) mais list_quarantine_bucket ne scanne que <root>/_review (quarantine_ttl.review_root) -> viewer files_count=0, review_root=C:\Users\blanc\AppData\Local\Temp\cinesort_lotd_viewer_cm1gz17i\root\_review : le loser est invisible dans l'UI quarantaine (docstrings run_flow_support.py:1633 et run_facade.py:306 promettent <root>/_review).
+XFAIL tests/test_lotd_chain_doublons.py::LotDDupBucketViewerGuardTests::test_loser_visible_dans_viewer_quarantaine - [LOTD-DUP-BUCKET-VIEWER] le loser a bien ete deplace par apply vers <state_dir>/runs/tri_films_<run>/_review/_duplicates_user_decided/ (apply_support.py:1540) mais list_quarantine_bucket ne scanne que <root>/_review (quarantine_ttl.review_root) -> viewer files_count=0, review_root=C:\Users\<utilisateur>\AppData\Local\Temp\cinesort_lotd_viewer_cm1gz17i\root\_review : le loser est invisible dans l'UI quarantaine (docstrings run_flow_support.py:1633 et run_facade.py:306 promettent <root>/_review).
 XFAIL tests/test_lotd_chain_doublons.py::LotDDupTitleYearIdentityGuardTests::test_meme_film_annee_taggee_doit_etre_groupe - [LOTD-DUP-TITLE-YEAR] meme film / meme annee (2005) dans 2 roots mais titres proposes divergents ['Le Grand Voyage', 'Le Grand Voyage 2005'] : clean_title_guess garde l'annee dans le titre quand elle est suivie d'un tag qualite -> identites titre+annee differentes -> check_duplicates total_groups=0 (vrai doublon cross-root RATE, et cible redondante 'Titre 2005 (2005)').
 XFAIL tests/test_lotd_chain_doublons.py::R8028FilesIdenticalQuickGuardTests::test_r8_028_middle_of_file_blind_spot - [R8-028] files_identical_quick (cinesort/app/apply_core.py:340, via sha1_quick L267 : 8 premiers + 8 derniers Mo seulement) declare IDENTIQUES deux fichiers >16 Mo qui ne different qu'au milieu -> un vrai doublon 'different' peut etre fusionne/ecarte a tort.
 ======================== 1 passed, 3 xfailed in 6.77s =========================

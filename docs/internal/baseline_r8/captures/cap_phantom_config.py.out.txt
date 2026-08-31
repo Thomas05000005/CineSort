@@ -1,5 +1,5 @@
 CAPTURE PHANTOM CONFIG — baseline_r8 (READ-ONLY, 0 effet de bord)
-REPO    = C:\Users\blanc\projects\CineSort
+REPO    = C:\Users\<utilisateur>\projects\CineSort
 fichiers scannes: 230 .py (cinesort) + 86 .js (web) + 581 tests = 897
 
 ==============================================================================

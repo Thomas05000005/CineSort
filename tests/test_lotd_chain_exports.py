@@ -61,7 +61,7 @@ LIMITES observees (comportements par design, PAS des bugs) :
     n'est pas exige par le test pour rester portable.
 
 Lancer :
-  "C:/Users/blanc/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
+  "C:/Users/<utilisateur>/projects/CineSort/.venv/Scripts/python.exe" -X utf8 -m pytest \
       tests/test_lotd_chain_exports.py -q
 """
 

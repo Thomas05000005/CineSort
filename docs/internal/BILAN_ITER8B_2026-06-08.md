@@ -54,12 +54,12 @@ Aucun fix produit (app/, domain/, infra/, ui/) n'a ete touche par ce run. Le per
 | **lint** (import-linter) | VERT — 3 contracts kept, 0 broken, 225 files, 566 deps | `lint-imports` |
 | **loopback** | VERT — `dist/CineSort.exe --api` + `GET /api/health` = 200 `{ok:true, version:1.5...}` | PID 33756 |
 | **safety** | VERT — aucun secret commite, scrubber actif, branche `loop/correction-2026-06` | revue working tree |
-| **capture** | VERT — quadruplet par vue + summary.json a la racine | `C:/Users/blanc/projects/CineSort/docs/internal/observe/2026-06-08_ITER8B_FINAL_TOUTGATES/` |
+| **capture** | VERT — quadruplet par vue + summary.json a la racine | `C:/Users/<utilisateur>/projects/CineSort/docs/internal/observe/2026-06-08_ITER8B_FINAL_TOUTGATES/` |
 
 Chemin de la capture de reference (etat frais, tous gates verts ensemble) :
 
 ```
-C:/Users/blanc/projects/CineSort/docs/internal/observe/2026-06-08_ITER8B_FINAL_TOUTGATES/
+C:/Users/<utilisateur>/projects/CineSort/docs/internal/observe/2026-06-08_ITER8B_FINAL_TOUTGATES/
 ```
 
 **Acceptation = TOUS gates verts ENSEMBLE etat frais** : satisfaite.
