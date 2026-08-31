@@ -65,7 +65,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # « Erreurs : 1 » sans explication), et la clause d'etat n'attrapait pas le
     # refus du garde anti-echappement de la racine.
     ("cinesort/app/apply_core.py", "apply_rows"): 773,
-    ("cinesort/domain/quality_score.py", "compute_quality_score"): 500,
+    ("cinesort/domain/quality_score.py", "compute_quality_score"): 493,  # -7 le 2026-08-31, gain verrouille
     # Nouvelle entree : le pre-check gagne le controle du second volume.
     ("cinesort/app/disk_space_check.py", "check_disk_space_for_apply"): 101,
     ("cinesort/ui/api/library_support.py", "_build_library_rows"): 429,
@@ -101,7 +101,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # parce que deplacer soixante lignes de deplacement de fichiers au milieu
     # d'un correctif de surete des donnees enlarge le diff sur le chemin le plus
     # dangereux de l'application — cet eclatement merite sa propre verification.
-    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 364,
+    ("cinesort/ui/api/apply_support.py", "_execute_undo_ops"): 360,  # -4 le 2026-08-31, gain verrouille
     ("cinesort/ui/api/run_flow_support.py", "_build_plan_job_fn"): 304,
     ("cinesort/ui/api/perceptual_support.py", "_execute_perceptual_analysis"): 298,
     ("cinesort/app/job_runner.py", "_run_worker"): 292,
@@ -122,11 +122,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/domain/tiers_helpers.py", "apply_tier_hierarchy"): 223,
     ("cinesort/app/apply_core.py", "apply_collection_item"): 217,
     ("cinesort/app/apply_core.py", "move_duplicate_losers_to_user_decided"): 214,
-    ("cinesort/app/apply_core.py", "apply_single"): 212,
+    ("cinesort/app/apply_core.py", "apply_single"): 203,  # -9 le 2026-08-31, gain verrouille
     ("cinesort/domain/scan_helpers.py", "_walk"): 211,
     ("cinesort/infra/omdb_client.py", "test_connection"): 210,
     ("cinesort/infra/probe/service.py", "probe_file"): 204,
-    ("cinesort/ui/api/film_support.py", "_get_film_full_impl"): 197,
+    ("cinesort/ui/api/film_support.py", "_get_film_full_impl"): 195,  # -2 le 2026-08-31, gain verrouille
     ("cinesort/ui/api/dashboard_support.py", "get_global_stats"): 196,
     ("cinesort/app/apply_core.py", "move_file_with_collision_policy"): 195,
     ("cinesort/ui/api/quality_report_support.py", "get_quality_report"): 195,
@@ -137,9 +137,12 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_support.py", "_row_matches"): 187,
     ("cinesort/app/apply_core.py", "move_marked_for_deletion_to_bucket"): 185,
     ("cinesort/ui/api/apply_support.py", "undo_selected_rows"): 184,
-    ("cinesort/ui/api/library_actions_support.py", "_rematch_tmdb_and_update_plan"): 184,
+    (
+        "cinesort/ui/api/library_actions_support.py",
+        "_rematch_tmdb_and_update_plan",
+    ): 176,  # -8 le 2026-08-31, gain verrouille
     ("cinesort/infra/integrations/poster_proxy.py", "fetch_and_cache"): 180,
-    ("cinesort/domain/quality_score.py", "_score_video"): 175,
+    ("cinesort/domain/quality_score.py", "_score_video"): 150,  # -25 le 2026-08-31, gain verrouille
     # 175 -> 176 : l'insight « DNR partiel » etait le dernier site de cette
     # fonction a compter sur les 20 derniers runs au lieu du dernier scan. UNE
     # ligne (`dnr_run_ids`), et la fonction etait pile a son plafond. Le
@@ -161,11 +164,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/perceptual_support.py", "get_perceptual_compare_frames"): 157,
     ("cinesort/app/apply_batches_reconciliation.py", "reconcile_pending_batches"): 155,
     ("cinesort/app/apply_rollback.py", "rollback_forward"): 155,
-    ("cinesort/domain/duplicate_multi_signal.py", "_phase_b_fuzzy_title"): 154,
+    ("cinesort/domain/duplicate_multi_signal.py", "_phase_b_fuzzy_title"): 137,  # -17 le 2026-08-31, gain verrouille
     ("cinesort/ui/api/library_timeline_support.py", "_get_library_timeline_impl"): 153,
     ("cinesort/ui/api/settings_support.py", "write_settings"): 152,
     ("cinesort/domain/perceptual/composite_score.py", "detect_cross_verdicts"): 150,
-    ("cinesort/infra/rest_server.py", "_handle_post"): 150,
+    ("cinesort/infra/rest_server.py", "_handle_post"): 147,  # -3 le 2026-08-31, gain verrouille
     # 150 -> 170 : le pre-check d'espace disque regarde desormais le SECOND
     # volume (les bacs vivent sous le state_dir, pas sous la bibliotheque).
     ("cinesort/ui/api/apply_support.py", "_validate_apply"): 170,
@@ -184,7 +187,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/perceptual_support.py", "_video_task"): 136,
     ("cinesort/domain/film_history.py", "get_film_timeline"): 133,
     ("cinesort/domain/perceptual/composite_score_v2.py", "apply_contextual_adjustments"): 133,
-    ("cinesort/app/plugin_hooks.py", "_run_plugin"): 132,
+    ("cinesort/app/plugin_hooks.py", "_run_plugin"): 108,  # -24 le 2026-08-31, gain verrouille
     ("cinesort/app/plan_support_replan.py", "_plan_tv_episode"): 131,
     ("cinesort/infra/probe/_normalize_ffprobe.py", "_extract_ffprobe"): 131,
     ("cinesort/ui/api/quality_report_support.py", "_probe_and_score"): 131,
@@ -209,7 +212,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/library_podiums_support.py", "_get_library_podiums_impl"): 120,
     ("cinesort/infra/db/repositories/decisions.py", "upgrade_deferred_to_accepted"): 118,
     ("cinesort/app/watchlist.py", "compare_watchlist"): 117,
-    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 109,
+    ("cinesort/domain/scene_parser.py", "parse_scene_title"): 107,  # -2 le 2026-08-31, gain verrouille
     ("cinesort/domain/duplicate_compare.py", "compare_by_criteria"): 116,
     ("cinesort/domain/video_hash.py", "extract_video_thumbnails"): 116,
     # 114 -> 108 : la route jaquettes a ete documentee et durcie le 2026-08-29,
@@ -230,7 +233,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 161,
     ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 114,
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
-    ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 114,
+    ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 105,  # -9 le 2026-08-31, gain verrouille
     ("cinesort/infra/db/sqlite_store.py", "_bootstrap_schema_latest"): 112,
     # `_save_settings_payload_locked` a quitte cette liste : sa chaine de sections
     # est passee dans `_appliquer_les_sections`, et elle est repassee sous le
@@ -350,6 +353,41 @@ def test_les_fonctions_listees_ne_grossissent_pas():
         "Les decouper, ou (si justifie) monter leur plafond dans PLAFONDS — "
         "ce qui doit rester un choix explicite en review. Detail : "
         + ", ".join(f"{rel}:{name} ({loc} > {plafond})" for rel, name, loc, plafond in depassements)
+    )
+
+
+def test_les_plafonds_ne_sont_pas_PERIMES():
+    """LE CLIQUET DESCEND AUSSI. Un gain non verrouille se reperd.
+
+    `test_les_fonctions_listees_ne_grossissent_pas` n'echoue que sur
+    `loc > plafond`, et `test_allowlist_has_no_stale_entries` ne se declenche
+    que si la fonction repasse sous MAX_LINES. Entre les deux, une fonction
+    pouvait FONDRE sans que rien ne bronche : `apply_rows` etait plafonnee a
+    773 ; descendue a 200, elle rouvrait 573 lignes de marge silencieuse sur le
+    chemin qui deplace les films de l'utilisateur. Le fichier revendiquait
+    « marge ZERO » — c'etait vrai a la hausse, faux a la baisse.
+
+    Mesure du 2026-08-31 : ONZE plafonds etaient perimes, pour 110 lignes de
+    marge rouverte — dont `_score_video` (150 pour 175) et `apply_single`
+    (203 pour 212), tous deux issus d'extractions faites LE JOUR MEME. Un gain
+    obtenu le matin etait deja rendu l'apres-midi.
+
+    C'est le patron que le depot applique deja trois fois : `bandit.yml`
+    (« GAIN A VERROUILLER »), `mypy.yml`, et
+    `test_sqlite_error_hors_oserror_cliquet.py:test_le_plafond_n_est_pas_PERIME`.
+    """
+    reels = {(rel, name): loc for rel, name, loc in _iter_oversized_functions()}
+    perimes = []
+    for (rel, name), plafond in sorted(PLAFONDS.items()):
+        loc = reels.get((rel, name))
+        if loc is not None and loc < plafond:
+            perimes.append((rel, name, loc, plafond))
+
+    assert not perimes, (
+        f"{len(perimes)} plafond(s) PERIME(S) : la fonction a fondu, le plafond non. "
+        "Inscrire la nouvelle valeur dans PLAFONDS pour verrouiller le gain — "
+        "sinon la marge se reperd en silence. Detail : "
+        + ", ".join(f"{rel}:{name} = {loc} (plafond {plafond})" for rel, name, loc, plafond in perimes)
     )
 
 
