@@ -1587,6 +1587,67 @@ async function _genererLesNfo(runId, btn) {
   });
 }
 
+// Ce que la modale de « Supprimer ce run » doit dire, et qu'elle ne disait pas.
+//
+// `run/delete_run` ne deplace AUCUN fichier video — c'est vrai, et l'ancienne
+// phrase s'arretait la : « Aucune modification sur les fichiers vidéo du
+// disque. » Mais la suppression emporte `apply_batches` et, par CASCADE,
+// `apply_operations` (`infra/db/repositories/run.py`, purge dediee du batch) :
+// le journal grace auquel `run/undo_last_apply` remet les dossiers a leur place.
+// `build_undo_preview_payload` echoue alors DEUX fois — `_find_run_row` ne
+// trouve plus la ligne `runs`, et `get_last_reversible_apply_batch` plus le
+// batch.
+//
+// La phrase rassurait donc exactement la ou la perte a lieu, et le bouton
+// « ↺ Annuler l'apply » est rendu juste au-dessus, pour le MEME run. La regle
+// n3 du depot exige que la modale annonce LA CONSEQUENCE : la voici.
+//
+// Formulation inconditionnelle a dessein : le handler ne dispose que du
+// `run_id`, et un run sans apply n'a pas de journal a perdre — la phrase reste
+// vraie, seulement sans objet.
+// Ce que la modale annonce est CONDITIONNEL : le handler sait si l'undo est
+// encore possible (`data-undo-possible`), et avertir d'une perte qui n'existe
+// pas serait le defaut inverse.
+//
+// Trois familles de pertes, mesurees sur `_TABLES_PORTANT_RUN_ID`
+// (`infra/db/repositories/run.py`) et non devinees :
+//
+// 1. LE JOURNAL D'APPLY. `delete_run` emporte `apply_batches` et, par CASCADE,
+//    `apply_operations` : le journal grace auquel `run/undo_last_apply` remet
+//    les dossiers a leur place. `build_undo_preview_payload` echoue alors DEUX
+//    fois — `_find_run_row` ne trouve plus la ligne `runs`, et
+//    `get_last_reversible_apply_batch` plus le batch.
+//
+// 2. LES DECISIONS PRISES SUR CE RUN. `duplicate_decisions`,
+//    `film_marked_for_deletion`, `film_tmdb_overrides` et
+//    `user_quality_feedback` portent toutes `run_id` DANS leur cle d'identite :
+//    leur purge est correcte — ces lignes n'ont aucun sens sans le run. Mais
+//    l'utilisateur les perd sans en etre averti, et ce sont des heures
+//    d'arbitrage manuel. (`film_field_locks` est le seul cas ou `run_id` est
+//    HORS de l'identite : le code la DETACHE au lieu de la supprimer, donc les
+//    verrous de champ survivent.)
+//
+// 3. CE QUI NE SE PERD PAS, et qu'il faut dire aussi. Le plan, le log et le
+//    fichier de validation RESTENT sur disque (docstring de `delete_run`) : ils
+//    partent a la rotation de retention. Une version anterieure de cette modale
+//    annoncait leur suppression immediate — rassurer a tort et alarmer a tort
+//    sont le meme defaut.
+function _consequenceSuppressionRun(undoEncorePossible) {
+  return (
+    (undoEncorePossible
+      ? "⚠ L'annulation de cet apply deviendra DÉFINITIVEMENT impossible : " +
+        "supprimer le run efface le journal qui la rend possible. " +
+        "Si vous pensiez pouvoir revenir en arrière, annulez l'apply AVANT. "
+      : "") +
+    "L'entrée disparaît de l'historique, avec son journal d'apply. " +
+    "Sont aussi perdues les décisions prises sur ce run : doublons tranchés, " +
+    "films marqués pour suppression, corrections TMDb et retours qualité. " +
+    "Le plan, le log et le fichier de validation NE sont PAS supprimés : " +
+    "ils partiront à la rotation de rétention. " +
+    "Aucune modification sur les fichiers vidéo du disque. Action NON réversible."
+  );
+}
+
 function _onActionClick(ev) {
   // Tab clicks dans l'inspector
   const tabBtn = ev.target.closest && ev.target.closest("[data-historique-inspector-tab]");
@@ -1663,16 +1724,7 @@ function _onActionClick(ev) {
       dangerConfirmModal({
         title: `Supprimer le run ${runId} de l'historique ?`,
         items: [`Run ${runId}`],
-        consequence:
-          (undoEncorePossible
-            ? "⚠ L'annulation de cet apply deviendra DÉFINITIVEMENT impossible : " +
-              "supprimer le run efface le journal qui la rend possible. " +
-              "Si vous pensiez pouvoir revenir en arrière, annulez l'apply AVANT. "
-            : "") +
-          "L'entrée disparaît de l'historique, avec son journal d'apply. " +
-          "Le plan, le log et le fichier de validation NE sont PAS supprimés : " +
-          "ils partiront à la rotation de rétention. " +
-          "Aucune modification sur les fichiers vidéo du disque. Action NON réversible.",
+        consequence: _consequenceSuppressionRun(undoEncorePossible),
         countdownSeconds: 3,
         confirmLabel: "✗ Supprimer le run",
         onConfirm: () => _doDeleteRun(runId),
