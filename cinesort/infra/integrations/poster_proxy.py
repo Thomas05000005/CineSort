@@ -190,8 +190,30 @@ MAX_POSTER_BYTES = 5 * 1024 * 1024
 #: TTL HTTP pour la cache-control client (30 jours, immutable).
 CACHE_CONTROL_MAX_AGE = 30 * 24 * 3600
 
-#: Timeout HTTP du fetch TMDb (secondes).
+#: Timeout HTTP du fetch TMDb, **PAR TENTATIVE** (secondes).
+#:
+#: Ce n'est PAS la borne de `fetch_and_cache` : `requests` applique ce timeout a
+#: chaque tentative (la session en fait jusqu'a `max_attempts` de plus, avec le
+#: backoff en supplement), et il ne borne qu'une LECTURE DE SOCKET, jamais la
+#: duree totale de la lecture du corps. Cf. `STREAM_BUDGET_S`.
 FETCH_TIMEOUT_S = 10.0
+
+#: Borne MURALE de la lecture du corps de la reponse (secondes).
+#:
+#: `GET /api/poster` s'execute dans un thread du serveur REST. Sans cette borne,
+#: un pair qui envoie un chunk juste avant l'expiration du timeout de lecture ne
+#: declenche jamais aucun timeout : la boucle `iter_content` ne s'arrete qu'au
+#: plafond de TAILLE (`MAX_POSTER_BYTES`). Mesure avant correctif, avec une
+#: horloge simulee et un chunk toutes les 9 s :
+#:
+#:     641 lectures, 5769 s de thread retenu (1 h 36) pour UNE jaquette
+#:
+#: 20 s laisse largement de quoi telecharger 5 Mio sur une liaison normale tout
+#: en gardant l'ordre de grandeur du timeout par tentative. La borne est
+#: verifiee ENTRE deux chunks : le pire cas reel est donc
+#: `STREAM_BUDGET_S + FETCH_TIMEOUT_S` (on ne peut pas interrompre une lecture
+#: de socket deja engagee).
+STREAM_BUDGET_S = 20.0
 
 #: Categories d'erreur retournees par fetch_and_cache (utilisees par serve_poster
 #: pour mapper vers les codes HTTP appropries).
@@ -350,11 +372,129 @@ def _atomic_write(target: Path, payload: bytes) -> None:
     atomic_write_bytes(target, payload)
 
 
+def _resoudre_url_cdn(
+    tmdb_client: Any,
+    tmdb_id: int,
+    size: str,
+    force: bool,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Rend `(url_cdn, None)` ou `(None, error_code)`.
+
+    Extrait de `fetch_and_cache` pour tenir le budget de taille de fonction
+    (`tests/test_function_size_budget.py`).
+
+    `force` porte le SECOND saut de cache du rafraichissement : `get_or_fetch`
+    saute le cache des images sur disque, mais le `poster_path` vient du cache
+    JSON de `tmdb_client` (TTL 30 jours par defaut). Sans ce saut-ci, l'URL
+    reconstruite est identique a la precedente et le bouton « Recuperer
+    jaquettes » retelecharge la MEME image jusqu'a l'expiration du TTL.
+    """
+    try:
+        if force:
+            # `force_refresh` saute la LECTURE du cache JSON sans le purger :
+            # le repli sur l'entree perimee survit si TMDb est injoignable
+            # (cf. `tmdb_client._get_movie_detail_cached`).
+            poster_path = tmdb_client.get_movie_poster_path(tmdb_id, force_refresh=True)
+        else:
+            poster_path = tmdb_client.get_movie_poster_path(tmdb_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort, on log et fallback
+        logger.warning("poster_proxy resolve poster_path failed id=%d: %s", tmdb_id, exc)
+        return None, ERR_UPSTREAM_ERROR
+
+    if not poster_path:
+        # TMDb n'a pas de poster pour cet id (ou id inexistant) -> 404 ephemere.
+        return None, ERR_NO_POSTER
+
+    # Sanitize : doit matcher la regex stricte (no `..`, no slash multiple).
+    if not POSTER_PATH_REGEX.match(poster_path):
+        logger.warning(
+            "poster_proxy cache pollue id=%d size=%s poster_path_invalide",
+            tmdb_id,
+            size,
+        )
+        return None, ERR_CACHE_POLLUTED
+
+    # URL CDN construite cote serveur (jamais une valeur libre du client).
+    return f"https://image.tmdb.org/t/p/{size}{poster_path}", None
+
+
+def _lire_corps_borne(
+    response: Any,
+    tmdb_id: int,
+    size: str,
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Lit le corps sous DEUX bornes. Rend `(payload, None)` ou `(None, error_code)`.
+
+    - TAILLE : `MAX_POSTER_BYTES` (5 Mio), anti-DoS memoire. Elle existait deja.
+    - DUREE : `STREAM_BUDGET_S`, anti-retention du thread du serveur REST. Elle
+      MANQUAIT. `FETCH_TIMEOUT_S` ne borne qu'une lecture de socket : un pair qui
+      livre un chunk juste avant son expiration ne declenche jamais de timeout,
+      et cette boucle ne s'arretait qu'au plafond de taille. Mesure avec une
+      horloge simulee et un chunk toutes les 9 s : **641 lectures, 5769 s de
+      thread retenu** (1 h 36) pour une seule jaquette.
+
+    La borne de duree est verifiee ENTRE deux chunks — on ne peut pas
+    interrompre une lecture de socket deja engagee, elle-meme bornee par
+    `FETCH_TIMEOUT_S`.
+    """
+    stream_deadline = time.monotonic() + STREAM_BUDGET_S
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in response.iter_content(chunk_size=8192):
+            # Inegalite NON STRICTE : cf. #1183 (`apply_core.py:360-371`), ou une
+            # comparaison stricte sur une horloge a granularite rendait la garde
+            # inoperante — `ecoule > 0` est faux quand deux lectures consecutives
+            # de l'horloge rendent la meme valeur.
+            if time.monotonic() >= stream_deadline:
+                logger.info(
+                    "poster_proxy lecture trop lente id=%d size=%s bytes=%d budget=%.0fs",
+                    tmdb_id,
+                    size,
+                    total,
+                    STREAM_BUDGET_S,
+                )
+                return None, ERR_OFFLINE
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_POSTER_BYTES:
+                logger.warning(
+                    "poster_proxy payload trop volumineux id=%d size=%s bytes=%d",
+                    tmdb_id,
+                    size,
+                    total,
+                )
+                return None, ERR_UPSTREAM_ERROR
+            chunks.append(chunk)
+    except (requests.RequestException, ConnectionError, TimeoutError) as exc:
+        logger.info(
+            "poster_proxy stream read error id=%d size=%s err=%s",
+            tmdb_id,
+            size,
+            type(exc).__name__,
+        )
+        return None, ERR_OFFLINE
+    finally:
+        # Le `finally` couvre TOUTES les sorties, y compris les abandons
+        # ci-dessus : la connexion n'est jamais laissee ouverte.
+        with contextlib.suppress(Exception):
+            response.close()
+
+    payload = b"".join(chunks)
+    if not payload:
+        logger.warning("poster_proxy empty payload id=%d size=%s", tmdb_id, size)
+        return None, ERR_UPSTREAM_ERROR
+    return payload, None
+
+
 def fetch_and_cache(
     tmdb_client: Any,
     cache_root: Path,
     tmdb_id: int,
     size: str,
+    *,
+    force: bool = False,
 ) -> Tuple[Optional[Path], Optional[str], Optional[str]]:
     """Fetch un poster TMDb cote serveur et l'ecrit dans le cache disque.
 
@@ -369,6 +509,14 @@ def fetch_and_cache(
         Identifiant TMDb deja valide.
     size : str
         Taille TMDb deja validee (`w92`, `w185`, `w342`, `w500`).
+    force : bool
+        Rafraichissement demande par l'utilisateur. Il y a DEUX caches sur ce
+        chemin : celui des images sur disque (gere par `get_or_fetch`) et celui
+        du `poster_path` dans `tmdb_client` (JSON, TTL 30 jours par defaut).
+        Sauter le premier sans sauter le second reconstruit la MEME URL CDN :
+        le « rafraichissement » retelecharge alors octet pour octet l'image
+        deja connue, et une nouvelle jaquette publiee par TMDb reste
+        inatteignable jusqu'a l'expiration du TTL.
 
     Returns
     -------
@@ -384,29 +532,14 @@ def fetch_and_cache(
       (CDN public). Aucun secret n'est inclus dans l'URL ni les logs.
     - `allow_redirects=False` (TMDb ne redirige pas, defense en profondeur).
     - Stream lecture avec limit 5 MB (`MAX_POSTER_BYTES`) pour borner memoire.
+    - Borne MURALE de l'appel : la connexion (et ses retentatives) est bornee
+      par `FETCH_TIMEOUT_S` PAR TENTATIVE, la lecture du corps par
+      `STREAM_BUDGET_S`. `FETCH_TIMEOUT_S` seul ne borne pas cette fonction.
     """
-    # 1. Resoudre poster_path via le cache TMDb existant.
-    try:
-        poster_path = tmdb_client.get_movie_poster_path(tmdb_id)
-    except Exception as exc:  # noqa: BLE001 — best-effort, on log et fallback
-        logger.warning("poster_proxy resolve poster_path failed id=%d: %s", tmdb_id, exc)
-        return None, None, ERR_UPSTREAM_ERROR
-
-    if not poster_path:
-        # TMDb n'a pas de poster pour cet id (ou id inexistant) -> 404 ephemere.
-        return None, None, ERR_NO_POSTER
-
-    # 2. Sanitize : doit matcher la regex stricte (no `..`, no slash multiple).
-    if not POSTER_PATH_REGEX.match(poster_path):
-        logger.warning(
-            "poster_proxy cache pollue id=%d size=%s poster_path_invalide",
-            tmdb_id,
-            size,
-        )
-        return None, None, ERR_CACHE_POLLUTED
-
-    # 3. Construire l'URL CDN cote serveur (jamais valeur libre client).
-    url = f"https://image.tmdb.org/t/p/{size}{poster_path}"
+    # 1-3. Resoudre poster_path (cache TMDb), le sanitizer, construire l'URL CDN.
+    url, resolve_error = _resoudre_url_cdn(tmdb_client, tmdb_id, size, force)
+    if url is None:
+        return None, None, resolve_error
 
     # 4. Fetch HTTP avec garde-fous.
     session = _get_session()
@@ -455,41 +588,10 @@ def fetch_and_cache(
         )
         return None, None, ERR_UPSTREAM_ERROR
 
-    # 5. Lire en streaming avec borne 5 MB (anti-DoS memoire).
-    chunks: list[bytes] = []
-    total = 0
-    try:
-        for chunk in response.iter_content(chunk_size=8192):
-            if not chunk:
-                continue
-            total += len(chunk)
-            if total > MAX_POSTER_BYTES:
-                with contextlib.suppress(Exception):
-                    response.close()
-                logger.warning(
-                    "poster_proxy payload trop volumineux id=%d size=%s bytes=%d",
-                    tmdb_id,
-                    size,
-                    total,
-                )
-                return None, None, ERR_UPSTREAM_ERROR
-            chunks.append(chunk)
-    except (requests.RequestException, ConnectionError, TimeoutError) as exc:
-        logger.info(
-            "poster_proxy stream read error id=%d size=%s err=%s",
-            tmdb_id,
-            size,
-            type(exc).__name__,
-        )
-        return None, None, ERR_OFFLINE
-    finally:
-        with contextlib.suppress(Exception):
-            response.close()
-
-    payload = b"".join(chunks)
-    if not payload:
-        logger.warning("poster_proxy empty payload id=%d size=%s", tmdb_id, size)
-        return None, None, ERR_UPSTREAM_ERROR
+    # 5. Lire le corps sous DEUX bornes (taille et duree).
+    payload, read_error = _lire_corps_borne(response, tmdb_id, size)
+    if payload is None:
+        return None, None, read_error
 
     # 6. Cache file path + defense en profondeur (sous cache_root.resolve()).
     try:
@@ -526,7 +628,7 @@ def fetch_and_cache(
         tmdb_id,
         size,
         ext,
-        total,
+        len(payload),
         (time.monotonic() - _t0) * 1000,
     )
     return cache_file, content_type, None
@@ -621,7 +723,11 @@ def get_or_fetch(
     force : bool
         Refresh demande par l'utilisateur (« Recuperer jaquettes », `force=1`).
         Le cache disque est IGNORE en lecture, mais il n'est PAS efface avant le
-        fetch — cf. la note ci-dessous.
+        fetch — cf. la note ci-dessous. Le drapeau est TRANSMIS a
+        `fetch_and_cache`, qui saute a son tour le cache JSON du `poster_path` :
+        sans ce second saut, l'URL CDN reconstruite reste celle de l'ancienne
+        jaquette et le rafraichissement ne peut rien rafraichir avant
+        l'expiration du TTL (30 jours par defaut).
 
     Returns
     -------
@@ -656,7 +762,7 @@ def get_or_fetch(
 
     # 2. Cache miss (ou refresh force) -> fetch TMDb.
     logger.debug("poster_proxy cache miss id=%d size=%s force=%s", tmdb_id, size, force)
-    cache_file, content_type, error_code = fetch_and_cache(tmdb_client, cache_root, tmdb_id, size)
+    cache_file, content_type, error_code = fetch_and_cache(tmdb_client, cache_root, tmdb_id, size, force=force)
     if error_code is None:
         if force:
             _purge_stale_extensions(cache_root, size, tmdb_id, keep=cache_file)

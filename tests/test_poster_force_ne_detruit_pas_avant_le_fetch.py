@@ -75,10 +75,18 @@ class _EnTetesInsensibles:
 
 
 class _FakeTmdbClient:
+    """Signature ALIGNEE sur `TmdbClient.get_movie_poster_path`.
+
+    `force_refresh` y est present depuis E4-bis ; le proxy le transmet depuis le
+    LOT 6 (« force=1 relisait le cache JSON TMDb »). Un faux client qui ne
+    l'accepte pas fait echouer la resolution du chemin, pas le comportement
+    teste ici.
+    """
+
     def __init__(self, poster_path: str = "/abc123.jpg") -> None:
         self.poster_path = poster_path
 
-    def get_movie_poster_path(self, movie_id: int) -> str:  # noqa: ARG002
+    def get_movie_poster_path(self, movie_id: int, force_refresh: bool = False) -> str:  # noqa: ARG002
         return self.poster_path
 
 

@@ -81,7 +81,9 @@ class _FakeTmdbClient:
     def __init__(self) -> None:
         self.calls = 0
 
-    def get_movie_poster_path(self, movie_id: int) -> str | None:  # noqa: ARG002
+    # `force_refresh` : signature alignee sur le vrai `TmdbClient` (le proxy le
+    # transmet depuis le LOT 6).
+    def get_movie_poster_path(self, movie_id: int, force_refresh: bool = False) -> str | None:  # noqa: ARG002
         self.calls += 1
         return "/legit.jpg"
 

@@ -1032,6 +1032,14 @@ class TmdbClient:
             self._debug(f"find_by_imdb_id warning imdb_id={iid} error={exc}")
             return None
 
+        # Meme garde que `search` / `_get_movie_detail_cached` : `r.json()` peut
+        # rendre une liste ou une chaine, sur lesquelles `.get()` leve une
+        # `AttributeError` que le `except` ci-dessus n'attrape pas — et qui
+        # s'echapperait de toute facon, l'appel etant HORS du `try`.
+        if not isinstance(data, dict):
+            self._debug(f"find_by_imdb_id warning imdb_id={iid} error=payload_non_dict")
+            return None
+
         movies = data.get("movie_results") or []
         if not movies:
             self._cache_set(cache_key, "")
@@ -1040,6 +1048,12 @@ class TmdbClient:
             return None
 
         m = movies[0]
+        if not isinstance(m, dict):
+            # Reponse MALFORMEE, pas une absence de resultat : on ne la met PAS
+            # en cache (motif R8-041 — figer un hoquet TMDb pour la duree du
+            # TTL). Le prochain appel re-interrogera l'API.
+            self._debug(f"find_by_imdb_id warning imdb_id={iid} error=element_non_dict")
+            return None
         release = m.get("release_date") or ""
         y = int(release[:4]) if len(release) >= 4 and release[:4].isdigit() else None
         result = TmdbResult(
@@ -1105,10 +1119,20 @@ class TmdbClient:
         except (requests.RequestException, CircuitOpenError, ValueError):
             return []
 
+        # Jumeau TV de la garde de `search` : un corps JSON valide mais non-dict
+        # (`[]`, `"texte"`) faisait lever `AttributeError` HORS du `try`.
+        if not isinstance(data, dict):
+            self._debug(f"search_tv warning query={q_norm} year={year} error=payload_non_dict")
+            return []
+
         results_raw = data.get("results") or []
         out: List[TmdbTvResult] = []
         cache_items: List[Dict[str, Any]] = []
         for item in results_raw[:max_results]:
+            # Filtre PAR ELEMENT, comme `search` : un seul element non-dict dans
+            # la liste faisait perdre TOUS les autres resultats.
+            if not isinstance(item, dict):
+                continue
             fad = str(item.get("first_air_date") or "")
             fad_year = int(fad[:4]) if len(fad) >= 4 and fad[:4].isdigit() else None
             tv = TmdbTvResult(
@@ -1165,6 +1189,16 @@ class TmdbClient:
             resp.raise_for_status()
             data = resp.json()
         except (requests.RequestException, CircuitOpenError, ValueError):
+            return None
+
+        # Troisieme site du meme motif : `.get()` hors du `try`, sur un corps
+        # dont rien ne garantit qu'il soit un objet. On ne met RIEN en cache ici
+        # (une reponse malformee n'est pas un episode sans titre).
+        if not isinstance(data, dict):
+            self._debug(
+                f"get_tv_episode_title warning series_id={series_id} "
+                f"s={season_number} e={episode_number} error=payload_non_dict"
+            )
             return None
 
         title = str(data.get("name") or "").strip() or None
