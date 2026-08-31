@@ -592,6 +592,70 @@ class RunRepository(_BaseRepository):
             return 0
         return int(cur.rowcount or 0)
 
+    def _purger_les_batches_du_run(self, conn: Any, rid: str) -> tuple[int, int, int]:
+        """Supprime les batches du run ET tout ce qui pend a leur `batch_id`.
+
+        Rend `(operations, modes, batches)` — trois comptes distincts pour que
+        l'appelant les additionne sans avoir a redemander a la base.
+
+        A APPELER AVANT `DELETE FROM runs` : `apply_batches` n'a pas de FK
+        CASCADE sur `run_id`, et `apply_operations` ne peut etre COMPTE qu'avant
+        la disparition de son batch parent.
+
+        Issue #448 : la version precedente lisait les batch_id en Python puis
+        rejouait la liste ENTIERE en parametres lies, dans un `IN` non borne —
+        au-dela de SQLITE_MAX_VARIABLE_NUMBER la suppression levait « too many
+        SQL variables ». Le sous-requetage garde exactement le meme ensemble de
+        lignes (meme predicat `run_id=?`, meme instant dans la transaction) avec
+        UN parametre par instruction, quel que soit le nombre de batches.
+
+        LOT 3 / A — `apply_batch_modes` n'etait dans AUCUNE des deux listes de
+        `delete_run`. La table (migration 029) est indexee par `batch_id` et n'a
+        pas de colonne `run_id` : l'invariant de symetrie du #984, qui itere
+        `_TABLES_PORTANT_RUN_ID`, ne pouvait donc pas la voir. Elle n'a pas non
+        plus de cle etrangere vers `apply_batches` — 029:15-19 le documente comme
+        un choix delibere — donc aucune CASCADE ne l'atteint. Ses lignes
+        survivaient POUR TOUJOURS, et le cron de retention (90 j) passe par ici :
+        la fuite etait cumulative sur toute la vie de l'installation.
+
+        Ce n'etait pas qu'une fuite d'espace. `_list_inprogress_rollbacks`
+        (app/apply_batches_reconciliation.py) lit cette table A CHAQUE BOOT et
+        relance `rollback_forward` sur tout batch `IN_PROGRESS`. Une ligne
+        orpheline y restait eligible a vie, pour un batch dont les operations
+        n'existent plus : reconciliation a vide, a chaque demarrage.
+
+        CE QU'ON NE PURGE PAS, ET POURQUOI. `apply_pending_moves` porte aussi un
+        `batch_id` sans cle etrangere, mais c'est le JOURNAL WRITE-AHEAD des
+        deplacements DEJA FAITS SUR DISQUE (019:1-7), relu au boot par
+        `move_reconciliation`. Meme taxonomie que les sections 1 et 4 de la
+        migration 021 : ce qui trace une action irreversible survit, ce qui n'est
+        qu'une metadonnee de batch part avec lui.
+        """
+        cur = conn.execute(
+            "SELECT COUNT(*) AS n FROM apply_operations"
+            " WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
+            (rid,),
+        )
+        operations = int(cur.fetchone()["n"] or 0)
+
+        # `apply_batch_modes` n'existe pas avant la migration 029 : meme tolerance
+        # BORNEE que la boucle de `delete_run` (table absente seulement, jamais un
+        # verrou ni une E/S), sans quoi `delete_run` casserait sur une base v28.
+        try:
+            cur = conn.execute(
+                "DELETE FROM apply_batch_modes WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
+                (rid,),
+            )
+            modes = int(cur.rowcount or 0)
+        except sqlite3.OperationalError as exc:
+            if not self._is_missing_table_error(exc, "apply_batch_modes"):
+                raise
+            modes = 0
+
+        # En dernier : les deux requetes ci-dessus dependent de `apply_batches`.
+        cur = conn.execute("DELETE FROM apply_batches WHERE run_id=?", (rid,))
+        return operations, modes, int(cur.rowcount or 0)
+
     def run_id_est_utilise(self, run_id: str) -> bool:
         """Vrai si ce `run_id` est pris — y compris par une ligne ORPHELINE.
 
@@ -710,71 +774,11 @@ class RunRepository(_BaseRepository):
                     continue
                 enfants_supprimes += int(cur.rowcount or 0)
 
-            # apply_batches n'a PAS de FK CASCADE sur run_id — purge des batches
-            # AVANT de supprimer le run pour pouvoir compter les operations
-            # rattachees (apply_operations CASCADE sur batch_id).
-            #
-            # Issue #448 : la version precedente lisait les batch_id en Python
-            # puis rejouait la liste ENTIERE en parametres lies, dans un `IN` non
-            # borne — au-dela de SQLITE_MAX_VARIABLE_NUMBER la suppression levait
-            # « too many SQL variables ». Le sous-requetage garde exactement le
-            # meme ensemble de lignes (meme predicat `run_id=?`, meme instant
-            # dans la transaction) avec DEUX parametres au total, quel que soit
-            # le nombre de batches. Sur ce chemin destructif c'est aussi le sens
-            # restrictif : une seule instruction, donc pas d'etat mi-supprime.
-            cur = conn.execute(
-                "SELECT COUNT(*) AS n FROM apply_operations"
-                " WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
-                (rid,),
-            )
-            apply_ops_deleted = int(cur.fetchone()["n"] or 0)
-
-            # LOT 3 / A — `apply_batch_modes` n'etait dans AUCUNE des deux listes.
-            #
-            # La table (migration 029) est indexee par `batch_id` et n'a PAS de
-            # colonne `run_id` : l'invariant de symetrie du #984, qui itere
-            # `_TABLES_PORTANT_RUN_ID`, ne pouvait donc pas la voir. Elle n'a pas
-            # non plus de cle etrangere vers `apply_batches` — 029:15-19 le
-            # documente comme un choix delibere — donc aucune CASCADE ne
-            # l'atteint. Ses lignes survivaient POUR TOUJOURS a la suppression
-            # de leur run, et rien d'autre dans le depot ne les supprime.
-            #
-            # Ce n'etait pas qu'une fuite d'espace. `_list_inprogress_rollbacks`
-            # (app/apply_batches_reconciliation.py) lit cette table A CHAQUE BOOT
-            # et relance `rollback_forward` sur tout batch `IN_PROGRESS`. Une
-            # ligne orpheline y restait eligible a vie, pour un batch dont les
-            # operations n'existent plus : reconciliation a vide, a chaque
-            # demarrage, sans aucun moyen d'en sortir.
-            #
-            # Purge AVANT le DELETE des batches, meme sous-requetage borne que
-            # pour le compte ci-dessus (issue #448 : pas de `IN` deroule en
-            # parametres lies).
-            #
-            # CE QU'ON NE PURGE PAS, ET POURQUOI. `apply_pending_moves` porte
-            # aussi un `batch_id` sans cle etrangere, mais c'est le JOURNAL
-            # WRITE-AHEAD des deplacements deja faits sur disque (019:1-7), relu
-            # au boot par `move_reconciliation`. Meme taxonomie que les sections
-            # 1 et 4 de la migration 021 : ce qui trace une action irreversible
-            # survit, ce qui n'est qu'une metadonnee de batch part avec lui.
-            #
-            # La table n'existe pas avant la migration 029 : meme tolerance
-            # BORNEE que la boucle ci-dessus (table absente seulement, jamais un
-            # verrou ni une E/S), sans quoi `delete_run` casserait sur une base
-            # restee en v28.
-            try:
-                cur = conn.execute(
-                    "DELETE FROM apply_batch_modes"
-                    " WHERE batch_id IN (SELECT batch_id FROM apply_batches WHERE run_id=?)",
-                    (rid,),
-                )
-                modes_deleted = int(cur.rowcount or 0)
-            except sqlite3.OperationalError as exc:
-                if not self._is_missing_table_error(exc, "apply_batch_modes"):
-                    raise
-                modes_deleted = 0
-
-            cur = conn.execute("DELETE FROM apply_batches WHERE run_id=?", (rid,))
-            batches_deleted = int(cur.rowcount or 0)
+            # Tout ce qui pend au `batch_id` des batches de ce run — operations,
+            # modes atomiques, puis les batches eux-memes. Le detail (l'ordre
+            # impose, la borne du #448, et surtout ce qui est DELIBEREMENT
+            # epargne) vit dans `_purger_les_batches_du_run`.
+            apply_ops_deleted, modes_deleted, batches_deleted = self._purger_les_batches_du_run(conn, rid)
 
             cur = conn.execute("DELETE FROM runs WHERE run_id=?", (rid,))
             run_deleted = int(cur.rowcount or 0)
