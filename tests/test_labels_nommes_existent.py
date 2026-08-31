@@ -41,15 +41,45 @@ _RACINE = Path(__file__).resolve().parents[1]
 #: Labels reellement definis sur le depot.
 #: Mesure : 2026-08-31, 35 labels.
 #: Regenerer avec :  gh label list --limit 200 --json name -q '.[].name' | sort
-_LABELS_REELS = frozenset({
-    "architecture", "audit-2026-05-12", "backend", "blocked", "bug", "build",
-    "ci", "critical", "database", "dependencies", "documentation", "duplicate",
-    "enhancement", "frontend", "github-actions", "good first issue",
-    "help wanted", "help-wanted", "high-priority", "i18n", "invalid",
-    "needs-review", "perceptual", "performance", "python", "python:uv",
-    "question", "reliability", "security", "settings", "stale", "testing",
-    "tests", "ux", "wontfix",
-})
+_LABELS_REELS = frozenset(
+    {
+        "architecture",
+        "audit-2026-05-12",
+        "backend",
+        "blocked",
+        "bug",
+        "build",
+        "ci",
+        "critical",
+        "database",
+        "dependencies",
+        "documentation",
+        "duplicate",
+        "enhancement",
+        "frontend",
+        "github-actions",
+        "good first issue",
+        "help wanted",
+        "help-wanted",
+        "high-priority",
+        "i18n",
+        "invalid",
+        "needs-review",
+        "perceptual",
+        "performance",
+        "python",
+        "python:uv",
+        "question",
+        "reliability",
+        "security",
+        "settings",
+        "stale",
+        "testing",
+        "tests",
+        "ux",
+        "wontfix",
+    }
+)
 
 #: Cles de `actions/stale` dont la valeur est une liste de labels.
 _CLES_LISTE = ("exempt-issue-labels", "exempt-pr-labels")
@@ -107,11 +137,7 @@ class LesLabelsNommesExistentTests(unittest.TestCase):
 
     def test_stale_ne_nomme_que_des_labels_REELS(self) -> None:
         """Le cas qui a mordu : trois exemptions PR sur cinq etaient fantomes."""
-        fantomes = {
-            label: origine
-            for label, origine in _labels_de_stale().items()
-            if label not in _LABELS_REELS
-        }
+        fantomes = {label: origine for label, origine in _labels_de_stale().items() if label not in _LABELS_REELS}
         self.assertEqual(
             fantomes,
             {},
