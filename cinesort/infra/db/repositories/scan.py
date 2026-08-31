@@ -55,7 +55,7 @@ class ScanRepository(_BaseRepository):
 
         def _safe_delete(conn: Any, table: str) -> int:
             try:
-                return int(conn.execute(f"DELETE FROM {table}").rowcount or 0)  # noqa: S608
+                return int(conn.execute(f"DELETE FROM {table}").rowcount or 0)
             except sqlite3.OperationalError as exc:
                 # UNIQUEMENT « table absente » (ex: migration pas encore passee
                 # sur cette base) : elle ne contient alors rien a purger, 0 est
