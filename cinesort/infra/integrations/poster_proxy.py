@@ -786,19 +786,9 @@ def serve_poster(
                 return
             cache_file, content_type = servi
         else:
-            # 3. Orchestrer cache hit / fetch.
-            #
-            # AUDIT 2026-06-14 (R7-8) : `force` fait IGNORER le cache disque en
-            # lecture, pour que le bouton « Recuperer jaquettes » ait un effet
-            # visible — un fichier cache immuable (Cache-Control 30 j) etait
-            # sinon resservi tel quel.
-            #
-            # AUDIT 2026-08-28 : le drapeau est TRANSMIS, il n'efface plus le
-            # cache ICI. Effacer AVANT le fetch detruisait la jaquette existante
-            # des que le reseau manquait, et privait de sa matiere le repli de
-            # `get_or_fetch` — l'utilisateur perdait ses jaquettes en cliquant
-            # sur un bouton de rafraichissement. On ne detruit qu'APRES avoir
-            # obtenu le remplacant (cf. `_purge_stale_extensions`).
+            # 3. Orchestrer cache hit / fetch. `force` est TRANSMIS, jamais
+            # applique ici : cf. la docstring de `get_or_fetch`, qui explique
+            # pourquoi detruire avant le fetch perdait la jaquette hors ligne.
             cache_file, content_type, error_code = get_or_fetch(
                 tmdb_client, cache_root, tmdb_id, size, force=_force_demande(query)
             )
