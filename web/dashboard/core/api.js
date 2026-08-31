@@ -4,34 +4,25 @@ import { getToken, clearToken, awaitToken } from "./state.js";
 import { isCacheable, saveSnapshot, loadSnapshot, formatStaleness } from "./cache.js";
 import { showToast } from "../components/toast.js";
 
-/* --- Indicateur de connexion (C8) ---------------------------- */
-let _connFailureStreak = 0;
-const _CONN_FAIL_THRESHOLD = 2;
-
-function _setConnStatus(cls) {
-  const dot = document.getElementById("dashConnStatus");
-  if (!dot) return;
-  dot.classList.remove("conn-dot--ok", "conn-dot--warn", "conn-dot--error", "conn-dot--unknown");
-  dot.classList.add(cls);
-  const labels = {
-    "conn-dot--ok": "Connecte",
-    "conn-dot--warn": "Lenteur reseau",
-    "conn-dot--error": "Deconnecte",
-    "conn-dot--unknown": "Statut inconnu",
-  };
-  dot.setAttribute("title", labels[cls] || "");
-  dot.setAttribute("aria-label", labels[cls] || "");
-}
-
-function _noteSuccess() {
-  _connFailureStreak = 0;
-  _setConnStatus("conn-dot--ok");
-}
-
-function _noteFailure() {
-  _connFailureStreak += 1;
-  _setConnStatus(_connFailureStreak >= _CONN_FAIL_THRESHOLD ? "conn-dot--error" : "conn-dot--warn");
-}
+/* --- Indicateur de connexion (C8) : RETIRE le 2026-08-31 (constat #68) ----
+ *
+ * `_setConnStatus` cherchait un element par identifiant et sortait a la ligne
+ * suivante s'il manquait. MESURE : cet identifiant n'apparaissait NI dans
+ * `web/dashboard/index.html`, NI dans aucun `.js` de `web/dashboard/` (aucun
+ * `createElement` ne le fabriquait). La fonction sortait donc a sa premiere
+ * ligne a CHAQUE appel depuis toujours, et les deux etats qui la pilotaient —
+ * un compteur d'echecs consecutifs et son seuil — etaient tenus a jour pour
+ * personne. Les regles `.conn-dot*` de `styles.css` (« pastille dans le
+ * sidebar-footer ») n'ont pas davantage de porteur : le `.sidebar-footer`
+ * qu'elles visent n'existe nulle part non plus.
+ *
+ * Le seul signal de panne qui atteint REELLEMENT l'utilisateur est le toast
+ * ci-dessous (N33). On ne conserve pas un second dispositif qui, lui, ne peut
+ * rien afficher : il donnait l'illusion qu'un echec reseau etait signale.
+ * Le jour ou une pastille de connexion sera voulue, elle devra etre montee
+ * DANS le DOM d'abord — c'est ce que verrouille
+ * `tests/test_zones_front_annonce_vs_fait_2026_08_31.py`.
+ */
 
 /* --- Snapshot hors ligne : signalement utilisateur (N33) ------------------
  *
@@ -39,11 +30,11 @@ function _noteFailure() {
  * localStorage vieux de 24 h au maximum en y posant `_offline` et
  * `_stale_age`. Ces deux cles n'avaient AUCUN lecteur dans tout web/ (une
  * seule occurrence chacune : celle qui les produit), et le payload rendu
- * franchit les gardes des appelants (`data.ok === false` est faux, la cle
- * `ok` etant simplement ABSENTE des payloads concernes). Resultat : l'ecran
- * se peuplait de valeurs perimees sans le moindre indice — l'indicateur de
- * connexion `_setConnStatus` n'en est pas un, l'element #dashConnStatus
- * qu'il cible n'existe nulle part dans le DOM de l'application.
+ * franchit les gardes des appelants : le corps servi est celui d'une reponse
+ * a SUCCES mise en cache, donc `data.ok === false` y est FAUX (`ok` vaut
+ * `true`, ou est simplement absente). Seul `status` distingue la panne — cf.
+ * `_loadSettings` dans `views/parametres.js`, qui l'ignorait (audit
+ * 2026-08-31, constat #72).
  *
  * On rend donc le repli VISIBLE. Throttle : un serveur a terre fait tomber
  * plusieurs endpoints caches d'affilee au boot, on ne veut pas empiler autant
@@ -81,15 +72,23 @@ function baseUrl() {
  * settings/get_settings (x2), notifications_unread_count, probe_tools_status.
  *
  * Strategie :
- *  - Backoff : delais 100/200/400/800 ms, max 3 retries, UNIQUEMENT sur 5xx
+ *  - Backoff : delais 100/200/400 ms, 3 retries, UNIQUEMENT sur 5xx
  *    et erreurs reseau. PAS de retry sur 401 (auth) ni sur 429 (deja rate-limit,
  *    on laisse l'UI afficher le feedback).
  *  - Dedup : Map<key, Promise> ou key = method+url+hash(body). Tant qu'une
  *    requete identique est en vol, les appelants concurrents recoivent la
  *    MEME Promise => 1 seul appel reseau effectif.
  */
-const _RETRY_DELAYS_MS = [100, 200, 400, 800];
-const _MAX_RETRIES = 3;
+/* Audit 2026-08-31 (#69) : la table portait une 4e valeur (800 ms) qu'aucun
+ * `attempt` n'atteignait. Les deux boucles lisent `_RETRY_DELAYS_MS[attempt]`
+ * sous la garde `attempt < _MAX_RETRIES` : avec `_MAX_RETRIES = 3` ecrit en
+ * dur, seuls les indices 0/1/2 etaient tires. MESURE (vraie source sous Node,
+ * `setTimeout` instrumente, GET et POST) : delais reellement demandes
+ * 100/200/400, attente cumulee 700 ms et non 1500 ms — la strategie decrite
+ * ci-dessus etait donc fausse d'un palier. `_MAX_RETRIES` est desormais DERIVE
+ * de la table : modifier l'une sans l'autre ne peut plus creer d'ecart. */
+const _RETRY_DELAYS_MS = [100, 200, 400];
+const _MAX_RETRIES = _RETRY_DELAYS_MS.length;
 const _inFlightRequests = new Map();
 
 function _sleep(ms) {
@@ -384,7 +383,6 @@ async function _apiGetImpl(path, url) {
         await _sleep(_RETRY_DELAYS_MS[attempt]);
         continue;
       }
-      _noteFailure();
       throw err;
     }
 
@@ -418,16 +416,12 @@ async function _apiGetImpl(path, url) {
   }
   if (resp.status >= 500) {
     console.error("[dash-api] GET %s -> %d (serveur indisponible, %d retries epuises)", path, resp.status, _MAX_RETRIES);
-    _noteFailure();
     return { status: resp.status, data: { ok: false, message: `Serveur indisponible (HTTP ${resp.status}). Reessayez dans quelques instants.` } };
   }
 
   const data = await resp.json().catch(() => ({ ok: false, message: "Reponse invalide." }));
   if (resp.status >= 400) {
     console.warn("[dash-api] GET %s -> %d", path, resp.status);
-    _noteFailure();
-  } else {
-    _noteSuccess();
   }
   return { status: resp.status, data };
 }
@@ -535,7 +529,6 @@ async function _apiPostImpl(method, params, url, body, signal) {
         await _sleep(_RETRY_DELAYS_MS[attempt]);
         continue;
       }
-      _noteFailure();
       throw err;
     }
 
@@ -577,7 +570,6 @@ async function _apiPostImpl(method, params, url, body, signal) {
   }
   if (resp.status >= 500) {
     console.error("[dash-api] POST /api/%s -> %d (serveur indisponible)", method, resp.status);
-    _noteFailure();
     /* J14 : fallback cache si disponible */
     const cached = loadSnapshot(method);
     if (cached) {
@@ -593,9 +585,7 @@ async function _apiPostImpl(method, params, url, body, signal) {
   const data = await resp.json().catch(() => ({ ok: false, message: "Reponse invalide." }));
   if (resp.status >= 400) {
     console.warn("[dash-api] POST /api/%s -> %d", method, resp.status);
-    _noteFailure();
   } else {
-    _noteSuccess();
     /* J14 : sauvegarde snapshot si cacheable */
     if (isCacheable(method) && data && data.ok !== false) {
       saveSnapshot(method, data);
