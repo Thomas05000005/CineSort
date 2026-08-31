@@ -338,12 +338,8 @@ class RestSecurityHttpTests(unittest.TestCase):
         #
         # L'encadrement reste mordant aux deux bouts : sans retry le compteur
         # vaut 1, et un retry sans plafond le fait depasser 3.
-        self.assertGreaterEqual(
-            tentatives["n"], 2, "le helper n'a pas REESSAYE apres l'expiration"
-        )
-        self.assertLessEqual(
-            tentatives["n"], 3, "le plafond de 3 tentatives de `_request` est franchi"
-        )
+        self.assertGreaterEqual(tentatives["n"], 2, "le helper n'a pas REESSAYE apres l'expiration")
+        self.assertLessEqual(tentatives["n"], 3, "le plafond de 3 tentatives de `_request` est franchi")
         self.assertIn(status, (200, 400, 404, 410, 500), "aucune tentative n'a abouti")
 
     def test_trois_expirations_de_suite_LEVENT_en_nommant_la_panne(self) -> None:
