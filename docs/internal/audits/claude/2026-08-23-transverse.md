@@ -469,3 +469,31 @@ plan qu'il corrige n'existe plus apres la suppression. Le critere n'est pas « l
 donnee vient-elle de l'utilisateur ? » mais « **a-t-elle encore un sens sans le
 run ?** ». Le seul cas anormal connu (`film_field_locks`, `run_id` documente
 « audit, optionnel ») a deja ete traite par `_TABLES_DETACHEES_AU_LIEU_D_ETRE_PURGEES`.
+
+**Le critere se LIT, il ne se devine pas.** Une relecture de ce paragraphe a
+d'abord voulu etendre le finding aux tables « de decision » par leur NOM, ce qui
+est precisement le raisonnement que le paragraphe ci-dessus refute. La reponse
+est dans le DDL : **`run_id` figure-t-il dans la cle d'identite de la ligne ?**
+Si oui, la ligne n'existe pas hors du run et sa purge est correcte.
+
+| table | identite (DDL de migration) | `delete_run` |
+|---|---|---|
+| `duplicate_decisions` | `PRIMARY KEY (run_id, group_key)` | purge — juste |
+| `film_marked_for_deletion` | `UNIQUE(run_id, row_id)` | purge — juste |
+| `film_tmdb_overrides` | `UNIQUE(run_id, row_id)` | purge — juste |
+| `user_quality_feedback` | `run_id TEXT NOT NULL`, sans cle par film | purge — juste |
+| `film_decisions_v2` | `UNIQUE(film_id, run_id)`, `run_id DEFAULT ''` | purge — juste ; les decisions GLOBALES (`run_id=''`) ne sont pas ciblees par `WHERE run_id=?` et survivent |
+| `film_field_locks` | `UNIQUE(film_id, field_name)` — `run_id` HORS identite | detachee — juste |
+
+Le paragraphe ci-dessus citait quatre tables ; il y en a **cinq** qui portent une
+decision de l'utilisateur (`user_quality_feedback` manquait). Le verdict ne
+change pour aucune : `_TABLES_PORTANT_RUN_ID` et
+`_TABLES_DETACHEES_AU_LIEU_D_ETRE_PURGEES` classent les six correctement.
+
+**Ce qui reste debout, et qui n'est pas une perte de donnees.** La modale
+annonce « le run + son plan + son log ». L'utilisateur perd EN PLUS, legitimement
+mais sans le savoir, ses decisions de doublons, ses marquages de suppression, ses
+corrections TMDb et ses retours qualite. Le defaut est donc dans l'ANNONCE, pas
+dans le comportement — meme famille que le finding 1, et meme famille que le
+triangle annonce/journal du depot. A instruire avec la modale de #1136, dont
+c'est le sujet ; il est nomme ici pour ne pas se perdre en « piste ».
