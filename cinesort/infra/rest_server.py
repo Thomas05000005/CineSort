@@ -1509,6 +1509,47 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             clear_request_id()
             del token
 
+    def _repondre_methode_introuvable(self, method_name: str) -> None:
+        """Repond 410 ou 404 quand aucune methode de facade ne correspond.
+
+        Extraite de `_handle_post` : ce lot y ajoute trois appels a
+        `_pour_journal`, que le formateur eclate en multi-ligne, et la fonction
+        passait de 147 a 159 lignes — au-dessus de son plafond. La reponse du
+        depot a une fonction trop longue est d'EXTRAIRE, pas de monter le
+        plafond ; c'est ce que dit le message d'echec du cliquet lui-meme.
+
+        Ce bloc ne consultait que `method_name` et les constantes de module :
+        rien ne le retenait dans son hote.
+
+        410 plutot que 404 pour un appel LEGACY : un client doit pouvoir
+        distinguer « cette route a ete retiree, en voici la nouvelle forme » de
+        « cette route n'a jamais existe ». P0 #233, Pass 1 desactivee par
+        defaut depuis 2026-05.
+        """
+        if (
+            _legacy_pass1_disabled()
+            and method_name
+            and _FACADE_SEPARATOR not in method_name
+            and method_name.split(_FACADE_SEPARATOR, 1)[0] not in _FACADE_ATTR_NAMES
+        ):
+            self._respond_json(
+                410,
+                {
+                    "ok": False,
+                    "message": "Use /api/<facade>/<method> instead",
+                },
+            )
+            # CodeQL py/log-injection : `method_name` vient de l'URL HTTP.
+            # `%r` (repr) echappe DEJA les sauts de ligne — mesure :
+            # `"%r" % "a\nX"` ne contient aucun vrai `\n`, `"%s"` si. La
+            # protection est reelle mais NON INTENTIONNELLE : passer a `%s` au
+            # nom de la lisibilite la retirerait sans que rien ne le signale.
+            logger.warning("REST POST legacy method 410 Gone: %r", method_name)
+            return
+        # M9 : ne pas refleter `method_name` dans la reponse.
+        self._respond_json(404, {"ok": False, "message": "Methode inconnue"})
+        logger.warning("REST POST method inconnue: %r", method_name)
+
     def _handle_post(self) -> None:
         _t0 = time.monotonic()
         path = self.path.split("?")[0].rstrip("/")
@@ -1547,31 +1588,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         method_name = path[5:]  # strip "/api/"
         method = self.api_methods.get(method_name)
         if not method:
-            # P0 #233 (finalise 2026-05 : Pass 1 desactivee par defaut) :
-            # appel legacy direct (pas de "/" dans method_name = pas de prefixe
-            # facade) renvoie 410 Gone avec message guidant vers le nouveau
-            # format /api/<facade>/<method>.
-            if (
-                _legacy_pass1_disabled()
-                and method_name
-                and _FACADE_SEPARATOR not in method_name
-                and method_name.split(_FACADE_SEPARATOR, 1)[0] not in _FACADE_ATTR_NAMES
-            ):
-                self._respond_json(
-                    410,
-                    {
-                        "ok": False,
-                        "message": "Use /api/<facade>/<method> instead",
-                    },
-                )
-                # CodeQL py/log-injection : method_name vient de l'URL HTTP.
-                # repr() escape automatiquement \n, \r et caracteres de controle
-                # qui pourraient forger de fausses entrees de log.
-                logger.warning("REST POST legacy method 410 Gone: %r", method_name)
-                return
-            # M9 : ne pas refleter method_name dans la reponse
-            self._respond_json(404, {"ok": False, "message": "Methode inconnue"})
-            logger.warning("REST POST method inconnue: %r", method_name)
+            self._repondre_methode_introuvable(method_name)
             return
 
         # Parse body
