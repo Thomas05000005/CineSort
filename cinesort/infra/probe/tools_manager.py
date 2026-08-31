@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -211,7 +212,13 @@ def _probe_version_line(*, tool_name: str, tool_path: str, runner: RunnerFn) -> 
     cmd = [tool_path, "--Version"] if tool_name == "mediainfo" else [tool_path, "-version"]
     try:
         rc, out, err = runner(cmd, VERSION_PROBE_DETAILED_TIMEOUT_S)
-    except (OSError, TypeError, ValueError) as exc:
+    # `subprocess.TimeoutExpired` n'herite PAS d'`OSError` (cf `tooling._probe_version`).
+    # Le binaire est deja sur disque a ce stade : un `-version` qui n'aboutit pas
+    # decrit un executable inutilisable, ce que le `(False, "", ...)` ci-dessous
+    # traduit deja en statut `invalid_executable`. Sans cette entree, l'exception
+    # traversait `_build_tool_status` et `detect_probe_tools` jusqu'a l'ecran
+    # Parametres, qui rendait « Erreur interne » au lieu du statut.
+    except (OSError, TypeError, ValueError, subprocess.TimeoutExpired) as exc:
         return False, "", str(exc)
     text = str(out or "").strip() or str(err or "").strip()
     if rc != 0:
@@ -557,7 +564,12 @@ def _run_winget_for_tool(
         cmd = _build_winget_command(winget_path=winget_path, action=action, package_id=pkg, scope=scope)
         try:
             rc, out, err = runner(cmd, WINGET_INSTALL_TIMEOUT_S)
-        except (KeyError, OSError, TypeError, ValueError) as exc:
+        # Meme famille : `WINGET_INSTALL_TIMEOUT_S` vaut 1800 s, donc le timeout
+        # est le mode d'echec ATTENDU d'une installation qui s'enlise. Sans cette
+        # entree, il sortait de la boucle des le PREMIER identifiant de paquet —
+        # les identifiants suivants de `_WINGET_IDS` n'etaient jamais essayes, et
+        # `manage_probe_tools` ne rendait pas son payload `{ok: False, message}`.
+        except (KeyError, OSError, TypeError, ValueError, subprocess.TimeoutExpired) as exc:
             last_error = str(exc)
             continue
         if int(rc) == 0:
