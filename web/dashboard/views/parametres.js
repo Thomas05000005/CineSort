@@ -865,7 +865,17 @@ function _renderScanMaxWorkersSection(state) {
   const detected = String(state.storage_detected || "local_ssd");
   const autoSuggestion = Number(state.auto_suggestion || 1);
   const minVal = Number(state.min || 1);
-  const maxVal = Number(state.max || 64);
+  // Audit 2026-08-31 (#63) : `Number(state.max || 64)` etait une TROISIEME
+  // copie d'un plafond que le front ne possede pas — et les deux copies Python
+  // DIVERGENT deja : `_SCAN_MAX_WORKERS_MAX = 64`
+  // (cinesort/ui/api/settings_support.py) borne ce que l'ecran persiste, tandis
+  // que `_SCAN_PARALLEL_MAX_WORKERS_CAP = 32` (cinesort/app/_local_candidate.py,
+  // via `resolve_scan_max_workers`) borne ce que le scan EXECUTE. Le front
+  // n'arbitre pas entre les deux : il affiche une borne haute UNIQUEMENT si le
+  // payload la declare, et n'en invente aucune. (La divergence 64/32 elle-meme
+  // se corrige cote Python, hors de ce fichier.)
+  const maxBrut = Number(state.max);
+  const maxDeclare = Number.isFinite(maxBrut) && maxBrut > 0 ? maxBrut : null;
 
   const detectedLabel = detected === "nas_smb"
     ? "NAS / SMB"
@@ -876,12 +886,20 @@ function _renderScanMaxWorkersSection(state) {
 
   const activeBadge = `<span class="parametres-tools-mode parametres-tools-mode--ok">Workers actifs : ${escapeHtml(String(effective))}</span>`;
 
+  const minAff = escapeHtml(String(minVal));
+  const maxAff = maxDeclare === null ? "" : escapeHtml(String(maxDeclare));
+  const phrasePlage = maxDeclare === null
+    ? `Manuel = vous forcez une valeur à partir de ${minAff}.`
+    : `Manuel = vous forcez une valeur entre ${minAff} et ${maxAff}.`;
+  const libellePlage = maxDeclare === null ? `${minAff} ou plus` : `${minAff}-${maxAff}`;
+  const attrMax = maxDeclare === null ? "" : ` max="${maxAff}"`;
+
   return `<div class="parametres-scan-max-workers">
     <p class="parametres-section-intro">
       Nombre de workers pour la phase 1 du scan (parallelisation iter_videos).
       <strong>Auto</strong> s'adapte au stockage détecté
       (<em>${escapeHtml(detectedLabel)}</em> &rArr; ${escapeHtml(String(autoSuggestion))} workers).
-      Manuel = vous forcez une valeur entre ${escapeHtml(String(minVal))} et ${escapeHtml(String(maxVal))}.
+      ${phrasePlage}
     </p>
     <div class="parametres-field">
       <label class="parametres-field-label" for="parametres-scan-workers-mode">Mode</label>
@@ -893,10 +911,10 @@ function _renderScanMaxWorkersSection(state) {
     </div>
     <div class="parametres-field" data-scan-workers-value-wrapper${numberHidden}>
       <label class="parametres-field-label" for="parametres-scan-workers-value">
-        Workers (${escapeHtml(String(minVal))}-${escapeHtml(String(maxVal))})
+        Workers (${libellePlage})
       </label>
       <input type="number" id="parametres-scan-workers-value" class="parametres-input"
-             min="${escapeHtml(String(minVal))}" max="${escapeHtml(String(maxVal))}" step="1"
+             min="${minAff}"${attrMax} step="1"
              value="${escapeHtml(String(value))}" data-scan-workers-value>
       <span class="parametres-field-hint">
         Backward compat : valeur 1 = comportement strictement séquentiel (aucune parallélisation).
@@ -1243,6 +1261,25 @@ function _renderField(field, value, query) {
  * 5) RENDERERS — PROFILS QUALITE (categorie 2.9)
  * ============================================================= */
 
+/* Rend l'editeur de profil qualite.
+ *
+ * Audit 2026-08-31 (#59) — sous-section « Score d'arrêt des upgrades ». Son
+ * paragraphe d'introduction annoncait que l'UI cesserait d'afficher des
+ * recommandations d'upgrade au-dessus du seuil. Promesse SANS EXECUTANT.
+ * MESURE : `upgrade_until_score` n'apparait dans aucun autre `.js` de
+ * `web/dashboard/` (invariant verrouille par
+ * `tests/test_zones_front_annonce_vs_fait_2026_08_31.py`), et cote Python il
+ * n'est lu que par le CRUD de profil et l'import/export Recyclarr — ni le
+ * calcul de score, ni aucune vue ne s'en servent pour filtrer quoi que ce
+ * soit. Il n'existe d'ailleurs aucune « recommandation d'upgrade » a masquer.
+ * Le texte rendu dit desormais ce que le reglage fait REELLEMENT : il voyage
+ * dans le YAML Recyclarr, a destination de Radarr/Sonarr. Le jour ou un ecran
+ * le consommera, c'est ce paragraphe qu'il faudra reecrire — et le test
+ * ci-dessus rougira pour le rappeler.
+ *
+ * Le rationnel vit ICI, en commentaire JS, et non en commentaire HTML dans le
+ * gabarit : un commentaire pose dans le template est SERVI au navigateur.
+ */
 function _renderProfilsQualite() {
   const profiles = _state.profilesList || [];
   const activeId = _state.activeProfileId || "";
@@ -1426,9 +1463,12 @@ function _renderProfilsQualite() {
 
     <h4 class="parametres-subheading">Score d'arrêt des upgrades</h4>
     <p class="parametres-section-intro">
-      Au-dessus de ce score, l'UI n'affichera plus de recommandation
-      d'upgrade pour ces films (réduit le bruit décisionnel). Par défaut
-      <strong>10000</strong> (jamais arrêter).
+      Seuil <strong>Recyclarr / TRaSH</strong> (<code>upgrade.until_score</code>) :
+      il est porté par le profil actif et voyage dans l'export / import YAML
+      ci-dessus, à destination des outils qui le consomment (Radarr, Sonarr).
+      <strong>CineSort ne s'en sert pas encore</strong> pour masquer des
+      recommandations d'upgrade : aucun écran ne le lit aujourd'hui.
+      Par défaut <strong>10000</strong>.
     </p>
     <div class="parametres-profils-upgrade-until" data-vpf-upgrade-host>
       <label for="parametres-upgrade-until-score">Score seuil d'arrêt&nbsp;:</label>
@@ -2270,13 +2310,70 @@ function _promptNewProfileName(onSubmit, opts) {
   });
 }
 
+/* --- #58 : ce que le re-calcul applique VRAIMENT -------------------------
+ *
+ * Audit 2026-08-31 (CRITIQUE). Le bouton « Re-calculer scores avec ce profil »
+ * postait `quality/recompute_all_scores` avec un corps VIDE, et le backend
+ * `recompute_all_scores(api)` (cinesort/ui/api/quality_audit_support.py:503)
+ * n'accepte AUCUN parametre : il re-score depuis le profil ACTIF PERSISTE. Or
+ * les seuils de tier et les curseurs de poids n'ecrivent que dans
+ * `_state.profileDraft`, en memoire. Deplacer un curseur puis cliquer lancait
+ * donc un re-scoring irreversible de TOUTE la bibliotheque (~5-10 min) avec un
+ * profil que l'ecran ne montrait plus : l'utilisateur voyait « vidéo 90 » et le
+ * calcul appliquait « vidéo 60 ».
+ *
+ * Le brouillon n'etant transmissible par aucune route existante, on ne part pas
+ * tant qu'il diverge — et quand on part, on NOMME le profil applique.
+ */
+function _profilActifPersiste() {
+  const liste = _state.profilesList || [];
+  return liste.find((p) => String(p.id) === String(_state.activeProfileId)) || null;
+}
+
+/** Forme canonique comparable d'un profil (meme normalisation des deux cotes). */
+function _formeComparableDeProfil(source) {
+  const src = source || {};
+  return JSON.stringify({
+    tiers: { ..._DEFAULT_TIERS, ...(src.tiers || {}) },
+    weights: { ..._DEFAULT_WEIGHTS, ...(src.weights || {}) },
+    tier_hierarchy: _mergeTierHierarchy(src.tier_hierarchy),
+  });
+}
+
+/**
+ * Le brouillon a l'ecran differe-t-il de ce que le backend appliquera ?
+ *
+ * Reference = le profil actif PERSISTE. A defaut (installation neuve, aucun
+ * profil en base), les defauts du front — qui sont ceux du backend, invariant
+ * verrouille par `tests/test_audit_ultra_wave4b_frontend_constants.py`.
+ */
+function _brouillonDivergeDuProfilApplique() {
+  return _formeComparableDeProfil(_state.profileDraft)
+    !== _formeComparableDeProfil(_profilActifPersiste());
+}
+
+function _nomDuProfilApplique() {
+  const actif = _profilActifPersiste();
+  return (actif && (actif.label || actif.name || actif.id)) || "profil par défaut";
+}
+
 async function _recomputeScores() {
+  if (_brouillonDivergeDuProfilApplique()) {
+    _showProfilMessage(
+      "Les valeurs affichées ne sont pas enregistrées : le re-calcul s'exécuterait avec le "
+      + "profil actif enregistré, pas avec celles-ci. Enregistrez d'abord le profil "
+      + "(« Sauvegarder comme nouveau profil »), activez-le, puis relancez le re-calcul.",
+      "error",
+    );
+    return;
+  }
+  const nomProfil = _nomDuProfilApplique();
   // Fix audit 2026-05-30 (v1.5.8) UI/UX critical+high : A11Y-03 remplace window.confirm()
   // natif par dangerConfirmModal (ecrasement des scores de toute la biblio = destructif).
   // Memoire utilisateur exige modale custom + confirm supplementaire.
   dangerConfirmModal({
-    title: "Re-calculer les scores avec ce profil ?",
-    consequence: "Cette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min). Les scores existants seront écrasés.",
+    title: `Re-calculer les scores avec « ${nomProfil} » ?`,
+    consequence: `Cette opération va re-scorer l'ensemble des films de votre bibliothèque (~5-10 min) avec le profil enregistré « ${nomProfil} ». Les scores existants seront écrasés.`,
     countdownSeconds: 3,
     confirmLabel: "Lancer le re-calcul",
     cancelLabel: "Annuler",
@@ -2555,20 +2652,56 @@ async function _loadSettings() {
     if (_state.saveInFlight === pendingSave) _state.saveInFlight = null;
   }
   const res = await apiPost("settings/get_settings", {});
-  // BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est
-  // un objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
-  // silencieusement a `_state.settings`, ce qui faisait croire que le
-  // chargement avait reussi. Au premier toggle (Mode expert), `_scheduleSave`
-  // partait POSTer cet objet d'erreur + retombait sur le meme 401 -> badge
-  // rouge "Authentification refusee par le backend." dans l'indicateur de
-  // sauvegarde, alors que la vraie cause est l'echec initial. On detecte
-  // explicitement l'erreur et on throw pour que `initParametres` affiche le
-  // banner d'erreur avec bouton "Reessayer" (parcours UX clair).
-  if (!res || !res.data || typeof res.data !== "object" || res.data.ok === false) {
-    const msg = res?.data?.message || `Erreur ${res?.status || "inconnue"}.`;
-    throw new Error(msg);
-  }
+  const refus = _motifDeRefusDesReglages(res);
+  if (refus) throw new Error(refus);
   _state.settings = res.data.data || res.data || {};
+}
+
+/* Pourquoi une reponse de `settings/get_settings` est INEXPLOITABLE, ou `null`
+ * si elle ne l'est pas. Rendre un MOTIF plutot qu'un booleen : `initParametres`
+ * affiche ce texte dans son banner d'erreur avec le bouton « Réessayer », et
+ * l'utilisateur doit pouvoir distinguer un refus d'authentification d'un
+ * serveur a terre.
+ *
+ * BUG USER #1 : si get_settings echoue (401, 429, 5xx...), `res.data` est un
+ * objet d'erreur `{ok: false, message: "..."}`. L'ancien code l'assignait
+ * silencieusement a `_state.settings`, ce qui faisait croire que le chargement
+ * avait reussi. Au premier toggle (Mode expert), `_scheduleSave` partait POSTer
+ * cet objet d'erreur + retombait sur le meme 401 -> badge rouge
+ * "Authentification refusee par le backend." dans l'indicateur de sauvegarde,
+ * alors que la vraie cause est l'echec initial. On throw pour que
+ * `initParametres` affiche le banner avec bouton "Reessayer".
+ *
+ * Audit 2026-08-31 (#72, PERTE DE DONNEES) : ce garde ne testait QUE
+ * `data.ok === false` et ne regardait JAMAIS `res.status`. Or sur 5xx,
+ * `core/api.js` sert l'instantane localStorage de `core/cache.js` (TTL 24 h ;
+ * `settings/get_settings` est dans sa whitelist) en y posant `_offline` et
+ * `_stale_age` : le corps rendu est celui d'une reponse a SUCCES mise en
+ * cache, donc `ok` y vaut `true`. MESURE (vraie `core/api.js` + vraie
+ * `core/cache.js` sous Node, vrai aller-retour localStorage) : `status` 503,
+ * `data.ok === true`, `data.data.roots` = les racines d'HIER. Le garde laissait
+ * donc passer, l'ecran installait ces reglages perimes en se croyant a jour,
+ * et au premier toggle `_scheduleSave` les RENVOYAIT au backend — cocher une
+ * case restaurait la configuration de la veille par-dessus la vraie. Ce n'est
+ * pas un affichage errone, c'est une PERTE.
+ */
+function _motifDeRefusDesReglages(res) {
+  if (!res || !res.data || typeof res.data !== "object") {
+    return `Erreur ${res?.status || "inconnue"}.`;
+  }
+  // Repli hors ligne : servi avec un status d'erreur ET le `ok` d'un succes
+  // mis en cache. C'est le seul cas ou `status` est la SEULE preuve de panne.
+  if (res.data._offline === true) {
+    const age = res.data._stale_age ? ` (dernier état connu ${res.data._stale_age})` : "";
+    return `Serveur injoignable — réglages hors ligne non chargés${age}. Réessayez.`;
+  }
+  if (Number(res.status) >= 400) {
+    return res.data.message || `Serveur indisponible (HTTP ${res.status}).`;
+  }
+  if (res.data.ok === false) {
+    return res.data.message || `Erreur ${res.status || "inconnue"}.`;
+  }
+  return null;
 }
 
 /* =============================================================
