@@ -65,7 +65,15 @@ public (le dépôt a un fork, et les caches GitHub existent).
   aveugles. ~~Retirer les `|| true` des trois checks REQUIS~~ — ou les sortir de la liste des
   requis. `bandit.yml:89`, `mypy.yml:92`, `pip-audit.yml:87` (`continue-on-error`). La protection
   de `main` en annonce sept ; **quatre mordent**.
-- [ ] **T-SEC-8 · Ajouter une règle gitleaks qui mord sur un secret nu entre backticks en prose.**
+- [~] **T-SEC-8 · CORRECTIF EN VOL — #1180.** `.gitleaks.toml` ajoute la règle manquante.
+  LE CALIBRAGE EST LE POINT : un seuil d'entropie de 4.5 rendait sur le corpus réel
+  exactement les 2 vraies détections et zéro faux positif — et RATAIT **29,73 %** des
+  `token_urlsafe(24)` (mesure sur 20 000 tirages). Le secret du dépôt n'était attrapé que
+  parce qu'il se trouve à 4,54. Seuil retenu : **4.0**, zéro manque. Le vrai discriminant
+  n'est pas l'entropie mais la MIXITÉ de classes, qui fait passer 58 détections à 2 —
+  exprimée par exclusion, Go/RE2 n'ayant pas de lookahead. ⚠ Le scan hebdomadaire sera
+  ROUGE tant que T-SEC-2 n'est pas fait : c'est voulu, ces détections ne sont
+  délibérément pas figées. ~~Ajouter une règle gitleaks~~
   Le secret n'était **pas** dans `.gitleaksignore` : ce n'était pas une exemption assumée, c'était
   une non-détection. Corriger aussi `CLAUDE.md:658` et l'en-tête de `gitleaks.yml`, qui affirment
   « 56 détections, ZÉRO secret réel ».
@@ -149,7 +157,14 @@ public (le dépôt a un fork, et les caches GitHub existent).
   n'atteint son seuil (max 8 j pour 30). Seules les **trois préconditions** sont vérifiées : le
   label existe, son nom est identique octet pour octet (`cat -A` → `blocked$`), il est attaché
   aux 8.
-- [ ] **T-CI-19 · Quatre des cinq exemptions PR de `stale.yml` sont des labels FANTÔMES.**
+- [~] **T-CI-19 · CORRECTIF EN VOL — #1179.** Et le compte de cette ligne est FAUX dans les
+  deux sens : il y a **SIX** fantômes, pas cinq, et le périmètre inclut `dependabot.yml`,
+  que la revue n'avait pas examiné (`python` et `github-actions` y sont nommés sans
+  exister ; mesure : aucune des sept PR dependabot ne les portait). `good-first-issue`
+  aussi est fantôme — le vrai nom porte des ESPACES. Traitement non uniforme et assumé :
+  `python`/`github-actions` CRÉÉS, `pinned`/`wip`/`work-in-progress` ÉLAGUÉS au profit de
+  `exempt-draft-pr: true`, une option NATIVE qui ne peut pas devenir fantôme à son tour.
+  ~~Quatre des cinq exemptions PR de `stale.yml` sont des labels FANTÔMES.~~
   `exempt-pr-labels: "pinned,security,wip,work-in-progress,blocked"` — mesuré le 2026-08-28 sur
   les 32 labels réels du dépôt : seul **`security`** existait (`blocked` créé depuis, cf. T-CI-2).
   `pinned`, `wip` et `work-in-progress` ne peuvent **structurellement** jamais s'appliquer. Côté
@@ -157,13 +172,21 @@ public (le dépôt a un fork, et les caches GitHub existent).
   Une liste d'exemptions qui nomme des labels inexistants donne l'illusion d'un filet — c'est le
   motif de #1096 (la règle absolue impossible), appliqué à une garde. Trancher : créer les
   labels, ou élaguer la liste à ce qui existe.
-- [ ] **T-CI-3 · #1133 en priorité dans le lot** : elle rétablit le « 0 = désactivé » d'un cron
+- [x] **T-CI-3 · FAIT le 2026-08-31 — #1133 FUSIONNÉE.** ~~#1133 en priorité dans le lot~~ : elle rétablit le « 0 = désactivé » d'un cron
   **destructif** (cf. T-PROD-2).
-- [ ] **T-CI-4 · Fusionner #1145 et #1142 ensemble.** Dependabot a coupé une modification
+- [x] **T-CI-4 · SANS OBJET depuis #1178 (2026-08-31).** Le bloc `groups:` ajouté à
+  l'écosystème `github-actions` fait que dependabot remplacera ce couple par une PR
+  GROUPÉE au prochain passage : il n'y a plus rien à fusionner à la main. La cause amont
+  (T-CI-5) traitée rend le symptôme sans objet. ~~Fusionner #1145 et #1142 ensemble.~~ Dependabot a coupé une modification
   indivisible en deux PR : `codeql-action/init` d'un côté, `analyze` de l'autre, vers le même SHA.
   Chacune seule rend rouges les deux checks requis CodeQL. Erreurs symétriques :
   `Loaded a configuration file for version '4.37.6', but running version '4.37.8'` et l'inverse.
-- [ ] **T-CI-5 · Ajouter un bloc `groups:` à l'écosystème `github-actions`** de
+- [x] **T-CI-5 · FAIT le 2026-08-31 — #1178 FUSIONNÉE.** Et le compte de cette ligne était
+  incomplet : `github/codeql-action` a **TROIS** sous-chemins (`init`, `analyze`,
+  `upload-sarif`), pas deux. Le garde ajouté est GÉNÉRIQUE — il dérive la liste des
+  familles multi-chemins DEPUIS les workflows, donc il couvre la prochaine action
+  découpée. Il vérifie aussi qu'aucun groupe couvrant ne restreint `update-types`, sans
+  quoi un bump MAJEUR se redécouperait. ~~Ajouter un bloc `groups:`~~ de
   `.github/dependabot.yml` (seul `pip` en a un) : sans lui, les sous-chemins d'une même action
   montent en PR séparées et se cassent mutuellement. Deux des cinq créneaux dependabot sont gelés
   à vie par ce couple.
@@ -171,10 +194,16 @@ public (le dépôt a un fork, et les caches GitHub existent).
   (`pyproject.toml`, `requirements-dev.txt`). Restent `.pre-commit-config.yaml:18`, `uv.lock`,
   et `CLAUDE.md:49-50,102`. Le garde `test_ruff_version_is_identical_everywhere` a **tiré, comme
   conçu**. Compléter la PR avec le reformatage dans le même commit, ou la fermer.
-- [ ] **T-CI-7 · #1124** : le diff retire `ApplyOperationError` de `ApplyResponse` — sa seule
+- [x] **T-CI-7 · FAIT — #1124 FUSIONNÉE le 2026-08-30.** ~~#1124~~ : le diff retire `ApplyOperationError` de `ApplyResponse` — sa seule
   lecture — en le disant « ré-exporté ». `schemas/__init__.py` ne l'importe pas et la PR ne le
   touche pas. Supprimer le symbole ou le câbler.
-- [ ] **T-CI-8 · #1136 passe par une AUTRE voie** : ses 7 checks requis sont **verts**.
+- [x] **T-CI-8 · TRAITÉ le 2026-08-31 — #1136 en vol.** Ses deux fils de revue sont résolus
+  et son conflit avec `main` est réglé. La résolution a tranché sur les FAITS : le texte de
+  `main` était juste (le plan et le log RESTENT sur disque, cf. la docstring de
+  `delete_run`), celui de la branche annonçait leur suppression. La branche a gardé sa
+  factorisation, mais en FONCTION pour conserver le conditionnel de `main`. Et la modale
+  nomme désormais les décisions perdues, que NI l'une NI l'autre version ne disait.
+  ~~#1136 passe par une AUTRE voie~~ : ses 7 checks requis sont **verts**.
   `required_conversation_resolution: true` + 2 fils de revue non résolus. Même cause partielle sur
   #1125 (1 fil), #1133 (1), #1137 (1) : **approuver leurs runs ne suffira pas.**
 - [ ] **T-CI-9 · Corriger #1123 AVANT de la fusionner** (cf. T-PROD-5).
@@ -504,6 +533,121 @@ et l'ajout de la mesure d'artefacts + du piège `git branch -r`.)*
   déduplication.
 
 ---
+
+## Journal du 2026-08-31 — 19 PR fusionnees, backlog anterieur VIDE
+
+Les **11 PR anterieures non triees** sont toutes resolues. Il ne reste que les
+5 PR ouvertes ce jour-la.
+
+### Le controle qui a paye : la batterie CUMULATIVE
+
+Les 9 branches ouvertes fusionnees **ensemble** dans une branche de controle,
+puis la batterie CI complete :
+
+    1 failed, 9567 passed, 18 skipped, 2 xfailed, 1802 subtests — 22 min 06 s
+
+**Aucun conflit cumulatif** entre les 9 — mais le controle valait quand meme :
+son unique rouge s'est revele **present sur `main` seul**, donc pas une
+regression du cumul, mais un defaut que neuf suites vertes n'avaient pas vu.
+
+### `sha1_quick` : une inegalite STRICTE sur une horloge a granularite
+
+`time.monotonic() - start > max_seconds`. Mesure sur la machine de
+developpement :
+
+    time.get_clock_info("monotonic").resolution = 0,015625 s
+    deux lectures consecutives IDENTIQUES : 200 000 / 200 000  (100,0 %)
+
+`ecoule` vaut exactement `0.0`, et `0.0 > 0.0` est faux : avec `max_seconds=0`
+le budget est epuise et la boucle lit quand meme. Le test qui verifie ce cas
+echouait **19 fois sur 20** en local, et passait en CI.
+
+Ce n'etait pas un flake, mais la mesure d'une ambiguite semantique : « le temps
+imparti est ecoule » **inclut l'egalite**. Portee en production : nulle sur un
+defaut de 30 s. Ce qui change, c'est que le comportement cesse de dependre de
+la machine. Voir #1183, avec deux tests qui **figent** `time.monotonic` au lieu
+d'en dependre.
+
+### `conflicts_root` survivait a 251 tests
+
+Trouve en controlant qu'une extraction de fonction ne changeait rien : la
+mutation etait un controle du refactoring, elle a revele un trou preexistant.
+
+Ce champ est le **seul endroit** ou la reponse d'undo dit ou sont passes les
+films qu'elle n'a pas pu remettre en place (`<run_dir>/_review/_undo_conflicts/`).
+Les deux seuls fichiers qui posaient la cle la laissaient **VIDE** — exactement
+la valeur que le mutant produit. Un contrat qui ne peut rendre qu'UNE valeur ne
+mesure rien. Voir #1123.
+
+### Et le cliquet de taille est DESCENDU
+
+#1123 portait le plafond de `_execute_and_finalize_undo` de 172 a **174**, au
+motif que les deux lignes du triangle sont irreductibles. Elles le sont — mais
+la reponse du depot est d'EXTRAIRE. `_payload_de_fin_d_undo` sort 27 lignes qui
+ne consultaient que des variables locales : la fonction passe a **161 lignes**,
+et le cliquet descend a 161. **13 lignes de marge gagnees** la ou la PR en
+demandait 2 de plus.
+
+### La lecon de methode : calibrer contre la DISTRIBUTION
+
+Pour la regle gitleaks de T-SEC-8, un seuil d'entropie de **4.5** rendait sur le
+corpus reel — 2005 fichiers — **exactement 2 detections, les deux vraies, zero
+faux positif**. Impossible de faire mieux sur les donnees disponibles.
+
+Mesure contre 20 000 `secrets.token_urlsafe(24)`, ce qu'on veut attraper :
+
+| seuil | manques sur 20 000 |
+|---|---|
+| 4.0 | **0** |
+| 4.3 | 676 (3,38 %) |
+| **4.5** | **5945 (29,73 %)** |
+
+Le seuil « parfait » **ratait un tiers des cas**. Celui du depot n'etait attrape
+que parce qu'il se trouve a 4,54 — un hasard.
+
+L'echantillon connu etait de taille **1** : une infinite de seuils le separent
+du bruit, et ils different enormement sur la population. Quand la population est
+GENERABLE, elle doit l'etre.
+
+**Et le vrai discriminant n'etait pas le seuil** mais la **mixite de classes**
+(minuscule + majuscule + chiffre), qui fait passer 58 detections a 2 : un hash
+git est hexa minuscule, un slug n'a pas de chiffre. Chercher le critere
+STRUCTUREL avant de durcir un critere numerique.
+
+### Cinq modes de panne du harnais de MUTATION, tous rencontres le meme jour
+
+1. **La mutation casse la syntaxe** — les 6 tests tombent, garde anti-silence
+   compris. Elle a tue par plantage, pas par detection. **Signe** : si le garde
+   anti-silence tombe aussi, la mutation est invalide.
+2. **Elle ne s'applique pas et le test tourne quand meme** — ancre en LF sur un
+   fichier CRLF ; le `pytest` qui suit rend « 4 passed » sur le fichier NON mute.
+3. **L'ancre n'est pas unique** — la chaine visee etait aussi dans un commentaire.
+4. **Le perimetre de tests est trop etroit** — un mutant « survivant » a 33 tests
+   etait couvert par deux AUTRES fichiers. « Non couvert » etait une propriete
+   de la selection, pas du code.
+5. **On mute sans avoir commite** — `git checkout --` restaure depuis HEAD.
+
+Et **deux mutations survivantes ont revele des tests creux**, pas du code sain :
+`assertIn("GITLEAKS_CONFIG", texte)` passait au vert sur une ligne **commentee**,
+et des contre-exemples d'allowlist **redondants** laissaient retirer un motif
+sans rien casser.
+
+### Pieges d'outillage mesures
+
+- **`ruff format --check` est un check REQUIS distinct de `ruff check`.**
+  5 branches sur 6 poussees mal formatees : `.pre-commit-config.yaml` declare le
+  hook, mais `.git/hooks/pre-commit` **n'existe pas** dans le clone.
+- **`git merge-tree <base> <a> <b>`** (forme historique) imprime « changed in
+  both » pour tout fichier touche des deux cotes, conflit ou non — deux faux
+  conflits annonces. Seul `--write-tree` rend un code de sortie fiable.
+- **`statusCheckRollup` garde plusieurs entrees par nom de check** : filtrer sur
+  `conclusion=="FAILURE"` remonte un echec PERIME a cote du succes actuel.
+
+### Protection posee
+
+Les 9 PR non-Dependabot portent le label `blocked`, qui EXISTE et figure dans
+`exempt-pr-labels`. Le bot `stale` ne peut plus les fermer — ni, via
+`delete-branch: true`, supprimer leur branche.
 
 ## Journal du 2026-08-29 — 11 commits locaux, suite CI verte (9 279 passed, 0 échec)
 
