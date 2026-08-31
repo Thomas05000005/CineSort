@@ -268,6 +268,30 @@ def _profil_actif_ou_defaut(actif: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return default_quality_profile()
 
 
+def _message_de_purge_probe(base: int, disque: "_probe_disk_cache.PurgeDisque") -> str:
+    """Le message est le SEUL canal qui atteint l'utilisateur.
+
+    L'ecran rend `message` (`parametres.js`, `rendu: "message"`) et ne lit ni
+    `entries_deleted` ni `disk_entries_deleted`. Il ne doit donc promettre un
+    re-probe complet que si le miroir disque est CERTAINEMENT vide : toute
+    entree de repli survivante sera relue et re-promue en base au scan suivant,
+    et le film ne sera pas re-sonde.
+    """
+    total = base + disque.supprimes
+    tete = f"Cache probe purge : {total} entrees supprimees."
+    if disque.integrale:
+        return f"{tete} Relance un scan pour re-probe les films."
+    if not disque.balayage_complet:
+        return (
+            f"{tete} Le balayage du miroir disque n'a pas pu aller a son terme : "
+            "des entrees peuvent subsister et etre reutilisees au prochain scan."
+        )
+    return (
+        f"{tete} {disque.echecs} entree(s) disque n'ont pas pu etre supprimees "
+        "(fichier verrouille) et seront reutilisees au prochain scan."
+    )
+
+
 class CineSortApi:
     """
     API exposee a JavaScript via pywebview.
@@ -2082,21 +2106,27 @@ class CineSortApi:
                 log_module=__name__,
             )
         try:
-            disk_deleted = int(_probe_disk_cache.clear_disk_cache())
+            disque = _probe_disk_cache.clear_disk_cache_detaille()
         except Exception:  # noqa: BLE001 - le miroir disque ne doit pas invalider la purge base deja faite
             _log.exception("api: purge_probe_cache echec purge du miroir disque")
-            disk_deleted = 0
-        total = deleted + disk_deleted
+            # Le miroir n'a PAS ete balaye : `integrale` doit valoir faux, sinon
+            # le message promettrait un re-probe complet sur un miroir intact.
+            disque = _probe_disk_cache.PurgeDisque(0, 0, False)
         _log.info(
-            "api: purge_probe_cache entries_deleted=%d disk_entries_deleted=%d",
+            "api: purge_probe_cache entries_deleted=%d disk_entries_deleted=%d "
+            "disk_entries_kept=%d disk_scan_complete=%s",
             deleted,
-            disk_deleted,
+            disque.supprimes,
+            disque.echecs,
+            disque.balayage_complet,
         )
         return {
             "ok": True,
             "entries_deleted": deleted,
-            "disk_entries_deleted": disk_deleted,
-            "message": f"Cache probe purge : {total} entrees supprimees. Relance un scan pour re-probe les films.",
+            "disk_entries_deleted": disque.supprimes,
+            "disk_entries_kept": disque.echecs,
+            "disk_scan_complete": disque.balayage_complet,
+            "message": _message_de_purge_probe(deleted, disque),
         }
 
     def _get_probe_impl(self, run_id: str, row_id: str) -> Dict[str, Any]:

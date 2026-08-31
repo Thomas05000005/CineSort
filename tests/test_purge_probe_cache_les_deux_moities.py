@@ -126,12 +126,21 @@ class LaRouteVideLesDEUXMoitiesTests(_CacheDisqueTemporaire):
     def test_un_echec_du_disque_ne_perd_pas_la_purge_base(self) -> None:
         """Contre-test : la purge base a DEJA eu lieu quand le disque echoue.
         La faire echouer ici serait le defaut inverse — annoncer perdu ce qui est
-        fait."""
+        fait.
+
+        On patche `clear_disk_cache_DETAILLE`, celle que la route appelle. La
+        patcher sur la facade `clear_disk_cache` laisserait ce test s'executer
+        sans plus rien simuler : la vraie purge tournerait, et seule
+        l'assertion sur `disk_entries_deleted` le revelerait."""
         self._ecrire_entrees(1)
         api = self._api()
         with (
             patch.object(api, "_get_or_create_infra") as infra,
-            patch.object(backend._probe_disk_cache, "clear_disk_cache", side_effect=OSError("disque occupe")),
+            patch.object(
+                backend._probe_disk_cache,
+                "clear_disk_cache_detaille",
+                side_effect=OSError("disque occupe"),
+            ),
         ):
             store = MagicMock()
             store.probe.clear_probe_cache.return_value = 4
@@ -142,6 +151,11 @@ class LaRouteVideLesDEUXMoitiesTests(_CacheDisqueTemporaire):
         self.assertTrue(res["ok"])
         self.assertEqual(res["entries_deleted"], 4)
         self.assertEqual(res["disk_entries_deleted"], 0)
+        self.assertFalse(
+            res["disk_scan_complete"],
+            "le miroir n'a pas ete balaye du tout : ne pas promettre un re-probe",
+        )
+        self.assertNotIn("re-probe les films", res["message"])
 
     def test_une_purge_sans_rien_a_supprimer_reste_honnete(self) -> None:
         """Contre-test de non-regression : aucun compte invente sur un cache vide."""
@@ -215,3 +229,105 @@ class LeDrapeauGouverneTOUJOURSLaProductionTests(_CacheDisqueTemporaire):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeMessageNePROMETPasCeQueLaPurgeNAPasFaitTests(_CacheDisqueTemporaire):
+    """`clear_disk_cache` est best-effort : `except OSError: continue` laisse
+    derriere lui les fichiers que l'OS refuse de supprimer (lock Windows,
+    fichier ouvert par un autre process). Ces survivants restent des entrees de
+    repli VALIDES : le prochain scan les relit et les RE-PROMEUT en base.
+
+    Le message disait pourtant « Relance un scan pour re-probe les films » —
+    une promesse que la purge n'a pas tenue, et que rien ne dementait : le
+    compte des echecs existait dans la boucle, il etait simplement jete.
+
+    Le `continue` reste la bonne decision (echouer la route perdrait la purge
+    base deja faite). Ce qui change, c'est que le nombre de survivants REMONTE
+    jusqu'a l'utilisateur.
+    """
+
+    def _api(self) -> backend.CineSortApi:
+        api = backend.CineSortApi()
+        state_dir = Path(self._tmp) / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        api._state_dir = state_dir  # type: ignore[attr-defined]
+        return api
+
+    def _purger_avec_un_fichier_indelebile(self) -> dict:
+        """Un `unlink` qui refuse UN fichier sur les trois, comme un lock."""
+        self._ecrire_entrees(3)
+        refuses = {sorted(p.name for p in self.cache_dir.iterdir())[0]}
+        vrai_unlink = Path.unlink
+
+        def _unlink(self_path: Path, *a: object, **k: object) -> None:
+            if self_path.name in refuses:
+                raise PermissionError(13, "fichier verrouille")
+            vrai_unlink(self_path, *a, **k)
+
+        api = self._api()
+        with (
+            patch.object(api, "_get_or_create_infra") as infra,
+            patch.object(Path, "unlink", _unlink),
+        ):
+            store = MagicMock()
+            store.probe.clear_probe_cache.return_value = 0
+            infra.return_value = (store, MagicMock())
+            return api._purge_probe_cache_impl()
+
+    def test_les_survivants_du_disque_sont_COMPTES(self) -> None:
+        res = self._purger_avec_un_fichier_indelebile()
+
+        self.assertEqual(res["disk_entries_deleted"], 2)
+        self.assertEqual(
+            res["disk_entries_kept"],
+            1,
+            "le fichier verrouille a survecu et sera re-promu : il doit se compter",
+        )
+        self.assertEqual(self._entrees_restantes(), 1, "temoin : le lock a bien tenu")
+
+    def test_le_message_ne_promet_PLUS_un_re_probe_complet(self) -> None:
+        res = self._purger_avec_un_fichier_indelebile()
+
+        self.assertIn("1", res["message"], "le nombre de survivants doit atteindre l'utilisateur")
+        self.assertNotIn(
+            "re-probe les films",
+            res["message"],
+            "promesse d'un re-probe COMPLET alors qu'une entree de repli survit",
+        )
+
+    def test_sans_aucun_survivant_la_promesse_reste_ENTIERE(self) -> None:
+        """Contre-test : le cas nominal ne doit pas heriter d'une reserve
+        inutile. Une purge integrale PEUT promettre le re-probe."""
+        self._ecrire_entrees(3)
+        api = self._api()
+        with patch.object(api, "_get_or_create_infra") as infra:
+            store = MagicMock()
+            store.probe.clear_probe_cache.return_value = 4
+            infra.return_value = (store, MagicMock())
+            res = api._purge_probe_cache_impl()
+
+        self.assertEqual(res["disk_entries_kept"], 0)
+        self.assertIn("re-probe les films", res["message"])
+
+    def test_un_echec_GLOBAL_du_balayage_ne_compte_pas_zero_survivant(self) -> None:
+        """Le `except OSError` EXTERNE (autour de `iterdir`) arrete le balayage
+        en cours de route. Les entrees non visitees survivent sans avoir ete
+        comptees : rendre `0` survivant serait alors une affirmation FAUSSE, pas
+        une mesure. La purge doit se declarer incomplete."""
+        self._ecrire_entrees(3)
+        api = self._api()
+        with (
+            patch.object(api, "_get_or_create_infra") as infra,
+            patch.object(Path, "iterdir", side_effect=OSError(5, "E/S")),
+        ):
+            store = MagicMock()
+            store.probe.clear_probe_cache.return_value = 4
+            infra.return_value = (store, MagicMock())
+            res = api._purge_probe_cache_impl()
+
+        self.assertTrue(res["ok"], "la purge base a eu lieu, la route reussit")
+        self.assertFalse(
+            res["disk_scan_complete"],
+            "le balayage s'est arrete : on ne sait pas ce qui reste",
+        )
+        self.assertNotIn("re-probe les films", res["message"])
