@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import shutil
 import sys
@@ -267,15 +268,68 @@ class RestSecurityHttpTests(unittest.TestCase):
 
     # 33
     def test_500_no_exception_leak(self) -> None:
-        """M8 : la reponse 500 ne contient pas de traceback Python."""
-        status, data, _ = self._request(
-            "POST", "/api/get_dashboard", body={"run_id": "nonexistent_run_xyz"}, token=self.token
+        """M8 : la reponse 500 ne contient pas de detail interne.
+
+        CE TEST N'AVAIT AUCUNE ASSERTION EFFECTIVE (lot 7, 2026-08-31). Ses
+        trois assertions vivaient sous `if status == 500:` et il visait
+        `/api/get_dashboard` — une route LEGACY qui, depuis la desactivation
+        par defaut de Pass 1 (P0 #233), repond 410 Gone et JAMAIS 500. Le
+        corps du `if` n'a donc jamais ete execute. Mesure : en remplacant
+        `{"message": "Erreur interne"}` par `{"message": f"...{exc!r}"}` dans
+        la frontiere de `rest_server._handle_post`, les 20 tests du fichier
+        restaient VERTS.
+
+        Le 500 est desormais PROVOQUE pour de vrai : on injecte une panne dans
+        la table de dispatch du handler, et c'est bien la frontiere
+        `except Exception` de production qui redige la reponse. `assertEqual(
+        status, 500)` sert de controle positif — si la route redevenait morte,
+        le test rougirait au lieu de se taire.
+        """
+        # Detail interne SANS antislash : `json.dumps` echapperait les
+        # antislash d'un chemin Windows et le detecteur ne verrait plus la
+        # fuite qu'il cherche (cf. l'auto-controle plus bas).
+        detail_interne = "sqlite:////home/victime/.cinesort/state.db"
+        message_panne = f"no such column: users.password_hash [{detail_interne}]"
+
+        # AUTO-CONTROLE DU DETECTEUR : un `assertNotIn` sur un corps serialise
+        # est un controle qui ne peut rendre qu'UNE valeur s'il est incapable
+        # de voir un vrai leak. On le prouve capable AVANT de s'en servir.
+        self.assertIn(detail_interne, json.dumps({"message": message_panne}, ensure_ascii=False))
+
+        methods = self.server._handler_cls.api_methods
+        route = "run/get_dashboard"
+        originale = methods[route]
+
+        def _explose(**_kwargs):
+            raise RuntimeError(message_panne)
+
+        methods[route] = _explose
+        try:
+            with self.assertLogs("cinesort.infra.rest_server", level=logging.ERROR) as journal:
+                status, data, _ = self._request("POST", f"/api/{route}", body={}, token=self.token)
+        finally:
+            methods[route] = originale
+
+        self.assertEqual(status, 500, f"la panne injectee doit atteindre la frontiere 500 (recu {status}: {data})")
+        msg = str(data.get("message", ""))
+        self.assertEqual(msg, "Erreur interne")
+        self.assertNotIn("Traceback", msg)
+        self.assertNotIn('File "', msg)
+
+        # Le corps ENTIER, pas seulement `message` : un futur champ `detail`
+        # ou `error` fuirait sans que l'assertion ci-dessus bronche.
+        corps = json.dumps(data, ensure_ascii=False)
+        self.assertNotIn(detail_interne, corps, "le chemin interne ne doit pas partir au client")
+        self.assertNotIn("password_hash", corps, "le fragment SQL ne doit pas partir au client")
+        self.assertNotIn("RuntimeError", corps, "le type d'exception ne doit pas partir au client")
+
+        # L'information n'est pas PERDUE, elle est deplacee : le serveur la
+        # journalise. Taire le client sans rien tracer rendrait le prochain
+        # diagnostic impossible.
+        self.assertTrue(
+            any(detail_interne in ligne for ligne in journal.output),
+            f"la panne doit rester tracee cote serveur : {journal.output}",
         )
-        if status == 500:
-            msg = str(data.get("message", ""))
-            self.assertNotIn("Traceback", msg)
-            self.assertNotIn('File "', msg)
-            self.assertEqual(msg, "Erreur interne")
 
     # 34
     def test_le_retry_couvre_un_TIMEOUT_pas_seulement_un_abort(self) -> None:
@@ -370,20 +424,52 @@ class RestSecurityHttpTests(unittest.TestCase):
         self.assertIn("TimeoutError", str(ctx.exception), "le message ne nomme pas la panne rencontree")
 
     def test_path_traversal_post_harmless(self) -> None:
-        """Path traversal dans le body : pas de crash et pas de reflexion.
+        """Path traversal dans le body : pas de crash et RIEN n'est reflechi.
 
-        Post-2026-05 : Pass 1 desactivee par defaut => /api/get_dashboard
-        (appel legacy direct) renvoie 410. On utilise le nouveau format facade
-        /api/run/get_dashboard pour conserver le test d'attaque utile, et on
-        accepte aussi 410 par precaution.
+        CE TEST ACCEPTAIT TOUT (lot 7, 2026-08-31). `assertIn(status, (200,
+        400, 404, 410, 500))` couvrait le succes ET tous les echecs — un
+        ensemble dont le statut reel (200) ne pouvait pas sortir. Et sa seule
+        verification de CONTENU vivait sous `if status == 500:`, branche jamais
+        prise. Mesure : en ajoutant `"run_id": target_run` au payload vide de
+        `dashboard_support.get_dashboard` — c'est-a-dire en renvoyant la charge
+        d'attaque telle quelle au client — le test restait VERT.
+
+        L'invariant epingle ici est celui que le nom promet : une charge de
+        traversee est traitee EXACTEMENT comme un identifiant de run inconnu,
+        et aucun de ses octets ne revient dans la reponse.
         """
-        status, data, _ = self._request(
-            "POST", "/api/run/get_dashboard", body={"run_id": "../../etc/passwd"}, token=self.token
+        charge = "../../etc/passwd"
+
+        # AUTO-CONTROLE DU DETECTEUR avant de s'en servir : `assertNotIn` sur un
+        # corps serialise ne prouve rien s'il est incapable de voir une vraie
+        # reflexion.
+        self.assertIn(charge, json.dumps({"run_id": charge}, ensure_ascii=False))
+
+        status, data, _ = self._request("POST", "/api/run/get_dashboard", body={"run_id": charge}, token=self.token)
+        # Controle positif : la route doit etre VIVANTE. Sans lui, une route
+        # retiree (410) rendrait toutes les assertions suivantes vraies pour
+        # rien — c'est exactement ce qui est arrive au voisin M8.
+        temoin, temoin_data, _ = self._request(
+            "POST", "/api/run/get_dashboard", body={"run_id": "run-inconnu-inoffensif"}, token=self.token
         )
-        self.assertIn(status, (200, 400, 404, 410, 500))
-        if status == 500:
-            msg = str(data.get("message", ""))
-            self.assertNotIn("etc/passwd", msg)
+        self.assertEqual(temoin, 200, f"route morte ({temoin}: {temoin_data}) : le test ne prouverait rien")
+        self.assertEqual(
+            status,
+            temoin,
+            "la charge de traversee doit se comporter comme un run_id inconnu ordinaire",
+        )
+
+        corps = json.dumps(data, ensure_ascii=False)
+        self.assertNotIn(charge, corps, "la charge d'attaque ne doit pas revenir au client")
+        self.assertNotIn("etc/passwd", corps)
+        # Bornage sur `../` et non sur `..` : une phrase francaise du payload
+        # (« Aucun run disponible… ») pourrait porter des points de suspension
+        # et rendre ce garde faussement rouge, donc inutilisable.
+        self.assertNotIn("../", corps, "aucun segment de remontee ne doit revenir au client")
+        self.assertIsNone(
+            data.get("run_id"),
+            "la charge ne doit pas etre adoptee comme identifiant de run",
+        )
 
     # 35
     def test_cors_default_no_wildcard(self) -> None:

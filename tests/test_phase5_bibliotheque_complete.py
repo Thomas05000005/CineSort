@@ -271,8 +271,14 @@ class BulkActionsWiringTests(unittest.TestCase):
     def test_endpoint_mark_for_deletion_bulk(self) -> None:
         self.assertIn("library/mark_for_deletion_bulk", self.js)
 
-    def test_endpoint_rescan_rows_bulk(self) -> None:
-        self.assertIn("run/rescan_rows_bulk", self.js)
+    # `test_endpoint_rescan_rows_bulk` VIVAIT ICI ET NE VOYAIT RIEN (lot 7,
+    # 2026-08-31). `assertIn("run/rescan_rows_bulk", self.js)` : la chaine est
+    # presente DEUX fois dans `views/bibliotheque.js` — a la ligne 20, dans
+    # l'en-tete de commentaire qui liste les endpoints consommes, et a la ligne
+    # 1732, dans le seul appel qui compte. La premiere est inerte et suffisait a
+    # verdir l'assertion. Mesure : en ecrivant `run/rescan_row_bulk` (route
+    # inexistante) dans le VRAI appel, les 51 tests du fichier restaient verts.
+    # Remplace par `BulkRescanRuntimeTests` plus bas, qui execute `_bulkRescan`.
 
     def test_endpoint_export_films(self) -> None:
         self.assertIn("library/export_films", self.js)
@@ -432,6 +438,92 @@ class BulkDeleteGuardRuntimeTests(unittest.TestCase):
         calls = [c for c in res["big"]["api"] if c["ep"] == "library/mark_for_deletion_bulk"]
         self.assertEqual(len(calls), 1, "onConfirm doit appeler library/mark_for_deletion_bulk une fois")
         self.assertEqual(len(calls[0]["params"]["row_ids"]), 51)
+
+
+# ---------------------------------------------------------------------------
+# 8ter. Re-scan en masse : l'endpoint est verifie EN L'APPELANT
+# ---------------------------------------------------------------------------
+
+_RESCAN_STUBS = """
+const escapeHtml = (s) => String(s);
+const posterProxyUrl = (u) => u;
+globalThis.__calls = { api: [], toast: [] };
+globalThis.__reponse = { data: { ok: true, job_id: "job-42" } };
+const apiPost = async (ep, params) => {
+  globalThis.__calls.api.push({ ep, params });
+  return globalThis.__reponse;
+};
+const getNavSignal = () => null;
+const dangerConfirmModal = () => {};
+const showModal = () => {};
+const closeModal = () => {};
+const renderFilmDetail = () => {};
+const openDuplicateComparatorModal = () => {};
+const showToast = (t) => { globalThis.__calls.toast.push(t); };
+const buildEmptyState = () => "";
+const bindEmptyStateCta = () => {};
+const openLibraryAdvancedDrawer = () => {};
+const ADVANCED_DRAWER_DEFAULTS = {};
+const rightPanel = { setSections: () => {}, setTitle: () => {} };
+"""
+
+_RESCAN_EXTRA = """
+export { _bulkRescan as __bulkRescan };
+"""
+
+_RESCAN_DRIVER = """
+async function scenario(reponse) {
+  globalThis.__calls = { api: [], toast: [] };
+  globalThis.__reponse = reponse;
+  await M.__bulkRescan(["7", "9"]);
+  return { api: globalThis.__calls.api, toast: globalThis.__calls.toast };
+}
+__emit({
+  succes: await scenario({ data: { ok: true, job_id: "job-42" } }),
+  refus: await scenario({ data: { ok: false, message: "run deja en cours" } }),
+});
+"""
+
+
+class BulkRescanRuntimeTests(unittest.TestCase):
+    """L'action 'Re-scanner' doit APPELER `run/rescan_rows_bulk`, pas la citer."""
+
+    _res: dict | None = None
+
+    def _run_or_skip(self) -> dict:
+        require_node(self)
+        if BulkRescanRuntimeTests._res is None:
+            BulkRescanRuntimeTests._res = run_module_test(
+                _BIBLIOTHEQUE_JS,
+                stubs=_RESCAN_STUBS,
+                extra=_RESCAN_EXTRA,
+                driver=_RESCAN_DRIVER,
+            )
+        return BulkRescanRuntimeTests._res
+
+    def test_endpoint_rescan_rows_bulk(self) -> None:
+        """ROUGE des que le nom de la route change dans l'appel reel."""
+        appels = self._run_or_skip()["succes"]["api"]
+        self.assertEqual(len(appels), 1, f"un seul appel attendu : {appels}")
+        self.assertEqual(appels[0]["ep"], "run/rescan_rows_bulk")
+
+    def test_la_selection_est_transmise_telle_quelle(self) -> None:
+        """Un endpoint juste appele avec une selection vide ne re-scanne rien."""
+        appels = self._run_or_skip()["succes"]["api"]
+        self.assertEqual(appels[0]["params"]["row_ids"], ["7", "9"])
+
+    def test_le_lancement_est_annonce(self) -> None:
+        toasts = self._run_or_skip()["succes"]["toast"]
+        self.assertEqual([t["type"] for t in toasts], ["success"], toasts)
+        self.assertIn("job-42", toasts[0]["text"], "le toast doit porter l'identifiant du job")
+        self.assertIn("2", toasts[0]["text"], "le toast doit annoncer le nombre de films")
+
+    def test_un_refus_du_backend_n_est_pas_annonce_comme_un_succes(self) -> None:
+        """`{ok: false}` arrive dans `res.data` : un `res.ok` naif verrait
+        `undefined` et annoncerait un succes qui n'a pas eu lieu."""
+        refus = self._run_or_skip()["refus"]
+        self.assertEqual([t["type"] for t in refus["toast"]], ["error"], refus["toast"])
+        self.assertIn("run deja en cours", refus["toast"][0]["text"])
 
 
 # ---------------------------------------------------------------------------
