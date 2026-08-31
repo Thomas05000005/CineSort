@@ -9,7 +9,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cinesort.domain.perceptual.comparison as _comparison_mod
 from cinesort.domain.i18n_messages import t
@@ -18,6 +18,7 @@ from cinesort.domain.perceptual.av1_grain_metadata import extract_av1_film_grain
 from cinesort.domain.perceptual.comparison import build_comparison_report, compare_per_frame
 from cinesort.domain.perceptual.composite_score import build_perceptual_result
 from cinesort.domain.perceptual.composite_score_v2 import compute_global_score_v2
+from cinesort.domain.perceptual.constants import PERCEPTUAL_ENGINE_VERSION
 from cinesort.domain.perceptual.ffmpeg_runner import resolve_ffmpeg_path
 from cinesort.domain.perceptual.frame_extraction import extract_representative_frames
 from cinesort.domain.perceptual.grain_analysis import (
@@ -242,6 +243,102 @@ def get_perceptual_details(
         return _err_response(str(exc), category="runtime", level="error", log_module=__name__)
 
 
+def _rapport_perceptuel_en_cache(
+    store: Any,
+    *,
+    run_id: str,
+    row_id: str,
+    settings: Dict[str, Any],
+    force: bool,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Lit le rapport en cache et decide s'il est SERVABLE.
+
+    Rend `(cache_hit, rapport_perime)`, dont au plus un est non-None :
+
+      - `cache_hit`      : la reponse a renvoyer telle quelle, version a jour ;
+      - `rapport_perime` : un rapport d'une version ANTERIEURE. Il ne peut pas
+        servir de cache-hit, mais il reste le repli si le recalcul se revele
+        impossible (media deplace, probe en echec).
+
+    Extraite de `_validate_and_load_context` : ce lot y ajoutait la comparaison
+    de version et faisait passer la fonction hote de 114 a 147 lignes, au-dessus
+    de son plafond. La reponse du depot a une fonction trop longue est
+    d'EXTRAIRE, pas de monter le plafond ; c'est ce que dit le message d'echec
+    du cliquet lui-meme. Ce bloc ne consultait que `store`, `run_id`, `row_id`
+    et `settings` : rien ne le retenait dans son hote.
+    """
+    if force:
+        return None, None
+    existing = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
+    if not existing:
+        return None, None
+
+    metrics = dict(existing.get("metrics", {}) or {})
+    for cle in ("audio_fingerprint", "ssim_self_ref", "upscale_verdict", "spectral_cutoff_hz", "lossy_verdict"):
+        if existing.get(cle) is not None:
+            metrics[cle] = existing[cle]
+
+    # R6-PERC-CACHE-HIT-VOCAB : applique le meme dispatch V1/V2 que le chemin
+    # non-cache, pour eviter que le cache_hit expose le vocabulaire V1
+    # (reference/excellent/bon/mediocre/degrade) alors que VN-B.1 a promu V2
+    # (Platinum/Gold/Silver/Bronze/Reject) comme source de verite par defaut.
+    score_version = _normalize_composite_score_version(settings.get("composite_score_version"))
+    metrics["composite_score_version"] = score_version
+    if score_version == 2:
+        v2_score = existing.get("global_score_v2")
+        v2_tier = existing.get("global_tier_v2")
+        if v2_score is not None and v2_tier:
+            metrics["global_score"] = int(round(float(v2_score)))
+            metrics["global_tier"] = str(v2_tier)
+        else:
+            metrics["composite_score_version"] = 1
+
+    # PERCEPTUAL_ENGINE_VERSION existait, etait documentee « permet de
+    # distinguer un rapport calcule avec les regles precedentes d'un rapport
+    # recalcule apres correctif », etait posee sur chaque `PerceptualResult` et
+    # persistee dans `metrics_json`... et n'etait RELUE NULLE PART. Le bump
+    # 1.0 -> 1.1 du 2026-08-03 (trous spectraux AAC, confiances DRC et fake-4K
+    # plafonnees, verdict « Faux 4K ») ne rafraichissait donc aucun rapport
+    # deja en base : une bibliotheque melangeait en silence des verdicts 1.0 et
+    # 1.1 dans le meme classement.
+    #
+    # C'est EXACTEMENT le defaut de #1172, sur l'autre moteur. Le moteur de
+    # qualite, lui, compare bien sa version (`quality_report_support.py:396`) :
+    # c'est ce precedent qui tranche ici, pas un avis.
+    #
+    # Les rapports anterieurs a l'introduction du champ ne le portent pas :
+    # "" != "1.1", ils sont donc traites comme perimes eux aussi.
+    if str(metrics.get("version") or "") == PERCEPTUAL_ENGINE_VERSION:
+        return {"ok": True, "cache_hit": True, "perceptual": metrics}, None
+    return None, metrics
+
+
+def _rendu_de_rapport_perime(rapport: Dict[str, Any], *, raison: str) -> Dict[str, Any]:
+    """Sert un rapport d'une version PERIMEE quand le recalcul est impossible.
+
+    Sans ce repli, exiger la bonne version transformerait un rapport servi en
+    ERREUR pour tout film dont le media a bouge — une regression de
+    disponibilite introduite par un correctif de fraicheur. Le precedent du
+    moteur de qualite fait le meme choix (`stale_existing`,
+    `quality_report_support.py:398`) : un rapport perime reste le meilleur repli
+    quand le media n'est plus atteignable, a condition de le DIRE.
+
+    Le drapeau voyage dans la charge utile : un consommateur qui l'ignore voit
+    le meme rapport qu'avant, un consommateur qui le lit peut proposer un
+    recalcul force.
+    """
+    charge = dict(rapport)
+    charge["perceptual_engine_stale"] = True
+    charge["perceptual_engine_version_attendue"] = PERCEPTUAL_ENGINE_VERSION
+    return {
+        "ok": True,
+        "cache_hit": True,
+        "perceptual_engine_stale": True,
+        "message": f"Rapport calcule avec une version anterieure du moteur ; recalcul impossible ({raison}).",
+        "perceptual": charge,
+    }
+
+
 def _validate_and_load_context(
     api: Any,
     run_id: str,
@@ -278,29 +375,11 @@ def _validate_and_load_context(
     run_row, store = found
 
     opts = options if isinstance(options, dict) else {}
-    if not bool(opts.get("force")):
-        existing = store.perceptual.get_perceptual_report(run_id=run_id, row_id=row_id)
-        if existing:
-            metrics = dict(existing.get("metrics", {}) or {})
-            for k in ("audio_fingerprint", "ssim_self_ref", "upscale_verdict", "spectral_cutoff_hz", "lossy_verdict"):
-                if k in existing and existing[k] is not None:
-                    metrics[k] = existing[k]
-            # R6-PERC-CACHE-HIT-VOCAB : applique le meme dispatch V1/V2 que le
-            # chemin non-cache (cf lignes 482-505) pour eviter que le cache_hit
-            # expose le vocabulaire V1 (reference/excellent/bon/mediocre/degrade)
-            # alors que VN-B.1 a promu V2 (Platinum/Gold/Silver/Bronze/Reject)
-            # comme source de verite par defaut (composite_score_version=2).
-            score_version = _normalize_composite_score_version(settings.get("composite_score_version"))
-            metrics["composite_score_version"] = score_version
-            if score_version == 2:
-                v2_score = existing.get("global_score_v2")
-                v2_tier = existing.get("global_tier_v2")
-                if v2_score is not None and v2_tier:
-                    metrics["global_score"] = int(round(float(v2_score)))
-                    metrics["global_tier"] = str(v2_tier)
-                else:
-                    metrics["composite_score_version"] = 1
-            return {"ok": True, "cache_hit": True, "perceptual": metrics}
+    cache_hit, rapport_perime = _rapport_perceptuel_en_cache(
+        store, run_id=run_id, row_id=row_id, settings=settings, force=bool(opts.get("force"))
+    )
+    if cache_hit is not None:
+        return cache_hit
 
     state_dir = normalize_user_path(run_row.get("state_dir"), api._state_dir)
     run_paths = api._run_paths_for(state_dir, run_id, ensure_exists=False)
@@ -319,6 +398,8 @@ def _validate_and_load_context(
         rows = api._load_rows_from_plan_jsonl(run_paths)
         row = next((r for r in rows if str(r.row_id) == str(row_id)), None)
     if row is None:
+        if rapport_perime is not None:
+            return _rendu_de_rapport_perime(rapport_perime, raison="film absent du plan")
         return _err_response(
             "Film introuvable dans ce plan (row_id).", category="resource", level="info", log_module=__name__
         )
@@ -326,6 +407,8 @@ def _validate_and_load_context(
     cfg = rs.cfg if rs else api._cfg_from_run_row(run_row)
     media_path = api._resolve_media_path_for_row(cfg, row)
     if media_path is None or not media_path.exists():
+        if rapport_perime is not None:
+            return _rendu_de_rapport_perime(rapport_perime, raison="media introuvable")
         return _err_response("Fichier media introuvable.", category="resource", level="warning", log_module=__name__)
 
     probe_result = _load_probe(api, store, run_row, media_path)
@@ -336,6 +419,8 @@ def _validate_and_load_context(
     probe_quality = str(normalized.get("probe_quality") or "")
     # BUG-018 (hotfix1) : helper centralise vs == "FAILED" strict case-sensitive.
     if probe_quality_is_failed(probe_quality) and width == 0 and height == 0:
+        if rapport_perime is not None:
+            return _rendu_de_rapport_perime(rapport_perime, raison="probe en echec")
         return _err_response(
             "Probe echouee (fichier corrompu ou format non supporte).",
             category="runtime",
@@ -346,11 +431,15 @@ def _validate_and_load_context(
     has_video = width > 0 and height > 0
     has_audio = len(normalized.get("audio_tracks") or []) > 0
     if not has_video and not has_audio:
+        if rapport_perime is not None:
+            return _rendu_de_rapport_perime(rapport_perime, raison="probe sans video ni audio")
         return _err_response(
             "Probe incomplete (ni video ni audio detectes).", category="runtime", level="warning", log_module=__name__
         )
     duration_s = float(normalized.get("duration_s") or 0)
     if duration_s <= 0:
+        if rapport_perime is not None:
+            return _rendu_de_rapport_perime(rapport_perime, raison="duree manquante")
         return _err_response(
             "Probe incomplete (duree manquante).", category="runtime", level="warning", log_module=__name__
         )

@@ -264,7 +264,12 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # donc rien ne le retenait ici — la fonction passe SOUS son plafond
     # historique au lieu de le repousser.
     ("cinesort/ui/api/apply_support.py", "_execute_and_finalize_undo"): 161,
-    ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 114,
+    # 114 -> 106 : l'extraction de `_rapport_perceptuel_en_cache` (cache
+    # perceptuel versionne). Le cliquet a rougi DANS LES DEUX SENS sur ce lot :
+    # d'abord a la hausse (147 > 114, le correctif ajoutait 33 lignes), puis a
+    # la baisse une fois l'extraction faite. C'est son interet — le gain est
+    # verrouille au lieu d'etre disponible pour la prochaine rallonge.
+    ("cinesort/ui/api/perceptual_support.py", "_validate_and_load_context"): 106,
     ("cinesort/ui/api/profiles_support_import_export.py", "get_breakdown_5_axes"): 114,
     ("cinesort/ui/api/tmdb_support.py", "enrich_tmdb_ids_by_title"): 105,  # -9 le 2026-08-31, gain verrouille
     ("cinesort/infra/db/sqlite_store.py", "_bootstrap_schema_latest"): 112,
