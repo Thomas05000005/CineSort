@@ -14,6 +14,9 @@
 
 import { escapeHtml } from "../core/dom.js";
 import { apiPost } from "../core/api.js";
+// LOT 5-D : « Tout effacer » est destructif (regle projet n3) — cf.
+// _confirmerToutEffacer plus bas.
+import { dangerConfirmModal } from "./modal.js";
 
 const POLL_MS = 30000;
 const DRAWER_ID = "v5-notif-drawer";
@@ -173,6 +176,37 @@ function _buildHtml(items, unread) {
   `;
 }
 
+/** LOT 5-D — « Tout effacer » derriere la confirmation de la regle projet n3.
+ *
+ * Les deux conditions du critere ecrit dans `dangerConfirmModal` sont reunies :
+ * la perte est IRRECUPERABLE PAR L'APPLICATION (les notifications vivent en
+ * memoire, `store.clear()` ne laisse ni undo ni corbeille) et la portee n'est
+ * PAS une selection de l'utilisateur — le bouton efface TOUT, y compris ce que
+ * le filtre courant ne montre pas. La suppression UNITAIRE, elle, reste
+ * immediate : c'est une portee choisie.
+ *
+ * La liste vient de `_cache.items` (toutes les notifications), jamais du sous-
+ * ensemble filtre : c'est justement l'ecart entre les deux qui surprend.
+ * `countdownSeconds` n'est pas passe -> derive du nombre d'elements par
+ * `gradedCountdownSeconds` (3 s au-dela de 50, comme l'exige la regle n3).
+ */
+function _confirmerToutEffacer() {
+  const items = (_cache.items || []).map((it) => String((it && (it.title || it.body || it.id)) || ""));
+  const n = items.length;
+  dangerConfirmModal({
+    title: `Effacer les ${n} notification${n > 1 ? "s" : ""} ?`,
+    items,
+    consequence:
+      "Effacement definitif : le centre ne garde les notifications qu'en memoire, "
+      + "il n'y a ni annulation ni corbeille. Le filtre affiche n'y change rien, "
+      + "TOUT est efface — y compris les avertissements d'apply, seul canal qui "
+      + "survit a la fermeture de l'ecran.",
+    confirmLabel: "Tout effacer",
+    onConfirm: () =>
+      apiPost("runtime/clear_notifications").then(() => refreshNotifications()).catch(() => {}),
+  });
+}
+
 function _bindDrawer(drawer) {
   // V2-C R4-MEM-2 : tracker le handler pour pouvoir le retirer si besoin
   // (sinon les listeners s'accumulaient car le drawer n'etait pas re-cree).
@@ -194,7 +228,7 @@ function _bindDrawer(drawer) {
 
     const clearAll = e.target.closest("[data-notif-clear-all]");
     if (clearAll && !clearAll.disabled) {
-      apiPost("runtime/clear_notifications").then(() => refreshNotifications()).catch(() => {});
+      _confirmerToutEffacer();
       return;
     }
 

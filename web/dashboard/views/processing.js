@@ -216,9 +216,28 @@ function _renderInspectorMobileDrawer() {
 
   document.getElementById("v5BtnCloseInspector")?.addEventListener("click", _closeInspectorDrawer);
   overlay.addEventListener("click", _closeInspectorDrawer);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") _closeInspectorDrawer();
-  });
+  // LOT 5-C : handler NOMME. En anonyme il etait impossible a retirer, donc il
+  // restait sur `document` pour toute la session, sur toutes les autres vues.
+  document.addEventListener("keydown", _onInspectorDrawerKeydown);
+}
+
+function _onInspectorDrawerKeydown(e) {
+  if (e.key === "Escape") _closeInspectorDrawer();
+}
+
+/** LOT 5-C : demonte le drawer inspecteur.
+ *
+ * Le drawer et son voile sont ajoutes a `document.body`, PAS au conteneur de la
+ * vue : vider `containerRef.innerHTML` ne les enleve pas. Quitter Traitement
+ * avec le drawer ouvert laissait donc un panneau et son voile par-dessus
+ * l'ecran suivant. Retirer les noeuds est aussi ce qui permet a un remontage de
+ * repasser la garde de `_renderInspectorMobileDrawer` et de reposer ses
+ * listeners — sinon le drawer survivrait sans plus reagir a Echap.
+ */
+function _destroyInspectorMobileDrawer() {
+  document.removeEventListener("keydown", _onInspectorDrawerKeydown);
+  document.getElementById("v5ProcessingInspectorDrawer")?.remove();
+  document.getElementById("v5ProcessingInspectorOverlay")?.remove();
 }
 
 function _buildInspectorContent(rowId) {
@@ -1049,6 +1068,8 @@ export function unmountProcessing() {
   _state.pollTimer = null;
   if (_state.containerRef) _state.containerRef.innerHTML = "";
   _state.containerRef = null;
+  // LOT 5-C : le drawer inspecteur vit sous document.body, hors du conteneur.
+  _destroyInspectorMobileDrawer();
 }
 
 export { STEPS };
