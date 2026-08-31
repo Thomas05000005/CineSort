@@ -49,18 +49,24 @@ _WORKFLOW = _RACINE / ".github" / "workflows" / "mypy.yml"
 
 
 def _invocation_mypy() -> str:
-    """La commande `mypy ...` telle que le job la lance."""
+    """LA LIGNE `mypy ...` que le job execute — pas l'etape qui la contient.
+
+    Une premiere version rendait l'etape `run:` ENTIERE. Or l'invocation reelle
+    et la commande de reproduction citee en commentaire vivent dans la MEME
+    etape : `assertIn("app.py", etape)` restait donc vrai apres avoir retire
+    `app.py` de l'invocation. La mutation a survecu, et c'est elle qui l'a
+    revele — le garde souffrait du defaut qu'il denonce, chercher une chaine
+    dans un bloc trop large.
+    """
     conf = yaml.safe_load(io.open(_WORKFLOW, encoding="utf-8").read())
-    commandes = [
-        str(etape.get("run") or "") for job in (conf.get("jobs") or {}).values() for etape in (job.get("steps") or [])
-    ]
-    # On cherche l'invocation REELLE, pas la commande de reproduction citee en
-    # commentaire : cette derniere commence par `uvx`.
-    for commande in commandes:
-        for ligne in commande.split("\n"):
-            nue = ligne.strip()
-            if nue.startswith("mypy ") and not nue.startswith("#"):
-                return commande
+    for job in (conf.get("jobs") or {}).values():
+        for etape in job.get("steps") or []:
+            for ligne in str(etape.get("run") or "").split("\n"):
+                nue = ligne.strip()
+                # `#` exclut les commentaires shell ; `uvx` exclut la commande de
+                # reproduction, qui n'est pas ce que le job execute.
+                if nue.startswith("mypy ") and not nue.startswith(("#", "uvx")):
+                    return nue
     raise AssertionError("aucune invocation `mypy` trouvee dans le workflow")
 
 
