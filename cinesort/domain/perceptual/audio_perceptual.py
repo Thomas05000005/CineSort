@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional
 
 from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK_PATTERNS as _CODEC_RANK_FULL
 
+# Source unique de la derivation « codec de base + variante -> etiquette
+# canonique » (le probe range 'DTS-HD MA' dans `profile`, pas dans `codec`).
+# Meme dependance, et pour la meme raison, que `duplicate_compare` : dupliquer
+# la regle a deja produit un bug (R8-039).
+from cinesort.domain.quality_score import _canonical_audio_codec
+
 from .constants import (
     AUDIO_WEIGHT_CLIPPING,
     AUDIO_WEIGHT_CREST,
@@ -100,6 +106,37 @@ _DEFAULT_SAMPLE_RATE = 48000
 # ---------------------------------------------------------------------------
 
 
+def _track_codec_rank(track: Dict[str, Any]) -> int:
+    """Rang d'une piste, sur son etiquette CANONIQUE (codec de base + variante).
+
+    Fix ultra-audit 2026-08-31 (#6). ffprobe range le codec de BASE dans `codec`
+    ('dts', 'truehd', 'eac3') et la VARIANTE dans des champs separes : `profile`
+    ('DTS-HD MA'), `is_atmos`, `is_dts_x` (cf. infra/probe/_normalize_ffprobe).
+    Ce module faisait un substring sur `codec` et `title` SEULS, alors que les
+    trois autres implementations de « la meilleure piste » du depot
+    (`quality_score._best_audio_track`, `duplicate_compare._best_audio`,
+    `naming._best_audio_track`) passent toutes par `_canonical_audio_codec`.
+
+    Mesure du defaut, remux BluRay DTS-HD MA 7.1 + piste EAC3 2.0 de
+    commentaires : `codec='dts'` -> rang 2, `codec='eac3'` -> rang 3, donc la
+    piste de COMMENTAIRES etait elue « meilleure piste » et toute l'analyse
+    perceptuelle (loudnorm, astats, clipping) portait sur elle. C'est exactement
+    le defaut R8-039, deja corrige dans `quality_score` et laisse ici.
+
+    Le `title` reste interroge : c'est par lui qu'un « Atmos » non porte par les
+    champs structures etait deja vu, et le drapeau `is_atmos` lui devient
+    equivalent au lieu d'etre ignore.
+    """
+    if not isinstance(track, dict):
+        return 0
+    codec = _canonical_audio_codec(track) or str(track.get("codec") or "").lower()
+    title = str(track.get("title") or "").lower()
+    for pattern, rank in _CODEC_RANK:
+        if pattern in codec or pattern in title:
+            return rank
+    return 0
+
+
 def select_best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Selectionne la piste audio avec le codec le plus haut dans la hierarchie."""
     if not audio_tracks:
@@ -109,13 +146,7 @@ def select_best_audio_track(audio_tracks: List[Dict[str, Any]]) -> Optional[Dict
     best_rank = -1
 
     for track in audio_tracks:
-        codec = str(track.get("codec") or "").lower()
-        title = str(track.get("title") or "").lower()
-        rank = 0
-        for pattern, r in _CODEC_RANK:
-            if pattern in codec or pattern in title:
-                rank = r
-                break
+        rank = _track_codec_rank(track)
         if rank > best_rank:
             best_rank = rank
             best_track = track

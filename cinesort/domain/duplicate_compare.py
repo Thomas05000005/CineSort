@@ -28,6 +28,17 @@ from cinesort.domain.quality_score import (
     _canonical_audio_codec,
 )
 
+# Echelle largeur-primaire, source UNIQUE du depot. Ce module en portait une
+# recopie (les seuils 3800/2100, 1900/1000, 1280/680 ecrits en dur) : cf. le
+# correctif #5 de `_resolution_height`.
+from cinesort.domain.resolution_class import (
+    RES_720P,
+    RES_1080P,
+    RES_2160P,
+    RES_SD,
+    classify_resolution,
+)
+
 logger = logging.getLogger(__name__)
 
 # --- Ponderations des criteres -------------------------------------------
@@ -45,10 +56,17 @@ _TIE_THRESHOLD = 5
 # --- Rangs pour chaque critere -------------------------------------------
 _RESOLUTION_RANK = {2160: 4, 1080: 3, 720: 2, 480: 1}
 
-# Etiquette canonique (`metrics.detected.resolution`, cf. quality_score
-# ._resolution_label) -> hauteur de reference de la classe. Utilise quand
-# l'appelant fournit deja le verdict canonique plutot que des dimensions.
-_CANONICAL_LABEL_RANK = {"2160p": 2160, "1080p": 1080, "720p": 720}
+# Etiquette canonique (`metrics.detected.resolution`, cf. resolution_class)
+# -> hauteur de reference de la classe. Utilise quand l'appelant fournit deja
+# le verdict canonique plutot que des dimensions.
+#
+# Fix ultra-audit 2026-08-31 (#5) : cette table est desormais lue DANS LES DEUX
+# SENS. `_resolution_height` encode (bande -> valeur comparee) et
+# `_resolution_label` decode (valeur comparee -> etiquette affichee). Tant
+# qu'il n'y a qu'UNE table, « meme etiquette » et « meme valeur » ne peuvent
+# plus diverger — c'est exactement ce qui avait diverge.
+_CANONICAL_LABEL_RANK = {RES_2160P: 2160, RES_1080P: 1080, RES_720P: 720}
+_RANK_TO_CANONICAL_LABEL = {height: label for label, height in _CANONICAL_LABEL_RANK.items()}
 
 _HDR_RANK = {"dv": 3, "dolby vision": 3, "hdr10+": 2, "hdr10plus": 2, "hdr10": 1, "sdr": 0, "": 0}
 
@@ -240,8 +258,8 @@ def compare_by_criteria(
         _compare_criterion(
             "audio_channels",
             "Canaux audio",
-            int(aa.get("channels") or 0),
-            int(ab.get("channels") or 0),
+            _channels_value(aa),
+            _channels_value(ab),
             _channels_label,
             _WEIGHT_AUDIO_CHANNELS,
         )
@@ -404,32 +422,41 @@ def _resolution_height(video: Dict[str, Any]) -> Optional[int]:
     label = str(video.get("resolution") or video.get("resolution_label") or "").strip().lower()
     if label in _CANONICAL_LABEL_RANK:
         return _CANONICAL_LABEL_RANK[label]
-    w = _to_positive_int(video.get("width"))
-    h = _to_positive_int(video.get("height"))
-    if w <= 0 and h <= 0:
-        return 480 if label in {"sd", "480p"} else None
-    # Seuils identiques a quality_score._resolution_label (source de verite unique).
-    if w >= 3800 or h >= 2100:
-        return 2160
-    if w >= 1900 or h >= 1000:
-        return 1080
-    if w >= 1280 or h >= 680:
-        return 720
-    return h or None
+    # Fix ultra-audit 2026-08-31 (#5) : les trois seuils etaient RECOPIES ici.
+    # Ils vivent une seule fois, dans `resolution_class` — le module ecrit pour
+    # ca, et que `quality_score._resolution_label` interroge deja.
+    band = classify_resolution(video.get("width"), video.get("height"))
+    if band in _CANONICAL_LABEL_RANK:
+        return _CANONICAL_LABEL_RANK[band]
+    if band == RES_SD:
+        # En dessous de 720p on garde la hauteur BRUTE : elle reste
+        # discriminante entre SD (576 / 480 / 360). `_resolution_label` la rend
+        # telle quelle, sinon l'affichage nierait l'ecart qu'on vient de noter.
+        return _to_positive_int(video.get("height")) or None
+    # Aucune dimension exploitable : seul un verdict deja ecrit peut trancher.
+    return 480 if label in {"sd", "480p"} else None
 
 
 def _resolution_label(h: Optional[int]) -> str:
+    """Decode EXACTEMENT la valeur produite par `_resolution_height`.
+
+    Fix ultra-audit 2026-08-31 (#5). Cette fonction re-classait la valeur recue
+    avec des seuils HAUTEUR (`h >= 480 -> "480p"`), alors que `_resolution_height`
+    y depose soit une bande canonique (2160/1080/720), soit la hauteur BRUTE
+    d'un flux SD. Toute la plage [480..679] s'affichait donc « 480p » : deux SD
+    compares -- 720x576 (PAL) contre 720x480 (NTSC) -- sortaient
+    « 480p vs 480p » avec un delta de +30, le POIDS PLEIN du critere. La table
+    des criteres annoncait une egalite que le verdict contredisait, et l'ecran
+    Doublons transforme ce verdict en decision de masse (« Auto-decider tous »),
+    les perdants partant en _review/_duplicates_user_decided/.
+
+    L'encodage et le decodage partagent desormais `_CANONICAL_LABEL_RANK` :
+    meme etiquette <=> meme valeur comparee <=> delta nul.
+    """
     if h is None:
         return "?"
-    if h >= 2160:
-        return "2160p"
-    if h >= 1080:
-        return "1080p"
-    if h >= 720:
-        return "720p"
-    if h >= 480:
-        return "480p"
-    return f"{h}p"
+    label = _RANK_TO_CANONICAL_LABEL.get(h)
+    return label if label else f"{h}p"
 
 
 def _hdr_rank_value(video: Dict[str, Any]) -> Optional[int]:
@@ -516,6 +543,31 @@ def _audio_codec_rank_value(audio: Dict[str, Any]) -> Optional[int]:
 
 def _audio_codec_label(rank: Optional[int]) -> str:
     return {5: "truehd", 4: "dts-hd ma", 3: "flac", 2: "ac3", 1: "aac"}.get(rank or 0, "?")
+
+
+def _channels_value(audio: Dict[str, Any]) -> Optional[int]:
+    """Nombre de canaux compare, ou `None` quand le probe n'en porte AUCUN.
+
+    Fix ultra-audit 2026-08-31 (#20). Le site d'appel coercait
+    `int(audio.get("channels") or 0)` AVANT `_compare_criterion`, ce qui rendait
+    la garde d'abstention de cette derniere (`val is None -> winner='unknown',
+    delta=0`) strictement INATTEIGNABLE pour ce critere : une absence de mesure
+    devenait un 0, c'est-a-dire la PIRE valeur possible.
+
+    Mesure : A = AC3 5.1, B sans aucune piste audio exploitable ->
+    `value_a='5.1'  value_b='?'  winner='a'  points_delta=+10`, soit le poids
+    PLEIN du critere en faveur de A, avec « ? » affiche juste a cote. Meme
+    signature que `.get(cle, 0)` de `_video_codec_rank_value` (2026-08-29), qui
+    distinguait deja « inconnu » de « pire ». Sur un chemin qui deplace des
+    fichiers, l'absence de connaissance doit produire un refus de trancher.
+    """
+    if not isinstance(audio, dict):
+        return None
+    try:
+        ch = int(audio.get("channels") or 0)
+    except (TypeError, ValueError):
+        return None
+    return ch if ch > 0 else None
 
 
 def _channels_label(ch: Optional[int]) -> str:

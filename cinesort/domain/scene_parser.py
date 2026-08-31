@@ -38,12 +38,23 @@ from typing import Optional
 # Fix B02-TAGS-BRACKETS : avant ce fix, les chiffres TMDb (ex 27205) restaient
 # dans le titre nettoye et polluaient la query fuzzy. parse_scene_title() doit
 # strip ces tags AVANT le pipeline noise/year/release-group.
+#
+# SOURCE UNIQUE (fix ultra-audit 2026-08-31, #9). Ces deux motifs existaient en
+# TROIS exemplaires -- ici, `naming.py:25` et `title_helpers.py:30` -- et les
+# trois annoncaient dans leur commentaire tolerer les espaces internes. Un seul
+# le faisait : celui de `naming.py`, qui porte le `\s*` avant le separateur.
+# Mesure sur « Inception (2010) {tmdb - 27205} » : `naming` extrayait 27205,
+# `title_helpers` et ce module rendaient None, et `strip_provider_tags` laissait
+# le tag entier dans le titre -- donc les chiffres TMDb partaient en query
+# fuzzy, ce que ce fix B02 existe precisement pour empecher. La variante la plus
+# permissive (celle qui tient la promesse des trois commentaires) est retenue,
+# et ce module -- feuille sans aucun import interne -- en est le seul porteur.
 _PROVIDER_TMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*tmdb(?:id)?[\-:_]\s*(\d{1,9})\s*[\}\]]",
+    r"[\{\[]\s*tmdb(?:id)?\s*[\-:_]\s*(\d{1,9})\s*[\}\]]",
     re.IGNORECASE,
 )
 _PROVIDER_IMDB_TAG_RE = re.compile(
-    r"[\{\[]\s*imdb(?:id)?[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
+    r"[\{\[]\s*imdb(?:id)?\s*[\-:_]\s*(tt\d{7,10})\s*[\}\]]",
     re.IGNORECASE,
 )
 

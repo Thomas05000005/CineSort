@@ -8,7 +8,7 @@ Couvre :
 - Audio canaux : 7.1 vs 5.1 → A gagne
 - Bitrate : meme codec, A plus haut → A gagne ; codecs differents → skip
 - Egalite parfaite → tie
-- Probe manquante : criteres connus seulement
+- Probe manquante : criteres connus seulement (aucun connu -> tie, cf. #20)
 - Deux probes manquantes → tie
 - 3 fichiers → rank_duplicates ordonne
 - Score pondere correct
@@ -257,13 +257,36 @@ class ProbeManquanteTests(unittest.TestCase):
     """Gestion des probes manquantes."""
 
     def test_one_probe_missing(self) -> None:
-        """Une probe manquante → criteres connus seulement, A gagne par defaut si il a des donnees."""
+        """Une probe entierement absente -> TOUS les criteres s'abstiennent, donc tie.
+
+        Ce test attendait `winner == "a"` et son propre commentaire disait
+        pourquoi : « A a des donnees concretes (canaux 8 vs 0) ». C'etait le
+        constat #20 de l'ultra-audit 2026-08-31 ecrit en assertion. Les CINQ
+        autres criteres s'abstenaient deja face a une probe absente
+        (`_hdr_rank_value`, `_video_codec_rank_value`, `_audio_codec_rank_value`
+        rendent None ; le bitrate a sa branche `unknown`) : seul le critere des
+        canaux tranchait, et uniquement parce que son site d'appel coercait
+        `int(... or 0)` AVANT `_compare_criterion`, transformant une absence de
+        mesure en la PIRE valeur possible.
+
+        Le verdict honnete d'une comparaison ou l'on ne sait RIEN de B est
+        « Qualite equivalente, garder les deux ». L'inverse envoyait B en
+        _review/_duplicates_user_decided/ au premier « Auto-decider tous ».
+        (Aucun impact production : `run_flow_support._enrich_one_group` refuse
+        deja d'appeler le comparateur quand une probe est None.)
+        """
         r = compare_duplicates(
             _probe(height=1080, codec="hevc", audio_codec="truehd", channels=8),
             None,
         )
-        # A a des donnees concretes (canaux 8 vs 0) → A gagne
-        self.assertEqual(r.winner, "a")
+        self.assertEqual(r.winner, "tie")
+        self.assertTrue(
+            all(c.winner in {"unknown", "tie"} for c in r.criteria),
+            [(c.name, c.winner, c.points_delta) for c in r.criteria],
+        )
+        canaux = next(c for c in r.criteria if c.name == "audio_channels")
+        self.assertEqual((canaux.value_a, canaux.value_b), ("7.1", "?"))
+        self.assertEqual(canaux.points_delta, 0)
 
     def test_both_probes_missing(self) -> None:
         r = compare_duplicates(None, None)

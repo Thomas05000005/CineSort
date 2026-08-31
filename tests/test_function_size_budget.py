@@ -197,7 +197,9 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/app/quarantine_ttl.py", "purge_review_bucket"): 123,
     ("cinesort/domain/perceptual/av1_grain_metadata.py", "extract_av1_film_grain_params"): 123,
     ("cinesort/domain/core.py", "build_candidates_from_tmdb"): 122,
-    ("cinesort/domain/release_name_parser.py", "parse_release_name"): 122,
+    # `parse_release_name` est SORTIE de ce plafond le 2026-08-31 : 147 -> 91
+    # lignes, apres extraction de `_parse_audio_hints` (64). Le cliquet avait
+    # rougi a 147 > 122 en documentant le repli DTS:X ; il demande de DECOUPER.
     ("cinesort/ui/api/library_support.py", "set_film_tmdb_candidate"): 122,
     ("cinesort/domain/calibration.py", "suggest_weight_adjustment"): 121,
     ("cinesort/domain/perceptual/grain_classifier.py", "classify_grain_nature"): 121,

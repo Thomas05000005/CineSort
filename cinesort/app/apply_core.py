@@ -25,6 +25,7 @@ from cinesort.app.move_journal import (
 )
 from cinesort.domain.naming import (
     build_naming_context,
+    check_path_length,
     check_path_length_killswitch,
     format_movie_folder,
     format_tv_series_folder,
@@ -2686,6 +2687,24 @@ def _deplacer_le_dossier_du_film(
             renommer_avec_reprise(folder, dst)
 
 
+def _log_path_length_warning(dst: Path, longest_inner: str, log: Any) -> None:
+    """Avertissement PREVENTIF MAX_PATH, juste sous le kill-switch (#15).
+
+    `naming.check_path_length` (seuil 240, « ~20 chars de marge avant
+    MAX_PATH ») n'avait AUCUN appelant de production : seuls deux fichiers de
+    tests l'exercaient. C'est ici son unique zone utile — le kill-switch vient
+    de laisser passer, donc on est sous 259, et l'utilisateur merite de savoir
+    que le prochain sidecar un peu long fera SKIPPER ce film.
+
+    Le sujet mesure est le MEME que celui du kill-switch (`dst` + le nom
+    interne le plus long), sinon le seuil bas ne pourrait pas preceder le haut.
+    Purement informatif : aucun `res.error_messages`, aucun skip.
+    """
+    warn = check_path_length(str(dst.parent), dst.name, inner_name=longest_inner)
+    if warn is not None:
+        log("WARN", warn)
+
+
 def apply_single(
     cfg: "Config",
     folder: Path,
@@ -2764,6 +2783,7 @@ def apply_single(
             pass
         core_mod._mark_skip(res, core_mod.SKIP_REASON_PATH_TOO_LONG)
         return
+    _log_path_length_warning(dst, _longest_inner, log)
 
     # #469 : memes entrees de contexte que `_naming_ctx` ci-dessus (edition +
     # separator), sinon cette garde NOOP compare le dossier a un nom que ce
