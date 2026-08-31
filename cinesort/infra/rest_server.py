@@ -1539,16 +1539,22 @@ class _CineSortHandler(BaseHTTPRequestHandler):
                     "message": "Use /api/<facade>/<method> instead",
                 },
             )
-            # CodeQL py/log-injection : `method_name` vient de l'URL HTTP.
-            # `%r` (repr) echappe DEJA les sauts de ligne — mesure :
-            # `"%r" % "a\nX"` ne contient aucun vrai `\n`, `"%s"` si. La
-            # protection est reelle mais NON INTENTIONNELLE : passer a `%s` au
-            # nom de la lisibilite la retirerait sans que rien ne le signale.
-            logger.warning("REST POST legacy method 410 Gone: %r", method_name)
+            # `method_name` vient de l'URL HTTP (CWE-117).
+            #
+            # `%r` protegeait DEJA — mesure : `"%r" % "a\nX"` ne contient aucun
+            # vrai saut de ligne, `"%s"` si. Mais cette protection etait
+            # ACCIDENTELLE : elle tenait au choix d'un format d'affichage, que
+            # personne n'aurait hesite a changer pour de la lisibilite. Et
+            # CodeQL ne la reconnait pas (alertes #339 et #340, levees sur ces
+            # deux lignes exactes).
+            #
+            # `_pour_journal` la rend EXPLICITE : le lecteur voit l'intention,
+            # et un passage a `%s` ne la retire plus.
+            logger.warning("REST POST legacy method 410 Gone: %s", _pour_journal(method_name))
             return
         # M9 : ne pas refleter `method_name` dans la reponse.
         self._respond_json(404, {"ok": False, "message": "Methode inconnue"})
-        logger.warning("REST POST method inconnue: %r", method_name)
+        logger.warning("REST POST method inconnue: %s", _pour_journal(method_name))
 
     def _handle_post(self) -> None:
         _t0 = time.monotonic()
@@ -1563,7 +1569,7 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         # toute action. Indispensable car le bypass auth loopback autoriserait
         # sinon une page malveillante a piloter l'API locale (start_plan/apply).
         if self._is_forbidden_cross_site():
-            logger.warning("REST 403 cross-site POST from origin=%r", self.headers.get("Origin"))
+            logger.warning("REST 403 cross-site POST from origin=%s", _pour_journal(self.headers.get("Origin")))
             self._respond_json(403, {"ok": False, "message": "Origine non autorisee"})
             return
 
