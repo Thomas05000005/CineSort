@@ -84,7 +84,7 @@ jobs:
         # que ce soit, et cette etape doit produire le SARIF quoi qu'il arrive.
         # Ce qui BLOQUE est le cliquet plus bas, pas cette etape.
         run: |
-          bandit -r cinesort/ \
+          bandit -r cinesort/ app.py scripts/ \
             --skip B101,B404,B603,B311 \
             -ll -ii \
             -f sarif -o bandit-results.sarif || true
@@ -119,12 +119,38 @@ jobs:
           python - <<'PY'
           import json, sys
 
+          # PERIMETRE ELARGI le 2026-08-31 : `app.py` et `scripts/` entrent.
+          #
+          # `app.py` fait 1200 lignes, porte le boot desktop et le passage du
+          # jeton REST — et echappait a SIX controles statiques a la fois :
+          # bandit, mypy, le budget de taille de fonction, le cliquet
+          # `except OSError`/sqlite, le cliquet d'imports lazy et le contrat de
+          # symboles morts. Tous sont bornes a `cinesort/`. C'est le fichier le
+          # plus sensible du depot, et le seul angle mort complet.
+          #
+          # Mesure de l'elargissement, avec les drapeaux ci-dessous :
+          #     cinesort/            32   (apres la migration SHA-256)
+          #     + app.py             34   (2 x B104)
+          #     + scripts/           40   (2 B324, 2 B310, 1 B608, 1 B602)
+          #
+          # Les 8 nouveaux sont TOUS connus et bornes, aucun n'est une surprise :
+          #   B104 x2  app.py:386 et :502 — `0.0.0.0` DELIBERE, gouverne par le
+          #            reglage `rest_api_enabled` / `--public`. Dette assumee.
+          #   B602     scripts/run_lighthouse.py:95 — `shell=True`, commente sur
+          #            place (cmd.exe et les guillemets), outil LOCAL que nul
+          #            workflow ne lance. HIGH/HIGH, et jamais vu jusqu'ici.
+          #   B324 x2  scripts/_safety2c_manifest.py — script orphelin de juin.
+          #   B310 x2, B608 x1 — outils de diagnostic.
+          #
+          # Ce qui change n'est pas leur nature mais leur VISIBILITE : ils sont
+          # desormais comptes, donc une NOUVELLE occurrence rougit.
+          #
           # 33 -> 32 le 2026-08-31 : le SEUL finding de niveau `error` du lot,
           # B324 sur `_tmdb_api_key_fingerprint`, a ete resolu par MIGRATION
           # vers SHA-256 — pas par annotation. Mesure faite avec bandit 1.9.4 et
           # les drapeaux ci-dessous : 33 avant, 32 apres, et B324 disparait de
           # la ventilation par regle. Reste {B104: 4, B310: 1, B608: 27}.
-          PLAFOND = 32  # mesure du 2026-08-31, bandit>=1.7,<2, drapeaux ci-dessus
+          PLAFOND = 40  # mesure du 2026-08-31, bandit>=1.7,<2, drapeaux ci-dessus
 
           with open("bandit-results.sarif", encoding="utf-8") as fh:
               sarif = json.load(fh)
