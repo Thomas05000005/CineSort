@@ -16,6 +16,20 @@ Meme motif que l'audit du 2026-08-05 (`allow_copy_fallback=False` pose sur un
 seul site alors qu'il en manquait six) : une garde n'est acquise que lorsqu'elle
 couvre tous ses sites.
 
+--- Audit 2026-09-02 : un NEUVIEME site, hors du chemin partage ---
+
+`apply_core.migrate_legacy_collection_root` renomme la RACINE du dossier de
+collection (`Collection` -> le nom configure) par un `Path.rename` NU : il
+n'emprunte ni `renommer_avec_reprise`, ni `_rename_or_cross_device_copy`. Les
+tests ci-dessus ne pouvaient donc pas le voir — ils eprouvent le chemin partage,
+et celui-la n'y passe pas.
+
+Ce que la course y coute est particulier : le handler F10 qui entoure l'appel
+attribue le `PermissionError` a un verrou (« dossier ouvert dans l'explorateur,
+fichier lu par VLC »), compte `errors += 1` et POURSUIT l'apply. L'echec est donc
+silencieux au sens ou il ne ressemble pas a un defaut : l'utilisateur voit une
+erreur « verrou » plausible, et la migration n'a simplement pas eu lieu.
+
 Ce que ces tests verrouillent, et qu'une mesure de taux ne peut pas verrouiller
 (elle est statistique, donc inutilisable en CI) :
   - une course qui se resout ne perd plus le deplacement, sur le chemin partage ;
@@ -37,7 +51,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from cinesort.app.apply_core import _case_only_rename_with_rollback
+import cinesort.domain.core as core
+from cinesort.app.apply_core import _case_only_rename_with_rollback, migrate_legacy_collection_root
 from cinesort.app.move_journal import _rename_or_cross_device_copy, atomic_move
 
 _VRAI_RENAME = Path.rename
@@ -157,6 +172,90 @@ class CablageAtomicMoveTests(unittest.TestCase):
             self.assertEqual(len(echecs), 1, "la course doit bien avoir eu lieu")
             self.assertFalse(src.exists(), "la source doit avoir ete deplacee")
             self.assertTrue((dst / "film.mkv").is_file(), "le contenu doit etre arrive intact a destination")
+
+
+class MigrationRacineCollectionTests(unittest.TestCase):
+    """Le 9e site : la migration de la racine de collection, hors du chemin partage.
+
+    Les tests de `RenameCheminPartageTests` restent VERTS si ce site regresse :
+    il n'appelle pas `_rename_or_cross_device_copy`. Il lui faut donc son propre
+    controle, et il porte sur le VRAI corps de `migrate_legacy_collection_root`.
+    """
+
+    def _cfg(self, racine: Path) -> core.Config:
+        # La VRAIE `Config` (frozen dataclass) : une doublure minimale echoue sur
+        # `video_exts` avant meme d'atteindre le renommage, ce qui donnerait un
+        # rouge identique avec et sans le correctif — donc un rouge qui ne prouve
+        # rien. Meme raisonnement que `test_apply_journal_write_ahead._config`.
+        return core.Config(
+            root=racine,
+            enable_collection_folder=True,
+            collection_root_name="_Collection",
+        ).normalized()
+
+    def _roots(self, racine: Path) -> dict:
+        review = racine / "_review"
+        return {
+            "conflicts_root": review / "_conflicts",
+            "conflicts_sidecars_root": review / "_conflicts_sidecars",
+            "duplicates_identical_root": review / "_duplicates_identical",
+            "leftovers_root": review / "_leftovers",
+        }
+
+    def test_une_course_ne_fait_plus_echouer_la_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            racine = Path(tmp)
+            cfg = self._cfg(racine)
+            legacy = racine / "Collection"
+            legacy.mkdir()
+            (legacy / "saga").mkdir()
+            cible = racine / "_Collection"
+            echecs: list = []
+
+            def _rename(self, chemin_cible):  # noqa: ANN001
+                if chemin_cible == cible and not echecs:
+                    echecs.append(chemin_cible)
+                    raise _refus(5)
+                return _VRAI_RENAME(self, chemin_cible)
+
+            with mock.patch.object(Path, "rename", _rename):
+                migrate_legacy_collection_root(
+                    cfg,
+                    dry_run=False,
+                    log=lambda niveau, msg: None,
+                    res=core.ApplyResult(),
+                    **self._roots(racine),
+                )
+
+            self.assertEqual(len(echecs), 1, "la course doit bien avoir eu lieu")
+            self.assertFalse(legacy.exists(), "l'ancienne racine aurait du etre renommee")
+            self.assertTrue((cible / "saga").is_dir(), "le contenu doit etre arrive intact")
+
+    def test_un_verrou_PERSISTANT_echoue_toujours(self) -> None:
+        """Contre-test : la reprise ne doit pas transformer un vrai verrou en succes.
+
+        C'est ce qui garantit que le handler F10 de l'appelant garde son role —
+        sans lui, « reprendre » serait indistinguable d'« avaler ».
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            racine = Path(tmp)
+            cfg = self._cfg(racine)
+            (racine / "Collection").mkdir()
+
+            def _rename(self, chemin_cible):  # noqa: ANN001, ARG001
+                raise _refus(5)
+
+            with mock.patch.object(Path, "rename", _rename):
+                with self.assertRaises(PermissionError) as ctx:
+                    migrate_legacy_collection_root(
+                        cfg,
+                        dry_run=False,
+                        log=lambda niveau, msg: None,
+                        res=core.ApplyResult(),
+                        **self._roots(racine),
+                    )
+
+            self.assertEqual(ctx.exception.winerror, 5, "l'exception d'origine doit remonter telle quelle")
 
 
 if __name__ == "__main__":
