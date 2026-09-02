@@ -13,7 +13,6 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from cinesort.domain.codec_ranks import AUDIO_CODEC_RANK as _AUDIO_CODEC_RANK
 from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_channels
 
 # VQ-1 : import depuis path_utils (feuille) au lieu de core. Casse le cycle
@@ -21,6 +20,13 @@ from cinesort.domain.codec_ranks import format_audio_channels as _format_audio_c
 # `cinesort.domain.core.windows_safe` reste un alias re-exporte pour backward
 # compat avec les callers externes (apply_core, plan_support_*, etc.).
 from cinesort.domain.path_utils import windows_safe
+
+# Le rang d'une piste audio se lit sur l'etiquette CANONIQUE, jamais sur le
+# `codec` brut : c'est la source unique deja partagee par les trois autres
+# implementations de « la meilleure piste » (cf. `_audio_track_sort_key`).
+# `quality_score` n'importe rien qui mene ici — seul `duplicate_support`
+# importe `naming` dans le domaine — donc cet import ne ferme aucun cycle.
+from cinesort.domain.quality_score import _audio_codec_rank
 
 # --- B02-TAGS-BRACKETS : parsing des tags providers depuis input names -----
 # Symetrique a `tmdb_tag` produit par build_naming_context (ligne ~191).
@@ -629,8 +635,33 @@ def _channels_label(channels: Any) -> str:
 
 
 def _audio_track_sort_key(track: Dict[str, Any]) -> Tuple[int, int, int]:
-    codec = str(track.get("codec") or "").strip().lower()
-    rank = _AUDIO_CODEC_RANK.get(codec, 0) if codec else 0
+    """Cle de tri d'une piste : rang du codec, puis canaux, puis bitrate.
+
+    Le rang se lit sur l'etiquette CANONIQUE (`_audio_codec_rank`), jamais sur le
+    `codec` brut du probe. ffprobe range le codec de BASE dans `codec` ('dts',
+    'truehd') et la VARIANTE dans des champs SEPARES (`profile`, `is_atmos`,
+    `is_dts_x`) ; MediaInfo, lui, rend son `Format` ('AC-3', 'E-AC-3', 'PCM').
+    Le lookup EXACT sur la forme brute rendait donc 0 — soit SOUS l'AAC (1) —
+    pour toutes les formes que les backends produisent reellement :
+
+        pcm_s16le / pcm_s24le / pcm_bluray (remux)  -> 0
+        ac-3 / e-ac-3 (backend MediaInfo)           -> 0
+        mlp                                         -> 0
+        dts + profile 'DTS-HD MA'                   -> 2 au lieu de 4
+
+    Effet mesurable : sur un remux PCM 5.1 accompagne d'une piste AAC 2.0 de
+    commentaires, c'est l'AAC qui etait elue « meilleure piste » — donc
+    `{audio_codec}` ecrivait « aac » et `{channels}` « 2.0 » dans le NOM DU
+    DOSSIER, la seule chose que ce produit renomme.
+
+    C'est le defaut R8-039 / ultra-audit 2026-08-03, corrige dans les trois
+    autres implementations de « la meilleure piste » (`quality_score`,
+    `duplicate_compare`, puis `audio_perceptual` le 2026-08-31) et laisse ici :
+    ce helper est ne « self-contained » en PR#758, AVANT que la derivation
+    canonique n'existe. `audio_perceptual._track_codec_rank` affirme d'ailleurs
+    dans sa docstring que ce site-ci passe deja par elle.
+    """
+    rank = _audio_codec_rank(track)
 
     def _as_int(value: Any) -> int:
         try:
