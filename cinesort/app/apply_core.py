@@ -794,7 +794,22 @@ def migrate_legacy_collection_root(
                 op_type="MOVE_DIR",
                 liberer_si_rien_n_a_bouge=True,
             ):
-                legacy_root.rename(target_root)
+                # #965/#973 : renommage de DOSSIER, donc expose a la course de
+                # quelques microsecondes mesuree sur `apply_single` (8 echecs /
+                # 20, machine au repos, %TEMP% neuf). Ce site appelait
+                # `Path.rename` NU — il echappait a la fois a
+                # `renommer_avec_reprise` et au passage oblige
+                # `move_journal._rename_or_cross_device_copy`.
+                #
+                # Le handler F10 qui entoure cet appel (cf. l'appelant) attribue
+                # son `PermissionError` a un « verrou » : dossier ouvert dans
+                # l'explorateur, .nfo lu par un editeur. La mesure de #965 dit
+                # l'inverse — l'echec survient machine au repos, sans verrou, et
+                # la seule enveloppe Python le fait disparaitre. La reprise ne
+                # masque pas pour autant un VRAI verrou : il epuise les six
+                # paliers et l'exception d'origine repart telle quelle, donc le
+                # handler F10 garde exactement son role.
+                renommer_avec_reprise(legacy_root, target_root)
             record_apply_op(
                 record_op,
                 op_type="MOVE_DIR",
