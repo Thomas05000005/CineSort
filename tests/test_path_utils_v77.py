@@ -94,6 +94,44 @@ class WindowsSafeContractTests(unittest.TestCase):
         self.assertFalse(out.startswith("_"))
         self.assertEqual(out, "ConFilm")
 
+    def test_la_troncature_ne_peut_pas_REVIDER_le_resultat(self):
+        """Le garde « vide -> _untitled » doit porter sur le RESULTAT.
+
+        Il s'executait AVANT `name[:180].rstrip(". ")`, si bien que la derniere
+        ligne pouvait revider ce qu'il venait de remplir. Il faut que les 180
+        PREMIERS caracteres soient tous des points ou des espaces : la ligne 107
+        a deja retire ceux de QUEUE et collapse les espaces multiples, donc le
+        cas ne s'atteint que par la tete.
+
+        Le contrat documente de la fonction dit « Remplace par `_untitled` si le
+        RESULTAT est vide » : c'est lui qui est verifie ici.
+
+        Un nom de dossier vide vaut `parent / ""` == `parent` chez les six
+        appelants qui ne se protegent pas eux-memes (`naming:459`,
+        `duplicate_support:134,144,200,205,489`) — `core:580-586`, lui, porte
+        deja un `or "_Collection"` de son cote.
+        """
+        for entree in ("." * 180 + "X", "." * 200, ". " * 90 + "Titre"):
+            with self.subTest(entree=entree[:20] + "..."):
+                out = path_utils.windows_safe(entree)
+                self.assertTrue(out, f"sortie vide pour un nom de {len(entree)} caracteres")
+                self.assertNotEqual(out, "")
+
+    def test_les_noms_courants_ne_changent_pas(self):
+        """CONTRE-TEST : deplacer le garde ne doit toucher que le cas vide.
+
+        Vert avant comme apres. Si ce test rougit, le remede a debordé.
+        """
+        self.assertEqual(path_utils.windows_safe("Blade Runner (1982)"), "Blade Runner (1982)")
+        self.assertEqual(path_utils.windows_safe("???"), "_untitled")
+        self.assertEqual(path_utils.windows_safe("con"), "_con")
+        self.assertEqual(path_utils.windows_safe("Titre."), "Titre")
+
+    def test_le_repli_untitled_reste_idempotent(self):
+        """`windows_safe(windows_safe(x)) == windows_safe(x)`, repli compris."""
+        once = path_utils.windows_safe("." * 180 + "X")
+        self.assertEqual(path_utils.windows_safe(once), once)
+
 
 class NormWinPathContractTests(unittest.TestCase):
     """Contrat de _norm_win_path / norm_win_path."""

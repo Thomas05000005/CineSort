@@ -111,8 +111,16 @@ def windows_safe(name: str) -> str:
     stem = name.split(".", 1)[0].lower()
     if stem in _RESERVED_DOS_NAMES:
         name = f"_{name}"
-    if not name:
-        name = "_untitled"
     # Re-applique le strip apres troncature : un nom tronque a 180 chars peut
     # se terminer par "." ou " " (interdit NTFS / cause CreateFile errors).
-    return name[:180].rstrip(". ").strip()
+    name = name[:180].rstrip(". ").strip()
+    # Le garde « resultat vide » s'applique au RESULTAT, donc APRES la
+    # troncature. Il s'executait avant, si bien que la derniere ligne pouvait
+    # REVIDER ce qu'il venait de remplir : pour un nom dont les 180 premiers
+    # caracteres sont tous des points ou des espaces (`"." * 180 + "X"`), le
+    # `rstrip(". ")` final rendait `""`. La fonction annoncait pourtant
+    # « Remplace par `_untitled` si le resultat est vide » — le contrat parlait
+    # bien du RESULTAT, l'ordre des deux lignes ne le tenait pas.
+    if not name:
+        name = "_untitled"
+    return name
