@@ -529,6 +529,32 @@ def _audio_codec_rank_value(audio: Dict[str, Any]) -> Optional[int]:
     on reutilise donc la meme derivation que le scorer (source unique, cf.
     R8-039 qui avait deja du realigner ces deux fonctions apres une divergence
     constatee sur 113 films).
+
+    2026-09-04 : le repli portait encore `.get(..., 0)`, alors que `0` n'est pas
+    une absence de rang mais le rang le PLUS BAS — sous l'AAC et le MP3, qui
+    valent 1. C'est mot pour mot le defaut corrige le 2026-08-29 sur la fonction
+    SOEUR `_video_codec_rank_value`, vingt lignes plus haut dans ce fichier ;
+    l'audio etait le dernier des trois rangs du comparateur a confondre encore
+    « inconnu » et « pire » (`_hdr_rank_value` s'abstient deja).
+
+    Tout codec dont l'etiquette canonique n'est ni une cle de `AUDIO_CODEC_RANK`
+    ni un de ses alias tombait donc a 0. Cas interne au depot : `mlp` (Meridian
+    Lossless Packing) est declare SANS PERTE par `codec_ranks.est_lossless`
+    (:171) et n'a d'entree dans aucune des deux tables — le meme codec valait
+    donc « lossless » d'un cote et « pire que l'AAC » de l'autre.
+
+    Le remede n'INVENTE aucun rang : donner une place a `mlp` est un arbitrage
+    produit, que `codec_ranks` signale lui-meme comme « un ecart a instruire »
+    (:148-152). Il se contente de distinguer « inconnu » de « pire ».
+    `_compare_criterion` rend alors `unknown` a 0 point — chemin deja exerce par
+    le cas du codec ABSENT, juste au-dessus.
+
+    Les deux autres lecteurs de cette fonction coercent deja `or 0` parce qu'ils
+    TRIENT (`_best_audio`, `_compute_single_score`) et exigent un ordre total :
+    leur comportement est inchange. Seul le critere compare change, et c'est
+    celui qui alimente « Auto-decider tous ».
+
+    Garde : `tests/test_duplicate_compare.py::CodecAudioHorsTableTests`.
     """
     if not isinstance(audio, dict) or not audio.get("codec"):
         return None
@@ -537,7 +563,8 @@ def _audio_codec_rank_value(audio: Dict[str, Any]) -> Optional[int]:
         return None
     rank = _AUDIO_CODEC_RANK.get(canonical)
     if rank is None:
-        rank = _AUDIO_CODEC_RANK.get(_AUDIO_CANONICAL_RANK_ALIAS.get(canonical, ""), 0)
+        alias = _AUDIO_CANONICAL_RANK_ALIAS.get(canonical)
+        rank = _AUDIO_CODEC_RANK.get(alias) if alias else None
     return rank
 
 
