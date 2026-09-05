@@ -69,7 +69,7 @@ dev = [
     # lendemain sans qu'aucun commit n'ait bouge — c'est ce qui a mis la CI au
     # rouge sur `main` lui-meme et bloque ~180 PR. Toute montee de version doit
     # etre DELIBEREE, avec le reformatage dans le meme commit.
-    "ruff==0.16.3",
+    "ruff==0.16.5",
     "coverage>=7.14.0,<8",
     "pre-commit>=4.6.0,<5",
     "pytest>=9.0.3,<10",
