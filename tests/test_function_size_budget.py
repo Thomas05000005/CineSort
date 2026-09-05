@@ -177,7 +177,12 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # `tests/test_audit_wave3_r2_counter_and_insight.py`, pas ici : ce corps
     # n'avait pas a grossir de neuf lignes de commentaire.
     ("cinesort/ui/api/dashboard_support.py", "_compute_active_insights"): 176,
-    ("cinesort/domain/perceptual/comparison.py", "build_comparison_report"): 174,
+    # 174 -> 153 le 2026-09-05 : etendre la garde #923 aux criteres audio
+    # demandait 6 lignes de plus. Plutot que de monter le plafond, les trois
+    # criteres audio sont EXTRAITS dans `_build_audio_criteria` — la garde y
+    # devient testable seule. Le cliquet descendant exige d'inscrire le gain
+    # net ici, sinon il se reperd.
+    ("cinesort/domain/perceptual/comparison.py", "build_comparison_report"): 153,
     ("cinesort/domain/quality_score.py", "_build_quality_presets_catalog"): 167,
     ("cinesort/app/jellyfin_validation.py", "build_sync_report"): 165,
     ("cinesort/ui/api/dashboard_support.py", "get_dashboard"): 165,

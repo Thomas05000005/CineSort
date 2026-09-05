@@ -382,6 +382,81 @@ class TestHistoricalReportsWithoutTheMeasuredKey(unittest.TestCase):
         self.assertEqual(report["winner"], "a")
 
 
+class TestAudioCriteriaObeyTheSameRule(unittest.TestCase):
+    """#923 etendu aux criteres AUDIO et a « Detail (variance) » (2026-09-05).
+
+    Le correctif d'origine a pose `measured_a`/`measured_b` sur quatre criteres
+    video et s'est arrete la. Les quatre restants portent le meme piege, et le
+    module frere `audio_perceptual._compute_audio_score` fait deja la
+    distinction pour les trois metriques audio (`if lra is not None`,
+    `if nf is not None`, `total_segments > 0` — garde R8-098). Le contrat
+    « non mesure » n'est donc pas invente ici, il est RECOPIE du site qui le
+    porte deja.
+
+    Un seul des quatre basculait dans le sens PERMISSIF, et c'est le clipping :
+    `clipping_pct` vaut 0.0 par defaut et `higher_is_better=False`, donc 0 % est
+    la valeur parfaite. Les trois autres se trompaient dans le sens restrictif —
+    mais offraient au camp d'en face une victoire par forfait, qui ressort en
+    « Points forts » dans la recommandation d'archivage.
+    """
+
+    def _perc(self, *, audio: Dict[str, Any], score: int = 70, variance: float = 500.0) -> Dict[str, Any]:
+        return {
+            "global_score": score,
+            "video_perceptual": {"local_variance": {"mean_variance": variance}},
+            "audio_perceptual": audio,
+        }
+
+    def _crit(self, report: Dict[str, Any], name: str) -> Dict[str, Any]:
+        return next(c for c in report["criteria"] if c["criterion"] == name)
+
+    def test_unmeasured_clipping_cannot_win(self) -> None:
+        """Le sens PERMISSIF : 0,00 % non mesure est la valeur parfaite."""
+        mesure = self._perc(audio={"clipping": {"total_segments": 120, "clipping_pct": 3.5}})
+        rate = self._perc(audio={"clipping": {"total_segments": 0, "clipping_pct": 0.0}})
+        crit = self._crit(build_comparison_report(mesure, rate, [], "mesure.mkv", "rate.mkv"), "Clipping")
+        self.assertEqual(crit["winner"], "tie", "le fichier non analyse ne doit pas remporter le clipping")
+        self.assertFalse(crit["measured_b"])
+        self.assertTrue(crit["measured_a"])
+
+    def test_measured_clipping_still_departages(self) -> None:
+        """Contre-test : deux mesures reelles doivent continuer de se departager."""
+        propre = self._perc(audio={"clipping": {"total_segments": 120, "clipping_pct": 0.0}})
+        ecrete = self._perc(audio={"clipping": {"total_segments": 120, "clipping_pct": 8.0}})
+        crit = self._crit(build_comparison_report(propre, ecrete, [], "a.mkv", "b.mkv"), "Clipping")
+        self.assertEqual(crit["winner"], "a", "un 0,00 % MESURE reste la meilleure valeur")
+
+    def test_legacy_clipping_without_total_segments_still_compares(self) -> None:
+        """Rapports anterieurs a la cle : une valeur non nulle prouve la mesure."""
+        ecrete = self._perc(audio={"clipping": {"clipping_pct": 8.0}})
+        propre = self._perc(audio={"clipping": {"clipping_pct": 1.0}})
+        crit = self._crit(build_comparison_report(ecrete, propre, [], "a.mkv", "b.mkv"), "Clipping")
+        self.assertEqual(crit["winner"], "b")
+
+    def test_unmeasured_lra_and_noise_floor_win_nothing(self) -> None:
+        """`Optional[float] = None` dans AudioPerceptual : `or 0` confondait tout."""
+        mesure = self._perc(audio={"ebu_r128": {"loudness_range": 14.0}, "astats": {"noise_floor": -65.0}})
+        rate = self._perc(audio={"ebu_r128": {"loudness_range": None}, "astats": {"noise_floor": None}})
+        report = build_comparison_report(mesure, rate, [], "mesure.mkv", "rate.mkv")
+        self.assertEqual(self._crit(report, "Dynamique audio (LRA)")["winner"], "tie")
+        self.assertEqual(self._crit(report, "Bruit de fond (noise floor)")["winner"], "tie")
+
+    def test_measured_lra_and_noise_floor_still_departage(self) -> None:
+        large = self._perc(audio={"ebu_r128": {"loudness_range": 18.0}, "astats": {"noise_floor": -80.0}})
+        etroit = self._perc(audio={"ebu_r128": {"loudness_range": 6.0}, "astats": {"noise_floor": -40.0}})
+        report = build_comparison_report(large, etroit, [], "a.mkv", "b.mkv")
+        self.assertEqual(self._crit(report, "Dynamique audio (LRA)")["winner"], "a")
+        self.assertEqual(self._crit(report, "Bruit de fond (noise floor)")["winner"], "a")
+
+    def test_unmeasured_variance_wins_nothing(self) -> None:
+        """Le cinquieme critere video, oublie par #923 comme les trois audio."""
+        mesure = self._perc(audio={}, variance=500.0)
+        rate = self._perc(audio={}, variance=0.0)
+        crit = self._crit(build_comparison_report(mesure, rate, [], "a.mkv", "b.mkv"), "Detail (variance)")
+        self.assertEqual(crit["winner"], "tie")
+        self.assertFalse(crit["measured_b"])
+
+
 class TestMasteringVerdictRequiresMeasurements(unittest.TestCase):
     """Un verdict POSITIF ne doit pas naitre d'une analyse absente."""
 
