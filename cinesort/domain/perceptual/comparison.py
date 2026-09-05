@@ -335,6 +335,73 @@ def _visual_coverage(video: Dict[str, Any]) -> Optional[float]:
     return max(0.0, min(1.0, float(raw)))
 
 
+def _clipping_measured(clip: Dict[str, Any]) -> bool:
+    """#508 — `total_segments == 0` EST le contrat de « clipping non mesure ».
+
+    Ce contrat n'est pas invente ici : `analyze_clipping_segments` rend
+    `{total_segments: 0, clipping_pct: 0.0, verdict: "unknown"}` sur chacun de
+    ses trois chemins d'echec, et `audio_perceptual._compute_audio_score` teste
+    deja `total_segments > 0` avant de scorer (garde R8-098, « une mesure ratee
+    mappait vers la valeur la plus flatteuse »). Ce module etait le second
+    lecteur de `clipping_pct`, et le seul a ne pas porter la garde.
+
+    Meme repli que `_metric_measured` pour les rapports anterieurs a la cle :
+    une valeur non nulle ne peut venir que d'une mesure, seul 0.0 est ambigu.
+    """
+    if int(clip.get("total_segments") or 0) > 0:
+        return True
+    return float(clip.get("clipping_pct") or 0.0) != 0.0
+
+
+def _build_audio_criteria(audio_a: Dict[str, Any], audio_b: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Les trois criteres audio, sous la meme garde « non mesure » que le video.
+
+    #923 a pose `measured_a`/`measured_b` sur les criteres VIDEO et s'est
+    arrete la. Les trois metriques audio portent pourtant le meme piege, et
+    `audio_perceptual._compute_audio_score` fait deja la distinction pour les
+    trois (`if lra is not None`, `if nf is not None`, `total_segments > 0`) :
+
+    - `loudness_range` et `noise_floor` sont `Optional[float] = None` dans
+      `AudioPerceptual` — `or 0` confondait donc « pas de mesure » avec 0 ;
+    - `clipping_pct` vaut 0.0 par defaut, et `higher_is_better=False` : c'est
+      la valeur PARFAITE. Le fichier dont l'analyse de clipping a echoue
+      remportait « Clipping » contre une copie reellement mesuree, et ce faux
+      point fort partait dans la recommandation d'archivage.
+    """
+    ebu_a = audio_a.get("ebu_r128") or {}
+    ebu_b = audio_b.get("ebu_r128") or {}
+    astats_a = audio_a.get("astats") or {}
+    astats_b = audio_b.get("astats") or {}
+    clip_a = audio_a.get("clipping") or {}
+    clip_b = audio_b.get("clipping") or {}
+    return [
+        compare_criterion(
+            ebu_a.get("loudness_range") or 0,
+            ebu_b.get("loudness_range") or 0,
+            "Dynamique audio (LRA)",
+            higher_is_better=True,
+            measured_a=ebu_a.get("loudness_range") is not None,
+            measured_b=ebu_b.get("loudness_range") is not None,
+        ),
+        compare_criterion(
+            astats_a.get("noise_floor") or 0,
+            astats_b.get("noise_floor") or 0,
+            "Bruit de fond (noise floor)",
+            higher_is_better=False,
+            measured_a=astats_a.get("noise_floor") is not None,
+            measured_b=astats_b.get("noise_floor") is not None,
+        ),
+        compare_criterion(
+            clip_a.get("clipping_pct") or 0,
+            clip_b.get("clipping_pct") or 0,
+            "Clipping",
+            higher_is_better=False,
+            measured_a=_clipping_measured(clip_a),
+            measured_b=_clipping_measured(clip_b),
+        ),
+    ]
+
+
 def build_comparison_report(
     perceptual_a: Dict[str, Any],
     perceptual_b: Dict[str, Any],
@@ -388,34 +455,13 @@ def build_comparison_report(
             vb.get("local_variance", {}).get("mean_variance", 0),
             "Detail (variance)",
             higher_is_better=True,
+            measured_a=_metric_measured(va, "local_variance", "mean_variance"),
+            measured_b=_metric_measured(vb, "local_variance", "mean_variance"),
         ),
     ]
 
-    # Criteres audio
-    ebu_a = aa.get("ebu_r128") or {}
-    ebu_b = ab_audio.get("ebu_r128") or {}
-    astats_a = aa.get("astats") or {}
-    astats_b = ab_audio.get("astats") or {}
-    clip_a = aa.get("clipping") or {}
-    clip_b = ab_audio.get("clipping") or {}
-
-    criteria += [
-        compare_criterion(
-            ebu_a.get("loudness_range") or 0,
-            ebu_b.get("loudness_range") or 0,
-            "Dynamique audio (LRA)",
-            higher_is_better=True,
-        ),
-        compare_criterion(
-            astats_a.get("noise_floor") or 0,
-            astats_b.get("noise_floor") or 0,
-            "Bruit de fond (noise floor)",
-            higher_is_better=False,
-        ),
-        compare_criterion(
-            clip_a.get("clipping_pct") or 0, clip_b.get("clipping_pct") or 0, "Clipping", higher_is_better=False
-        ),
-    ]
+    # Criteres audio — meme garde « non mesure » que les criteres video (#923).
+    criteria += _build_audio_criteria(aa, ab_audio)
 
     # §11 v7.5.0 — LPIPS (similarite perceptuelle apprise, pas gagnant mais info)
     lpips_crit = _build_lpips_criterion(lpips_result)
