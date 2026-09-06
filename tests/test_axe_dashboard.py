@@ -6,6 +6,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from pathlib import Path
@@ -21,6 +22,37 @@ DASHBOARD_URL = "http://127.0.0.1:8642/dashboard/"
 # routeur reel : une route qui disparait fait desormais rougir, au lieu de vider
 # silencieusement l'audit.
 ROUTES = ["/status", "/library", "/quality", "/traitement", "/settings", "/help"]
+
+
+def _authentifier_le_contexte(ctx, token: str) -> None:
+    """Pose le jeton en `sessionStorage` AVANT que le moindre script ne tourne.
+
+    PAS `?ntoken=` DANS L'URL. Ce harnais l'a fait jusqu'au 2026-08-31 : depuis
+    #1207, `_detectNativeBoot` (web/dashboard/app.js) lit le jeton dans le
+    FRAGMENT et ne consulte plus la query DU TOUT — c'est meme grave par
+    `test_boot_natif_jeton.py::test_le_jeton_de_la_QUERY_n_est_PLUS_lu`. Le
+    harnais fournissait donc un jeton par un canal mort.
+
+    Rien ne l'a signale : `requireAuth()` rend `true` en loopback
+    (`_isNativeMode`), donc les vues se rendaient quand meme — mais SANS Bearer,
+    donc avec des donnees vides ou en 401. L'audit a11y portait sur des ecrans
+    depeuples et s'annoncait comme la baseline du dashboard.
+
+    C'est la meme classe de defaut que la route `/validation` inexistante
+    ci-dessus : un audit qui n'observe rien et rend un verdict propre.
+
+    La forme retenue est celle, deja eprouvee, de
+    `tests/e2e_dashboard/conftest.py` : c'est `sessionStorage` qu'il faut ecrire,
+    car `getToken()` (core/state.js) le lit EN PRIORITE et ne consulte
+    `localStorage` que si `cinesort.dashboard.persist` vaut "1". Ecrire cette
+    seule cle equivaut a `setToken(token, persist=false)`, et le portillon de
+    boot d'`app.js` la cherche explicitement pour appeler `markTokenReady()`.
+    """
+    ctx.add_init_script(
+        "try { sessionStorage.setItem('cinesort.dashboard.token', "
+        + json.dumps(token)
+        + "); } catch (e) { /* no-op */ }"
+    )
 
 
 class AxeDashboardTests(unittest.TestCase):
@@ -45,8 +77,9 @@ class AxeDashboardTests(unittest.TestCase):
     def test_axe_baseline(self):
         browser = self.playwright.chromium.launch(headless=True)
         ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        _authentifier_le_contexte(ctx, self.token)
         page = ctx.new_page()
-        page.goto(f"{DASHBOARD_URL}?ntoken={self.token}&native=1")
+        page.goto(f"{DASHBOARD_URL}?native=1")
         page.wait_for_load_state("networkidle")
 
         # Charge axe-core depuis CDN (acceptable pour test, pas runtime)

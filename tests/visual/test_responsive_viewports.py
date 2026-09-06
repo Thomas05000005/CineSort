@@ -10,6 +10,7 @@ Génère:
 
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from pathlib import Path
@@ -32,6 +33,31 @@ VIEWPORTS = [
 ]
 
 ROUTES = ["/status", "/library", "/quality", "/validation", "/settings", "/help"]
+
+
+def _authentifier_le_contexte(ctx, token: str) -> None:
+    """Pose le jeton en `sessionStorage` AVANT que le moindre script ne tourne.
+
+    PAS `?ntoken=` DANS L'URL. Ce harnais l'a fait jusqu'au 2026-08-31 : depuis
+    #1207, `_detectNativeBoot` (web/dashboard/app.js) lit le jeton dans le
+    FRAGMENT et ne consulte plus la query DU TOUT. Le harnais fournissait donc
+    un jeton par un canal mort, et sans que rien ne le signale — `requireAuth()`
+    rend `true` en loopback, donc les vues se rendaient, mais SANS Bearer.
+
+    Consequence propre a CE harnais : sur des ecrans vides, `scrollWidth` ne
+    depasse jamais `clientWidth`, donc la detection de debordement horizontal ne
+    pouvait plus rien trouver — dix viewports rendaient un verdict vert sans
+    avoir rien observe, et les captures montraient des vues depeuplees.
+
+    Forme reprise de `tests/e2e_dashboard/conftest.py` : `sessionStorage` et pas
+    `localStorage`, car `getToken()` (core/state.js) le lit EN PRIORITE et ne
+    consulte `localStorage` que si `cinesort.dashboard.persist` vaut "1".
+    """
+    ctx.add_init_script(
+        "try { sessionStorage.setItem('cinesort.dashboard.token', "
+        + json.dumps(token)
+        + "); } catch (e) { /* no-op */ }"
+    )
 
 
 class ResponsiveViewportTests(unittest.TestCase):
@@ -65,8 +91,9 @@ class ResponsiveViewportTests(unittest.TestCase):
 
             browser = self.playwright.chromium.launch(headless=True)
             ctx = browser.new_context(viewport={"width": w, "height": h})
+            _authentifier_le_contexte(ctx, self.token)
             page = ctx.new_page()
-            page.goto(f"{DASHBOARD_URL}?ntoken={self.token}&native=1")
+            page.goto(f"{DASHBOARD_URL}?native=1")
             page.wait_for_load_state("networkidle")
 
             for route in ROUTES:
