@@ -84,9 +84,17 @@ correction est donc **neutre en nombre de lignes** (8+/8−) au lieu d'etre
 redigee au plus clair. C'est le meme piege que #1207 a rencontre (« le seul
 ajout du commentaire portait `main` de 525 a 535 »).
 
-> Le prompt d'audit decrit toujours #215 comme le suivi de ce point. Correction
-> demandee par les rapports des 08-09, 08-16 **et 08-23** : toujours pas
-> appliquee au prompt.
+> **Correction d'un point recopie.** J'avais d'abord ecrit ici, a la suite des
+> rapports des 08-09, 08-16 et 08-23, que « le prompt decrit toujours #215 comme
+> ouverte ». **C'est faux depuis** : `.github/audit-prompt.md:1642` dit
+> desormais « issue #215, **FERMEE le 2026-08-06**. Point sans objet sauf
+> regression mesuree », et le paragraphe voisin (l. 1640) consigne meme l'erreur
+> passee. La correction demandee par trois runs A ete appliquee.
+>
+> Je le laisse ecrit parce que le mecanisme compte plus que le fait : j'ai
+> recopie l'etat d'un rapport anterieur au lieu de le mesurer, sur un prompt que
+> j'avais lu integralement dix minutes plus tot. C'est la faute exacte que ce
+> depot documente sous « remesurer avant de corriger un chiffre qui derange ».
 
 ### 2) Duplication desktop/dashboard — SANS OBJET
 
