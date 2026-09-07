@@ -271,5 +271,104 @@ class AutoInstallSupplyChainFacadeTests(unittest.TestCase):
         self.assertEqual((self.tools / "MediaInfo.exe").read_bytes(), b"real-mediainfo")
 
 
+class ExtractionPublieUnBinaireDurableTests(unittest.TestCase):
+    """Finding f10b47da (2026-08-06) — l'executable extrait est sur le DISQUE avant d'etre publie.
+
+    `_extract_member` ecrit dans un fichier de travail puis le publie par
+    `os.replace`. Sans `flush` + `fsync` avant ce renommage, la publication peut
+    devenir visible alors que les octets ne le sont pas encore : un crash
+    systeme entre les deux laisse un EXECUTABLE TRONQUE au chemin final — que
+    `tools_manager` voit ensuite comme disponible et LANCE.
+
+    COMMENT CE TEST MORD, et c'est le point : on n'assert pas « `os.fsync` a ete
+    appele » (une telle assertion survit a la suppression du `flush`). On
+    observe, AU MOMENT du fsync, la taille du fichier DEJA sur le disque, et on
+    exige qu'elle soit la taille finale. Les deux moities de l'invariant sont
+    donc eprouvees separement :
+
+      - `fsync` retire      -> aucune taille observee, l'ensemble est vide ;
+      - `flush` retire      -> la taille observee est amputee du dernier bloc.
+
+    D'ou la taille choisie pour la charge utile : `_EXTRACT_CHUNK_BYTES + 100`.
+    Elle force DEUX ecritures, dont une derniere de 100 octets — assez petite
+    pour rester dans le tampon Python. Une charge d'un seul bloc ne prouverait
+    rien : un `write` plus grand que le tampon part directement sur le disque,
+    et le test resterait vert sans `flush`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.mkdtemp(prefix="cinesort_autoinstall_fsync_")
+        self.local_appdata = Path(self._tmp) / "appdata"
+        self.tools = Path(self._tmp) / "tools"
+        self.local_appdata.mkdir(parents=True, exist_ok=True)
+        self.tools.mkdir(parents=True, exist_ok=True)
+        self._env = mock.patch.dict(os.environ, {"LOCALAPPDATA": str(self.local_appdata)})
+        self._env.start()
+        self._tools_patch = mock.patch.object(auto_install, "get_tools_dir", return_value=self.tools)
+        self._tools_patch.start()
+        self.api = backend.CineSortApi()
+
+    def tearDown(self) -> None:
+        self._tools_patch.stop()
+        self._env.stop()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_le_binaire_est_entierement_sur_disque_avant_sa_publication(self) -> None:
+        taille = auto_install._EXTRACT_CHUNK_BYTES + 100
+        charge = b"\0" * taille
+        ff_archive = _zip_bytes(
+            {
+                "ffmpeg-8.1.2-essentials_build/bin/ffprobe.exe": charge,
+                "ffmpeg-8.1.2-essentials_build/bin/ffmpeg.exe": charge,
+            }
+        )
+        mi_archive = _zip_bytes({"MediaInfo.exe": charge})
+
+        def _dispatch(request: object, timeout: Optional[float] = None, **kwargs: object) -> _FakeHttpResponse:
+            payload = ff_archive if "ffmpeg" in _request_url(request).lower() else mi_archive
+            return _fake_transport(payload)(request, timeout)
+
+        # Capture AVANT le patch : la sonde appelle le vrai fsync, elle ne le
+        # remplace pas (sinon on prouverait la durabilite en la supprimant).
+        vrai_fsync = os.fsync
+        tailles_vues: list[int] = []
+
+        def _sonde_fsync(fd: int) -> None:
+            try:
+                tailles_vues.append(int(os.fstat(fd).st_size))
+            except OSError:  # pragma: no cover - defensif, fd deja ferme
+                tailles_vues.append(-1)
+            vrai_fsync(fd)
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    auto_install._ENV_SHA256_FFMPEG: hashlib.sha256(ff_archive).hexdigest(),
+                    auto_install._ENV_SHA256_MEDIAINFO: hashlib.sha256(mi_archive).hexdigest(),
+                },
+            ),
+            mock.patch.object(auto_install, "urlopen", side_effect=_dispatch),
+            mock.patch("os.fsync", new=_sonde_fsync),
+        ):
+            payload = self.api.runtime.auto_install_probe_tools()
+
+        # L'installation reelle doit avoir abouti, sinon l'assertion suivante
+        # serait vraie par vacuite (rien d'extrait = rien a publier).
+        self.assertEqual(payload.get("errors"), [], payload)
+        self.assertEqual((self.tools / "ffprobe.exe").stat().st_size, taille)
+        self.assertEqual((self.tools / "ffmpeg.exe").stat().st_size, taille)
+        self.assertEqual((self.tools / "MediaInfo.exe").stat().st_size, taille)
+
+        # `tailles_vues` peut contenir d'autres fsync (ecritures d'etat) : on
+        # exige la PRESENCE de la taille complete, pas l'exclusivite.
+        self.assertIn(
+            taille,
+            tailles_vues,
+            "aucun fsync n'a vu le binaire complet sur le disque avant sa publication "
+            f"(tailles observees: {tailles_vues})",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
