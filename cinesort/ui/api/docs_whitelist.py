@@ -10,6 +10,13 @@ Aucune chaine `..`, aucun chemin absolu, aucun fichier hors du repertoire
 Le mapping pointe vers des chemins RELATIFS a la racine du repo (parents[3]
 de ce fichier). La resolution finale verifie que le chemin reel est bien
 contenu dans le dossier `docs/`.
+
+AJOUTER UNE ENTREE ICI NE SUFFIT PAS : dans un bundle onefile, cette « racine
+du repo » vaut `sys._MEIPASS`, et un fichier absent des `datas` de
+`CineSort.spec` y est simplement introuvable — `get_doc` repond alors
+« Document inconnu » et `search_docs` rend une liste vide, sans erreur. Le
+fichier doit donc etre ajoute a `_DOC_FILES` dans `CineSort.spec`, ce que
+`tests/test_packaging.py::DocsWhitelistBundledTests` verifie.
 """
 
 from __future__ import annotations

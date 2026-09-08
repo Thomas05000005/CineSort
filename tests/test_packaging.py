@@ -1,11 +1,13 @@
 """LOT F — Tests de packaging et de dependances.
 
 Couvre : VERSION lisible, smtplib/rapidfuzz importables, themes.css dans le spec,
-pas de .bak dans web/, fallback _MEIPASS correct.
+pas de .bak dans web/, fallback _MEIPASS correct, documents de l'ecran Aide
+embarques dans le bundle.
 """
 
 from __future__ import annotations
 
+import ast
 import unittest
 from pathlib import Path
 
@@ -92,6 +94,68 @@ class CineSortSpecTests(unittest.TestCase):
         spec_path = PROJECT_ROOT / "CineSort.spec"
         content = spec_path.read_text(encoding="utf-8")
         self.assertIn("VERSION", content)
+
+
+class DocsWhitelistBundledTests(unittest.TestCase):
+    """Les documents de l'ecran Aide doivent etre EMBARQUES dans le bundle.
+
+    `runtime_support._repo_root()` vaut `sys._MEIPASS` en bundle onefile. Un
+    document whiteliste mais absent des `datas` du spec est donc introuvable
+    dans l'EXE : `get_doc` repond « Document inconnu » et `search_docs` rend
+    `{ok: True, results: []}` — un ecran vide sans le moindre message d'erreur.
+
+    Le meme mecanisme vaut pour `VERSION`, lui explicitement ajoute aux datas et
+    garde par `test_version_in_spec_datas`. Ce cliquet donne a `DOCS_WHITELIST`
+    la meme protection.
+
+    La liste du spec est relevee a l'AST et non au `grep` : on compare des
+    DONNEES (des litteraux de chemin), pas une chaine de code source.
+    """
+
+    def _spec_doc_files(self) -> list[str]:
+        """Litteraux de `_DOC_FILES` releves dans CineSort.spec, via l'AST."""
+        spec_path = PROJECT_ROOT / "CineSort.spec"
+        tree = ast.parse(spec_path.read_text(encoding="utf-8"), filename=str(spec_path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "_DOC_FILES" not in names:
+                continue
+            self.assertIsInstance(
+                node.value,
+                ast.List,
+                "_DOC_FILES doit rester une liste litterale (relevee a l'AST par ce test)",
+            )
+            return [el.value for el in node.value.elts if isinstance(el, ast.Constant)]
+        self.fail("_DOC_FILES introuvable dans CineSort.spec : les documents de l'ecran Aide ne sont pas embarques")
+        return []  # pragma: no cover - self.fail() leve
+
+    def test_spec_embarque_exactement_la_whitelist(self) -> None:
+        """La liste du spec et `DOCS_WHITELIST` ne peuvent pas diverger."""
+        from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST
+
+        attendus = set(DOCS_WHITELIST.values())
+        embarques = set(self._spec_doc_files())
+        self.assertEqual(
+            embarques,
+            attendus,
+            "CineSort.spec et DOCS_WHITELIST divergent : "
+            f"whitelistes non embarques={sorted(attendus - embarques)}, "
+            f"embarques hors whitelist={sorted(embarques - attendus)}",
+        )
+
+    def test_chaque_document_whiteliste_existe(self) -> None:
+        """Un chemin whiteliste qui n'existe pas produirait un bundle incomplet."""
+        from cinesort.ui.api.docs_whitelist import DOCS_WHITELIST
+
+        manquants = [rel for rel in sorted(DOCS_WHITELIST.values()) if not (PROJECT_ROOT / rel).is_file()]
+        self.assertEqual(manquants, [], f"Documents whitelistes introuvables sur disque : {manquants}")
+
+    def test_docs_internal_reste_hors_du_bundle(self) -> None:
+        """`docs/internal/` (audits, notes de conception) n'a rien a faire dans l'EXE."""
+        internes = [rel for rel in self._spec_doc_files() if rel.startswith("docs/internal/")]
+        self.assertEqual(internes, [], f"Documents internes embarques dans le bundle : {internes}")
 
 
 class NoBackupFilesInWebTests(unittest.TestCase):
