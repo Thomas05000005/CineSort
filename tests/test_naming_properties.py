@@ -143,6 +143,30 @@ class WindowsSafeProperties(unittest.TestCase):
         out = windows_safe(name)
         self.assertGreater(len(out), 0)
 
+    @settings(max_examples=100, deadline=None)
+    @given(st.text(min_size=181, max_size=400))
+    def test_la_non_vacuite_est_eprouvee_AU_DELA_de_la_troncature(self, name: str) -> None:
+        """Meme correctif de perimetre que `test_la_troncature_est_REELLEMENT_exercee`.
+
+        Le test frere ci-dessus plafonne a `max_size=100` : la troncature ne
+        peut donc JAMAIS s'y declencher, et la propriete « jamais vide » n'etait
+        eprouvee que sur des noms trop courts pour la rencontrer. Or c'est bien
+        la troncature qui pouvait revider le resultat — le garde
+        « vide -> _untitled » s'executait AVANT `name[:180].rstrip(". ")`.
+
+        La mesure deja consignee dans ce fichier (l. 113-119) vaut ici mot pour
+        mot : sur `max_size=300`, hypothesis rend une longueur MAX de 45 et
+        ZERO exemple de plus de 180 caracteres. Le remede est le meme,
+        `min_size=181`.
+
+        Ce tirage ne produira pratiquement jamais le contre-exemple exact (il
+        faut 180 points ou espaces EN TETE) : c'est une garde de perimetre, pas
+        le test qui mord. Le cas deterministe vit dans
+        `tests/test_path_utils_v77.py::test_la_troncature_ne_peut_pas_REVIDER_le_resultat`.
+        """
+        out = windows_safe(name)
+        self.assertGreater(len(out), 0)
+
 
 @unittest.skipUnless(HYPOTHESIS_AVAILABLE, "hypothesis not installed")
 class FormatMovieFolderProperties(unittest.TestCase):
