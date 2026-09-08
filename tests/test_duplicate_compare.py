@@ -193,6 +193,98 @@ class CodecHorsTableTests(unittest.TestCase):
         self.assertEqual(c.winner, "unknown")
 
 
+class CodecAudioHorsTableTests(unittest.TestCase):
+    """Meme invariant que `CodecHorsTableTests`, sur le rang AUDIO.
+
+    `_video_codec_rank_value` distingue « inconnu » de « pire » depuis le
+    2026-08-29. `_audio_codec_rank_value`, vingt lignes plus bas dans le MEME
+    fichier, gardait `.get(..., 0)` sur son repli par alias : tout codec dont
+    l'etiquette canonique n'est ni une cle de `AUDIO_CODEC_RANK` ni un de ses
+    alias tombait a 0, soit SOUS l'AAC et le MP3 (rang 1).
+
+    Le depot affirmait pourtant le contraire par ecrit — la docstring de
+    `ProbeManquanteTests` de ce fichier enumere « `_hdr_rank_value`,
+    `_video_codec_rank_value`, `_audio_codec_rank_value` rendent None ». C'etait
+    vrai du codec ABSENT, faux du codec hors table.
+
+    Cas interne au depot, et il se lit sans connaitre aucune bibliotheque :
+    `codec_ranks.est_lossless` declare `mlp` SANS PERTE (:171), tandis que les
+    deux tables de rang l'ignorent — le meme codec valait donc « lossless » d'un
+    cote et « pire que l'AAC » de l'autre. `codec_ranks` signale lui-meme cet
+    ecart comme « a instruire » (:148-152).
+
+    Le remede n'invente aucun rang : donner une place a `mlp` reste un arbitrage
+    produit. Il rend `unknown` a 0 point, chemin deja exerce par le codec vide.
+    """
+
+    HORS_TABLE = ("mlp", "mlp fba", "vorbis", "wmav2", "alac")
+
+    def test_un_codec_audio_hors_table_ne_perd_pas_contre_aac(self) -> None:
+        for codec in self.HORS_TABLE:
+            with self.subTest(codec=codec):
+                criteres = compare_by_criteria(
+                    _probe(height=1080, codec="hevc", audio_codec=codec, channels=6),
+                    _probe(height=1080, codec="hevc", audio_codec="aac", channels=6),
+                )
+                c = next(x for x in criteres if x.name == "audio_codec")
+                self.assertEqual(
+                    c.winner,
+                    "unknown",
+                    f"`{codec}` inconnu doit rendre un verdict inconnu, pas une defaite",
+                )
+                self.assertEqual(c.points_delta, 0)
+
+    def test_le_verdict_global_ne_designe_plus_l_aac(self) -> None:
+        """Le cas complet : seul l'audio discrimine, donc le verdict bascule.
+
+        Avant, `audio_codec` valait -15 (poids plein) pour un seul seuil de tie a
+        5 : le comparateur recommandait « Garder B, archiver A », et
+        « Auto-decider tous » l'appliquait en masse.
+        """
+        r = compare_duplicates(
+            _probe(height=1080, codec="hevc", bitrate=25000000, audio_codec="mlp", channels=6),
+            _probe(height=1080, codec="hevc", bitrate=25000000, audio_codec="aac", channels=6),
+        )
+        self.assertNotEqual(r.winner, "b", "un codec audio inconnu ne doit plus faire perdre le fichier")
+
+    def test_les_codecs_audio_connus_gardent_leur_rang(self) -> None:
+        """CONTRE-TEST : rendre l'inconnu neutre ne doit pas neutraliser le connu.
+
+        Vert avant comme apres. Si ce test rougit, le remede est alle trop loin
+        et a desarme le critere pour tout le monde.
+        """
+        criteres = compare_by_criteria(
+            _probe(height=1080, codec="hevc", audio_codec="truehd", channels=6),
+            _probe(height=1080, codec="hevc", audio_codec="aac", channels=6),
+        )
+        c = next(x for x in criteres if x.name == "audio_codec")
+        self.assertEqual(c.winner, "a")
+        self.assertGreater(c.points_delta, 0)
+
+    def test_les_etiquettes_composees_gardent_leur_alias(self) -> None:
+        """CONTRE-TEST : le repli par alias reste actif (il ne rend PAS None).
+
+        `dts:x` et `ac-3` n'ont pas de cle propre dans `AUDIO_CODEC_RANK` : ils
+        passent par `_AUDIO_CANONICAL_RANK_ALIAS`. Une lecture trop large du
+        remede supprimerait ce repli avec le defaut.
+        """
+        criteres = compare_by_criteria(
+            _probe(height=1080, codec="hevc", audio_codec="dts:x", channels=6),
+            _probe(height=1080, codec="hevc", audio_codec="ac-3", channels=6),
+        )
+        c = next(x for x in criteres if x.name == "audio_codec")
+        self.assertEqual(c.winner, "a", "dts:x (alias -> dts-hd ma) doit battre ac-3 (alias -> ac3)")
+
+    def test_un_codec_audio_vide_reste_inconnu(self) -> None:
+        """CONTRE-TEST : le comportement deja correct du codec ABSENT est preserve."""
+        criteres = compare_by_criteria(
+            _probe(height=1080, codec="hevc", audio_codec="", channels=6),
+            _probe(height=1080, codec="hevc", audio_codec="aac", channels=6),
+        )
+        c = next(x for x in criteres if x.name == "audio_codec")
+        self.assertEqual(c.winner, "unknown")
+
+
 class AudioCompareTests(unittest.TestCase):
     """Audio : TrueHD 7.1 vs AC3 5.1 → A gagne."""
 
