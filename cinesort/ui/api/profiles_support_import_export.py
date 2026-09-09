@@ -30,6 +30,11 @@ from importlib import resources
 from typing import Any, Dict, List, Optional, Tuple
 
 from cinesort.domain import list_quality_presets, quality_profile_from_preset, validate_quality_profile
+from cinesort.domain.conversions import to_int
+from cinesort.domain.quality_score import (
+    DEFAULT_UPGRADE_UNTIL_SCORE,
+    UPGRADE_UNTIL_SCORE_MAX,
+)
 from cinesort.ui.api import profiles_support_crud as _crud
 from cinesort.ui.api._responses import err
 
@@ -44,8 +49,12 @@ MAX_LINE_LENGTH = 4096
 # Axes de la hierarchie "Quality Trumps All" exposes dans l'UI.
 BREAKDOWN_AXES: Tuple[str, ...] = ("source", "codec", "hdr", "audio", "group")
 
-# Defaut explicite : pas de plafond effectif (10000 = "jamais arreter d'upgrader").
-DEFAULT_UPGRADE_UNTIL_SCORE = 10000
+# `DEFAULT_UPGRADE_UNTIL_SCORE` (10000 = "jamais arreter d'upgrader") est
+# desormais DEFINI dans `cinesort.domain.quality_score` et importe ci-dessus :
+# c'est la seule couche que `validate_quality_profile` — qui doit connaitre la
+# borne pour preserver la cle — et le CRUD de profil puissent tous deux
+# importer. Le nom reste accessible ici, donc `profiles_support.__all__`
+# continue de le publier sans changement.
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +340,9 @@ def _profile_to_recyclarr_dict(profile: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(profile, dict):
         raise TypeError("_profile_to_recyclarr_dict attend un dict.")
     profile_id = str(profile.get("id") or "CineSort_Custom")
-    upgrade_until = int(profile.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE)
+    # `to_int` et non `or` : un seuil a 0 ("n'upgrade jamais") est une valeur
+    # legitime et l'oppose exact du defaut. Cf tests/test_sentinelle_falsy_or_defaut.py.
+    upgrade_until = to_int(profile.get("upgrade_until_score"), DEFAULT_UPGRADE_UNTIL_SCORE)
     return {
         "quality_profiles": [
             {
@@ -385,7 +396,9 @@ def _recyclarr_dict_to_profile(data: Dict[str, Any]) -> Optional[Dict[str, Any]]
     upgrade_until = DEFAULT_UPGRADE_UNTIL_SCORE
     if isinstance(upgrade, dict):
         try:
-            upgrade_until = int(upgrade.get("until_score") or DEFAULT_UPGRADE_UNTIL_SCORE)
+            # `to_int` : un `until_score: 0` present dans le YAML est une consigne
+            # ("n'upgrade jamais"), pas une absence.
+            upgrade_until = to_int(upgrade.get("until_score"), DEFAULT_UPGRADE_UNTIL_SCORE)
         except (TypeError, ValueError):
             upgrade_until = DEFAULT_UPGRADE_UNTIL_SCORE
 
@@ -595,7 +608,7 @@ def get_embedded_presets(api: Any) -> Dict[str, Any]:  # noqa: ARG001
                 "label": str(preset.get("label") or "TRaSH 2026"),
                 "description": str(preset.get("description") or ""),
                 "enabled_by_default": bool(preset.get("enabled_by_default")),  # FALSE
-                "upgrade_until_score": int(preset.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE),
+                "upgrade_until_score": to_int(preset.get("upgrade_until_score"), DEFAULT_UPGRADE_UNTIL_SCORE),
                 "tier_hierarchy": dict(preset.get("tier_hierarchy") or {}),
                 "trash_scoring": dict(preset.get("trash_scoring") or {}),
             }
@@ -613,7 +626,10 @@ def get_embedded_presets(api: Any) -> Dict[str, Any]:  # noqa: ARG001
                         "label": str(alt_data.get("label") or alt_id),
                         "description": str(alt_data.get("description") or ""),
                         "enabled_by_default": False,  # AC-3 : tous OFF.
-                        "upgrade_until_score": int(alt_data.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE),
+                        "upgrade_until_score": to_int(
+                            alt_data.get("upgrade_until_score"),
+                            DEFAULT_UPGRADE_UNTIL_SCORE,
+                        ),
                         "tier_hierarchy": dict(alt_data.get("tier_hierarchy") or {}),
                         "trash_scoring": dict(alt_data.get("trash_scoring") or {}),
                     }
@@ -638,7 +654,9 @@ def get_upgrade_until_score(api: Any) -> Dict[str, Any]:
     try:
         payload = api._active_quality_profile_payload()
         profile_json = payload.get("profile_json") or {}
-        score = int(profile_json.get("upgrade_until_score") or DEFAULT_UPGRADE_UNTIL_SCORE)
+        # `to_int` et non `or` : sans cela un seuil enregistre a 0 ("n'upgrade
+        # jamais") etait relu comme 10000 ("upgrade toujours") — l'oppose exact.
+        score = to_int(profile_json.get("upgrade_until_score"), DEFAULT_UPGRADE_UNTIL_SCORE)
         return {
             "ok": True,
             "upgrade_until_score": score,
@@ -651,8 +669,13 @@ def get_upgrade_until_score(api: Any) -> Dict[str, Any]:
 def set_upgrade_until_score(api: Any, score: Any) -> Dict[str, Any]:
     """Met a jour le upgrade_until_score du profil actif.
 
-    Borne [0..100000]. Persiste via _save_active_quality_profile (deep copy du
-    profile_json + override du champ).
+    Borne ``[0..UPGRADE_UNTIL_SCORE_MAX]``. Persiste via
+    _save_active_quality_profile (deep copy du profile_json + override du champ).
+
+    La valeur ne survivait PAS a `validate_quality_profile`, qui reconstruit le
+    profil depuis le defaut et ne recopiait pas cette cle : la fonction rendait
+    `ok: True` avec le score demande, et la base n'en gardait rien. Corrige dans
+    `quality_score._preserver_cles_hors_defaut`.
     """
     try:
         try:
@@ -663,9 +686,9 @@ def set_upgrade_until_score(api: Any, score: Any) -> Dict[str, Any]:
                 category="validation",
                 level="warning",
             )
-        if score_int < 0 or score_int > 100000:
+        if score_int < 0 or score_int > UPGRADE_UNTIL_SCORE_MAX:
             return err(
-                f"upgrade_until_score hors borne [0..100000] : {score_int}.",
+                f"upgrade_until_score hors borne [0..{UPGRADE_UNTIL_SCORE_MAX}] : {score_int}.",
                 category="validation",
                 level="warning",
             )
