@@ -68,6 +68,7 @@ from cinesort.domain.quality_score import (
 )
 from cinesort.infra.db.sqlite_store import SQLiteStore
 from cinesort.ui.api.cinesort_api import CineSortApi
+from cinesort.ui.api.profiles_support_crud import _build_profile_row
 from cinesort.ui.api.profiles_support_import_export import _profile_to_recyclarr_dict
 
 
@@ -204,18 +205,6 @@ class UnSeuilAZeroEstUneConsigneTests(_ApiSurStoreReel):
             "un seuil a 0 relu comme 10000 inverse la consigne de l'utilisateur",
         )
 
-    def test_zero_traverse_le_row_de_profil(self) -> None:
-        """`get_profiles` alimente la liste des profils de l'ecran."""
-        self.api.quality.set_upgrade_until_score(0)
-
-        res = self.api.settings.get_profiles()
-
-        self.assertTrue(res.get("ok"), res)
-        actifs = [p for p in res.get("profiles", []) if p.get("is_active")]
-        for profil in actifs:
-            with self.subTest(profile_id=profil.get("id")):
-                self.assertEqual(profil.get("upgrade_until_score"), 0)
-
     def test_zero_part_dans_le_yaml_recyclarr(self) -> None:
         """La destination reelle du reglage : Radarr/Sonarr, via le YAML."""
         profil = default_quality_profile()
@@ -224,6 +213,31 @@ class UnSeuilAZeroEstUneConsigneTests(_ApiSurStoreReel):
         rendu = _profile_to_recyclarr_dict(profil)
 
         self.assertEqual(rendu["quality_profiles"][0]["upgrade"]["until_score"], 0)
+
+
+class LeRowDeProfilPreserveZeroTests(unittest.TestCase):
+    """`_build_profile_row` alimente la liste de profils de l'ecran Parametres.
+
+    Ce test porte sur le LECTEUR, pas sur `get_profiles` : cette derniere
+    construit ses rows depuis le CATALOGUE de presets et ne relit jamais le
+    profil persiste pour les remplir — elle n'interroge la base que pour savoir
+    quel identifiant est actif. Un test qui passerait par elle n'observerait donc
+    pas la valeur enregistree, et serait vert sans rien prouver.
+    """
+
+    def test_un_seuil_a_zero_nest_pas_ressuscite_au_defaut(self) -> None:
+        profil = default_quality_profile()
+        profil["upgrade_until_score"] = 0
+
+        row = _build_profile_row(profil)
+
+        self.assertEqual(row["upgrade_until_score"], 0)
+
+    def test_la_cle_absente_retombe_sur_le_defaut(self) -> None:
+        """Non-regression : c'est le lecteur qui porte le defaut, pas le profil."""
+        row = _build_profile_row(default_quality_profile())
+
+        self.assertEqual(row["upgrade_until_score"], DEFAULT_UPGRADE_UNTIL_SCORE)
 
 
 class LeValidateurPreserveLaCleTests(unittest.TestCase):
