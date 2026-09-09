@@ -70,6 +70,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_PROFILE_ID = "CinemaLux_v1"
 DEFAULT_PROFILE_VERSION = 1
 
+# `upgrade_until_score` : score au-dela duquel Radarr/Sonarr cessent de chercher
+# un meilleur fichier. La valeur voyage dans le YAML Recyclarr ; aucun calcul de
+# score de CineSort ne la lit (c'est pourquoi ce lot ne bumpe PAS
+# `SCORING_RULES_VERSION` : aucun score ni tier ne change).
+#
+# LES DEUX CONSTANTES VIVENT ICI, ET UNE SEULE FOIS. Le defaut etait defini dans
+# `ui/api/profiles_support_import_export.py` et la borne haute ecrite en dur dans
+# `set_upgrade_until_score` ; `profiles_support_crud._build_profile_row` portait
+# en plus une TROISIEME copie du defaut, en litteral. La couche `ui` importe
+# `domain`, l'inverse est interdit par import-linter : le domaine est donc le
+# seul endroit ou les deux peuvent etre partagees. Le nom reste re-exporte par
+# `profiles_support` (backward compat de son `__all__`).
+DEFAULT_UPGRADE_UNTIL_SCORE = 10000
+UPGRADE_UNTIL_SCORE_MAX = 100000
+
 # Version des REGLES de scoring, c'est-a-dire du CODE de ce module.
 #
 # Fix revue adversaire PR#854. Le gate de cache de `quality_report_support`
@@ -435,6 +450,59 @@ def quality_profile_from_preset(preset_id: Any) -> Optional[Dict[str, Any]]:
 # _to_int, _to_float, _to_bool imported from cinesort.domain.conversions
 
 
+def _preserver_cles_hors_defaut(profile: Dict[str, Any], raw_profile: Dict[str, Any]) -> None:
+    """Recopie les cles de profil qui ne figurent pas dans `default_quality_profile()`.
+
+    POURQUOI CE REGROUPEMENT EXISTE. `validate_quality_profile` ne construit pas
+    sa sortie depuis son entree : elle part du profil PAR DEFAUT et y recopie une
+    liste FERMEE de cles. Toute cle absente de cette liste est donc effacee — en
+    silence, et a chaque passage. Les deux premieres (`custom_rules`,
+    `tier_hierarchy`) ont ete ajoutees apres coup, une par une ; la troisieme a
+    ete oubliee et n'a jamais pu etre enregistree :
+
+        set_upgrade_until_score(3000)
+          -> normalized = validate_quality_profile(...)   # la cle disparait ici
+          -> _save_active_quality_profile(normalized)     # la base ne la voit pas
+          -> rend {"ok": True, "upgrade_until_score": 3000}   # et l'annonce quand meme
+
+    Les QUATRE chemins qui persistent un profil passent par ce validateur
+    (`set_upgrade_until_score`, `import_recyclarr_yaml`, `save_profile`,
+    `set_active_profile`), et `ensure_quality_profile` le rappelle a chaque
+    LECTURE du profil actif : la valeur ne survivait nulle part.
+
+    Les rassembler ici donne a la liste un endroit unique et nomme, pour que la
+    prochaine cle ajoutee au profil ne se perde pas de la meme facon.
+    """
+    # Custom rules (G6) : passer a travers si present, validation deleguee a custom_rules.validate_rules
+    raw_rules = raw_profile.get("custom_rules")
+    if isinstance(raw_rules, list):
+        profile["custom_rules"] = raw_rules
+
+    # VP-B (Vague P) : hierarchie qualite multi-axes. Backward compat ABSOLUE :
+    # un profil legacy SANS cle ``tier_hierarchy`` recoit le default
+    # (enabled=False, no-op total). Cf normalize_hierarchy_config.
+    profile["tier_hierarchy"] = _normalize_hierarchy_config(raw_profile.get("tier_hierarchy"))
+
+    # `upgrade_until_score` (AC-5). On PRESERVE ce qui est lisible sans fabriquer
+    # de defaut : l'absence de la cle reste l'absence, et c'est le lecteur qui
+    # applique `DEFAULT_UPGRADE_UNTIL_SCORE`. Ecrire le defaut ici ajouterait la
+    # cle a TOUS les profils (presets compris) et changerait des payloads que
+    # personne n'a demande a changer.
+    #
+    # `0` est une valeur METIER legitime — « n'upgrade jamais », l'exact oppose
+    # du defaut 10000 — et l'ecran comme le backend l'acceptent deja
+    # (`min="0"`, borne `[0..UPGRADE_UNTIL_SCORE_MAX]`). Le test porte donc sur
+    # `is None`, jamais sur la faussete : cf. `tests/test_sentinelle_falsy_or_defaut.py`.
+    brut = raw_profile.get("upgrade_until_score")
+    if brut is not None:
+        try:
+            profile["upgrade_until_score"] = max(0, min(UPGRADE_UNTIL_SCORE_MAX, int(brut)))
+        except (TypeError, ValueError, OverflowError):
+            # Valeur illisible : on n'ecrit rien plutot que d'inventer un nombre.
+            # Le lecteur retombe alors sur le defaut, comme avant ce correctif.
+            logger.warning("Profil qualite: upgrade_until_score illisible (%r), cle ignoree.", brut)
+
+
 def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[str, Any]]:
     errs: List[str] = []
     base = default_quality_profile()
@@ -522,16 +590,7 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     if not (tiers["platinum"] >= tiers["gold"] >= tiers["silver"] >= tiers["bronze"]):
         errs.append("Seuils invalides: Platinum >= Gold >= Silver >= Bronze requis.")
 
-    # Custom rules (G6) : passer a travers si present, validation deleguee a custom_rules.validate_rules
-    raw_rules = raw_profile.get("custom_rules")
-    if isinstance(raw_rules, list):
-        profile["custom_rules"] = raw_rules
-
-    # VP-B (Vague P) : hierarchie qualite multi-axes. Backward compat ABSOLUE :
-    # un profil legacy SANS cle ``tier_hierarchy`` recoit le default
-    # (enabled=False, no-op total). Cf normalize_hierarchy_config.
-    raw_hierarchy = raw_profile.get("tier_hierarchy")
-    profile["tier_hierarchy"] = _normalize_hierarchy_config(raw_hierarchy)
+    _preserver_cles_hors_defaut(profile, raw_profile)
 
     return (len(errs) == 0), errs, profile
 

@@ -583,7 +583,18 @@ __emit({ modals: globalThis.__dangerModals });
 # #59 — « l'UI n'affichera plus de recommandation d'upgrade » : aucun executant
 # =============================================================================
 class UpgradeUntilScoreSansExecutantTests(unittest.TestCase):
-    """#59 : le reglage est bien persiste, mais rien ne s'en sert pour filtrer."""
+    """#59 : aucune vue ne lit ce seuil pour filtrer quoi que ce soit.
+
+    CETTE DOCSTRING A LONGTEMPS DIT « le reglage est bien persiste, mais rien ne
+    s'en sert ». La premiere moitie etait FAUSSE, et personne ne l'avait mesuree :
+    `validate_quality_profile` effacait la cle a chaque ecriture, si bien que
+    `set_upgrade_until_score` rendait `ok: True` sans que la base en garde rien.
+    Corrige par `quality_score._preserver_cles_hors_defaut` ; la persistance est
+    desormais eprouvee par `tests/test_upgrade_until_score_persistance.py`.
+
+    Ce que CES tests-ci mesurent reste inchange et reste vrai : le seuil n'a
+    toujours aucun consommateur cote `web/`.
+    """
 
     def setUp(self) -> None:
         require_node(self)
