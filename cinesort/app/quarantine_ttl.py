@@ -803,6 +803,60 @@ def purge_review_bucket_all(cfg: "Config", *, dry_run: bool = False) -> Dict[str
     return payload
 
 
+#: Cle du reglage relu a CHAQUE cycle du cron (cf `_ttl_du_cycle`).
+_TTL_SETTING_KEY = "quarantaine_ttl_days"
+
+
+def _ttl_du_cycle(api: Any, defaut: int) -> int:
+    """TTL a appliquer pour CE cycle : le reglage COURANT, sinon `defaut`.
+
+    `start_quarantine_ttl_cron` recoit son `ttl_days` d'`app.py`, qui le lit UNE
+    SEULE FOIS, au boot. Sans cette relecture, la valeur du demarrage vaut pour
+    toute la session : l'utilisateur qui saisit 0 (« 0 = désactivé », hint de
+    `web/dashboard/views/parametres.js`) ou qui allonge le TTL voit malgre tout
+    sa quarantaine purgee a l'ANCIENNE valeur au cycle suivant, dans les 24 h.
+
+    C'est le prolongement exact du defaut corrige par
+    `tests/test_zero_desactive_les_crons.py`, dont le perimetre s'arrete au SITE
+    DE BOOT : la garde `days <= 0` du demarreur y est devenue atteignable, elle
+    ne l'etait toujours pas pour un changement fait EN COURS DE SESSION. Le
+    meme cycle relit pourtant deja la cfg — donc le `root` — a chaque passage
+    (`cinesort_api._build_quarantine_cfg`) : l'intention « lire l'etat courant »
+    etait presente, elle s'arretait avant le TTL.
+
+    Le repli est `defaut` (la valeur du boot), jamais une constante :
+
+    - un reglage ABSENT doit laisser le boot decider — `quarantaine_ttl_days`
+      ne figure pas dans les defauts litteraux de `settings_support` ;
+    - une valeur ILLISIBLE ne doit surtout pas valoir 0, ce qui DESACTIVERAIT
+      une purge que l'utilisateur n'a pas desactivee.
+
+    La semantique est celle d'`app.reglage_entier` — absent / vide / illisible
+    retombent sur le defaut, seul le zero EXPLICITE est preserve — et pour la
+    meme raison : `0` veut dire « ne purge jamais », pas « pas de valeur ».
+    Un zero relu ici rend `purge_review_bucket` no-op (`days <= 0`), donc la
+    desactivation prend effet des ce cycle.
+
+    Ne leve jamais : un cron destructif qui meurt laisse la quarantaine croitre
+    sans borne (meme raison que l'`except` large de `_run_purge_once`).
+    """
+    try:
+        settings = api.settings.get_settings()
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+        _log.warning("quarantine ttl cron: reglage illisible, on garde le TTL du boot (%dj) : %s", defaut, exc)
+        return defaut
+    if not isinstance(settings, dict):
+        return defaut
+    brut = settings.get(_TTL_SETTING_KEY)
+    if brut is None or (isinstance(brut, str) and not brut.strip()):
+        return defaut
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        _log.warning("quarantine ttl cron: reglage %r illisible, on garde le TTL du boot (%dj)", brut, defaut)
+        return defaut
+
+
 def _run_purge_once(api: Any, ttl_days: int) -> None:
     """Execute un cycle de purge en isolant les erreurs (utilise par le cron)."""
     try:
@@ -881,13 +935,16 @@ def start_quarantine_ttl_cron(
             api._quarantine_ttl_stop = stop_event
 
     def _worker() -> None:
+        # `days` n'est que le DEFAUT de repli : le TTL applique est relu a chaque
+        # cycle, sans quoi un changement de reglage n'aurait d'effet qu'au
+        # prochain lancement (cf `_ttl_du_cycle`).
         if stop_event.wait(initial_delay_s):
             return
-        _run_purge_once(api, days)
+        _run_purge_once(api, _ttl_du_cycle(api, days))
         while not stop_event.is_set():
             if stop_event.wait(interval_s):
                 return
-            _run_purge_once(api, days)
+            _run_purge_once(api, _ttl_du_cycle(api, days))
 
     thread = threading.Thread(
         target=_worker,
