@@ -232,12 +232,29 @@ def install_repeated_exception_dedup(max_per_minute: int = 5) -> None:
     """Attache RepeatedExceptionDedupFilter au root logger + handlers existants.
 
     Idempotent : appelable plusieurs fois sans dupliquer le filter. A appeler
-    une fois au boot dans app.py:main / app.py:main_api, apres l'installation
-    des handlers.
+    au boot dans app.py:main / app.py:main_api, APRES l'installation des
+    handlers (`basicConfig`, `install_rotating_log`).
+
+    AUDIT 2026-09-16 : cette fonction court-circuitait sur `_DEDUP_INSTALLED`,
+    donc le premier appel decidait seul de sa portee. Or elle etait appelee
+    AVANT que le moindre handler n'existe : le filtre n'atteignait que le root
+    LOGGER, ou il ne voit rien — un filtre de logger ne s'applique PAS aux
+    records propages depuis un logger enfant (seuls les filtres de HANDLER le
+    font, cf `attach_filter_to_handler` ci-dessous). Comme aucun module de
+    `cinesort/` ne logge directement sur le root (mesure : 0 occurrence de
+    `logging.exception(...)` hors `logger = getLogger(__name__)`), l'anti-spam
+    ne pouvait filtrer aucun record de l'application.
+
+    Le remede est celui deja retenu pour `install_global_scrubber` (AUDIT
+    2026-06-10), et pour la meme raison : on ne court-circuite plus, chaque
+    appel RE-SYNCHRONISE le filtre sur le root et tous ses handlers courants.
+    L'idempotence reste assuree par les `if not any(...)` ci-dessous, qui sont
+    ce que le test d'idempotence eprouve reellement.
+
+    Nota : le `max_per_minute` du PREMIER appel fait foi — un appel ulterieur
+    ne reconfigure pas un filtre deja en place (meme contrat que le scrubber).
     """
     global _DEDUP_INSTALLED
-    if _DEDUP_INSTALLED:
-        return
     flt = RepeatedExceptionDedupFilter(max_per_minute=max_per_minute)
     root = logging.getLogger()
     if not any(isinstance(f, RepeatedExceptionDedupFilter) for f in root.filters):
