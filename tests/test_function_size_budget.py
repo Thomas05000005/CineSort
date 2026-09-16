@@ -312,12 +312,13 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # rougi a la HAUSSE sur le seul ajout d'un commentaire (535 > 525), puis a
     # la BAISSE une fois l'extraction faite. C'est son interet : le gain est
     # verrouille au lieu de rester disponible pour la prochaine rallonge.
-    # 514 -> 530 et 144 -> 158 (2026-09-16) : les deux chemins de boot appliquent
-    # desormais le niveau de log au HANDLER DE FICHIER et installent l'anti-spam
-    # d'exceptions APRES les handlers. Le gros de la hausse est du commentaire :
-    # l'ordre des appels est ici porteur de sens, et il etait deja faux une fois.
+    # 514 -> 531 et 144 -> 158 (2026-09-16) : les deux chemins de boot appliquent
+    # desormais le niveau de log au HANDLER DE FICHIER, et le mode bureau
+    # installe enfin l'anti-spam d'exceptions. Le gros de la hausse est du
+    # commentaire : l'ordre de ces appels est porteur de sens, et la portee du
+    # garde dependait jusqu'ici de l'ordre d'un AUTRE point d'entree.
     # Cf `tests/test_logs_du_boot_atteignent_le_fichier.py`.
-    ("app.py", "main"): 530,
+    ("app.py", "main"): 531,
     ("app.py", "_startup"): 155,
     ("app.py", "main_api"): 158,
     # 127 -> 124 : `_dbg_codepoints` delegue desormais a `diagnostic_jeton` au

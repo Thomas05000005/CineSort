@@ -21,22 +21,31 @@ connue, et plus personne ne la reprend ensuite.
    produisait donc AUCUNE ligne de plus, nulle part — pas meme apres
    redemarrage.
 
-2. **L'anti-spam d'exceptions repetees (Vague H) n'etait attache a aucun
-   handler.** `install_repeated_exception_dedup` court-circuitait sur son
-   drapeau, et `main_api` l'appelait AVANT `basicConfig` et
-   `install_rotating_log` : le filtre n'atteignait que le root LOGGER, ou il ne
-   voit rien — un filtre de logger ne s'applique PAS aux records propages
-   depuis un logger enfant. Comme aucun module de `cinesort/` ne logge
-   directement sur le root (mesure du 2026-09-16 : 0 occurrence de
-   `logging.exception(...)` hors `logger = getLogger(__name__)`), il ne pouvait
-   filtrer aucun record. Le mode BUREAU, lui — celui de l'EXE distribue — ne
-   l'appelait pas du tout, alors que la docstring de la fonction prescrit
-   « app.py:main / app.py:main_api ».
+2. **Le mode BUREAU n'avait aucun anti-spam d'exceptions repetees (Vague H).**
+   `app.py:main` — celui de l'EXE distribue, et le seul emprunte quand
+   l'interface est la — n'appelait pas `install_repeated_exception_dedup`,
+   alors que la docstring de la fonction prescrit « app.py:main /
+   app.py:main_api ». Une exception en boucle ecrivait donc sans limite dans
+   `cinesort.log` et faisait tourner la rotation (50 Mo x 5), effacant les logs
+   utiles — exactement ce que la Vague H voulait empecher.
 
-   Le depot connaissait deja ce mecanisme : `install_global_scrubber` a perdu
-   son court-circuit le 2026-06-10 pour cette raison exacte, et
-   `attach_filter_to_handler` existe pour la meme raison. Deux des trois
-   filtres du fichier de log etaient couverts ; le troisieme manquait.
+   **Ce que la premiere lecture de cet audit avait cru, et qui etait faux** :
+   que l'appel de `main_api`, place avant `basicConfig`, ne couvrait aucun
+   handler. `main_api` n'est pas un point d'entree autonome — `main` s'execute
+   toujours d'abord (`app.py`, dispatch sous `_is_api_mode()`) et avait deja
+   cree les handlers. Le mode `--api` etait donc couvert, mais par
+   COINCIDENCE : la portee du garde dependait de l'ordre d'un AUTRE point
+   d'entree. C'est ce que le correctif retire, et c'est de la defense en
+   profondeur, pas la reparation d'un defaut observable.
+
+   La propriete qui rend l'ordre decisif, elle, est reelle et mesuree : un
+   filtre pose sur un LOGGER ne s'applique PAS aux records propages depuis un
+   logger enfant (seuls les filtres de HANDLER le font), et aucun module de
+   `cinesort/` ne logge directement sur le root — 0 occurrence de
+   `logging.<niveau>(...)` porte par le module `logging` lui-meme. Le depot
+   connaissait deja ce mecanisme : `install_global_scrubber` a perdu son
+   court-circuit le 2026-06-10 pour cette raison exacte, et
+   `attach_filter_to_handler` existe pour la meme.
 
 Les classes de comportement ci-dessous eprouvent le MECANISME ; la derniere
 eprouve les SITES D'APPEL, parce qu'un correctif pose d'un seul cote est le
@@ -194,10 +203,13 @@ class LAntiSpamAtteintLesHandlersTests(_BaseLogTests):
     """Defaut n°2 — le filtre Vague H n'etait attache a aucun handler."""
 
     def test_un_handler_cree_APRES_le_premier_appel_recoit_le_filtre(self) -> None:
-        """LE test qui separe : c'est la SEQUENCE du boot qui etait fautive.
+        """La propriete que le court-circuit interdisait.
 
-        Avant le correctif, le second appel court-circuitait sur
-        `_DEDUP_INSTALLED` et le handler ne recevait jamais le filtre.
+        Avant le correctif, le second appel sortait sur `_DEDUP_INSTALLED` et
+        le handler ne recevait jamais le filtre : la portee du garde etait
+        figee par le PREMIER appel. Aucun defaut observable n'en decoulait au
+        boot (cf. l'en-tete de ce fichier) — c'est de la defense en profondeur,
+        et c'est la seule propriete du correctif qui puisse etre vue rouge.
         """
         install_repeated_exception_dedup(max_per_minute=5)  # aucun handler encore
 
@@ -314,8 +326,11 @@ class LesDeuxCheminsDeBootConfigurentLeFichierTests(unittest.TestCase):
     def test_l_anti_spam_est_pose_APRES_les_handlers(self) -> None:
         """Le compte ne dit pas QUAND. Pose avant, le filtre ne couvre rien.
 
-        C'etait l'etat de `main_api` : l'appel existait, 15 lignes trop tot.
-        Un cliquet qui se contente de sa PRESENCE aurait ete vert tout du long.
+        `main_api` posait l'appel avant son propre `basicConfig` : il ne devait
+        sa portee qu'aux handlers deja crees par `main`. Un cliquet qui se
+        contente de la PRESENCE de l'appel laisserait ce couplage revenir, et
+        il deviendrait un vrai defaut le jour ou `main_api` serait appelable
+        seul.
         """
         appels = self._appels_par_fonction()
         for chemin in _CHEMINS_DE_BOOT:

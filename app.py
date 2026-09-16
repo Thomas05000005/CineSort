@@ -584,11 +584,11 @@ def main_api() -> None:
     state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
     # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min).
-    # AUDIT 2026-09-16 : l'appel etait place AVANT `basicConfig` et
-    # `install_rotating_log`, donc avant l'existence du moindre handler — le
-    # filtre n'atteignait que le root LOGGER, ou il ne voit aucun record propage
-    # depuis un logger enfant. Il doit venir APRES les handlers, comme sa propre
-    # docstring le prescrit.
+    # AUDIT 2026-09-16 : l'appel etait place avant `basicConfig` — sans dommage,
+    # mais par COINCIDENCE : `main` s'execute toujours d'abord et avait deja
+    # cree les handlers. Un filtre pose sur le root LOGGER seul ne voit aucun
+    # record propage depuis un logger enfant, donc la portee de ce garde ne doit
+    # pas dependre de l'ordre d'un AUTRE point d'entree. Pose apres les handlers.
     install_repeated_exception_dedup(max_per_minute=5)
 
     api = CineSortApi()
@@ -850,9 +850,10 @@ def main() -> None:
     state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
     # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min).
-    # AUDIT 2026-09-16 : ce chemin de boot — celui de l'EXE distribue — ne
-    # l'appelait PAS DU TOUT, alors que la docstring de la fonction prescrit
-    # « app.py:main / app.py:main_api ». Pose ici, apres les handlers.
+    # AUDIT 2026-09-16 : ce chemin — celui de l'EXE distribue, et le SEUL quand
+    # l'interface est la — ne l'appelait PAS DU TOUT, alors que la docstring de
+    # la fonction prescrit « app.py:main / app.py:main_api ». Le mode bureau
+    # n'avait donc aucun anti-spam. Pose ici, apres les handlers.
     install_repeated_exception_dedup(max_per_minute=5)
 
     _check_dpapi_availability()
