@@ -232,12 +232,40 @@ def install_repeated_exception_dedup(max_per_minute: int = 5) -> None:
     """Attache RepeatedExceptionDedupFilter au root logger + handlers existants.
 
     Idempotent : appelable plusieurs fois sans dupliquer le filter. A appeler
-    une fois au boot dans app.py:main / app.py:main_api, apres l'installation
-    des handlers.
+    au boot dans app.py:main / app.py:main_api, APRES l'installation des
+    handlers (`basicConfig`, `install_rotating_log`).
+
+    AUDIT 2026-09-16 : `app.py:main` — le mode BUREAU, celui de l'EXE
+    distribue — ne l'appelait PAS, alors que la prescription ci-dessus le
+    nomme. Ce mode n'avait donc aucun anti-spam : une exception en boucle
+    ecrivait sans limite dans `cinesort.log` et faisait tourner la rotation
+    (50 Mo x 5), effacant les logs utiles. C'est exactement ce que la Vague H
+    voulait empecher.
+
+    POURQUOI L'ORDRE COMPTE, et pourquoi le court-circuit a saute : un filtre
+    pose sur un LOGGER ne s'applique PAS aux records propages depuis un logger
+    enfant — seuls les filtres de HANDLER le font (cf `attach_filter_to_handler`
+    ci-dessous, ecrit pour cette raison). Et aucun module de `cinesort/` ne
+    logge directement sur le root (mesure du 2026-09-16 : 0 occurrence de
+    `logging.<niveau>(...)` porte par le module `logging` lui-meme). Un appel
+    place avant l'existence des handlers ne couvrirait donc RIEN.
+
+    `main_api` l'appelait avant son propre `basicConfig` — sans dommage, mais
+    par COINCIDENCE seulement : `main` s'execute toujours en premier et avait
+    deja cree les handlers. Faire dependre la portee d'un garde de l'ordre
+    d'un AUTRE point d'entree est ce qu'on retire ici.
+
+    Le remede est celui deja retenu pour `install_global_scrubber` (AUDIT
+    2026-06-10) : on ne court-circuite plus sur `_DEDUP_INSTALLED`, chaque
+    appel RE-SYNCHRONISE le filtre sur le root et tous ses handlers courants.
+    Defense en profondeur, pas correction d'un defaut observable : l'idempotence
+    reste assuree par les `if not any(...)` ci-dessous, qui sont ce que le test
+    d'idempotence eprouve reellement.
+
+    Nota : le `max_per_minute` du PREMIER appel fait foi — un appel ulterieur
+    ne reconfigure pas un filtre deja en place (meme contrat que le scrubber).
     """
     global _DEDUP_INSTALLED
-    if _DEDUP_INSTALLED:
-        return
     flt = RepeatedExceptionDedupFilter(max_per_minute=max_per_minute)
     root = logging.getLogger()
     if not any(isinstance(f, RepeatedExceptionDedupFilter) for f in root.filters):

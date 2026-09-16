@@ -247,9 +247,12 @@ def install_global_scrubber(loggers: Iterable[logging.Logger] = ()) -> None:
 
 def reset_for_tests() -> None:
     """A utiliser uniquement dans les tests : reset l'etat _INSTALLED."""
-    global _INSTALLED, _ROTATING_INSTALLED
+    global _INSTALLED, _ROTATING_HANDLER, _ROTATING_INSTALLED
     _INSTALLED = False
     _ROTATING_INSTALLED = False
+    # Sans cette ligne, `set_rotating_log_level` viserait le handler du test
+    # PRECEDENT, deja retire du root par son tearDown.
+    _ROTATING_HANDLER = None
 
 
 # H-6 audit QA 20260429 : rotation des logs Python
@@ -261,6 +264,12 @@ DEFAULT_LOG_BACKUP_COUNT = 5
 DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s [run=%(run_id)s req=%(request_id)s] %(message)s"
 
 _ROTATING_INSTALLED = False
+
+#: Handler pose par `install_rotating_log`, conserve pour `set_rotating_log_level`.
+#: Le niveau du handler est fixe A L'INSTALL, donc AVANT que `settings.json` ne
+#: soit lu : sans cette reference, le reglage « Niveau de verbosite » ne peut plus
+#: l'atteindre. Cf la docstring de `set_rotating_log_level`.
+_ROTATING_HANDLER: Optional[logging.Handler] = None
 
 
 def install_rotating_log(
@@ -280,7 +289,7 @@ def install_rotating_log(
     Retourne le path absolu du fichier de log courant, ou None si
     l'install a deja eu lieu / est impossible.
     """
-    global _ROTATING_INSTALLED
+    global _ROTATING_HANDLER, _ROTATING_INSTALLED
     if _ROTATING_INSTALLED:
         return None
     log_dir = Path(log_dir)
@@ -315,4 +324,42 @@ def install_rotating_log(
         root.setLevel(int(level))
 
     _ROTATING_INSTALLED = True
+    _ROTATING_HANDLER = handler
     return log_path
+
+
+def set_rotating_log_level(level: int) -> bool:
+    """Reajuste le niveau du handler de fichier pose par `install_rotating_log`.
+
+    AUDIT 2026-09-16 — le reglage « Niveau de verbosite » (Parametres > Logs)
+    n'atteignait PAS le fichier de log. Les deux chemins de boot d'`app.py`
+    font, dans cet ordre :
+
+        boot_level = resolve_log_level(None)        # settings.json PAS encore lu
+        install_rotating_log(..., level=boot_level) # handler.setLevel(INFO)
+        ...
+        effective_level = resolve_log_level(settings.get("log_level"))
+        logging.getLogger().setLevel(effective_level)   # le ROOT seul bouge
+
+    Un handler filtre pour son propre compte (`record.levelno >= handler.level`).
+    Le handler restait donc a INFO alors que le root passait a DEBUG : les
+    records DEBUG etaient bien emis, puis rejetes a l'entree du fichier. Or
+    `cinesort.log` est le seul canal de diagnostic d'un utilisateur d'EXE (le
+    bundle est construit sans console) et c'est celui que la visionneuse de
+    l'ecran Diagnostics lit (`runtime_support._logs_dir`). Choisir DEBUG ne
+    produisait donc AUCUNE ligne supplementaire nulle part.
+
+    Cette fonction ne touche que le handler du fichier : le niveau du root
+    logger reste la decision de l'appelant, et la priorite des variables
+    d'environnement (`CINESORT_LOG_LEVEL` > `CINESORT_DEBUG` > settings) reste
+    entierement portee par `resolve_log_level`, qui n'est pas modifiee.
+
+    Returns:
+        True si un handler a ete reajuste, False si aucun n'est installe
+        (mode test, echec d'install disque) — l'appelant n'a rien a faire.
+    """
+    handler = _ROTATING_HANDLER
+    if handler is None:
+        return False
+    handler.setLevel(int(level))
+    return True
