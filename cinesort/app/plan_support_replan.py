@@ -26,7 +26,7 @@ from cinesort.app.plan_support_core import (
 )
 from cinesort.domain.confidence_thresholds import confidence_label
 from cinesort.domain.edition_helpers import extract_edition
-from cinesort.domain.integrity_check import check_header
+from cinesort.domain.integrity_check import DETAIL_READ_ERROR, check_header
 from cinesort.domain.runtime_matching import score_runtime_delta
 from cinesort.domain.scan_helpers import _NOT_A_MOVIE_THRESHOLD, not_a_movie_score
 from cinesort.domain.subtitle_helpers import build_subtitle_report
@@ -636,14 +636,31 @@ def _apply_integrity_check(video: Path, result_row: "PlanRow") -> None:
     """Pose le flag 'integrity_header_invalid' si magic bytes invalides.
 
     Ne jamais bloquer le scan pour un check d'integrite (try/except large).
+
+    UN FICHIER ILLISIBLE N'EST PAS UN FICHIER CORROMPU. `check_header` rend
+    `False` dans quatre cas, dont un seul ne parle pas du contenu :
+    `DETAIL_READ_ERROR` signale que l'ouverture elle-meme a echoue (verrou
+    antivirus, partage reseau tombe, permission, fichier disparu depuis le
+    scan). Le detail etait jete ici, si bien que cette ignorance posait le meme
+    drapeau qu'une vraie incoherence de magic bytes — et ce drapeau n'est pas
+    decoratif : il figure dans `_AUTO_INTEGRITY_WARNINGS` (sortie de
+    l'auto-approbation) et dans `_SIDEBAR_CRITICAL_FLAGS` (alerte critique) ;
+    avec `quarantine_corrupted`, il fait PRE-COCHER le rejet et partir le film
+    en quarantaine. Un deplacement de fichier decide sur une ignorance.
+
+    Les trois autres details restent des constats et gardent le drapeau :
+    `empty_file` (0 octet), `file_too_small` et `header_mismatch` portent tous
+    sur des octets REELLEMENT lus.
     """
 
     try:
-        hdr_valid, _hdr_detail = check_header(video)
-        if not hdr_valid and "integrity_header_invalid" not in result_row.warning_flags:
-            result_row.warning_flags.append("integrity_header_invalid")
+        hdr_valid, hdr_detail = check_header(video)
     except (OSError, ValueError):
-        pass  # ne jamais bloquer le scan pour un check d'integrite
+        return  # ne jamais bloquer le scan pour un check d'integrite
+    if hdr_valid or hdr_detail == DETAIL_READ_ERROR:
+        return
+    if "integrity_header_invalid" not in result_row.warning_flags:
+        result_row.warning_flags.append("integrity_header_invalid")
 
 
 def _store_row_cache(
