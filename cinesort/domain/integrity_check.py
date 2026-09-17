@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 # Nombre d'octets a lire pour la verification
 _HEADER_READ_SIZE = 1024
 
+#: Detail rendu quand le fichier n'a pas pu etre LU du tout : verrou antivirus,
+#: partage reseau tombe, permission refusee, fichier disparu depuis le scan.
+#:
+#: Ce n'est PAS un verdict de corruption. Les autres details `False`
+#: (`empty_file`, `file_too_small`, `header_mismatch`) portent sur un contenu
+#: CONSTATE ; celui-ci dit seulement que nous n'avons rien pu constater. Un
+#: appelant qui transforme un `False` en alerte doit donc le distinguer — la
+#: constante existe pour qu'il n'ait pas a comparer un litteral.
+DETAIL_READ_ERROR = "read_error"
+
 # --- Magic bytes par format -----------------------------------------------
 
 # MKV / WebM : EBML header
@@ -83,7 +93,10 @@ def check_header(path: Path) -> Tuple[bool, str]:
     - (False, "empty_file") — fichier vide
     - (False, "file_too_small") — trop petit pour verifier
     - (False, "header_mismatch") — magic bytes ne correspondent pas
-    - (False, "read_error") — erreur de lecture (permission, etc.)
+    - (False, DETAIL_READ_ERROR) — fichier ILLISIBLE (permission, verrou, etc.)
+
+    Le dernier cas se distingue des trois precedents : il ne dit rien du
+    contenu, seulement que nous n'avons pas pu le lire. Cf. `DETAIL_READ_ERROR`.
     """
     ext = path.suffix.lower()
     fmt = _EXT_TO_FORMAT.get(ext)
@@ -94,7 +107,7 @@ def check_header(path: Path) -> Tuple[bool, str]:
         data = _read_header(path)
     except OSError as exc:
         logger.debug("Integrity read error %s: %s", path, exc)
-        return False, "read_error"
+        return False, DETAIL_READ_ERROR
 
     if len(data) == 0:
         return False, "empty_file"
