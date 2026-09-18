@@ -141,6 +141,28 @@ def build_radarr_report(
     }
 
 
+def _score_du_rapport(quality_report: Dict[str, Any]) -> Optional[int]:
+    """Score qualite du rapport, ou `None` s'il est absent ou illisible.
+
+    `None` et `0` sont deux reponses differentes : `0` est une NOTE (la plus
+    basse de l'echelle [0, 100]), `None` dit qu'on ne sait pas. Les confondre
+    revient a ne jamais proposer d'upgrade pour le pire fichier de la
+    bibliotheque.
+
+    Tolerant sur le TYPE (int, float, chaine numerique) pour ne rien changer au
+    verdict des rapports persistes par d'anciennes versions — l'ancien
+    `int(... or 0)` l'etait aussi, a ceci pres qu'il levait sur une chaine non
+    numerique.
+    """
+    raw = quality_report.get("score")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def should_propose_upgrade(
     film_match: Dict[str, Any],
     quality_report: Optional[Dict[str, Any]],
@@ -154,8 +176,19 @@ def should_propose_upgrade(
     if not quality_report:
         return False
 
-    score = int(quality_report.get("score") or 0)
-    if score > 0 and score < _UPGRADE_SCORE_THRESHOLD:
+    # `0` est le PIRE score possible, pas une absence de donnee : le score est
+    # clampe dans [0, 100] (`quality_score._clamp_0_100`) et persiste tel quel
+    # (`repositories/quality.get_quality_report` fait `int(row["score"])`, la
+    # cle est TOUJOURS presente sur ce chemin). L'ancien garde `score > 0`
+    # excluait donc de l'upgrade le film le plus digne d'en recevoir un — meme
+    # confusion « inconnu » / « pire » que #1216, prise par l'autre bout.
+    #
+    # L'absence se lit sur la VALEUR MANQUANTE ou illisible, jamais sur un 0 :
+    # un rapport qui n'en porte pas (stub, version anterieure) ne permet pas de
+    # trancher sur le score, et on passe aux criteres suivants. Pour toute autre
+    # entree — int, float, chaine numerique — le verdict est celui d'avant.
+    score = _score_du_rapport(quality_report)
+    if score is not None and score < _UPGRADE_SCORE_THRESHOLD:
         return True
 
     # Verifier les encode warnings
