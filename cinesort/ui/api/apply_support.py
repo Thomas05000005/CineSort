@@ -3100,6 +3100,20 @@ def _snapshot_jellyfin_watched(api: Any, log_fn: Callable[[str, str], None]) -> 
         if not user_id:
             return None
         snapshot = snapshot_watched(client, user_id)
+        if snapshot is None:
+            # La bibliotheque n'a pas pu etre lue. Le `except` ci-dessous ne
+            # peut PAS voir ce cas : `snapshot_watched` attrape l'echec pour
+            # garantir a l'apply qu'il ne levera jamais. Sans cette branche, la
+            # garde d'a cote — qui sait pourtant deja annoncer un echec de
+            # snapshot — restait INATTEIGNABLE pour le seul chemin qui echoue
+            # vraiment, et l'utilisateur perdait ses statuts vus en silence.
+            _log.warning("Jellyfin snapshot watched indisponible : statuts vus non sauvegardés")
+            log_fn(
+                "WARN",
+                "Jellyfin sync : statuts vus NON sauvegardés (serveur injoignable) — "
+                "ils ne pourront pas être restaurés après le déplacement des fichiers.",
+            )
+            return None
         if snapshot:
             log_fn("INFO", f"Jellyfin sync : {len(snapshot)} film(s) vu(s) sauvegardé(s).")
         return {"snapshot": snapshot, "user_id": user_id, "settings": data}
