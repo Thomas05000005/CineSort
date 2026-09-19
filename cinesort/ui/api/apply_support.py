@@ -3145,6 +3145,17 @@ def _restore_jellyfin_watched(
             )
         if result.not_found > 0:
             log_fn("WARN", f"Jellyfin sync : {result.not_found} film(s) non retrouvé(s) après re-indexation.")
+        if result.unreachable > 0:
+            # Ces films etaient comptes en `not_found` avant ce correctif. Les en
+            # sortir SANS message dedie les ferait passer d'un diagnostic faux a
+            # un silence : le compteur baisse, et personne ne dit pourquoi. La
+            # cause nommee est le reseau, pas l'indexation.
+            log_fn(
+                "WARN",
+                f"Jellyfin sync : {result.unreachable} statut(s) vu NON restauré(s) — serveur Jellyfin "
+                "injoignable pendant toute la restauration (vérifiez que le serveur est allumé et "
+                "accessible). Les films sont bien rangés ; seuls les statuts « vu » sont concernés.",
+            )
         if result.errors > 0:
             log_fn("WARN", f"Jellyfin sync : {result.errors} erreur(s) lors de la restauration.")
     # BUG-1 (v7.8.0) : IntegrationError remplace except Exception annote intentionnel.
