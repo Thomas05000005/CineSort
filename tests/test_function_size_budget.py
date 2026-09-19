@@ -138,7 +138,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/runtime_support.py", "get_or_create_infra"): 238,
     ("cinesort/app/apply_core.py", "apply_tv_episode"): 237,
     ("cinesort/ui/api/history_support.py", "_get_history_stats_impl"): 237,
-    ("cinesort/app/jellyfin_sync.py", "restore_watched"): 231,
+    # 231 -> 263 : un serveur injoignable etait compte en « film non retrouve
+    # apres re-indexation », donc diagnostique comme un defaut d'indexation
+    # Jellyfin au lieu d'une panne reseau. Separer les deux causes demande de
+    # tracer si le serveur a repondu AU MOINS UNE FOIS sur les cinq tentatives.
+    ("cinesort/app/jellyfin_sync.py", "restore_watched"): 263,
     ("cinesort/domain/duplicate_support.py", "find_duplicate_targets"): 225,
     ("cinesort/domain/tiers_helpers.py", "apply_tier_hierarchy"): 223,
     ("cinesort/app/apply_core.py", "apply_collection_item"): 217,

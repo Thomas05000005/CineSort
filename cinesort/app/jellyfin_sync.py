@@ -88,6 +88,14 @@ class RestoreResult:
     `restored` : le statut vu a ete re-affirme dans les deux cas, seul
     l'historique (nombre de lectures + date de derniere lecture) distingue une
     restauration complete d'une restauration partielle.
+
+    `unreachable` est en revanche DISJOINT de `not_found`, et c'est tout son
+    objet : les deux comptent des films non restaures, mais pour des causes que
+    l'utilisateur ne repare pas au meme endroit. `not_found` dit « le serveur a
+    repondu, ton film n'y etait pas » (piste : re-indexation Jellyfin) ;
+    `unreachable` dit « le serveur n'a jamais repondu » (piste : reseau, NAS
+    eteint). Les confondre envoie chercher un « Force Refresh All Metadata »
+    quand il faut rallumer une machine.
     """
 
     restored: int = 0
@@ -96,6 +104,7 @@ class RestoreResult:
     errors: int = 0
     counters_restored: int = 0
     counters_lost: int = 0
+    unreachable: int = 0
     details: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -107,6 +116,7 @@ class RestoreResult:
             "errors": self.errors,
             "counters_restored": self.counters_restored,
             "counters_lost": self.counters_lost,
+            "unreachable": self.unreachable,
             "details": self.details,
         }
 
@@ -294,6 +304,11 @@ def restore_watched(
     3. Recupere la liste des films avec leurs nouveaux chemins
     4. Match et restaure les statuts
     5. Retry si des films ne sont pas encore indexes
+
+    Un film non restaure est classe selon ce qu'on SAIT de la cause :
+    `errors` (mark_played a echoue de facon persistante), `unreachable` (le
+    serveur n'a repondu a aucune tentative) ou `not_found` (le serveur a
+    repondu, le film n'etait pas dans sa bibliotheque).
     """
     if not snapshot:
         return RestoreResult()
@@ -331,6 +346,17 @@ def restore_watched(
     # R8-080 : new_path -> item_id du dernier mark_played en echec (503/timeout).
     # Permet de compter en 'errors' (et non 'not_found') apres epuisement.
     mark_failed: Dict[str, str] = {}
+    # Le serveur a-t-il repondu AU MOINS UNE FOIS ? Sans cette trace, un serveur
+    # injoignable (NAS endormi, cable debranche pendant l'apply) est
+    # indistinguable d'un serveur qui repond sans avoir re-indexe : les deux
+    # laissent `pending` plein et `mark_failed` vide, donc tout tombait en
+    # `not_found` avec la raison « apres re-indexation ».
+    #
+    # Le OU est volontairement PRUDENT : une seule reponse suffit a repasser en
+    # `not_found`. Un serveur qui a parle puis s'est taise n'est pas declare
+    # injoignable — on ne remplace pas un diagnostic par un autre sur la foi
+    # d'une tentative isolee.
+    serveur_a_repondu = False
 
     for attempt in range(1, max_retries + 1):
         # H-11 audit QA 20260429 : backoff exponentiel sur les retries
@@ -354,6 +380,7 @@ def restore_watched(
         except (OSError, ValueError, JellyfinError) as exc:
             _log.warning("Jellyfin sync : echec recuperation films (tentative %d) — %s", attempt, exc)
             continue
+        serveur_a_repondu = True
 
         # Indexer par chemin normalise. Issue #566 : plusieurs items Jellyfin
         # peuvent pointer le MEME chemin (doublon reste apres un refresh
@@ -488,6 +515,19 @@ def restore_watched(
                     "reason": "mark_played failed",
                 }
             )
+        elif not serveur_a_repondu:
+            # Le serveur n'a repondu a AUCUNE des tentatives : on ne sait rien de
+            # l'etat de la bibliotheque. Le dire, plutot que d'affirmer que le
+            # film n'y a pas ete retrouve — c'est une ignorance, pas un constat.
+            result.unreachable += 1
+            result.details.append(
+                {
+                    "action": "unreachable",
+                    "old_path": old_norm,
+                    "new_path": new_norm,
+                    "reason": "serveur Jellyfin injoignable pendant toute la restauration",
+                }
+            )
         else:
             result.not_found += 1
             result.details.append(
@@ -500,11 +540,13 @@ def restore_watched(
             )
 
     _log.info(
-        "Jellyfin sync : restore termine — %d restaures (%d avec historique, %d sans), %d non trouves, %d erreurs",
+        "Jellyfin sync : restore termine — %d restaures (%d avec historique, %d sans), "
+        "%d non trouves, %d injoignables, %d erreurs",
         result.restored,
         result.counters_restored,
         result.counters_lost,
         result.not_found,
+        result.unreachable,
         result.errors,
     )
     return result
