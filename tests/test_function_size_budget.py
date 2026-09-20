@@ -146,7 +146,9 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/app/apply_core.py", "apply_single"): 203,  # -9 le 2026-08-31, gain verrouille
     ("cinesort/domain/scan_helpers.py", "_walk"): 211,
     ("cinesort/infra/omdb_client.py", "test_connection"): 210,
-    ("cinesort/infra/probe/service.py", "probe_file"): 204,
+    # +7 le 2026-09-20 : la qualite de probe ne se deduit plus du mot « manquant »
+    # dans les messages, elle recoit `_is_tool_definitely_unavailable`.
+    ("cinesort/infra/probe/service.py", "probe_file"): 211,
     ("cinesort/ui/api/film_support.py", "_get_film_full_impl"): 195,  # -2 le 2026-08-31, gain verrouille
     ("cinesort/ui/api/dashboard_support.py", "get_global_stats"): 196,
     ("cinesort/app/apply_core.py", "move_file_with_collision_policy"): 195,

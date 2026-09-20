@@ -226,17 +226,42 @@ def _merge_probes(
     }
 
 
+def _outil_manquant(normalized: NormalizedProbe, tool_unavailable: Optional[bool]) -> bool:
+    """La probe a-t-elle echoue faute d'OUTIL, ou parce que la sonde a echoue ?
+
+    `tool_unavailable` vient de `ProbeService._is_tool_definitely_unavailable`,
+    qui SAIT quels binaires sont lancables. On le prefere toujours quand il est
+    fourni.
+
+    Le repli historique — chercher « manquant » dans les messages — se trompe
+    des que les deux causes coexistent, et elles coexistent en mode `auto` :
+    un seul des deux outils absent suffit a poser « ffprobe manquant (mode
+    auto). », meme si c'est l'AUTRE, present, dont la sonde a echoue sur le
+    fichier. La cause affichee envoyait alors installer un outil quand le
+    fichier etait en cause, et surtout le classement PARTIAL faisait echapper
+    au cap Silver un fichier que personne n'avait pu lire.
+
+    Il reste le defaut pour les appelants qui ne passent pas l'information
+    (tests de normalisation, `_degraded_source_payload`), dont le comportement
+    est inchange.
+    """
+    if tool_unavailable is not None:
+        return bool(tool_unavailable)
+    return any("manquant" in str(m).lower() for m in normalized.messages)
+
+
 def _determine_quality(
     normalized: NormalizedProbe,
     *,
     raw_mediainfo: Optional[Dict[str, Any]],
     raw_ffprobe: Optional[Dict[str, Any]],
     backend: str,
+    tool_unavailable: Optional[bool] = None,
 ) -> None:
     reasons: List[str] = []
     any_raw = isinstance(raw_mediainfo, dict) or isinstance(raw_ffprobe, dict)
     if not any_raw:
-        if any("manquant" in str(m).lower() for m in normalized.messages):
+        if _outil_manquant(normalized, tool_unavailable):
             reasons.append("Analyse partielle: outil manquant.")
             normalized.probe_quality = PROBE_QUALITY_PARTIAL
         else:

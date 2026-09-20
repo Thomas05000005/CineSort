@@ -74,12 +74,18 @@ def normalize_probe(
     raw_ffprobe: Optional[Dict[str, Any]],
     backend: str,
     messages: List[str],
+    tool_unavailable: Optional[bool] = None,
 ) -> NormalizedProbe:
     """Fusionne les payloads mediainfo + ffprobe en un NormalizedProbe canonique.
 
-    Signature publique inchangee depuis Vague K (NFO complet). Les helpers
-    prives sont accessibles via les sous-modules ou re-exportes depuis ce
-    module pour la retro-compat des tests.
+    Signature publique inchangee depuis Vague K (NFO complet), a ceci pres que
+    `tool_unavailable` s'y ajoute en OPTIONNEL : omis, la qualite se determine
+    comme avant. Il porte la reponse de `_is_tool_definitely_unavailable` pour
+    que « aucun outil lancable » ne se devine plus dans le texte des messages —
+    cf. `_outil_manquant`.
+
+    Les helpers prives sont accessibles via les sous-modules ou re-exportes
+    depuis ce module pour la retro-compat des tests.
     """
     mi, ff = _extract_tracks(raw_mediainfo, raw_ffprobe)
 
@@ -87,6 +93,12 @@ def normalize_probe(
     normalized.messages = list(messages or [])
 
     _merge_probes(mi, ff, normalized)
-    _determine_quality(normalized, raw_mediainfo=raw_mediainfo, raw_ffprobe=raw_ffprobe, backend=backend)
+    _determine_quality(
+        normalized,
+        raw_mediainfo=raw_mediainfo,
+        raw_ffprobe=raw_ffprobe,
+        backend=backend,
+        tool_unavailable=tool_unavailable,
+    )
 
     return normalized
