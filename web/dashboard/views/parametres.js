@@ -58,9 +58,19 @@ export const PARAMETRES_GROUPS = [
       { id: "exclusions", label: "Exclusions", fields: [
         { key: "excluded_patterns", label: "Patterns d'exclusion (glob)", type: "multi-path",
           hint: "Un pattern par ligne (ex : *.tmp, _review/*, **/sample.*)", advanced: true },
+        // Le placeholder listait 9 extensions alors que le défaut effectif en
+        // compte 15 (`resolve_video_exts` = VIDEO_EXTS_DEFAULT | VIDEO_EXTS_ALL) :
+        // il omettait .m2ts (Blu-ray), .vob et .iso (DVD), .mpg, .mpeg, .ogv.
+        // Or le champ est RESTRICTIF depuis le 2026-08-03 — toute saisie REMPLACE
+        // la liste. Recopier le placeholder pour y ajouter une extension sortait
+        // donc silencieusement les sources physiques du périmètre de scan.
+        // On n'énumère plus : une liste en dur ici rejouerait la divergence que
+        // `tests/test_constantes_divergentes_audit_20260806.py` verrouille côté
+        // backend. Le placeholder dit la SÉMANTIQUE du champ vide.
         { key: "file_extensions", label: "Extensions vidéo acceptées", type: "text",
-          placeholder: ".mkv;.mp4;.avi;.mov;.m4v;.wmv;.flv;.webm;.ts",
-          hint: "Séparées par ; (toutes en minuscule, avec le point).", advanced: true },
+          placeholder: "(vide = toutes les extensions par défaut)",
+          hint: "Séparées par ; (toutes en minuscule, avec le point). Toute saisie REMPLACE la liste par défaut : "
+                + "les extensions non listées seront ignorées au scan. Vider le champ revient au défaut.", advanced: true },
       ]},
       { id: "watch", label: "Surveillance automatique", fields: [
         { key: "watch_enabled", label: "Activer la surveillance (watch folder)", type: "toggle" },
