@@ -950,8 +950,8 @@ def main() -> None:
 
         if rest_server is not None and ui_variant != "preview":
             # Mode normal : pywebview charge le dashboard via HTTP local.
-            # On passe le token en query string (?ntoken=XXX) pour un bypass immediat du login.
-            # Le JS dashboard le detecte au boot, le stocke dans localStorage et purge l'URL.
+            # Token dans le FRAGMENT (#ntoken=XXX), jamais dans la query : il ne part pas au serveur (T-SEC-5).
+            # Le JS dashboard le detecte au boot, le stocke, puis RECONSTRUIT l'URL sans lui.
             from urllib.parse import quote
 
             port = getattr(rest_server, "_port", 8642)
@@ -1069,9 +1069,9 @@ def main() -> None:
         # garantissant que le bus JS-Python est pret avant toute manipulation.
         #
         # NB : l'inject_js precedent etait REDONDANT avec l'IIFE _detectNativeBoot
-        # (web/dashboard/app.js:75-112) qui lit deja `?ntoken=...&native=1` depuis
-        # l'URL et fait tout le bootstrap (setToken, localStorage native, force
-        # hash #/accueil, etc.). On le supprime completement.
+        # (web/dashboard/app.js) qui lit deja `?native=1#ntoken=...` depuis l'URL
+        # et fait tout le bootstrap (setToken, localStorage native, force hash
+        # #/accueil, etc.). On le supprime completement.
         import threading as _threading_evt
 
         _loaded_event = _threading_evt.Event()
@@ -1185,9 +1185,9 @@ def main() -> None:
                 # Fix 2026-05-24 ecran noir post-v1.3.0 :
                 # Le bootstrap natif (token, mode native, force #/accueil) est
                 # entierement gere par l'IIFE _detectNativeBoot dans
-                # web/dashboard/app.js:75-112 qui lit `?ntoken=XXX&native=1`
-                # depuis l'URL. Plus aucun evaluate_js ici - on attend
-                # juste events.loaded comme signal de chargement reussi.
+                # web/dashboard/app.js, qui lit `?native=1#ntoken=XXX` depuis
+                # l'URL. Plus aucun evaluate_js ici - on attend juste
+                # events.loaded comme signal de chargement reussi.
                 _log.info("splash: etape finale — Pret")
                 # Fix audit 2026-05-24 (v1.5.1) : message honnete - le splash
                 # restait visible avec "Pret !" pendant 5-30s d'attente
