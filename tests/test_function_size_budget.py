@@ -178,10 +178,15 @@ PLAFONDS: dict[tuple[str, str], int] = {
     # n'avait pas a grossir de neuf lignes de commentaire.
     ("cinesort/ui/api/dashboard_support.py", "_compute_active_insights"): 176,
     ("cinesort/domain/perceptual/comparison.py", "build_comparison_report"): 174,
+    # 163 -> 178 : le cache incremental ne fige plus « aucune video » sur un
+    # dossier dont la LECTURE a echoue (#696, second volet). Le corps ajoute est
+    # une garde de six lignes ; le reste est le « pourquoi », qui ne pouvait pas
+    # vivre ailleurs — le site fautif est une ligne de `persist_folder_cache`
+    # identique a celle, LEGITIME, qui la suit huit lignes plus bas.
+    ("cinesort/app/plan_support_core.py", "_filter_dossiers_phase"): 178,
     ("cinesort/domain/quality_score.py", "_build_quality_presets_catalog"): 167,
     ("cinesort/app/jellyfin_validation.py", "build_sync_report"): 165,
     ("cinesort/ui/api/dashboard_support.py", "get_dashboard"): 165,
-    ("cinesort/app/plan_support_core.py", "_filter_dossiers_phase"): 163,
     ("cinesort/domain/subtitle_helpers.py", "build_subtitle_report"): 161,
     # 157 -> 163 : mesure de la vague 2. La relecture des PRAGMA (six `PRAGMA` de
     # plus par ouverture) devient optionnelle sur le seul chemin qui IGNORE le
