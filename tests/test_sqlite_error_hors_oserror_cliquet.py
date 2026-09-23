@@ -88,7 +88,13 @@ def _fichiers_python() -> list[Path]:
 #       `scripts/` : le nombre ne bouge pas, ces deux racines n'ont aucun site
 #       a risque. C'est un elargissement gratuit, pas une absence de mesure —
 #       `test_le_perimetre_VOIT_bien_app_py` l'epingle.
-PLAFOND = 59
+#   56  le 2026-09-23 : les TROIS acces au cache probe de
+#       `infra/probe/service.py` (lecture DB, warm-up depuis le disque,
+#       ecriture) passent en `sqlite3.Error`. Chemin de CACHE, donc le geste que
+#       la docstring ci-dessus declare correct : rien n'y devient un succes
+#       silencieux, et le repli disque — inatteignable pour la cause qu'il
+#       nomme — le redevient. Cf `tests/test_probe_cache_sqlite_verrouillee.py`.
+PLAFOND = 56
 
 
 def _noms_exceptions(handler: ast.ExceptHandler) -> set[str]:
