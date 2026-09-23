@@ -403,9 +403,17 @@ class ProbeService:
         """
         try:
             cached = self.store.probe.get_probe_cache(**cache_key)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
             # DB indisponible (NAS lent, lock SQLite, BrokenPipeError) -> on
             # tente quand meme le cache disque.
+            #
+            # `sqlite3.Error` (regle inviolable n4 du CLAUDE.md) : il n'herite PAS
+            # d'`OSError`, et c'est precisement « lock SQLite » — la cause que ce
+            # commentaire NOMME — qui le leve (`OperationalError: database is
+            # locked`). Le repli disque, seule raison d'etre de `disk_cache.py`
+            # (« SQLite peut subir [...] une contention WAL ; le cache disque JSON
+            # est independant de la DB »), etait donc INATTEIGNABLE pour le cas
+            # qu'il vise : l'exception sortait de la fonction avant de l'atteindre.
             logger.warning(
                 "Cache probe DB lecture echouee path=%s err=%s (fallback disque)",
                 cache_key.get("path"),
@@ -430,7 +438,12 @@ class ProbeService:
                 normalized_json=disk_cached["normalized_json"],
                 ts=disk_cached.get("ts", time.time()),
             )
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+            # Meme raison : ce warm-up s'execute APRES un echec de lecture DB,
+            # donc typiquement pendant que la base est encore verrouillee. Sans
+            # `sqlite3.Error`, il remontait l'exception au lieu de rendre le hit
+            # disque qu'il venait d'obtenir — le repli perdait son resultat sur
+            # l'optimisation censee l'accompagner.
             logger.debug("Warm-up DB depuis cache disque ignore path=%s err=%s", cache_key.get("path"), exc)
         return disk_cached
 
@@ -456,7 +469,15 @@ class ProbeService:
                 normalized_json=normalized_dict,
                 ts=ts_now,
             )
-        except (OSError, TypeError, ValueError) as exc:
+        except (OSError, TypeError, ValueError, sqlite3.Error) as exc:
+            # `sqlite3.Error` : la docstring ci-dessus promet « si l'une des deux
+            # ecritures echoue, on logue mais on continue ». Sur un verrou DB,
+            # l'exception sortait au contraire de `probe_file` — le cache DISQUE,
+            # ecrit juste apres, n'etait jamais atteint, et un probe REUSSI
+            # (subprocess deja paye, metadonnees deja lues) etait perdu.
+            # La branche PARALLELE de `probe_files` nomme deja `sqlite3.Error`
+            # pour ce meme appel (R8-024 F2-d) : c'est la meme panne, vue depuis
+            # le chemin direct.
             logger.warning(
                 "Ecriture cache probe DB ignoree path=%s err=%s",
                 cache_key.get("path"),
