@@ -71,9 +71,10 @@ class CacheIncrementalDossierIllisibleTests(unittest.TestCase):
         self.addCleanup(patch_min.stop)
 
         # Les noms portent une annee entre parentheses : `discover_candidate_folders`
-        # les retient alors sans faire de scandir dessus (optimisation « BUG 5 »).
-        # C'est ce qui rend l'ordre des scandir sur ce chemin DETERMINISTE pendant
-        # la passe : #1 = folder_signature, #2 = iter_videos.
+        # les retient directement comme candidats (fast-path « BUG 5 ») au lieu de
+        # descendre. Il fait tout de meme UN scandir dessus, par
+        # `_yyyy_folder_shape` — d'ou le choix, dans `_blip_sur`, de discriminer
+        # par fonction APPELANTE et non par rang d'appel.
         self.dossier_blip = self.root / "Inception (2010)"
         self.dossier_sain = self.root / "Interstellar (2014)"
         self.dossier_bruit = self.root / "Notes (2001)"
