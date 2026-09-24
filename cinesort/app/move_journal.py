@@ -391,7 +391,7 @@ def journal_pose_autour(
         raise
 
 
-def _present(chemin: Union[Path, str]) -> Optional[bool]:
+def presence_sur_disque(chemin: Union[Path, str]) -> Optional[bool]:
     """True / False si le disque a REPONDU, None s'il n'a pas pu.
 
     Trois reponses, pas deux. `Path.exists()` n'en rend que deux et fait passer
@@ -401,6 +401,12 @@ def _present(chemin: Union[Path, str]) -> Optional[bool]:
     `FileNotFoundError` et `NotADirectoryError` sont les seules a signifier
     reellement « absent » : un parent qui n'est pas un dossier place le chemin
     hors du systeme de fichiers aussi surement qu'une absence.
+
+    PUBLIQUE parce que le journal n'est pas seule a en avoir besoin : la
+    reconciliation du demarrage (`move_reconciliation._classify_pending`) lit
+    les MEMES deux chemins pour rendre un verdict, et les confondait. C'est la
+    meme question — « le disque a-t-il repondu ? » — donc la meme reponse, et
+    non une seconde implementation qui pourrait diverger.
     """
     try:
         Path(chemin).stat()
@@ -440,7 +446,7 @@ def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: U
     # l'environnement meme de ce produit. Source locale + destination sur un
     # partage qui vient de tomber : la source repond True, la cible False sans
     # erreur, et on libererait sur une lecture qui n'a jamais abouti.
-    if _present(src) is not True or _present(dst) is not False:
+    if presence_sur_disque(src) is not True or presence_sur_disque(dst) is not False:
         return
     for entree in store.apply.list_pending_moves():
         if entree.get("src_path") == str(src) and entree.get("dst_path") == str(dst):

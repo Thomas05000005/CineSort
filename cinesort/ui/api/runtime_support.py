@@ -401,9 +401,14 @@ def get_or_create_infra(
                     # Sans eux, une reconciliation qui detecte une incoherence
                     # s'affichait « 1 examinee, 0 completed, 0 rolled_back,
                     # 0 duplicated, 0 lost » : la synthese mentait.
+                    # Audit 2026-09-24 (finding 923330d6) : `unreachable` y entre
+                    # pour la MEME raison. C'est le seul verdict qui laisse
+                    # l'entree pending en place ; sans lui, un demarrage sur
+                    # volume injoignable afficherait « N examinee(s), 0 partout »
+                    # — et cette fois la ligne mentirait sur du travail RESTANT.
                     _logger.info(
                         "reconcile_at_boot: %d entree(s) examinee(s), %d completed, %d rolled_back, "
-                        "%d duplicated, %d lost, %d mismatched, %d unverified",
+                        "%d duplicated, %d lost, %d mismatched, %d unverified, %d unreachable",
                         report["examined"],
                         report.get("completed", 0),
                         report.get("rolled_back", 0),
@@ -411,6 +416,7 @@ def get_or_create_infra(
                         len(report.get("lost", [])),
                         len(report.get("mismatched", [])),
                         len(report.get("unverified", [])),
+                        len(report.get("unreachable", [])),
                     )
             except Exception as exc:
                 _logger.warning("reconcile_at_boot: erreur ignoree (boot continue): %s", exc)
