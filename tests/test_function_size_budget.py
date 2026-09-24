@@ -226,7 +226,11 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/ui/api/quality_report_support.py", "_probe_and_score"): 131,
     ("cinesort/ui/api/run_flow_support.py", "_persist_duplicate_winner"): 131,
     ("cinesort/ui/api/run_flow_support.py", "_validate_and_init_plan_context"): 130,
-    ("cinesort/app/move_reconciliation.py", "reconcile_pending_moves"): 128,
+    # `reconcile_pending_moves` est SORTIE de ce plafond le 2026-09-24 : 128 ->
+    # 79 lignes, apres extraction de `_enregistrer_verdict` (90). Le cliquet a
+    # bien mordu — l'ajout du verdict `unreachable` la portait a 142 sur un
+    # plafond a marge zero — et sa reponse a ete de DECOUPER, pas de monter le
+    # plafond. Le helper extrait reste sous MAX_LINES, donc il n'entre pas ici.
     ("cinesort/infra/jellyfin_client.py", "get_all_movies"): 128,
     ("cinesort/ui/api/tmdb_support.py", "search_tmdb"): 128,
     ("cinesort/app/plan_support_core.py", "_classify_and_plan_folder"): 127,
