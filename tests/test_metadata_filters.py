@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from cinesort.domain.perceptual.constants import JUDDER_UNKNOWN
 from cinesort.domain.perceptual.metadata_analysis import (
     CropSegment,
     _classify_judder,
@@ -324,13 +325,18 @@ class TestDetectJudder(unittest.TestCase):
         self.assertEqual(info.keep_count, 95)
         self.assertAlmostEqual(info.drop_ratio, 0.05)
 
-    def test_timeout_returns_none(self):
+    def test_timeout_rend_non_mesure_et_pas_judder_none(self):
+        """Le nom d'origine (`test_timeout_returns_none`) disait « rend NONE »
+        et l'assertion verifiait `judder_none` : la confusion entre « pas de
+        resultat » et « aucun judder » etait inscrite dans le test lui-meme.
+        """
         with patch(
             "cinesort.domain.perceptual.metadata_analysis.tracked_run",
             side_effect=subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=30),
         ):
             info = detect_judder("ffmpeg", "x.mkv", 7200.0)
-        self.assertEqual(info.verdict, "judder_none")
+        self.assertEqual(info.verdict, JUDDER_UNKNOWN)
+        self.assertNotEqual(info.verdict, "judder_none")
 
 
 # ---------------------------------------------------------------------------
