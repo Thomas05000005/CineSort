@@ -400,6 +400,18 @@ MPDECIMATE_JUDDER_LIGHT = 0.05  # ratio drop/(drop+keep) > ce seuil = judder leg
 MPDECIMATE_JUDDER_PULLDOWN = 0.15  # telecinema 3:2 probable
 MPDECIMATE_JUDDER_HEAVY = 0.25  # conversion framerate problematique
 
+# Verdict « la mesure n'a pas eu lieu ». DISTINCT de `judder_none`, qui veut
+# dire « mesure faite, aucun judder » — un compliment, pas une abstention.
+# Les deux analyses SŒURS de la section 8 rendent deja `unknown` sur le meme
+# mode d'echec (`_parse_idet_stderr`, `classify_crop`) ; seul le judder
+# repondait par son verdict le plus favorable.
+JUDDER_UNKNOWN = "judder_unknown"
+
+# Verdict commun « non mesure » des deux autres analyses de la section 8
+# (entrelacement, recadrage). Nomme ici pour que le DEFAUT du dataclass et le
+# verdict rendu a l'execution ne puissent pas diverger.
+SECTION8_UNKNOWN = "unknown"
+
 # 8.4 IMAX
 IMAX_AR_FULL_FRAME_MIN = 1.40  # IMAX 70mm natif (rare)
 IMAX_AR_FULL_FRAME_MAX = 1.46
