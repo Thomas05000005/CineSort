@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -382,6 +383,159 @@ class LiberationSurPreuveTests(unittest.TestCase):
             1,
             "l'option est opt-in : les appelants qui font un shutil.move gardent "
             "le contrat conservateur de journaled_move.",
+        )
+
+
+class LaLiberationNeMasquePasLEchecDOrigineTests(unittest.TestCase):
+    """La liberation s'execute DEPUIS un `except`. Si elle leve, sa propre
+    exception REMPLACE celle du deplacement — et change de CLASSE.
+
+    `_liberer_si_le_disque_le_prouve` interroge la base (`list_pending_moves`,
+    qui passe par `_ensure_apply_pending_tables` -> `_ensure_schema_group`).
+    Elle leve donc hors de `OSError` : `sqlite3.Error` sur une base verrouillee,
+    `KeyError` (« Groupe de schema inconnu ») et `RuntimeError` (bootstrap de
+    schema) — les trois types que `test_move_journal_cleanup_tolerance.py` a
+    deja mesures comme atteignables depuis cette meme famille d'appels.
+
+    Ce qui le rend couteux : les trois clauses par-row d'`apply_rows` n'attrapent
+    que `PermissionError`, `OSError` et
+    `(ValueError, TypeError, DestinationHorsRacineError)`. Aucune ne voit ces
+    types, donc le lot ENTIER etait avorte — apres que les rows precedentes
+    avaient deja bouge sur disque (regle inviolable n4) — et le message
+    « FICHIER VERROUILLE » destine a l'utilisateur disparaissait au profit d'un
+    « database is locked » brut.
+
+    L'entree du declencheur n'a rien d'exotique : c'est un fichier verrouille,
+    que `_liberer_si_le_disque_le_prouve` decrit elle-meme comme « le cas NORMAL
+    sous Windows ».
+
+    POURQUOI CES TESTS PASSENT PAR `apply_single` ET NON PAR `journal_pose_autour`
+    NU : c'est `apply_single` qui pose `liberer_si_rien_n_a_bouge=True` sur le
+    chemin le plus frequent du produit (le renommage du dossier d'un film). Un
+    test sur le gestionnaire seul prouverait la mecanique sans prouver qu'un
+    appelant reel l'emprunte.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="cinesort_liberation_masque_"))
+        self.store = SQLiteStore(self._tmp / "test.sqlite", busy_timeout_ms=5000)
+        self.store.initialize()
+        self.root = self._tmp / "root"
+        self.root.mkdir()
+        review = self.root / "_review"
+        self.roots = {
+            "conflicts_root": review / "_conflicts",
+            "conflicts_sidecars_root": review / "_conflicts_sidecars",
+            "duplicates_identical_root": review / "_duplicates_identical",
+            "leftovers_root": review / "_leftovers",
+        }
+        self.folder = self.root / "un film 2019"
+        self.folder.mkdir()
+        (self.folder / "movie.mkv").write_bytes(b"x" * 2048)
+
+    def tearDown(self) -> None:
+        with contextlib.suppress(Exception):
+            self.store.close()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _renomme_un_film(self) -> None:
+        """Lance le vrai `apply_single` sur un dossier de film reel."""
+        apply_single(
+            _config(self.root),
+            self.folder,
+            title="Un Film",
+            year=2019,
+            dry_run=False,
+            log=lambda niveau, msg: None,
+            res=core.ApplyResult(),
+            record_op=RecordOpWithJournal(lambda payload: None, store=self.store, batch_id="lot-test"),
+            **self.roots,
+        )
+
+    def _verrou_windows(self, source: Path, cible: Path) -> None:
+        raise PermissionError("WinError 5 : handle tenu par un tiers")
+
+    def _renomme_avec_base_qui_leve(self, panne: Exception) -> BaseException:
+        """Renomme avec un verrou fichier ET une base qui refuse la liberation.
+
+        Retourne l'exception reellement sortie, pour que l'appelant juge sa CLASSE.
+        `Exception` et non `PermissionError` dans l'`assertRaises` : c'est
+        precisement la classe qui est en cause, l'epingler ici ferait echouer le
+        test sur une AssertionError au lieu de rendre l'exception a examiner.
+        """
+        with mock.patch.object(apply_core, "renommer_avec_reprise", self._verrou_windows):
+            with mock.patch.object(self.store.apply, "list_pending_moves", side_effect=panne):
+                with self.assertRaises(Exception) as capture:
+                    self._renomme_un_film()
+        return capture.exception
+
+    def test_une_base_VERROUILLEE_ne_remplace_pas_le_verrou_fichier(self) -> None:
+        sortie = self._renomme_avec_base_qui_leve(sqlite3.OperationalError("database is locked"))
+
+        self.assertIsInstance(
+            sortie,
+            PermissionError,
+            "c'est l'echec de la LIBERATION qui est sorti, pas celui du deplacement. "
+            f"Sortie: {type(sortie).__name__}: {sortie}",
+        )
+        self.assertIsInstance(
+            sortie,
+            OSError,
+            "l'exception qui sort n'est pas un OSError : aucune des trois clauses "
+            "par-row d'apply_rows ne l'attrape, donc le lot ENTIER est avorte apres "
+            "que les rows precedentes ont deja bouge sur disque.",
+        )
+        self.assertTrue(self.folder.exists(), "le dossier source a bouge alors que le renommage a echoue")
+
+    def test_un_groupe_de_schema_INCONNU_ne_remplace_pas_non_plus(self) -> None:
+        """Le remede doit couvrir les types HORS `sqlite3`.
+
+        `_ensure_schema_group` leve `KeyError` (sqlite_store.py). Une garde
+        limitee a `(sqlite3.Error, OSError, AttributeError)` — le tuple des sites
+        voisins — laisserait ce cas ouvert : c'est l'erreur qu'a deja payee
+        l'issue #670 sur `delete_pending_move`.
+        """
+        sortie = self._renomme_avec_base_qui_leve(KeyError("Groupe de schema inconnu: apply_pending"))
+
+        self.assertIsInstance(
+            sortie,
+            PermissionError,
+            f"un KeyError de la liberation a masque le verrou fichier. Sortie: {type(sortie).__name__}: {sortie}",
+        )
+
+    def test_la_liberation_reste_EFFECTIVE_quand_la_base_repond(self) -> None:
+        """Contre-test : avaler l'echec ne doit pas revenir a ne plus rien faire.
+
+        Sans lui, remplacer le corps de la liberation par un `pass` passerait
+        cette batterie — et reintroduirait le fantome que T-PROD-8 a ferme (une
+        entree pending laissee derriere chaque fichier verrouille, a trier au
+        demarrage suivant).
+        """
+        with mock.patch.object(apply_core, "renommer_avec_reprise", self._verrou_windows):
+            with self.assertRaises(PermissionError):
+                self._renomme_un_film()
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            0,
+            "la source est intacte et la cible absente : le disque PROUVE que rien "
+            "n'a bouge, l'entree devait etre liberee.",
+        )
+
+    def test_une_base_qui_leve_LAISSE_l_entree_pour_la_reconciliation(self) -> None:
+        """Contre-test symetrique : avaler ne doit pas non plus perdre la trace.
+
+        Le sens restrictif est de garder l'entree — la reconciliation du prochain
+        demarrage la classera « rien n'a bouge ». Ce test interdit un remede qui
+        supprimerait l'entree par un autre chemin pour « faire propre ».
+        """
+        self._renomme_avec_base_qui_leve(sqlite3.OperationalError("database is locked"))
+
+        self.assertEqual(
+            self.store.apply.count_pending_moves(),
+            1,
+            "l'entree pending a disparu alors que la base refusait de repondre : "
+            "plus rien ne signale le deplacement en suspens au prochain demarrage.",
         )
 
 

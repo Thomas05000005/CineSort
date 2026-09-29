@@ -387,7 +387,41 @@ def journal_pose_autour(
         # la reconciliation du prochain demarrage tranchera, et elle a plus de
         # chances d'aboutir que des ecritures faites pendant l'arret.
         if liberer_si_rien_n_a_bouge:
-            _liberer_si_le_disque_le_prouve(store, src=src, dst=dst)
+            # L'EXCEPTION QUI REMONTE DOIT RESTER CELLE D'ORIGINE. La liberation
+            # est un nettoyage best-effort execute DEPUIS un `except` : si elle
+            # leve, sa propre exception REMPLACE celle du deplacement (le `raise`
+            # ci-dessous n'est jamais atteint) — et elle change de CLASSE.
+            #
+            # C'est la regle inviolable n4 sur son chemin le plus cher.
+            # `list_pending_moves` appelle `_ensure_apply_pending_tables` ->
+            # `_ensure_schema_group`, donc leve hors de `OSError` :
+            # `sqlite3.Error` (base verrouillee / corrompue), `KeyError`
+            # (« Groupe de schema inconnu », sqlite_store.py) et `RuntimeError`
+            # (bootstrap de schema). Or les trois clauses par-row d'`apply_rows`
+            # n'attrapent que `PermissionError`, `OSError` et
+            # `(ValueError, TypeError, DestinationHorsRacineError)` : aucune ne
+            # les voit. Un simple fichier verrouille — le cas NORMAL sous
+            # Windows, cf. ci-dessous — avortait donc TOUT le lot APRES que les
+            # rows precedentes avaient deja bouge sur disque, et le message
+            # « FICHIER VERROUILLE » destine a l'utilisateur disparaissait.
+            #
+            # Avaler est ici le sens RESTRICTIF, exactement comme pour le
+            # `delete_pending_move` de `journaled_move` (issue #670) : ne pas
+            # liberer laisse une entree pending que la reconciliation du prochain
+            # demarrage classera, c'est-a-dire le comportement conservateur
+            # d'avant cette option. Les deux autres sites qui appellent
+            # `list_pending_moves` gardent deja leur garde
+            # (`move_reconciliation.py`, et les quatre appels d'`apply_rollback`).
+            try:
+                _liberer_si_le_disque_le_prouve(store, src=src, dst=dst)
+            except Exception:  # noqa: BLE001 - best-effort : ne doit jamais masquer l'echec du deplacement
+                _logger.exception(
+                    "journal: liberation du pending impossible (%s -> %s) ; l'entree sera "
+                    "reconciliee au prochain demarrage, et l'echec d'origine du deplacement "
+                    "est relance tel quel",
+                    src,
+                    dst,
+                )
         raise
 
 
@@ -431,6 +465,14 @@ def _liberer_si_le_disque_le_prouve(store: Any, *, src: Union[Path, str], dst: U
     renommage a casse seule voit `dst.exists()` vrai meme quand rien n'a bouge.
     La condition est alors fausse, l'entree reste, et la reconciliation tranche —
     le comportement conservateur, celui d'avant.
+
+    CETTE FONCTION PEUT LEVER, ET SON APPELANT L'AVALE. Elle interroge la base
+    (`list_pending_moves`), donc elle echoue sur une base verrouillee, corrompue
+    ou dont le schema n'est pas encore la. Comme elle s'execute DEPUIS un
+    `except`, laisser sortir son echec remplacerait l'exception du deplacement —
+    cf. le commentaire de `journal_pose_autour`. Ne pas ajouter de garde ici en
+    croyant qu'il manque : elle vit au site d'appel, ou elle protege AUSSI les
+    lignes futures de cette fonction.
     """
     # `Path.exists()` ne convient PAS ici : il AVALE une partie des OSError et
     # rend False, ce qui confond « absent » et « je n'ai pas pu lire ». Mesure
