@@ -32,11 +32,23 @@ from cinesort.infra.rest_server import (
 
 
 class _FakeConnection:
-    def __init__(self) -> None:
+    """Doublure de socket : `gettimeout`/`settimeout`, comme la vraie.
+
+    `gettimeout` a ete ajoute avec la restauration du delai d'inactivite. Sans
+    lui, le drain levait `AttributeError` sur ce fake — une doublure qui ne
+    porte pas la surface de la production ne protege rien.
+    """
+
+    def __init__(self, timeout=30.0) -> None:
         self.timeouts: list = []
+        self._timeout = timeout
+
+    def gettimeout(self):
+        return self._timeout
 
     def settimeout(self, value) -> None:
         self.timeouts.append(value)
+        self._timeout = value
 
 
 def _make_handler(content_length, body: bytes = b"", *, consumed=False):
@@ -236,6 +248,90 @@ class DrainBodyRealSocketSEC1Tests(unittest.TestCase):
                     pass
             drip.join(timeout=1.0)
             worker.join(timeout=2.0)
+
+
+class LeDrainRendLaSocketCommeIlLATrouveeTests(unittest.TestCase):
+    """Le drain REDUIT le timeout de la socket pour borner chaque `recv`. Il doit
+    le RESTAURER : `StreamRequestHandler.setup()` ne pose `self.timeout` qu'UNE
+    FOIS PAR CONNEXION, pas par requete.
+
+    Sans restauration, une connexion keep-alive ayant servi une 401 / 403 / 404 /
+    410 / 429 gardait `_DRAIN_BODY_TIMEOUT_S` (5 s) au lieu des 30 s de la classe
+    pour toutes ses requetes suivantes. Or le tableau de bord sonde a 30 s : la
+    connexion etait close entre deux sondages, donc une socket neuve et une
+    entree de plus en TIME_WAIT — la fuite exacte que #924 a fermee en passant
+    en HTTP/1.1.
+
+    `test_rest_keepalive_924.py::test_un_delai_d_inactivite_est_pose` ne pouvait
+    pas le voir : il asserte sur l'attribut de CLASSE `_CineSortHandler.timeout`,
+    jamais sur la socket reelle apres un drain.
+    """
+
+    def test_ANCRAGE_la_boucle_reduit_bien_le_timeout(self) -> None:
+        """Sans cet ancrage, « le delai est restaure » serait satisfait par un
+        drain qui n'aurait rien pose du tout."""
+        handler = _make_handler(4, b"abcd")
+        handler._drain_request_body()
+        self.assertIn(
+            rest_server._DRAIN_BODY_TIMEOUT_S,
+            handler.connection.timeouts,
+            "la boucle n'a pas borne le recv : ce test ne mesure plus rien",
+        )
+
+    def test_le_delai_initial_est_restaure_apres_un_drain_normal(self) -> None:
+        handler = _make_handler(4, b"abcd")
+        handler.connection = _FakeConnection(timeout=30.0)
+        handler._drain_request_body()
+        self.assertEqual(
+            handler.connection.gettimeout(),
+            30.0,
+            "le delai d'inactivite du keep-alive reste ecrase par le budget du drain",
+        )
+
+    def test_le_delai_est_restaure_meme_quand_la_deadline_COUPE(self) -> None:
+        """Le pire cas : la boucle sort par `break` sur deadline epuisee, donc le
+        dernier `settimeout` pose le budget RESIDUEL — qui peut valoir une
+        milliseconde. C'est la valeur qui resterait sur la connexion."""
+        handler = _CineSortHandler.__new__(_CineSortHandler)
+        handler.headers = {"Content-Length": str(_MAX_BODY_SIZE)}
+        handler.rfile = _SlowDripFakeReader()
+        handler.connection = _FakeConnection(timeout=30.0)
+        handler._body_consumed = False
+
+        with mock.patch.object(rest_server.time, "monotonic", _FakeClock(step=1.0)):
+            handler._drain_request_body()
+
+        self.assertEqual(handler.connection.gettimeout(), 30.0)
+        self.assertLess(
+            min(handler.connection.timeouts),
+            _DRAIN_BODY_MAX_WALL_S,
+            "ancrage : la boucle a bien pose un budget plus court que le delai initial",
+        )
+
+    def test_un_timeout_initial_ABSENT_est_restaure_tel_quel(self) -> None:
+        """`setup()` ne touche a rien quand `timeout` vaut None : on restaure la
+        valeur RELEVEE, pas `self.timeout`."""
+        handler = _make_handler(4, b"abcd")
+        handler.connection = _FakeConnection(timeout=None)
+        handler._drain_request_body()
+        self.assertIsNone(handler.connection.gettimeout())
+
+    def test_sur_une_socket_REELLE_le_delai_revient(self) -> None:
+        """Le fake ne prouve que l'appel. Preuve fidele sur une vraie socket."""
+        srv, cli = socket.socketpair()
+        self.addCleanup(srv.close)
+        self.addCleanup(cli.close)
+        cli.sendall(b"abcd")
+        srv.settimeout(30.0)
+
+        handler = _CineSortHandler.__new__(_CineSortHandler)
+        handler.headers = {"Content-Length": "4"}
+        handler.rfile = srv.makefile("rb", -1)
+        handler.connection = srv
+        handler._body_consumed = False
+        handler._drain_request_body()
+
+        self.assertEqual(srv.gettimeout(), 30.0, "la socket reelle garde le timeout court du drain")
 
 
 if __name__ == "__main__":
