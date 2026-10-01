@@ -1933,18 +1933,11 @@ def _validate_apply(
     if not dry_run:
         # Le second volume : les bacs de l'apply vivent sous `<run_dir>/_review`
         # (decision R8-002), donc sur le disque du `state_dir` et PAS sur celui
-        # de la bibliotheque. On ne lui impute que ce qui est resoluble ici :
-        # doublons ecartes et marques pour suppression. Best-effort de bout en
-        # bout — un echec de lecture rend un ensemble vide, ce qui ramene
-        # exactement au comportement d'avant.
-        _bucket_keys: Set[str] = set()
-        with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
-            _bucket_keys |= _resolve_duplicate_loser_row_ids(merged_decisions, log_fn)
-        with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
-            for _m in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
-                _mid = str(_m.get("row_id") or "").strip()
-                if _mid:
-                    _bucket_keys.add(_mid)
+        # de la bibliotheque. Les deux sources imputees a ce volume vivent
+        # desormais dans `_row_ids_partant_en_bac` — dont la lecture des
+        # decisions de doublons, qui recevait ici un argument de la mauvaise
+        # FORME et rendait donc toujours un ensemble vide.
+        _bucket_keys = _row_ids_partant_en_bac(store, run_id, log_fn)
         ok_disk, disk_info = check_disk_space_for_apply(
             cfg,
             rows,
@@ -2026,6 +2019,61 @@ def _resolve_duplicate_loser_row_ids(
                     "mais gagnant d'une decision plus recente -> conserve (non deplace).",
                 )
     return {row_id for row_id, role in role_by_row.items() if role == "loser"}
+
+
+def _row_ids_partant_en_bac(
+    store: Any,
+    run_id: str,
+    log_fn: Callable[[str, str], None],
+) -> Set[str]:
+    """Les row_id dont l'apply enverra le film dans un BAC, pas a sa destination.
+
+    Sert UNIQUEMENT au pre-check d'espace du SECOND volume : six des sept bacs
+    de l'apply vivent sous `<run_dir>/_review` (decision R8-002), donc sur le
+    disque du `state_dir` — en pratique `%LOCALAPPDATA%`, souvent le disque
+    systeme, alors que la bibliotheque est sur un disque de donnees.
+
+    POURQUOI CETTE FONCTION EXISTE. Son contenu vivait en ligne dans
+    `_validate_apply`, et la source « doublons ecartes » y recevait
+    `merged_decisions` — un `Dict[str, Dict]` indexe par `row_id`
+    (`cinesort_api._merge_decisions`). Or `_resolve_duplicate_loser_row_ids`
+    attend une SEQUENCE de decisions de doublons : son filtre d'entree est
+    `[dec for dec in (decisions or []) if isinstance(dec, dict)]`, et iterer un
+    dict rend ses CLES, c'est-a-dire des `str`. Aucune n'etant un `dict`, la
+    liste sortait VIDE et la fonction rendait **toujours** `set()`.
+
+    Consequence mesuree sur le pre-check : un apply dont les seuls fichiers
+    partant en bac sont des doublons perdants — le cas NOMINAL du produit —
+    arrivait a `check_disk_space_for_apply` avec `bucket_keys` vide, et le bloc
+    du second volume est garde par `if state_dir is not None and bucket_keys:`.
+    Il etait donc INTEGRALEMENT saute : aucune verification du disque qui
+    recoit les fichiers. C'est exactement la panne que H-2 (#989) existe pour
+    empecher, et son message d'erreur promet pourtant de couvrir « les doublons
+    ecartes et les films marques pour suppression ».
+
+    L'asymetrie qui rend le diagnostic univoque : l'autre site d'appel de
+    `_resolve_duplicate_loser_row_ids` (`_execute_apply`, celui qui ROUTE
+    reellement les perdants vers le bucket) lui passe bien
+    `store.apply.list_duplicate_decisions(run_id=...)`. Et le `suppress` pose
+    autour de l'appel fautif listait deja `sqlite3.Error` et `AttributeError` —
+    des types qu'un filtrage de dict en memoire ne peut pas lever : l'intention
+    d'aller lire la base etait ecrite, c'est l'argument qui manquait sa cible.
+
+    Best-effort de bout en bout, et volontairement : une source illisible rend
+    un ensemble partiel, ce qui ramene au comportement d'avant plutot que de
+    refuser un apply legitime. La couverture reste PARTIELLE par conception —
+    les conflits dependent de collisions connues seulement a l'execution (cf.
+    `disk_space_check.check_disk_space_for_apply`).
+    """
+    bucket_keys: Set[str] = set()
+    with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        bucket_keys |= _resolve_duplicate_loser_row_ids(store.apply.list_duplicate_decisions(run_id=run_id), log_fn)
+    with contextlib.suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        for marque in store.film_modal.list_marked_for_deletion(run_id=run_id) or []:
+            row_id = str(marque.get("row_id") or "").strip()
+            if row_id:
+                bucket_keys.add(row_id)
+    return bucket_keys
 
 
 # F17 : cles du diagnostic de nettoyage residuel produites par
