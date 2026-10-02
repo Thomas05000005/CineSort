@@ -996,8 +996,21 @@ class CineSortApi:
             # sans redemarrer le serveur (evite la coupure des sessions
             # legitimes). Si le serveur n'expose pas update_auth_token
             # (versions anterieures), on no-op silencieusement -> backward compat.
+            # LE HOT-SWAP NE PART QUE SI LE PAYLOAD PARLE DU JETON.
+            #
+            # Sans ce `in`, une charge utile qui ne le nommait pas donnait
+            # `new_token = ""` : different de l'ancien, donc `update_auth_token("")`
+            # partait et coupait l'auth du serveur en memoire. Corriger la
+            # PERSISTANCE (`settings_support`, secrets non effacables par omission)
+            # ne suffisait pas — le fichier redevenait correct pendant que le
+            # serveur vivant, lui, restait sans jeton jusqu'au redemarrage.
+            #
+            # `_unmask_secrets_for_save` ne fait que REMPLACER la valeur d'une cle
+            # deja presente : la presence de la cle reste donc le signal fidele de
+            # « ce payload parle du jeton ». Un effacement VOULU (`rest_api_token`
+            # present et vide) continue d'atteindre le kill-switch.
             new_token = str(settings.get("rest_api_token") or "").strip()
-            if new_token != old_token and self._rest_server is not None:
+            if "rest_api_token" in settings and new_token != old_token and self._rest_server is not None:
                 updater_fn = getattr(self._rest_server, "update_auth_token", None)
                 if callable(updater_fn):
                     try:
