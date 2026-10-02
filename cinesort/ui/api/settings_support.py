@@ -1646,24 +1646,85 @@ def _save_section_jellyfin(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+#: Secrets dont la cle ABSENTE vaut silence, et NON effacement.
+#:
+#: LE DEFAUT QUE CECI CORRIGE. Les sections ci-dessous ecrivaient leur secret
+#: inconditionnellement. Comme `to_save` part de l'existant, toute sauvegarde qui
+#: ne nommait pas le secret le remplacait par "" — et `write_settings` n'ecrit
+#: alors AUCUNE enveloppe chiffree, donc le secret est perdu sans copie.
+#:
+#: Mesure, par lecture du flux de `_save_settings_payload_locked`, sur un
+#: `settings.json` portant les sept secrets :
+#:
+#:     save_settings({"theme": "luxe"})  ->  ok: True
+#:       plex_token           -> ''   <- EFFACE      tmdb_api_key     -> conserve
+#:       radarr_api_key       -> ''   <- EFFACE      jellyfin_api_key -> conserve
+#:       omdb_api_key         -> ''   <- EFFACE
+#:       email_smtp_password  -> ''   <- EFFACE
+#:       rest_api_token       -> ''   <- EFFACE
+#:
+#: L'ASYMETRIE EST CE QUI REND LE DIAGNOSTIC UNIVOQUE : `tmdb_api_key` et
+#: `jellyfin_api_key` survivent, parce que `_apply_tmdb_key_persistence` et
+#: `_apply_jellyfin_key_persistence` tournent APRES les sections et reportent
+#: l'existant quand le payload est muet. Cinq secrets sur sept avaient manque
+#: cette politique ; elle leur est etendue ici, elle n'est pas inventee.
+#:
+#: C'est le meme motif, dans le meme fichier, que `_save_section_probe` (chemins
+#: d'outils) et `_save_section_quality_profiles` : « cle ABSENTE = silence (on
+#: garde), cle presente et VIDE = demande (on efface) ». L'effacement explicite
+#: reste donc possible — c'est ce que fait l'utilisateur qui vide son champ.
+#:
+#: Omettre la cle est SANS RISQUE pour la forme des reglages rendus au
+#: frontend : `_LITERAL_DEFAULTS` porte les quatre premieres, et
+#: `apply_settings_defaults` genere `rest_api_token` quand il manque.
+#: La valeur dit s'il faut `strip()` : le mot de passe SMTP est le seul a ne PAS
+#: l'etre, un espace de tete ou de fin pouvant faire partie du secret
+#: (cf. `test_password_not_stripped`).
+_SECRETS_NON_EFFACABLES_PAR_OMISSION: Dict[str, bool] = {
+    "plex_token": True,
+    "radarr_api_key": True,
+    "omdb_api_key": True,
+    "email_smtp_password": False,
+    "rest_api_token": True,
+}
+
+
+def _reprendre_le_secret_si_fourni(out: Dict[str, Any], payload: Dict[str, Any], cle: str) -> None:
+    """Recopie `cle` dans `out` UNIQUEMENT si le payload la porte.
+
+    La table ci-dessus est LUE ici, et non recopiee dans les sections : une
+    entree qu'on y ajouterait sans toucher a aucune section resterait inerte,
+    mais un appel pour une cle NON declaree leve `KeyError` au premier test.
+    Le lien entre la politique et ses sites d'application est donc effectif
+    dans un sens, et le cliquet de `test_secrets_charge_partielle.py` ferme
+    l'autre en eprouvant le COMPORTEMENT du dispatcher.
+    """
+    if cle not in payload:
+        return
+    brut = str(payload.get(cle) or "")
+    out[cle] = brut.strip() if _SECRETS_NON_EFFACABLES_PAR_OMISSION[cle] else brut
+
+
 def _save_section_plex(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    out: Dict[str, Any] = {
         "plex_enabled": to_bool(payload.get("plex_enabled"), False),
         "plex_url": str(payload.get("plex_url") or "").strip().rstrip("/"),
-        "plex_token": str(payload.get("plex_token") or "").strip(),
         "plex_library_id": str(payload.get("plex_library_id") or "").strip(),
         "plex_refresh_on_apply": to_bool(payload.get("plex_refresh_on_apply"), True),
         "plex_timeout_s": max(1.0, min(60.0, to_float(payload.get("plex_timeout_s"), 10.0))),
     }
+    _reprendre_le_secret_si_fourni(out, payload, "plex_token")
+    return out
 
 
 def _save_section_radarr(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    out: Dict[str, Any] = {
         "radarr_enabled": to_bool(payload.get("radarr_enabled"), False),
         "radarr_url": str(payload.get("radarr_url") or "").strip().rstrip("/"),
-        "radarr_api_key": str(payload.get("radarr_api_key") or "").strip(),
         "radarr_timeout_s": max(1.0, min(60.0, to_float(payload.get("radarr_timeout_s"), 10.0))),
     }
+    _reprendre_le_secret_si_fourni(out, payload, "radarr_api_key")
+    return out
 
 
 def _save_section_omdb(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1671,11 +1732,12 @@ def _save_section_omdb(payload: Dict[str, Any]) -> Dict[str, Any]:
     # ce qui faisait que omdb_api_key etait silencieusement droppee a chaque save.
     # Toute la plomberie DPAPI etait correcte (read_settings/write_settings), juste
     # le dispatcher de save n'incluait pas la section.
-    return {
+    out: Dict[str, Any] = {
         "omdb_enabled": to_bool(payload.get("omdb_enabled"), False),
-        "omdb_api_key": str(payload.get("omdb_api_key") or "").strip(),
         "omdb_min_confidence_for_call": max(0, min(100, to_int(payload.get("omdb_min_confidence_for_call"), 90))),
     }
+    _reprendre_le_secret_si_fourni(out, payload, "omdb_api_key")
+    return out
 
 
 def _save_section_notifications(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1695,15 +1757,25 @@ def _save_section_rest_api(payload: Dict[str, Any]) -> Dict[str, Any]:
     # qui retrograde transparent vers 127.0.0.1 si bind 0.0.0.0 demande avec
     # token court. Pas de double validation pour preserver les tests legacy
     # qui utilisent des tokens custom courts en mode local-only.
-    return {
+    out: Dict[str, Any] = {
         "rest_api_enabled": to_bool(payload.get("rest_api_enabled"), False),
         "rest_api_port": max(1024, min(65535, to_int(payload.get("rest_api_port"), 8642))),
-        "rest_api_token": str(payload.get("rest_api_token") or "").strip(),
         "rest_api_cors_origin": str(payload.get("rest_api_cors_origin") or "").strip(),
         "rest_api_https_enabled": to_bool(payload.get("rest_api_https_enabled"), False),
         "rest_api_cert_path": str(payload.get("rest_api_cert_path") or "").strip(),
         "rest_api_key_path": str(payload.get("rest_api_key_path") or "").strip(),
     }
+    # CELUI-CI COUTE PLUS QUE LES AUTRES. Efface, il faisait aussi tomber l'auth
+    # du serveur REST en memoire : `_save_settings_impl` compare l'ancien et le
+    # nouveau jeton puis appelle `update_auth_token("")`, et un jeton vide est
+    # traite comme un kill-switch volontaire (`rest_server.py`) qui saute meme la
+    # garde de longueur minimale en bind 0.0.0.0. Le controle d'auth etant
+    # fail-closed (`if not self.auth_token: return False`), ce n'est pas un
+    # contournement mais un REFUS GENERAL : tableau de bord et appareils appaires
+    # recoivent 401 jusqu'a ce qu'un GET regenere un jeton — DIFFERENT, donc tous
+    # les appareils sont a reconfigurer.
+    _reprendre_le_secret_si_fourni(out, payload, "rest_api_token")
+    return out
 
 
 def _save_section_watch(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1845,17 +1917,18 @@ def _save_section_quality_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _save_section_email(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    out: Dict[str, Any] = {
         "email_enabled": to_bool(payload.get("email_enabled"), False),
         "email_smtp_host": str(payload.get("email_smtp_host") or "").strip(),
         "email_smtp_port": max(1, min(65535, _coerce_int_with_default(payload.get("email_smtp_port", _MISSING), 587))),
         "email_smtp_user": str(payload.get("email_smtp_user") or "").strip(),
-        "email_smtp_password": str(payload.get("email_smtp_password") or ""),
         "email_smtp_tls": to_bool(payload.get("email_smtp_tls"), True),
         "email_to": str(payload.get("email_to") or "").strip(),
         "email_on_scan": to_bool(payload.get("email_on_scan"), True),
         "email_on_apply": to_bool(payload.get("email_on_apply"), True),
     }
+    _reprendre_le_secret_si_fourni(out, payload, "email_smtp_password")
+    return out
 
 
 def _save_section_subtitles(payload: Dict[str, Any]) -> Dict[str, Any]:

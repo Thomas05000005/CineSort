@@ -213,7 +213,16 @@ class SaveSectionPlexTests(unittest.TestCase):
         result = _save_section_plex({})
         self.assertEqual(result["plex_enabled"], False)
         self.assertEqual(result["plex_url"], "")
-        self.assertEqual(result["plex_token"], "")
+        # LE CONTRAT A CHANGE, ET C'ETAIT LE BUT : un secret dont la cle est
+        # ABSENTE n'est plus reecrit. `to_save` partant de l'existant, l'ecrire
+        # inconditionnellement a "" effacait le jeton Plex a chaque sauvegarde
+        # qui ne le nommait pas. Meme raisonnement que `_save_section_probe`
+        # pour les chemins d'outils. Cf `test_secrets_charge_partielle.py`.
+        self.assertNotIn("plex_token", result)
+
+    def test_un_jeton_FOURNI_est_bien_ecrit(self) -> None:
+        """L'autre sens : la correction ne doit pas figer le secret."""
+        self.assertEqual(_save_section_plex({"plex_token": "  tok  "})["plex_token"], "tok")
 
     def test_url_trailing_slash_stripped(self) -> None:
         self.assertEqual(
@@ -226,7 +235,8 @@ class SaveSectionRadarrTests(unittest.TestCase):
         result = _save_section_radarr({})
         self.assertEqual(result["radarr_enabled"], False)
         self.assertEqual(result["radarr_url"], "")
-        self.assertEqual(result["radarr_api_key"], "")
+        # Cf `SaveSectionPlexTests.test_defaults` : cle absente = silence.
+        self.assertNotIn("radarr_api_key", result)
 
     def test_url_trailing_slash_stripped(self) -> None:
         self.assertEqual(_save_section_radarr({"radarr_url": "http://radarr/"})["radarr_url"], "http://radarr")
@@ -283,7 +293,8 @@ class SaveSectionEmailTests(unittest.TestCase):
         self.assertEqual(result["email_enabled"], False)
         self.assertEqual(result["email_smtp_port"], 587)
         self.assertEqual(result["email_smtp_tls"], True)
-        self.assertEqual(result["email_smtp_password"], "")
+        # Cf `SaveSectionPlexTests.test_defaults` : cle absente = silence.
+        self.assertNotIn("email_smtp_password", result)
 
     def test_password_not_stripped(self) -> None:
         # On garde le password exact (espaces compris) car SMTP peut accepter des passwords avec espaces
