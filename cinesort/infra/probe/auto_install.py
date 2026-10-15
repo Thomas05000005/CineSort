@@ -447,6 +447,24 @@ def _extract_member(
     pour CE membre serait donc inatteignable — on ne l'ajoute pas ; c'est le
     budget partage, lui atteignable, qui porte la borne en streaming.
 
+    DURABILITE (finding f10b47da du 2026-08-06, laisse « candidat au prochain
+    run ») : le contenu est `flush`e puis `fsync`e AVANT `os.replace`. Sans
+    cela, le renommage pouvait etre visible alors que les pages du fichier ne
+    l'etaient pas encore — un crash systeme, une coupure secteur ou un arret
+    brutal entre les deux publiait un EXECUTABLE TRONQUE au chemin final, que
+    `tools_manager` detecte comme disponible et LANCE ensuite. C'etait le SEUL
+    site d'ecriture atomique du depot sans cette moitie de l'invariant, alors
+    meme qu'il est le seul a publier un executable ; les huit autres
+    (`infra/state.py`, `backup`, `disk_cache`, `updater`, `export_support`,
+    `quarantine_ttl`, `omdb_client`, `poster_proxy`) l'appliquent depuis la
+    campagne #820/#822/#787/#692.
+
+    L'echec du `fsync` n'est PAS avale, contrairement a `backup._fsync_file`
+    qui, lui, le tolere : refuser une RESTAURATION pour un fsync capricieux
+    laisserait l'utilisateur sans base, alors qu'ici refuser l'installation ne
+    coute qu'un outil reinstallable. C'est le fail-closed que ce module pose en
+    tete — on ne publie pas un binaire dont on n'a pas pu garantir l'ecriture.
+
     `dest` est un chemin fixe cote CineSort (jamais le nom de l'entree, que
     l'attaquant controle) : pas de zip-slip possible ici.
     """
@@ -472,6 +490,11 @@ def _extract_member(
                 # Borne evaluee AVANT l'ecriture du chunk.
                 budget.consume(len(chunk), label=label)
                 out.write(chunk)
+            # Cf docstring : la publication ne doit jamais preceder l'arrivee
+            # des octets sur le disque. `flush` vide le tampon Python, `fsync`
+            # celui du systeme — les deux sont necessaires, et dans cet ordre.
+            out.flush()
+            os.fsync(out.fileno())
         os.replace(tmp_name, dest)
     finally:
         # Apres un os.replace reussi le fichier de travail n'existe plus ; sur
