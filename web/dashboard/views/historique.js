@@ -987,7 +987,21 @@ async function _ensureHistoryStats(runId, { force = false } = {}) {
         total_rows: base.total_rows || 0,
         applied_rows: base.applied_rows || 0,
         errors_count: base.errors_count || 0,
-        duplicates_groups: base.duplicates_groups || 0,
+        // TROIS ETATS, PAS DEUX — et ce repli les ramenait a deux.
+        // `_renderDoublonsList` distingue `null` (« non compte ») de `0`
+        // (« aucun doublon, MESURE »), invariant pose par #1077 et verrouille
+        // par `tests/test_historique_doublons_affirmation.py`. Mais ce test
+        // exerce la fonction de RENDU ; il ne voit pas ce qu'on lui passe.
+        // `|| 0` ecrasait l'inconnu en zero mesure, et l'ecran reaffirmait
+        // « Aucun doublon detecte dans ce run » — exactement la phrase que
+        // #1077 avait retiree.
+        //
+        // Le zero n'etait pas conditionnel mais CERTAIN : `get_runs_summary`
+        // (repositories/run.py) n'expose PAS `duplicates_groups`, donc
+        // `base.duplicates_groups` vaut TOUJOURS `undefined` ici.
+        //
+        // `??` et non `||` : un 0 REELLEMENT porte par la liste resterait un 0.
+        duplicates_groups: base.duplicates_groups ?? null,
         films: [],
         apply_operations: [],
         duplicates_decided: [],
