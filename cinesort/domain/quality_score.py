@@ -435,6 +435,46 @@ def quality_profile_from_preset(preset_id: Any) -> Optional[Dict[str, Any]]:
 # _to_int, _to_float, _to_bool imported from cinesort.domain.conversions
 
 
+# Cles OPTIONNELLES d'`audio_bonuses` : absentes de tous les presets et de
+# l'ecran Parametres, elles n'entrent que par un import de profil ou par la
+# route REST. Chaque valeur est le repli RECOPIE depuis son site de lecture
+# dans `_audio_codec_bonus` : normaliser vers autre chose que ce que le
+# scoring aurait pris DEPLACERAIT un score au lieu de le proteger.
+_REPLIS_BONUS_AUDIO_OPTIONNELS: Dict[str, Callable[[Dict[str, Any]], int]] = {
+    "flac_pcm_bonus": lambda ab: max(1, _to_int(ab.get("dts_hd_ma_bonus"), 0) - 2),
+    "atmos_lossy_bonus": lambda ab: max(1, _to_int(ab.get("truehd_atmos_bonus"), 0) // 2),
+    "dts_hd_hra_bonus": lambda ab: _to_int(ab.get("dts_bonus"), 0),
+    "dts_x_bonus": lambda ab: _to_int(ab.get("dts_hd_ma_bonus"), 0),
+}
+
+
+def _normaliser_bonus_audio_optionnels(ab: Dict[str, Any]) -> None:
+    """Normalise EN PLACE les bonus audio optionnels du profil.
+
+    Optionnel ne veut pas dire dispense de validation. Ces quatre cles sont
+    lues par `_audio_codec_bonus` sous un `int()` NU, donc PENDANT le scoring :
+    une valeur non numerique y leve, et `get_quality_report` — dont la
+    frontiere attrape `Exception` — rend alors `ok: False` pour tout film
+    portant le codec concerne.
+
+    `flac_pcm_bonus` portait deja cette garde ; ses trois soeurs, lues
+    exactement de la meme facon dans la meme fonction, ne l'avaient pas. Un
+    audit les avait ecartees comme « idiomatiques, toutes avec repli
+    documente » : c'est vrai de `atmos_lossy_bonus`, qui teste `is None`, et
+    FAUX des deux autres. Leur repli s'ecrit `dict.get(cle, defaut)`, dont le
+    defaut ne s'applique QUE si la cle est ABSENTE ; une cle presente a `null`
+    — un JSON parfaitement valide — rend `None`, et `int(None)` leve.
+
+    Le repli est celui du site de lecture, a l'identique : le comportement ne
+    change donc QUE la ou il levait. Seule exception, documentee : une valeur
+    NEGATIVE est ramenee a 0, comme pour les quatre bonus de base et
+    `flac_pcm_bonus` — un « bonus » negatif n'a pas de sens dans ce dict.
+    """
+    for cle, repli in _REPLIS_BONUS_AUDIO_OPTIONNELS.items():
+        if cle in ab:
+            ab[cle] = max(0, _to_int(ab.get(cle), repli(ab)))
+
+
 def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[str, Any]]:
     errs: List[str] = []
     base = default_quality_profile()
@@ -492,14 +532,9 @@ def validate_quality_profile(raw_profile: Any) -> Tuple[bool, List[str], Dict[st
     ab = profile["audio_bonuses"]
     for key in ("truehd_atmos_bonus", "dts_hd_ma_bonus", "dts_bonus", "aac_bonus"):
         ab[key] = max(0, _to_int(ab.get(key), base["audio_bonuses"][key]))
-    # `flac_pcm_bonus` est OPTIONNELLE — elle n'est dans aucun preset, son repli
-    # est calcule — mais pas dispensee de validation : sans cela une valeur non
-    # numerique dans un profil utilisateur atteignait `int()` PENDANT le scoring
-    # et levait ValueError. Le repli n'est pas 0 : ramener un lossless a zero
-    # violerait l'invariant que cette cle existe precisement pour tenir.
-    if "flac_pcm_bonus" in ab:
-        repli = max(1, _to_int(ab.get("dts_hd_ma_bonus"), 0) - 2)
-        ab["flac_pcm_bonus"] = max(0, _to_int(ab.get("flac_pcm_bonus"), repli))
+    # Les bonus OPTIONNELS (`flac_pcm_bonus` et ses trois soeurs) sont normalises
+    # ici, apres les quatre bonus de base dont leurs replis se deduisent.
+    _normaliser_bonus_audio_optionnels(ab)
     channels_raw = ab.get("channels_bonus_map")
     channels = base["audio_bonuses"]["channels_bonus_map"].copy()
     if isinstance(channels_raw, dict):

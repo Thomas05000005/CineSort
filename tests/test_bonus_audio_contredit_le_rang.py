@@ -146,5 +146,138 @@ class LaCleOptionnelleEstVALIDEEComme_les_autresTests(unittest.TestCase):
         )
 
 
+class LesTroisSOEURSDeLaCleOptionnelleTests(unittest.TestCase):
+    """La garde ci-dessus existait pour UNE cle sur QUATRE.
+
+    `_audio_codec_bonus` lit quatre bonus optionnels sous un `int()` nu :
+    `flac_pcm_bonus`, `atmos_lossy_bonus`, `dts_hd_hra_bonus`, `dts_x_bonus`.
+    Seul le premier etait normalise par `validate_quality_profile`.
+
+    Un audit avait ecarte les trois autres comme « idiomatiques, toutes avec
+    repli documente » (2026-08-12). C'est vrai d'`atmos_lossy_bonus`, qui teste
+    `is None`, et FAUX des deux dernieres : leur repli s'ecrit
+    `dict.get(cle, defaut)`, dont le defaut ne s'applique QUE si la cle est
+    ABSENTE. Une cle presente a `null` rend `None`, et `int(None)` leve.
+
+    Les trois cles n'entrent ni par un preset ni par l'ecran Parametres : elles
+    arrivent par un import de profil ou par la route REST, soit exactement la
+    surface pour laquelle la garde de `flac_pcm_bonus` a ete posee.
+    """
+
+    #: (cle optionnelle, piste audio qui atteint SA branche de `_audio_codec_bonus`)
+    CLES_ET_PISTES = (
+        ("atmos_lossy_bonus", {"codec": "eac3", "is_atmos": True}),
+        ("dts_hd_hra_bonus", {"codec": "dts", "profile": "DTS-HD HRA"}),
+        ("dts_x_bonus", {"codec": "dts", "is_dts_x": True}),
+    )
+
+    def _profil_avec(self, cle: str, valeur: object) -> dict:
+        import copy
+
+        brut = copy.deepcopy(default_quality_profile())
+        brut["audio_bonuses"][cle] = valeur
+        return brut
+
+    def _score(self, profil: dict, piste: dict) -> dict:
+        from cinesort.domain.quality_score import compute_quality_score
+
+        sonde = {
+            "probe_quality": "FULL",
+            "video": {"width": 1920, "height": 1080, "codec": "h264", "bitrate": 10_000_000},
+            "audio_tracks": [{**piste, "channels": 6, "language": "fre", "bitrate": 1_500_000}],
+        }
+        return compute_quality_score(normalized_probe=sonde, profile=profil)
+
+    def test_une_valeur_non_numerique_ne_casse_aucune_des_trois(self) -> None:
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        for cle, piste in self.CLES_ET_PISTES:
+            with self.subTest(cle=cle):
+                brut = self._profil_avec(cle, "pas un nombre")
+                ok, _errs, prof = validate_quality_profile(brut)
+                self.assertTrue(ok, "le profil doit rester acceptable, pas etre rejete")
+                self.assertIsInstance(
+                    prof["audio_bonuses"][cle],
+                    int,
+                    f"{cle} n'a pas ete normalisee : elle atteindra `int()` pendant le scoring",
+                )
+                self.assertIsInstance(self._score(brut, piste)["score"], int)
+
+    def test_une_cle_a_null_ne_casse_aucune_des_trois(self) -> None:
+        """`null` est le cas que « repli documente » ne couvrait PAS.
+
+        `dict.get(cle, defaut)` ne rend le defaut que sur une cle ABSENTE. Ce
+        test est donc le discriminant entre les deux lectures de la refutation
+        de 2026-08-12 : sans le correctif, les deux dernieres cles levent
+        `TypeError` la ou `atmos_lossy_bonus` retombe sur son repli.
+        """
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        for cle, piste in self.CLES_ET_PISTES:
+            with self.subTest(cle=cle):
+                brut = self._profil_avec(cle, None)
+                _ok, _errs, prof = validate_quality_profile(brut)
+                self.assertIsInstance(prof["audio_bonuses"][cle], int)
+                self.assertIsInstance(self._score(brut, piste)["score"], int)
+
+    def test_le_repli_est_celui_du_site_de_lecture_pas_zero(self) -> None:
+        """CONTRE-TEST : normaliser vers 0 remplacerait le defaut par un autre.
+
+        Un lossless premium ramene a zero, c'est precisement l'erreur que
+        `flac_pcm_bonus` a ete ajoutee pour fermer. Les valeurs attendues sont
+        celles que `_audio_codec_bonus` aurait prises si la cle etait absente.
+        """
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        base = default_quality_profile()["audio_bonuses"]
+        attendus = {
+            "atmos_lossy_bonus": max(1, int(base["truehd_atmos_bonus"]) // 2),
+            "dts_hd_hra_bonus": int(base["dts_bonus"]),
+            "dts_x_bonus": int(base["dts_hd_ma_bonus"]),
+        }
+        for cle, attendu in attendus.items():
+            with self.subTest(cle=cle):
+                _ok, _errs, prof = validate_quality_profile(self._profil_avec(cle, "pas un nombre"))
+                self.assertEqual(prof["audio_bonuses"][cle], attendu)
+                self.assertGreater(prof["audio_bonuses"][cle], 0, "le repli a ramene le bonus a zero")
+
+    def test_une_valeur_valide_traverse_INCHANGEE(self) -> None:
+        """CONTRE-TEST : le correctif ne doit deplacer AUCUN score existant.
+
+        Il ne se declenche que la ou `int()` levait. Une valeur exploitable —
+        entiere, flottante ou chaine numerique, comme `int()` les acceptait
+        deja — doit ressortir a l'identique, et gouverner le bonus rendu.
+        """
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        cas = (
+            ("atmos_lossy_bonus", "eac3 atmos", 7, 7),
+            ("dts_hd_hra_bonus", "dts-hd hra", 4, 4),
+            ("dts_x_bonus", "dts:x", 11, 11),
+            # Formes que `int()` acceptait deja : elles ne doivent pas basculer sur le repli.
+            ("dts_x_bonus", "dts:x", "13", 13),
+            ("dts_x_bonus", "dts:x", 13.7, 13),
+        )
+        for cle, etiquette, valeur, attendu in cas:
+            with self.subTest(cle=cle, valeur=valeur):
+                _ok, _errs, prof = validate_quality_profile(self._profil_avec(cle, valeur))
+                self.assertEqual(prof["audio_bonuses"][cle], attendu)
+                self.assertEqual(_audio_codec_bonus(etiquette, prof)[0], attendu)
+
+    def test_une_cle_absente_reste_absente(self) -> None:
+        """CONTRE-TEST : la normalisation ne doit pas MATERIALISER les cles.
+
+        Les materialiser exporterait dans chaque profil utilisateur quatre cles
+        que le produit n'expose nulle part, et figerait leur repli calcule au
+        lieu de le laisser suivre les bonus de base dont il se deduit.
+        """
+        from cinesort.domain.quality_score import validate_quality_profile
+
+        _ok, _errs, prof = validate_quality_profile(default_quality_profile())
+        for cle, _piste in self.CLES_ET_PISTES:
+            with self.subTest(cle=cle):
+                self.assertNotIn(cle, prof["audio_bonuses"])
+
+
 if __name__ == "__main__":
     unittest.main()
