@@ -2624,6 +2624,41 @@ def _auto_scan_max_workers_for_storage(storage_type: str) -> int:
     return 1
 
 
+def _valeur_manuelle_a_conserver(data: Dict[str, Any], value: Any) -> int:
+    """Valeur manuelle a persister quand le mode passe a "auto".
+
+    LE DEFAUT QUE CECI CORRIGE. `set_scan_max_workers_payload` ecrivait
+    `data["scan_max_workers_value"] = _normalize_scan_max_workers_value(value)`
+    y compris en mode "auto" — or `_applyScanMaxWorkers` (parametres.js) ne
+    transmet `value` QUE pour le mode manuel :
+
+        const payload = { mode: String(mode || "auto") };
+        if (mode === "manual") payload.value = Number(value);
+
+    `value` valait donc `None`, que le normalisateur rend `1`. Basculer sur
+    « auto » remettait la valeur manuelle a 1 :
+
+        reglage manuel 16 workers, puis bascule sur "auto"
+          -> scan_max_workers_value : 16 -> 1
+          -> retour en "manual" : le panneau affiche 1
+
+    La docstring du setter promettait pourtant « valeur conservee si presente et
+    valide » : elle decrivait une lecture de l'EXISTANT, quand le code lisait le
+    PARAMETRE. Elle est desormais vraie.
+
+    CE DEFAUT ETAIT MASQUE PAR UN AUTRE. Avant #1097, l'ecran Parametres
+    rejouait `scan_max_workers_value` a chaque autosave depuis son instantane :
+    il restaurait donc la valeur ecrasee, par accident. `_CLES_POSSEDEES_AILLEURS`
+    ayant retire ce rejeu, l'ecrasement persiste maintenant.
+
+    Une valeur EXPLICITE reste souveraine, meme en mode auto : seul le silence
+    de l'appelant fait reprendre l'existant.
+    """
+    if value is not None and not isinstance(value, bool):
+        return _normalize_scan_max_workers_value(value)
+    return _normalize_scan_max_workers_value(data.get("scan_max_workers_value"))
+
+
 def resolve_effective_scan_max_workers(state_dir: Path) -> int:
     """Resout la valeur effective de scan_max_workers a injecter dans Config.
 
@@ -2707,6 +2742,11 @@ def set_scan_max_workers_payload(
             level="info",
         )
 
+    # Lu AVANT le if/else : la branche "auto" en a besoin pour conserver la
+    # valeur manuelle de l'utilisateur. La lecture est pure, et le seul refus qui
+    # la precede (mode invalide) sort plus haut.
+    data = read_settings(state_dir)
+
     if raw_mode == "manual":
         # En manuel, on exige une valeur explicite int. On rejette bool, None,
         # strings non-numeriques pour eviter qu'un payload UI casse retombe
@@ -2736,12 +2776,13 @@ def set_scan_max_workers_payload(
             )
         normalized_value = n
     else:
-        # mode = auto : valeur conservee si presente et valide, sinon defaut 1.
-        normalized_value = _normalize_scan_max_workers_value(value)
+        # mode = auto : la valeur manuelle de l'utilisateur est CONSERVEE.
+        # Cf `_valeur_manuelle_a_conserver` — l'ecran ne transmet `value` qu'en
+        # mode manuel, donc l'ancienne lecture du seul parametre la remettait a 1.
+        normalized_value = _valeur_manuelle_a_conserver(data, value)
 
-    # Lecture / merge / ecriture (read_settings retourne les secrets dechiffres,
-    # write_settings rechiffrera correctement les autres champs).
-    data = read_settings(state_dir)
+    # Merge / ecriture (`data` vient de read_settings, donc secrets dechiffres :
+    # write_settings les rechiffrera correctement).
     data["scan_max_workers_mode"] = raw_mode
     data["scan_max_workers_value"] = normalized_value
     try:
