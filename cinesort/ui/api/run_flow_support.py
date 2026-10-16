@@ -1209,9 +1209,12 @@ def save_validation(api: Any, run_id: str, decisions: Dict[str, Dict[str, Any]])
     Coordination Vague P :
       - VP-A `apply_atomic` : aucun kwarg `apply_atomic` n'est consomme
         ici — pas de collision possible (AC-5).
-      - VP-C `field_locks` : transition `deferred -> accepted` consulte
-        les locks (via DecisionsRepository.upgrade_deferred_to_accepted)
-        — la repo expose les locks dans sa reponse (AC-3).
+      - VP-C `field_locks` : NON CABLE. Ce paragraphe annoncait que la
+        transition `deferred -> accepted` consultait les locks via
+        `DecisionsRepository.upgrade_deferred_to_accepted` ; le miroir passe
+        en realite par `set_decision`, qui ne les consulte pas. La methode
+        existe et est testee, mais n'a aucun appelant de production — sa
+        propre docstring le dit. Le lecteur cherchait donc un cablage absent.
     """
     if not isinstance(decisions, dict):
         return _err_response(
@@ -1385,10 +1388,7 @@ def _mirror_decisions_to_sql(
 
     try:
         # Import tardif pour eviter cycle (`infra.db` -> `ui.api` via store).
-        from cinesort.infra.db.repositories.decisions import (
-            DECISION_REJECTED,
-            from_legacy_ok_bool,
-        )
+        from cinesort.infra.db.repositories.decisions import from_legacy_ok_bool
     except ImportError:
         return
 
@@ -1418,8 +1418,13 @@ def _mirror_decisions_to_sql(
                 continue
             decision = from_legacy_ok_bool(ok_value)
 
+        # `set_decision` signale ses DEUX refus PAR RETOUR (`film_id` vide,
+        # `decision` hors des trois valeurs), pas par exception : appele en
+        # position d'instruction, il les perdait sans la moindre trace. Le
+        # miroir reste best-effort — le JSON demeure la source primaire — mais
+        # un refus se lit desormais dans le journal.
         try:
-            decisions_repo.set_decision(
+            res = decisions_repo.set_decision(
                 film_id,
                 run_id,
                 decision,
@@ -1429,9 +1434,13 @@ def _mirror_decisions_to_sql(
             )
         except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
             _logger.debug("save_validation: mirror SQL ignore pour row %s : %s", rid, exc)
-            # On force malgre tout decision=DECISION_REJECTED pour eviter
-            # le silence complet (ce code branch est defensif).
-            _ = DECISION_REJECTED
+            continue
+        if not res.get("ok"):
+            _logger.debug(
+                "save_validation: mirror SQL refuse pour row %s : %s",
+                rid,
+                res.get("reason") or "raison non fournie",
+            )
 
 
 def _build_pseudo_probe(detected: Dict[str, Any]) -> Dict[str, Any]:

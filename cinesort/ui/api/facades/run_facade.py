@@ -416,9 +416,10 @@ class RunFacade(_BaseFacade):
         Coordination Vague P :
           - VP-A `apply_atomic` : aucun conflit kwargs (apply_atomic
             transite par `apply()`, pas par `save_validation()`, AC-5).
-          - VP-C `field_locks` : la transition `deferred -> accepted`
-            consulte les locks via `DecisionsRepository
-            .upgrade_deferred_to_accepted` (AC-3).
+          - VP-C `field_locks` : NON CABLE (AC-3 non tenu). Le miroir SQL
+            passe par `DecisionsRepository.set_decision`, qui ne consulte pas
+            les locks ; `upgrade_deferred_to_accepted` n'a aucun appelant de
+            production. Cf. `run_flow_support.save_validation`.
         """
         return self._api._save_validation_impl(run_id, decisions)
 
