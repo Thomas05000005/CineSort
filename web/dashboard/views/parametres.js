@@ -4304,7 +4304,7 @@ async function _loadVPFBreakdown(container) {
       host.innerHTML = `<div class="parametres-breakdown-grid">${rows}</div>
         <p class="parametres-section-intro">
           Total théorique max : <strong>${totalWeight} pts</strong>. Score d'arrêt
-          des upgrades configuré : <strong>${res.data.upgrade_until_score || 10000}</strong>.
+          des upgrades configuré : <strong>${res.data.upgrade_until_score ?? 10000}</strong>.
         </p>`;
     } else {
       host.innerHTML = `<p class="parametres-section-intro parametres-profils-message--warning">

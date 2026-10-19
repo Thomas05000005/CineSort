@@ -24,7 +24,9 @@ from cinesort.domain import (
     quality_profile_from_preset,
     validate_quality_profile,
 )
+from cinesort.domain.conversions import to_int
 from cinesort.domain.custom_rules import validate_rules as _validate_custom_rules
+from cinesort.domain.quality_score import DEFAULT_UPGRADE_UNTIL_SCORE
 from cinesort.ui.api._responses import err
 
 logger = logging.getLogger(__name__)
@@ -126,7 +128,10 @@ def _build_profile_row(
         "weights": dict(profile_json.get("weights") or {}),
         "toggles": dict(profile_json.get("toggles") or {}),
         "tier_hierarchy": dict(profile_json.get("tier_hierarchy") or {}),
-        "upgrade_until_score": int(profile_json.get("upgrade_until_score") or 10000),
+        # `to_int` et non `or 10000` : un seuil a 0 est une consigne
+        # ("n'upgrade jamais"), pas une absence. Le defaut vient du domaine,
+        # ou il est defini une seule fois.
+        "upgrade_until_score": to_int(profile_json.get("upgrade_until_score"), DEFAULT_UPGRADE_UNTIL_SCORE),
         "profile_json": profile_json,
     }
 
