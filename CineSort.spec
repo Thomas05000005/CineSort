@@ -234,6 +234,37 @@ locales_datas = [
     for p in Path("locales").glob("*.json")
 ] if Path("locales").is_dir() else []
 
+# Documents de l'ecran Aide (`runtime/get_doc`, `runtime/search_docs`).
+#
+# `cinesort/ui/api/runtime_support.py:_repo_root()` vaut `sys._MEIPASS` dans un
+# bundle onefile : sans ces entrees, `_resolve_doc_safe` ne trouve AUCUN des
+# documents whitelistes, `get_doc` repond « Document inconnu » et `search_docs`
+# rend `{ok: True, results: []}`. L'ecran Aide est alors integralement vide dans
+# l'EXE distribue, alors qu'il fonctionne depuis les sources.
+#
+# C'est exactement pourquoi `VERSION` est ajoute plus bas : meme racine, meme
+# mecanisme. Seuls les fichiers de `DOCS_WHITELIST` sont embarques — surtout PAS
+# `docs/` en entier, qui porte `docs/internal/` (rapports d'audit et notes de
+# conception, sans objet dans un binaire public).
+#
+# `tests/test_packaging.py::DocsWhitelistBundledTests` compare cette liste a
+# `DOCS_WHITELIST` a l'AST : ajouter un document a la whitelist sans l'ajouter
+# ici fait rougir la CI.
+_DOC_FILES = [
+    "docs/USER_GUIDE_v2.md",
+    "docs/MANUAL.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/EXPORT_FORMAT.md",
+    "docs/api/ENDPOINTS.md",
+    "docs/i18n.md",
+    "docs/RELEASE.md",
+]
+docs_datas = [
+    (rel, str(Path(rel).parent))
+    for rel in _DOC_FILES
+    if Path(rel).is_file()
+]
+
 # V3.1 SCAFFOLDING — Bundle WebView2 Fixed Version, OPT-IN via env var.
 # Active uniquement quand `CINESORT_BUNDLE_WEBVIEW2=1` est defini AVANT le
 # build (typiquement par un mainteneur preparant une release "fixed runtime").
@@ -270,6 +301,7 @@ datas = (
     + migration_datas
     + locales_datas
     + preset_datas
+    + docs_datas
     + webview2_fixed_datas
     + cffi_datas
     + clr_loader_datas
