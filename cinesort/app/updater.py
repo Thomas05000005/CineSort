@@ -138,7 +138,7 @@ def check_for_updates(
     Returns:
         UpdateInfo si une version plus recente existe, None sinon.
     """
-    cached = _read_cache(cache_path, cache_ttl_s)
+    cached = _read_cache(cache_path, cache_ttl_s, expected_repo=github_repo)
     if cached is not None:
         return _build_update_info(cached, current_version)
 
@@ -146,12 +146,35 @@ def check_for_updates(
     if payload is None:
         return None
 
-    _write_cache(cache_path, payload)
+    _write_cache(cache_path, payload, repo=github_repo)
     return _build_update_info(payload, current_version)
 
 
-def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
-    """Retourne le payload cache si encore valide, sinon None."""
+def _read_cache(
+    cache_path: Optional[Path],
+    cache_ttl_s: int,
+    *,
+    expected_repo: Optional[str] = None,
+) -> Optional[dict]:
+    """Retourne le payload cache si encore valide, sinon None.
+
+    `expected_repo` : depot attendu. Le cache vit dans UN fichier unique du
+    state_dir (`update_cache.json`) alors que `update_github_repo` est un
+    reglage MODIFIABLE par l'utilisateur ; sans cette comparaison, changer de
+    depot laissait servir pendant tout le TTL (1 h) la release de l'ANCIEN —
+    avec son `release_url` et son `download_url`. Sur un mecanisme de mise a
+    jour, proposer le binaire d'un depot autre que celui configure n'est pas
+    une simple incoherence d'affichage.
+
+    Un cache ANTERIEUR a ce champ ne porte pas de `repo` : il est traite comme
+    inconnu, donc invalide, ce qui coute UN appel reseau une seule fois (le
+    cache se reecrit aussitot avec le champ). C'est le sens restrictif — servir
+    un cache dont on ne peut pas etablir la provenance est exactement le defaut
+    qu'on ferme.
+
+    `expected_repo=None` conserve le comportement historique (aucune
+    verification) pour les appelants qui n'ont pas le depot sous la main.
+    """
     if not cache_path or not cache_path.exists():
         return None
     try:
@@ -172,11 +195,13 @@ def _read_cache(cache_path: Optional[Path], cache_ttl_s: int) -> Optional[dict]:
         return None
     if time.time() - ts >= cache_ttl_s:
         return None
+    if expected_repo is not None and str(data.get("repo") or "") != str(expected_repo):
+        return None
     payload = data.get("payload")
     return payload if isinstance(payload, dict) else None
 
 
-def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
+def _write_cache(cache_path: Optional[Path], payload: dict, *, repo: str = "") -> None:
     """Ecrit le cache de maniere atomique ET durable (helper commun).
 
     Le check tourne dans un thread daemon (check_for_update_async) pendant que
@@ -202,7 +227,13 @@ def _write_cache(cache_path: Optional[Path], payload: dict) -> None:
         # partagent ce nom). Le helper unique fait les deux moities ensemble
         # et nettoie son `.tmp` en `finally` : la version inline de main est
         # retiree, pas conservee en double.
-        atomic_write_json(cache_path, {"ts": time.time(), "payload": payload}, indent=None)
+        # `repo` : provenance du payload, lue par `_read_cache` pour ne jamais
+        # servir la release d'un depot autre que celui configure.
+        atomic_write_json(
+            cache_path,
+            {"ts": time.time(), "repo": str(repo or ""), "payload": payload},
+            indent=None,
+        )
     except OSError as exc:
         logger.debug("Updater: ecriture cache impossible (%s)", exc)
 
@@ -321,7 +352,7 @@ def force_check(
     payload = _fetch_latest_release(github_repo, timeout_s)
     if payload is None:
         return None
-    _write_cache(cache_path, payload)
+    _write_cache(cache_path, payload, repo=github_repo)
     return _build_update_info(payload, current_version)
 
 
@@ -330,13 +361,20 @@ def get_cached_info(
     *,
     cache_path: Optional[Path] = None,
     cache_ttl_s: int = DEFAULT_CACHE_TTL_S,
+    github_repo: Optional[str] = None,
 ) -> Optional[UpdateInfo]:
     """Retourne l'info update depuis le cache uniquement (pas d'appel reseau).
 
     Utilise par ``get_update_info`` pour servir un resultat instantane apres
     le check au boot. Renvoie None si pas de cache ou cache expire.
+
+    ``github_repo`` : depot attendu. C'est CETTE fonction qui alimente l'ecran
+    (``runtime/get_update_info``), donc la comparaison de provenance doit
+    l'atteindre : la poser dans ``check_for_updates`` seul aurait laisse la
+    surface visible par l'utilisateur servir le cache d'un autre depot. Reste
+    optionnel — ``None`` conserve le comportement historique.
     """
-    cached = _read_cache(cache_path, cache_ttl_s)
+    cached = _read_cache(cache_path, cache_ttl_s, expected_repo=github_repo)
     if cached is None:
         return None
     return _build_update_info(cached, current_version)

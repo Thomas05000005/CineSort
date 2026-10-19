@@ -323,5 +323,101 @@ class BuildUpdateInfoTests(unittest.TestCase):
         self.assertIsNone(_build_update_info(payload, "7.6.0"))
 
 
+class LeCacheNeSertJamaisUnAutreDepotTests(unittest.TestCase):
+    """Le cache de mise a jour porte sa PROVENANCE et la fait respecter.
+
+    `update_cache.json` est unique par state_dir, alors que `update_github_repo`
+    est un reglage modifiable a tout moment. Sans comparaison de provenance,
+    changer de depot laissait servir pendant tout le TTL (1 h) la release de
+    l'ANCIEN — donc son `release_url` ET son `download_url`.
+
+    Les assertions portent sur la VERSION RENDUE, pas seulement sur le nombre
+    d'appels reseau : c'est ce que seul le correctif produit. Compter les appels
+    seul ne distinguerait pas un refetch d'un cache expire.
+    """
+
+    def test_changer_de_depot_invalide_le_cache_encore_frais(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            # Depot A : cache ecrit par le chemin de production, TTL frais.
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(_fake_payload(tag="7.7.0"))):
+                premier = check_for_updates("7.6.0", "alice/cinesort", cache_path=cache)
+            assert premier is not None
+            self.assertEqual(premier.latest_version, "7.7.0")
+
+            # Depot B, cache toujours dans son TTL : sans le correctif, la
+            # release d'alice etait servie telle quelle pour le depot de bob.
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(_fake_payload(tag="9.9.9"))) as m:
+                second = check_for_updates("7.6.0", "bob/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1, "le changement de depot doit declencher un appel reseau")
+            assert second is not None
+            self.assertEqual(second.latest_version, "9.9.9")
+
+    def test_meme_depot_le_cache_reste_servi_sans_reseau(self) -> None:
+        """Contre-test : le correctif ne doit pas neutraliser le cache.
+
+        Sans lui, le TTL ne servirait plus a rien et chaque boot rappellerait
+        GitHub — jusqu'au plafond de 60 requetes/h non authentifiees que ce
+        cache existe precisement pour respecter.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(_fake_payload(tag="7.7.0"))):
+                check_for_updates("7.6.0", "alice/cinesort", cache_path=cache)
+            with mock.patch.object(updater, "urlopen") as m:
+                info = check_for_updates("7.6.0", "alice/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 0)
+            assert info is not None
+            self.assertEqual(info.latest_version, "7.7.0")
+
+    def test_get_cached_info_refuse_le_cache_d_un_autre_depot(self) -> None:
+        """C'est CETTE fonction qui alimente l'ecran (`runtime/get_update_info`).
+
+        Poser la comparaison dans `check_for_updates` seul aurait laisse la
+        surface reellement visible par l'utilisateur servir le cache d'un autre
+        depot : une garde correcte mais inatteignable.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            _write_cache(cache, _fake_payload(tag="7.7.0"), repo="alice/cinesort")
+
+            self.assertIsNone(updater.get_cached_info("7.6.0", cache_path=cache, github_repo="bob/cinesort"))
+
+            attendu = updater.get_cached_info("7.6.0", cache_path=cache, github_repo="alice/cinesort")
+            assert attendu is not None
+            self.assertEqual(attendu.latest_version, "7.7.0")
+
+    def test_cache_anterieur_sans_provenance_est_refetche(self) -> None:
+        """Un cache ecrit AVANT ce champ n'a pas de `repo` : provenance inconnue.
+
+        On le refetche (un appel reseau, une seule fois) plutot que de servir un
+        payload dont on ne peut pas etablir l'origine — meme sens restrictif que
+        pour un cache corrompu.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            cache.write_text(
+                json.dumps({"ts": time.time(), "payload": _fake_payload(tag="7.7.0")}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(updater, "urlopen", return_value=_FakeResponse(_fake_payload(tag="9.9.9"))) as m:
+                info = check_for_updates("7.6.0", "alice/cinesort", cache_path=cache)
+                self.assertEqual(m.call_count, 1)
+            assert info is not None
+            self.assertEqual(info.latest_version, "9.9.9")
+
+    def test_sans_provenance_attendue_le_comportement_historique_est_conserve(self) -> None:
+        """`expected_repo=None` : aucune verification, comme avant ce lot.
+
+        Garde le contrat des appelants qui n'ont pas le depot sous la main.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "update_cache.json"
+            _write_cache(cache, _fake_payload(tag="7.7.0"), repo="alice/cinesort")
+            got = _read_cache(cache, cache_ttl_s=3600)
+            assert got is not None
+            self.assertEqual(got["tag_name"], "7.7.0")
+
+
 if __name__ == "__main__":
     unittest.main()

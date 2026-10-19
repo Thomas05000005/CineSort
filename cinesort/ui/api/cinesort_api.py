@@ -1231,7 +1231,12 @@ class CineSortApi:
         if force_refresh:
             return self._check_for_updates_impl()
         cache_path = _updater.default_cache_path(self._get_state_dir())
-        info = _updater.get_cached_info(self._app_version, cache_path=cache_path)
+        # Le depot est transmis pour que le cache ne puisse pas servir la
+        # release d'un AUTRE depot que celui actuellement configure : le fichier
+        # de cache est unique par state_dir, alors que `update_github_repo` est
+        # un reglage modifiable a tout moment.
+        repo = str((self._get_settings_impl() or {}).get("update_github_repo") or "").strip()
+        info = _updater.get_cached_info(self._app_version, cache_path=cache_path, github_repo=repo or None)
         return {"ok": True, "data": _updater.info_to_dict(info, self._app_version)}
 
     def _restart_api_server_impl(self) -> Dict[str, Any]:
