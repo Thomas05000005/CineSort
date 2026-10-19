@@ -246,11 +246,26 @@ def _restore_counters(client: Any, user_id: str, item_id: str, info: WatchedInfo
 # -- API publique ------------------------------------------------------
 
 
-def snapshot_watched(client: Any, user_id: str) -> Dict[str, WatchedInfo]:
+def snapshot_watched(client: Any, user_id: str) -> Optional[Dict[str, WatchedInfo]]:
     """Capture l'etat watched de tous les films Jellyfin.
 
     Retourne un dict {chemin_normalise: WatchedInfo} pour les films marques comme vus.
     Seuls les films avec played=True sont inclus (optimisation).
+
+    Rend `None` — et NON `{}` — quand la bibliotheque n'a PAS PU etre lue
+    (serveur eteint, timeout, 401). Les deux cas sont differents et l'appelant
+    doit pouvoir les distinguer :
+
+    - `{}` : Jellyfin a repondu, aucun film n'est marque comme vu. Il n'y a
+      rien a restaurer apres l'apply, le silence est legitime ;
+    - `None` : on ne SAIT PAS ce qui etait vu. L'apply va pourtant deplacer les
+      fichiers, Jellyfin re-indexera des items neufs (il les cle par chemin) et
+      les statuts vus seront perdus SANS que rien ne puisse les restaurer.
+
+    Rendre `{}` dans les deux cas faisait de la seconde situation un no-op
+    indistinguable de la premiere : `_snapshot_jellyfin_watched` n'annoncait
+    rien et `restore_watched` sortait sur son `if not snapshot`. Une perte de
+    donnees utilisateur etait ainsi presentee comme un succes muet.
     """
     try:
         # BUG 2 : utiliser le scan multi-library pour avoir tous les films
@@ -258,7 +273,7 @@ def snapshot_watched(client: Any, user_id: str) -> Dict[str, WatchedInfo]:
     # except Exception intentionnel : appel client tiers (JellyfinError herite de Exception)
     except Exception as exc:
         _log.warning("Jellyfin sync : echec snapshot watched — %s", exc)
-        return {}
+        return None
 
     snapshot: Dict[str, WatchedInfo] = {}
     for movie in movies:

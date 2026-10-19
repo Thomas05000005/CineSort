@@ -272,11 +272,17 @@ class TestSnapshotWatched(unittest.TestCase):
         result = snapshot_watched(client, "uid")
         self.assertEqual(len(result), 0)
 
-    def test_client_error_returns_empty(self):
+    def test_client_error_returns_none(self):
+        """Un echec de lecture ne leve pas, mais il ne se confond plus avec un dict vide.
+
+        `None` = « on ne sait pas ce qui etait vu » ; `{}` = « Jellyfin a
+        repondu, aucun film vu ». Les deux menent a des suites differentes,
+        cf `tests/test_jellyfin_snapshot_echec_silencieux.py`.
+        """
         client = MagicMock()
         client.get_all_movies_from_all_libraries.side_effect = OSError("network error")
         result = snapshot_watched(client, "uid")
-        self.assertEqual(len(result), 0)
+        self.assertIsNone(result)
 
     def test_no_played_movies(self):
         client = MagicMock()
