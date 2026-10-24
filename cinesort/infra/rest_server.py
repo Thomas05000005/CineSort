@@ -1352,6 +1352,21 @@ class _CineSortHandler(BaseHTTPRequestHandler):
         d'erreur deja bufferisee (WinError 10053 au lieu du JSON 401).
         Borne : un body > _MAX_BODY_SIZE n'est JAMAIS lu — l'abort du chemin
         413 est un anti-DoS VOULU (Lot D) et doit rester intact.
+
+        LE DELAI D'INACTIVITE EST RESTAURE EN SORTIE, et ce n'est pas cosmetique.
+        La boucle ci-dessous REDUIT le timeout de la socket pour borner chaque
+        `recv` ; `StreamRequestHandler.setup()`, lui, ne pose `self.timeout`
+        qu'UNE FOIS PAR CONNEXION, pas par requete. Sans restauration, une
+        connexion keep-alive ayant servi une 401 / 403 / 404 / 410 / 429 gardait
+        donc `_DRAIN_BODY_TIMEOUT_S` (5 s) au lieu des 30 s de la classe pour
+        TOUTES ses requetes suivantes — et le tableau de bord sonde a 30 s
+        (compteurs de la barre laterale). La connexion etait close entre deux
+        sondages, donc une socket neuve et une entree de plus en TIME_WAIT :
+        exactement la fuite que #924 a fermee en passant en HTTP/1.1.
+
+        On restaure la valeur RELEVEE, pas `self.timeout` : c'est le seul moyen
+        de rendre la socket a l'etat ou on l'a trouvee sans supposer ce que
+        `setup()` y a mis (il ne touche a rien quand `timeout` vaut None).
         """
         if getattr(self, "_body_consumed", True):
             return
@@ -1375,15 +1390,24 @@ class _CineSortHandler(BaseHTTPRequestHandler):
             # deadline ; un client totalement muet est coupe par le timeout aussi.
             deadline = time.monotonic() + _DRAIN_BODY_MAX_WALL_S
             _read1 = getattr(self.rfile, "read1", None) or self.rfile.read
-            while remaining > 0:
-                budget = deadline - time.monotonic()
-                if budget <= 0:
-                    break
-                self.connection.settimeout(min(_DRAIN_BODY_TIMEOUT_S, budget))
-                chunk = _read1(min(remaining, 65536))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
+            delai_initial = self.connection.gettimeout()
+            try:
+                while remaining > 0:
+                    budget = deadline - time.monotonic()
+                    if budget <= 0:
+                        break
+                    self.connection.settimeout(min(_DRAIN_BODY_TIMEOUT_S, budget))
+                    chunk = _read1(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            finally:
+                # `finally` et non apres la boucle : un `break` sur deadline
+                # epuisee laisse le timeout le plus COURT de toute la boucle
+                # (`budget` peut valoir une milliseconde), et une sortie par
+                # exception le laisserait aussi — le `suppress` qui englobe tout
+                # ceci avale justement les `OSError` du drain.
+                self.connection.settimeout(delai_initial)
 
     # --- GET ----------------------------------------------------------------
 
