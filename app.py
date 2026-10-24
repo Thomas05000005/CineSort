@@ -556,7 +556,11 @@ def main_api() -> None:
         install_repeated_exception_dedup,
         resolve_log_level,
     )
-    from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
+    from cinesort.infra.log_scrubber import (
+        install_global_scrubber,
+        install_rotating_log,
+        set_rotating_log_level,
+    )
     from cinesort.infra.rest_server import RestApiServer
 
     # H-3 audit QA 20260428 : scrub avant de creer l'API (idempotent
@@ -564,8 +568,6 @@ def main_api() -> None:
     install_global_scrubber()
     # V3-04 polish v7.7.0 : injecter run_id + request_id dans tous les logs.
     install_log_context_filter()
-    # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min)
-    install_repeated_exception_dedup(max_per_minute=5)
 
     # V3-04 : niveau de log configurable. Valeur lue depuis env vars
     # CINESORT_LOG_LEVEL > CINESORT_DEBUG > defaut INFO. Le setting
@@ -581,6 +583,13 @@ def main_api() -> None:
 
     state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min).
+    # AUDIT 2026-09-16 : l'appel etait place avant `basicConfig` — sans dommage,
+    # mais par COINCIDENCE : `main` s'execute toujours d'abord et avait deja
+    # cree les handlers. Un filtre pose sur le root LOGGER seul ne voit aucun
+    # record propage depuis un logger enfant, donc la portee de ce garde ne doit
+    # pas dependre de l'ordre d'un AUTRE point d'entree. Pose apres les handlers.
+    install_repeated_exception_dedup(max_per_minute=5)
 
     api = CineSortApi()
     settings = api.settings.get_settings()
@@ -589,6 +598,11 @@ def main_api() -> None:
     # si une env var l'a deja override).
     effective_level = resolve_log_level(settings.get("log_level"))
     _logging_api.getLogger().setLevel(effective_level)
+    # AUDIT 2026-09-16 : le handler de FICHIER garde le niveau qu'il avait a
+    # l'install (`boot_level`, resolu sans settings.json) et filtre pour son
+    # propre compte. Sans cette ligne, choisir DEBUG ne fait rien apparaitre
+    # dans `cinesort.log`, le seul canal que la visionneuse de Diagnostics lit.
+    set_rotating_log_level(effective_level)
 
     # V6-01 Polish Total v7.7.0 : charger la locale depuis settings.json. Defaut
     # FR si manquant ou invalide. Le module i18n_messages valide en interne.
@@ -813,9 +827,14 @@ def main() -> None:
 
     from cinesort.infra.log_context import (
         install_log_context_filter,
+        install_repeated_exception_dedup,
         resolve_log_level,
     )
-    from cinesort.infra.log_scrubber import install_global_scrubber, install_rotating_log
+    from cinesort.infra.log_scrubber import (
+        install_global_scrubber,
+        install_rotating_log,
+        set_rotating_log_level,
+    )
 
     install_global_scrubber()
     install_log_context_filter()
@@ -830,6 +849,12 @@ def main() -> None:
 
     state_dir = default_state_dir()
     install_rotating_log(state_dir / "logs", level=boot_level)
+    # Fix audit 2026-05-25 (v1.5.3) Vague H : evite le spam de meme exception (>5/min).
+    # AUDIT 2026-09-16 : ce chemin — celui de l'EXE distribue, et le SEUL quand
+    # l'interface est la — ne l'appelait PAS DU TOUT, alors que la docstring de
+    # la fonction prescrit « app.py:main / app.py:main_api ». Le mode bureau
+    # n'avait donc aucun anti-spam. Pose ici, apres les handlers.
+    install_repeated_exception_dedup(max_per_minute=5)
 
     _check_dpapi_availability()
 
@@ -922,6 +947,12 @@ def main() -> None:
         try:
             effective_level = resolve_log_level(settings_early.get("log_level"))
             _logging_main.getLogger().setLevel(effective_level)
+            # AUDIT 2026-09-16 : le handler de FICHIER filtre pour son propre
+            # compte et garde le niveau de l'install (avant lecture de
+            # settings.json). Cf `set_rotating_log_level`. Ce mode est celui du
+            # bundle, construit SANS console : `cinesort.log` y est le seul
+            # canal, donc le seul endroit ou le reglage puisse se voir.
+            set_rotating_log_level(effective_level)
         except (TypeError, ValueError, AttributeError) as _exc:
             _log.warning("V3-04: application log_level depuis settings echouee: %s", _exc)
 
