@@ -204,7 +204,10 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/infra/rest_server.py", "_handle_post"): 135,  # -3 le 2026-08-31, gain verrouille
     # 150 -> 170 : le pre-check d'espace disque regarde desormais le SECOND
     # volume (les bacs vivent sous le state_dir, pas sous la bibliotheque).
-    ("cinesort/ui/api/apply_support.py", "_validate_apply"): 170,
+    # 170 -> 163 : les deux sources du pre-check d'espace du SECOND volume sont
+    # extraites dans `_row_ids_partant_en_bac`. Le plafond BAISSE dans le meme
+    # commit — un gain non verrouille se reperd.
+    ("cinesort/ui/api/apply_support.py", "_validate_apply"): 163,
     ("cinesort/ui/api/perceptual_support.py", "get_perceptual_compare_audio"): 149,
     ("cinesort/infra/probe/_normalize_merge.py", "_merge_probes"): 148,
     ("cinesort/app/job_runner.py", "start_job"): 147,
