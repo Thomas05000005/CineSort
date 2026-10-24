@@ -626,6 +626,13 @@ class ProbeService:
             raw_ffprobe=raw_ffprobe,
             backend=backend,
             messages=messages,
+            # La variante STRICTE : « outil manquant » ne doit designer que le
+            # cas ou AUCUN binaire n'etait lancable. Sans elle, la qualite se
+            # deduisait du mot « manquant » dans les messages, et un seul des
+            # deux outils absent suffisait a masquer l'echec de l'autre.
+            tool_unavailable=self._is_tool_definitely_unavailable(
+                backend=backend, mediainfo_tool=mediainfo_tool, ffprobe_tool=ffprobe_tool
+            ),
         )
         normalized_dict = normalized_obj.to_dict()
 

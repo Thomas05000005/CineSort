@@ -97,6 +97,11 @@ class TestNormalizeSplitImports(unittest.TestCase):
             "raw_ffprobe",
             "backend",
             "messages",
+            # Ajoute le 2026-09-20, OPTIONNEL et keyword-only comme les autres :
+            # porte la reponse de `_is_tool_definitely_unavailable` pour que
+            # « outil manquant » ne se devine plus dans le texte des messages.
+            # Omis, la qualite se determine exactement comme avant.
+            "tool_unavailable",
         }
         self.assertEqual(set(params.keys()), expected)
         for name, p in params.items():

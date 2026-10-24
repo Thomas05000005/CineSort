@@ -99,6 +99,23 @@ class _RunnerSpy:
         return 1, "", "commande inattendue"
 
 
+class _RunnerMediainfoKO:
+    """MediaInfo repond a `--Version` (donc `available`) mais echoue sur le FICHIER.
+
+    C'est la configuration qui separe « aucun outil lancable » de « la sonde a
+    echoue » : le binaire est bien la, c'est le fichier qui ne se lit pas.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd, _timeout_s):
+        self.calls.append([str(x) for x in cmd])
+        if "--Version" in " ".join(str(x) for x in cmd):
+            return 0, "MediaInfoLib - v24.01", ""
+        return 1, "", "File is not readable"
+
+
 class ProbeAutoTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="probe_auto_")
@@ -132,6 +149,42 @@ class ProbeAutoTests(unittest.TestCase):
         self.assertEqual(out.get("raw_json", {}).get("mediainfo"), None)
         self.assertEqual(out.get("raw_json", {}).get("ffprobe"), None)
         self.assertEqual(spy.calls, [])
+
+    def test_un_outil_absent_ne_masque_pas_l_echec_de_l_autre(self) -> None:
+        """Mode auto, ffprobe ABSENT, MediaInfo PRESENT dont la sonde echoue.
+
+        Les deux causes coexistent. Tant que la qualite se deduisait du mot
+        « manquant » dans les messages, « ffprobe manquant (mode auto). »
+        l'emportait : la probe etait classee PARTIAL alors qu'aucune
+        metadonnee n'avait pu etre lue. PARTIAL bonifie le score (+4 au lieu
+        de -18) et surtout fait echapper le film au cap Silver de
+        `quality_score`, dont le role est justement d'empecher qu'un tier
+        eleve soit certifie sur un fichier jamais lu.
+        """
+        runner = _RunnerMediainfoKO()
+        service = ProbeService(
+            self.store,
+            runner=runner,
+            which_fn=lambda name: None if str(name) == "ffprobe" else str(name),
+        )
+        out = service.probe_file(
+            media_path=self.media,
+            settings={"probe_backend": "auto", "mediainfo_path": "", "ffprobe_path": ""},
+        )
+
+        normalized = out.get("normalized", {})
+        reasons = normalized.get("probe_quality_reasons", [])
+        # Le harnais doit avoir exerce la sonde de FICHIER : sans cet appel, le
+        # scenario retombe sur « aucun outil lancable » et ne prouve rien.
+        self.assertTrue(
+            any("--Output=JSON" in " ".join(c) for c in runner.calls),
+            f"MediaInfo n'a jamais ete lance sur le fichier : {runner.calls}",
+        )
+        self.assertEqual(normalized.get("probe_quality"), "FAILED", reasons)
+        self.assertFalse(
+            any("outil manquant" in str(r).lower() for r in reasons),
+            f"la cause designe l'outil absent alors que MediaInfo a bien tourne : {reasons}",
+        )
 
     def test_probe_auto_parses_and_traces_sources(self) -> None:
         spy = _RunnerSpy()
