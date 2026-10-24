@@ -346,5 +346,81 @@ class PruneEmptyDirsJunctionTests(_JunctionSandbox):
         self.assertFalse(src.exists(), "toute l'arborescence vide doit partir, racine comprise")
 
 
+class SourceSurvivanteEtSousDossierPurgeTests(_JunctionSandbox):
+    """G5 — le COMPLEMENT REEL de G4 : ne pas annoncer une source qui survit.
+
+    G4 verrouille la PREVIEW (`dry_run`) : elle refuse de promettre la
+    suppression d'une source qui contient un point d'analyse. L'apply REEL, lui,
+    comptait sur le retour de `prune_empty_dirs`, qui vaut True des qu'UN dossier
+    a ete supprime — un seul sous-dossier vide suffit, la source restant en
+    place. La preview etait donc plus honnete que l'apply.
+
+    Le test de G2 ci-dessus asserte deja `source_dirs_deleted_count == 0` avec
+    une jonction dans la source, mais sa source ne porte AUCUN sous-dossier a
+    vider : `prune_empty_dirs` y rend False, et l'ancienne condition ne se
+    declenchait pas. C'est l'ajout d'un `extras/` reellement vide par la fusion
+    qui rend le cas discriminant — un dossier de film ordinaire.
+    """
+
+    def test_un_sous_dossier_purge_ne_vaut_pas_suppression_de_la_source(self) -> None:
+        self._external_tree()
+        src = self.root / "Film.2019"
+        _create_file(src / "Film.2019.mkv")
+        # Ce sous-dossier sera VIDE apres la fusion, donc supprime par la purge :
+        # c'est lui qui faisait rendre True a `prune_empty_dirs`.
+        _create_file(src / "extras" / "bonus.mkv")
+        lien = src / "disque_partage"
+        _make_dir_link(lien, self.outside)
+        dst = self.root / "Film (2019)"
+
+        res = self._merge(src, dst, dry_run=False)
+
+        # ANCRAGE — sans ces deux assertions le test serait VACANT : il passerait
+        # aussi sans le correctif, faute d'avoir declenche la purge.
+        self.assertFalse(
+            (src / "extras").exists(),
+            "la purge doit avoir supprime le sous-dossier vide, sinon le cas n'est pas discriminant",
+        )
+        self.assertTrue(src.exists(), "la source survit : elle contient encore le point d'analyse")
+
+        self.assertEqual(
+            int(res.source_dirs_deleted_count),
+            0,
+            "un sous-dossier purge n'est pas la source : annoncer sa suppression est faux",
+        )
+        # La fusion elle-meme n'est pas gelee, et rien d'externe n'est entre.
+        self.assertTrue((dst / "Film.2019.mkv").exists())
+        self.assertTrue((dst / "extras" / "bonus.mkv").exists())
+        self.assertEqual(int(res.moves), 2)
+        self.assertEqual(int(res.errors), 0)
+        self.assertTrue(is_reparse_point(lien), "le point de montage doit survivre")
+        self._assert_external_tree_intact()
+        self._assert_nothing_external_entered(dst)
+
+    def test_le_helper_ne_compte_pas_une_source_encore_presente(self) -> None:
+        """La DECISION, isolee du site d'appel (le mutant qui supprime l'appel meurt ci-dessus)."""
+        src = self.root / "Film.2019"
+        (src / "extras").mkdir(parents=True)
+        (src / "reste.txt").write_bytes(b"RESTE")
+        res = core.ApplyResult()
+
+        apply_core._purger_la_source_videee(src, res)
+
+        self.assertFalse((src / "extras").exists(), "le sous-dossier vide doit bien avoir ete purge")
+        self.assertTrue(src.exists())
+        self.assertEqual(int(res.source_dirs_deleted_count), 0)
+
+    def test_une_source_REELLEMENT_disparue_reste_comptee(self) -> None:
+        """Contre-test : « honnete » ne doit pas devenir « ne compte plus jamais »."""
+        src = self.root / "Film.2019"
+        (src / "extras").mkdir(parents=True)
+        res = core.ApplyResult()
+
+        apply_core._purger_la_source_videee(src, res)
+
+        self.assertFalse(src.exists(), "toute l'arborescence etait vide : elle doit partir")
+        self.assertEqual(int(res.source_dirs_deleted_count), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

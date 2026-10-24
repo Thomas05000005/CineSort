@@ -214,7 +214,7 @@ PLAFONDS: dict[tuple[str, str], int] = {
     ("cinesort/app/quarantine_ttl.py", "list_review_bucket_files"): 145,
     ("cinesort/ui/api/perceptual_support.py", "compare_perceptual"): 145,
     ("cinesort/infra/db/nas_validation.py", "run_nas_benchmark"): 143,
-    ("cinesort/app/apply_core.py", "merge_dir_safe"): 141,
+    ("cinesort/app/apply_core.py", "merge_dir_safe"): 140,
     ("cinesort/domain/perceptual/audio_fingerprint.py", "compute_audio_fingerprint"): 136,
     ("cinesort/ui/api/apply_support.py", "_cleanup_apply"): 136,
     ("cinesort/ui/api/perceptual_support.py", "_video_task"): 136,

@@ -1105,6 +1105,39 @@ def move_file_with_collision_policy(
     return "moved"
 
 
+def _purger_la_source_videee(src_dir: Path, res: "ApplyResult") -> None:
+    """Purge l'arborescence source videe, puis ne compte que ce qui a DISPARU.
+
+    `prune_empty_dirs` rend True des qu'UN dossier a ete supprime — y compris un
+    seul sous-dossier vide, `src_dir` restant en place. Compter sur ce retour
+    faisait annoncer « Dossiers sources supprimes : 1 »
+    (`apply_support.py`, resume d'apply) pour un dossier de film toujours sur
+    disque. Le compteur s'appelle `source_dirs_deleted_count` et son libelle
+    parle de la SOURCE : c'est sa disparition qui doit le faire monter, pas
+    l'activite de la purge.
+
+    Le cas est atteignable des que `src_dir` survit a la fusion en gardant au
+    moins une entree — un point d'analyse que la descente refuse de traverser
+    (issue #891), un sous-dossier illisible, un `rmdir` refuse par un verrou
+    Windows — ET qu'un sous-dossier, lui, a bien ete vide puis supprime. Les
+    deux conditions se rencontrent sur un dossier de film ordinaire portant un
+    `extras/` et une jonction.
+
+    C'est deja le critere de la branche `dry_run` de `merge_dir_safe`, qui
+    refuse d'annoncer la suppression quand la descente a bute sur un point
+    d'analyse : la PREVIEW etait donc plus honnete que l'apply REEL.
+
+    Reserve assumee : `Path.exists()` rend aussi False quand le chemin n'a pas
+    pu etre LU (partage tombe en fin d'apply). Le sens de l'erreur reste
+    strictement meilleur qu'avant — on ne compte plus une suppression sur la
+    seule activite de la purge — et `prune_empty_dirs` juste au-dessus se
+    prononce deja avec le meme appel, donc la coherence locale est preservee.
+    """
+    prune_empty_dirs(src_dir)
+    if not src_dir.exists():
+        res.source_dirs_deleted_count += 1
+
+
 def merge_dir_safe(
     cfg: "Config",
     src_dir: Path,
@@ -1244,8 +1277,7 @@ def merge_dir_safe(
         if leftover_dst is not None:
             res.leftovers_moved_count += 1
 
-    if prune_empty_dirs(src_dir):
-        res.source_dirs_deleted_count += 1
+    _purger_la_source_videee(src_dir, res)
 
 
 def _revert_moves(
