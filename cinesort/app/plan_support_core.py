@@ -1277,12 +1277,27 @@ def _filter_dossiers_phase(ctx: _PlanLibraryContext) -> None:
                 ctx.stats.analyse_ignores_extensions[ext] = int(ctx.stats.analyse_ignores_extensions.get(ext, 0)) + int(
                     count
                 )
-            ctx.persist_folder_cache(
-                folder=folder,
-                folder_sig=folder_sig,
-                rows_before=rows_before,
-                stats_before=stats_before,
-            )
+            # #696, SECOND VOLET. `folder_signature` refuse deja d'ecrire le cache
+            # d'un dossier dont le scandir a echoue ; mais elle et `iter_videos`
+            # font DEUX scandir distincts, et le premier peut reussir quand le
+            # second echoue (blip NAS/SMB, verrou antivirus, WinError 5/32).
+            # `videos == []` ne prouve alors pas que le dossier est vide, et figer
+            # cet etat rend l'oubli PERMANENT : la signature, elle, n'a pas change
+            # — le prochain scan ferait donc un HIT sur une entree a zero ligne.
+            # `delta_scandir` est deja calcule ci-dessus et dit exactement ca.
+            if delta_scandir > 0:
+                ctx.log(
+                    "WARN",
+                    f"Cache incremental NON ecrit pour {folder.name} : "
+                    f"{delta_scandir} entree(s) illisible(s) — « aucune video » n'est pas prouve.",
+                )
+            else:
+                ctx.persist_folder_cache(
+                    folder=folder,
+                    folder_sig=folder_sig,
+                    rows_before=rows_before,
+                    stats_before=stats_before,
+                )
             continue
 
         should_break = _classify_and_plan_folder(ctx, folder, videos)
