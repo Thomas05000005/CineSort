@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from .constants import JUDDER_UNKNOWN, SECTION8_UNKNOWN
+
 
 @dataclass
 class FrameMetrics:
@@ -118,15 +120,30 @@ class VideoPerceptual:
     fake_4k_combined_confidence: float = 0.0
 
     # §8 v7.5.0 — Interlacing / Crop / Judder / IMAX
+    #
+    # LES TROIS DEFAUTS DISENT « NON MESURE », PAS « PROPRE ». Ils valaient
+    # `progressive` / `full_frame` / `judder_none` : trois verdicts FAVORABLES,
+    # poses sur un objet que personne n'a encore rempli. Or les trois sondes
+    # sont optionnelles (`perceptual_judder_detection_enabled` est meme a False
+    # par defaut) et leur resultat n'est recopie ici que `if ok` — donc ces
+    # defauts sont ce que porte le rapport de la MAJORITE des films, et ils
+    # affirmaient un entrelacement absent, un cadrage plein et une absence de
+    # judder que rien n'avait observe.
+    #
+    # Tous les autres verdicts de ce dataclass disaient deja `unknown`
+    # (`upscale_verdict`, `fake_4k_verdict_fft`, `fake_4k_verdict_combined`,
+    # `GrainAnalysis.verdict`). Les trois de la section 8 etaient l'exception.
+    # Les valeurs viennent de `constants` pour ne pas pouvoir diverger du
+    # verdict rendu a l'execution par `metadata_analysis`.
     interlaced_detected: bool = False
-    interlace_type: str = "progressive"
+    interlace_type: str = SECTION8_UNKNOWN
     crop_has_bars: bool = False
-    crop_verdict: str = "full_frame"
+    crop_verdict: str = SECTION8_UNKNOWN
     detected_aspect_ratio: float = 0.0
     detected_crop_w: int = 0
     detected_crop_h: int = 0
     judder_ratio: float = 0.0
-    judder_verdict: str = "judder_none"
+    judder_verdict: str = JUDDER_UNKNOWN
     is_imax: bool = False
     imax_type: str = "none"
     imax_confidence: float = 0.0

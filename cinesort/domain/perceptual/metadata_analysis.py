@@ -33,10 +33,12 @@ from .constants import (
     IMAX_EXPANSION_AR_DELTA,
     IMAX_EXPANSION_SEGMENTS_COUNT,
     IMAX_NATIVE_RESOLUTION_MIN_HEIGHT,
+    JUDDER_UNKNOWN,
     MPDECIMATE_JUDDER_HEAVY,
     MPDECIMATE_JUDDER_LIGHT,
     MPDECIMATE_JUDDER_PULLDOWN,
     MPDECIMATE_SEGMENT_DURATION_S,
+    SECTION8_UNKNOWN,
 )
 from .ffmpeg_runner import _runner_platform_kwargs
 from .parallelism import resolve_max_workers, run_parallel_tasks
@@ -91,7 +93,12 @@ class JudderInfo:
     drop_count: int
     keep_count: int
     drop_ratio: float
-    verdict: str  # judder_none|judder_light|pulldown_3_2_suspect|judder_heavy
+    # judder_unknown|judder_none|judder_light|pulldown_3_2_suspect|judder_heavy
+    #
+    # `judder_unknown` en tete parce que c'est le seul qui n'est PAS une mesure :
+    # les quatre autres supposent que mpdecimate a rendu des frames. Cf.
+    # `detect_judder`, qui le rend sur chacun de ses quatre modes d'echec.
+    verdict: str
 
 
 @dataclass(frozen=True)
@@ -143,13 +150,13 @@ def _run_ffmpeg_filter(cmd: List[str], timeout_s: float) -> Optional[str]:
 def _parse_idet_stderr(stderr: str) -> InterlaceInfo:
     m = _RE_IDET_MULTI.search(stderr or "")
     if not m:
-        return InterlaceInfo(False, "unknown", 0, 0, 0)
+        return InterlaceInfo(False, SECTION8_UNKNOWN, 0, 0, 0)
     tff = int(m.group(1))
     bff = int(m.group(2))
     prog = int(m.group(3))
     total = tff + bff + prog
     if total <= 0:
-        return InterlaceInfo(False, "unknown", tff, bff, prog)
+        return InterlaceInfo(False, SECTION8_UNKNOWN, tff, bff, prog)
     interlaced_ratio = (tff + bff) / total
     detected = interlaced_ratio > IDET_INTERLACE_RATIO_THRESHOLD
     if not detected:
@@ -172,7 +179,7 @@ def detect_interlacing(
 ) -> InterlaceInfo:
     """Detecte l'entrelacement via `ffmpeg -vf idet` sur 30s."""
     if not ffmpeg_path or not media_path or duration_s <= 0:
-        return InterlaceInfo(False, "unknown", 0, 0, 0)
+        return InterlaceInfo(False, SECTION8_UNKNOWN, 0, 0, 0)
 
     start = min(30.0, max(0.0, duration_s * 0.05))
     cmd = [
@@ -196,7 +203,7 @@ def detect_interlacing(
     ]
     stderr = _run_ffmpeg_filter(cmd, timeout_s)
     if stderr is None:
-        return InterlaceInfo(False, "unknown", 0, 0, 0)
+        return InterlaceInfo(False, SECTION8_UNKNOWN, 0, 0, 0)
     return _parse_idet_stderr(stderr)
 
 
@@ -330,7 +337,7 @@ def classify_crop(segments: List[CropSegment], orig_w: int, orig_h: int) -> Crop
     `detect_crop_multi_segments`, qui reordonne ses resultats par cle de tache.
     """
     if not segments or orig_w <= 0 or orig_h <= 0:
-        return CropInfo(False, "unknown", 0, 0, 0.0, [])
+        return CropInfo(False, SECTION8_UNKNOWN, 0, 0, 0.0, [])
 
     # Reference = segment MEDIAN, pas segments[0] (issue #828).
     # detect_crop_multi_segments place son premier segment a t=0 exactement
@@ -398,9 +405,17 @@ def detect_judder(
     segment_duration_s: float = MPDECIMATE_SEGMENT_DURATION_S,
     timeout_s: float = 30.0,
 ) -> JudderInfo:
-    """Detecte judder / pulldown via mpdecimate sur 30s au milieu."""
+    """Detecte judder / pulldown via mpdecimate sur 30s au milieu.
+
+    Les QUATRE sorties sans mesure rendent `JUDDER_UNKNOWN`, jamais
+    `judder_none` : outillage ou chemin manquant, duree inconnue, ffmpeg en
+    echec (timeout, OSError, returncode inattendu), et zero frame classee.
+    `judder_none` est un verdict FAVORABLE — il affirme que mpdecimate a
+    tourne et n'a rien trouve. Le rendre sur un echec, c'est transformer
+    l'ignorance en affirmation, sur le champ que l'ecran est cense lire.
+    """
     if not ffmpeg_path or not media_path or duration_s <= 0:
-        return JudderInfo(0, 0, 0.0, "judder_none")
+        return JudderInfo(0, 0, 0.0, JUDDER_UNKNOWN)
 
     start = max(0.0, min(60.0, duration_s * 0.3))
     cmd = [
@@ -424,12 +439,12 @@ def detect_judder(
     ]
     stderr = _run_ffmpeg_filter(cmd, timeout_s)
     if stderr is None:
-        return JudderInfo(0, 0, 0.0, "judder_none")
+        return JudderInfo(0, 0, 0.0, JUDDER_UNKNOWN)
 
     drop, keep = _parse_mpdecimate_stderr(stderr)
     total = drop + keep
     if total <= 0:
-        return JudderInfo(0, 0, 0.0, "judder_none")
+        return JudderInfo(0, 0, 0.0, JUDDER_UNKNOWN)
     ratio = drop / total
     verdict = _classify_judder(ratio)
     return JudderInfo(drop, keep, ratio, verdict)
