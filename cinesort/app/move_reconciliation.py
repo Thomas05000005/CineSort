@@ -15,10 +15,31 @@ Pour chaque entree, on inspecte l'etat reel du filesystem :
 | present | absent | Move pas commence ou rollback FS | cleanup, pas de notif |
 | present | present | CONFLIT : duplication, intervention humaine | cleanup + warning HIGH |
 | absent | absent | Fichier perdu (FS corruption, AV scan) | cleanup + warning CRITICAL |
+| illisible | * | `unreachable` : volume absent | AUCUN cleanup, pas de notif |
+| * | illisible | `unreachable` : volume absent | AUCUN cleanup, pas de notif |
 
-L'entree est cleanup dans tous les cas pour eviter qu'elle traine
-indefiniment. Les warnings sont remontes via la liste retournee, que
-le caller peut afficher dans l'UI / logs.
+L'entree est cleanup dans tous les cas SAUF `unreachable`. Les warnings sont
+remontes via la liste retournee, que le caller peut afficher dans l'UI / logs.
+
+`unreachable` est la seule exception, et elle est necessaire (audit 2026-08-21,
+finding `923330d6`). `Path.exists()` rend False sur un volume demonte ou un
+partage SMB injoignable : sans distinction, un crash suivi d'un demarrage NAS
+eteint faisait lire src ET dst comme absents, donc « FICHIER PERDU : verifiez
+vos backups et l'antivirus » — sur des fichiers intacts, de l'autre cote d'un
+cable. Et comme l'entree etait supprimee comme les autres, la vraie
+reconciliation, celle du jour ou le volume revient, ne pouvait PLUS avoir lieu.
+
+Le module avait pourtant invente `unverified` pour ce refus exact de
+transformer une ignorance en affirmation — mais au niveau de l'EMPREINTE
+seulement, jamais de l'EXISTENCE. Le discriminant vient de
+`move_journal.presence_sur_disque` (trois etats), la meme fonction qui protege
+deja la liberation d'un pending ; `apply_rollback._verdict_dst_manquant` porte
+la meme discipline depuis le 2026-08-29.
+
+Conserver l'entree ne coute rien : `apply_pending_moves` n'est ni un verrou, ni
+une condition d'apply — c'est un journal write-ahead, lu au seul demarrage. Une
+entree qui survit est reexaminee au demarrage suivant, et tranchee des que le
+volume repond.
 
 Verification d'identite (issue #512) : `exists()` seul ne prouve RIEN. Un
 homonyme a dst (ancien apply skippe, re-scan, fichier remis a la main) suffisait
@@ -54,8 +75,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cinesort.app.apply_core import sha1_quick
+from cinesort.app.move_journal import presence_sur_disque
 
 _logger = logging.getLogger(__name__)
+
+#: Verdicts qui laissent l'entree pending EN PLACE. Un seul aujourd'hui :
+#: `unreachable` ne conclut rien, donc supprimer la ligne detruirait la seule
+#: trace permettant de trancher quand le volume repondra.
+_VERDICTS_SANS_CLEANUP = frozenset({"unreachable"})
 
 
 def _expected_fingerprint(entry: Dict[str, Any]) -> tuple[str, Optional[int]]:
@@ -155,20 +182,30 @@ def _classify_pending(entry: Dict[str, Any]) -> str:
     """Determine le verdict de reconciliation pour une entree pending.
 
     Retourne : 'completed' | 'rolled_back' | 'duplicated' | 'lost'
-               | 'mismatched' | 'unverified'
+               | 'mismatched' | 'unverified' | 'unreachable'
+
+    L'EXISTENCE SE LIT EN TROIS ETATS (cf. docstring du module). Le
+    `try/except OSError` autour de `Path.exists()` qui figurait ici etait par
+    ailleurs MORT : `Path.exists()` avale lui-meme une partie des OSError et
+    rend False — dont `ERROR_NOT_READY` (winerror 21), le mode d'echec d'un
+    partage SMB tombe, c'est-a-dire l'environnement meme de ce produit. La
+    garde avait l'air posee et ne pouvait pas se declencher.
+
+    Des qu'un seul des deux chemins n'a pas repondu, AUCUNE des quatre
+    conclusions ci-dessous n'est soutenable : src illisible ne permet pas de
+    distinguer `rolled_back` de `completed`, et dst illisible ne permet pas de
+    distinguer `duplicated` de `lost`. On rend donc `unreachable` sans
+    consulter l'empreinte — la lire couterait un `stat` de plus sur un volume
+    qui vient de ne pas repondre, pour un verdict qu'on ne prendra pas.
     """
     src = Path(str(entry.get("src_path") or ""))
     dst = Path(str(entry.get("dst_path") or ""))
-    src_exists = False
-    dst_exists = False
-    try:
-        src_exists = src.exists()
-    except OSError:
-        src_exists = False
-    try:
-        dst_exists = dst.exists()
-    except OSError:
-        dst_exists = False
+    src_present = presence_sur_disque(src)
+    dst_present = presence_sur_disque(dst)
+    if src_present is None or dst_present is None:
+        return "unreachable"
+    src_exists = bool(src_present)
+    dst_exists = bool(dst_present)
 
     if not src_exists and dst_exists:
         # Le DELETE pending a peut-etre juste rate — mais il faut le PROUVER :
@@ -179,6 +216,98 @@ def _classify_pending(entry: Dict[str, Any]) -> str:
     if src_exists and dst_exists:
         return "duplicated"  # CRITIQUE : fichier present aux 2 endroits
     return "lost"  # CRITIQUE : fichier nulle part
+
+
+def _enregistrer_verdict(
+    report: Dict[str, Any],
+    *,
+    verdict: str,
+    entry: Dict[str, Any],
+    op_type: Any,
+    src: Any,
+    dst: Any,
+) -> None:
+    """Porte le verdict d'une entree dans le rapport (compteur, liste, message).
+
+    EXTRAIT de `reconcile_pending_moves` : cette chaine de `elif` en etait le
+    gros du corps, et le cliquet `tests/test_function_size_budget.py` l'y
+    plafonnait a 128 lignes, marge zero. La reponse du depot a une fonction
+    trop longue est de l'EXTRAIRE, pas de monter le plafond.
+    """
+    if verdict == "completed":
+        report["completed"] += 1
+        _logger.info(
+            "reconcile: %s OK (DELETE rate, fichier present a dst): %s -> %s",
+            op_type,
+            src,
+            dst,
+        )
+        return
+    if verdict == "rolled_back":
+        report["rolled_back"] += 1
+        _logger.info(
+            "reconcile: %s rollback FS (fichier toujours a src): %s",
+            op_type,
+            src,
+        )
+        return
+    if verdict == "duplicated":
+        report["duplicated"].append(entry)
+        msg = (
+            f"CONFLIT reconciliation : fichier present a la fois a la source "
+            f"et a la destination apres crash ({op_type}). Source : {src}. "
+            f"Destination : {dst}. Choisissez la bonne version manuellement "
+            f"avant de relancer un apply."
+        )
+        report["messages"].append(msg)
+        _logger.warning("reconcile: %s", msg)
+        return
+    if verdict == "lost":
+        report["lost"].append(entry)
+        msg = (
+            f"FICHIER PERDU : ni source ni destination existent apres crash "
+            f"({op_type}). Source attendue : {src}. Destination attendue : "
+            f"{dst}. Verifiez vos backups et l'antivirus."
+        )
+        report["messages"].append(msg)
+        _logger.error("reconcile: %s", msg)
+        return
+    if verdict == "mismatched":
+        report["mismatched"].append(entry)
+        msg = (
+            f"IDENTITE INCOHERENTE : apres crash, la destination existe mais ne "
+            f"contient PAS le fichier qui avait ete deplace ({op_type}) — son "
+            f"empreinte (taille + sha1) ne correspond pas a celle relevee avant "
+            f"le deplacement. Source : {src}. Destination : {dst}. Le fichier "
+            f"d'origine est probablement perdu et la destination appartient a "
+            f"autre chose : verifiez manuellement AVANT tout undo ou nouvel apply."
+        )
+        report["messages"].append(msg)
+        _logger.error("reconcile: %s", msg)
+        return
+    if verdict == "unverified":
+        report["unverified"].append(entry)
+        msg = (
+            f"IDENTITE NON VERIFIEE : la destination existe apres crash mais n'a "
+            f"pas pu etre lue pour confirmer qu'il s'agit bien du fichier deplace "
+            f"({op_type}). Source : {src}. Destination : {dst}. Verifiez que le "
+            f"support est accessible, puis controlez ce fichier a la main."
+        )
+        report["messages"].append(msg)
+        _logger.warning("reconcile: %s", msg)
+        return
+    if verdict == "unreachable":
+        report["unreachable"].append(entry)
+        msg = (
+            f"SUPPORT INJOIGNABLE : la source ou la destination n'a pas pu etre lue "
+            f"({op_type}), le verdict est donc REPORTE et rien n'est conclu. "
+            f"Source : {src}. Destination : {dst}. Rebranchez le disque ou le "
+            f"partage reseau, puis relancez CineSort : la reconciliation reprendra "
+            f"cette entree. Aucune action de votre part n'est requise d'ici la."
+        )
+        report["messages"].append(msg)
+        # WARNING et non ERROR : rien n'est perdu, rien n'est meme constate.
+        _logger.warning("reconcile: %s", msg)
 
 
 def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
@@ -193,6 +322,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         "lost": List[dict],        # CRITIQUE : fichier perdu
         "mismatched": List[dict],  # CRITIQUE : dst occupe par un AUTRE fichier
         "unverified": List[dict],  # identite de dst non verifiable (lecture KO)
+        "unreachable": List[dict],  # volume injoignable : verdict REPORTE, entree gardee
         "messages": List[str],     # messages a logger / afficher a l'UI
     }
 
@@ -206,6 +336,7 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         "lost": [],
         "mismatched": [],
         "unverified": [],
+        "unreachable": [],
         "messages": [],
     }
     if store is None:
@@ -232,65 +363,14 @@ def reconcile_pending_moves(store: Any) -> Dict[str, Any]:
         dst = entry.get("dst_path", "?")
         op_type = entry.get("op_type", "?")
 
-        if verdict == "completed":
-            report["completed"] += 1
-            _logger.info(
-                "reconcile: %s OK (DELETE rate, fichier present a dst): %s -> %s",
-                op_type,
-                src,
-                dst,
-            )
-        elif verdict == "rolled_back":
-            report["rolled_back"] += 1
-            _logger.info(
-                "reconcile: %s rollback FS (fichier toujours a src): %s",
-                op_type,
-                src,
-            )
-        elif verdict == "duplicated":
-            report["duplicated"].append(entry)
-            msg = (
-                f"CONFLIT reconciliation : fichier present a la fois a la source "
-                f"et a la destination apres crash ({op_type}). Source : {src}. "
-                f"Destination : {dst}. Choisissez la bonne version manuellement "
-                f"avant de relancer un apply."
-            )
-            report["messages"].append(msg)
-            _logger.warning("reconcile: %s", msg)
-        elif verdict == "lost":
-            report["lost"].append(entry)
-            msg = (
-                f"FICHIER PERDU : ni source ni destination existent apres crash "
-                f"({op_type}). Source attendue : {src}. Destination attendue : "
-                f"{dst}. Verifiez vos backups et l'antivirus."
-            )
-            report["messages"].append(msg)
-            _logger.error("reconcile: %s", msg)
-        elif verdict == "mismatched":
-            report["mismatched"].append(entry)
-            msg = (
-                f"IDENTITE INCOHERENTE : apres crash, la destination existe mais ne "
-                f"contient PAS le fichier qui avait ete deplace ({op_type}) — son "
-                f"empreinte (taille + sha1) ne correspond pas a celle relevee avant "
-                f"le deplacement. Source : {src}. Destination : {dst}. Le fichier "
-                f"d'origine est probablement perdu et la destination appartient a "
-                f"autre chose : verifiez manuellement AVANT tout undo ou nouvel apply."
-            )
-            report["messages"].append(msg)
-            _logger.error("reconcile: %s", msg)
-        elif verdict == "unverified":
-            report["unverified"].append(entry)
-            msg = (
-                f"IDENTITE NON VERIFIEE : la destination existe apres crash mais n'a "
-                f"pas pu etre lue pour confirmer qu'il s'agit bien du fichier deplace "
-                f"({op_type}). Source : {src}. Destination : {dst}. Verifiez que le "
-                f"support est accessible, puis controlez ce fichier a la main."
-            )
-            report["messages"].append(msg)
-            _logger.warning("reconcile: %s", msg)
+        _enregistrer_verdict(report, verdict=verdict, entry=entry, op_type=op_type, src=src, dst=dst)
 
-        # Cleanup l'entree dans tous les cas — elle ne sert plus a rien
-        # une fois examinee (ou serait re-examinee a chaque boot).
+        # Cleanup l'entree une fois examinee, SAUF si le verdict ne conclut
+        # rien : elle serait sinon re-examinee a chaque boot. `unreachable` est
+        # la seule exception, et c'est precisement parce qu'il faut pouvoir la
+        # re-examiner — cf. `_VERDICTS_SANS_CLEANUP` et la docstring du module.
+        if verdict in _VERDICTS_SANS_CLEANUP:
+            continue
         try:
             store.apply.delete_pending_move(int(entry.get("id", 0)))
         except (sqlite3.Error, OSError, AttributeError):
@@ -317,7 +397,10 @@ def reconcile_at_boot(store: Any, *, notify: Optional[Any] = None) -> Dict[str, 
     Si `notify` est un NotifyService (avec methode .notify(event, title, body)),
     on push une notification si des conflits, des fichiers perdus ou des
     destinations d'identite incoherente sont detectes. `unverified` n'y figure
-    pas : c'est un doute a lever, pas une perte constatee.
+    pas : c'est un doute a lever, pas une perte constatee. `unreachable` non
+    plus, et a plus forte raison : rien n'y est meme constate, l'entree est
+    conservee, et le demarrage suivant tranchera tout seul. Notifier une
+    « erreur » a chaque demarrage NAS eteint serait du bruit pur.
     """
     report = reconcile_pending_moves(store)
     if notify is not None and (report["duplicated"] or report["lost"] or report["mismatched"]):

@@ -8,14 +8,17 @@ Couvre :
 - Helper atomic_move : utilise journal si record_op porte journal_store,
   sinon fallback shutil.move direct.
 - reconcile_pending_moves : verdicts (completed, rolled_back, duplicated, lost,
-  mismatched, unverified) + cleanup de l'entree dans tous les cas.
+  mismatched, unverified, unreachable) + cleanup de l'entree, SAUF unreachable.
 - Issue #512 : `completed` exige la verification d'identite du fichier a dst
   (src_sha1 + src_size releves avant le move), pas un simple `exists()`.
+- Finding 923330d6 (audit 2026-08-21) : un volume injoignable au boot ne doit
+  plus se lire « FICHIER PERDU ». Cf. `VolumeInjoignableTests`.
 - Mixin _apply_mixin : insert/delete/list/count pending moves.
 """
 
 from __future__ import annotations
 
+import errno
 import shutil
 import tempfile
 import unittest
@@ -355,6 +358,125 @@ class ReconcilePendingMovesTests(unittest.TestCase):
         """store=None → no-op, rapport vide, pas d'erreur."""
         report = reconcile_pending_moves(None)
         self.assertEqual(report["examined"], 0)
+
+
+class _StatIndisponible:
+    """Fait echouer `Path.stat()` sur des chemins donnes, comme un volume absent.
+
+    L'ECHEC EST INJECTE A L'APPEL SYSTEME, pas au predicat de production : un
+    `patch` de `presence_sur_disque` sauterait par-dessus le seul endroit ou le
+    defaut vivait, et le test passerait aussi bien avec l'ancien code. Ici la
+    panne est celle que la production subit — `os.stat` qui ne repond pas.
+
+    `errno.EIO` plutot que `FileNotFoundError` : ce dernier signifie REELLEMENT
+    « absent » et doit continuer a se lire comme tel. Sous Windows, le mode
+    d'echec reel d'un partage tombe est `ERROR_NOT_READY` (winerror 21), que
+    `Path.exists()` avale en rendant False — c'est exactement ce que ce test
+    interdit desormais de confondre avec une absence.
+    """
+
+    def __init__(self, *chemins: Path) -> None:
+        self._vises = {str(c) for c in chemins}
+        self._vrai_stat = Path.stat
+
+    def __call__(self, chemin: Path, *args, **kwargs):
+        if str(chemin) in self._vises:
+            raise OSError(errno.EIO, "support injoignable")
+        return self._vrai_stat(chemin, *args, **kwargs)
+
+
+class VolumeInjoignableTests(unittest.TestCase):
+    """Finding 923330d6 : un support illisible n'est pas un fichier perdu.
+
+    `Path.exists()` rend False sur un volume demonte ou un partage SMB tombe.
+    Si un crash a laisse des entrees pending et que le volume manque au boot
+    suivant, src et dst etaient tous deux vus absents : verdict `lost`, message
+    « FICHIER PERDU : Verifiez vos backups et l'antivirus », et l'entree etait
+    SUPPRIMEE comme les autres — donc la vraie reconciliation, celle du jour ou
+    le volume revient, ne pouvait plus jamais avoir lieu.
+    """
+
+    def setUp(self) -> None:
+        self.store, self._tmp = _make_store()
+        self.src = self._tmp / "src.mkv"
+        self.dst = self._tmp / "dst.mkv"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _entry(self) -> dict:
+        return {
+            "id": 1,
+            "src_path": str(self.src),
+            "dst_path": str(self.dst),
+            "op_type": "MOVE_FILE",
+        }
+
+    def test_source_illisible_rend_unreachable(self) -> None:
+        """src illisible : on ne peut pas distinguer rolled_back de completed."""
+        self.dst.write_bytes(b"dst")
+        with mock.patch.object(Path, "stat", _StatIndisponible(self.src)):
+            self.assertEqual(_classify_pending(self._entry()), "unreachable")
+
+    def test_destination_illisible_rend_unreachable(self) -> None:
+        """dst illisible : on ne peut pas distinguer duplicated de lost."""
+        self.src.write_bytes(b"src")
+        with mock.patch.object(Path, "stat", _StatIndisponible(self.dst)):
+            self.assertEqual(_classify_pending(self._entry()), "unreachable")
+
+    def test_les_deux_illisibles_ne_sont_PAS_un_fichier_perdu(self) -> None:
+        """Le scenario du finding : NAS eteint au boot, les deux cotes muets."""
+        with mock.patch.object(Path, "stat", _StatIndisponible(self.src, self.dst)):
+            self.assertEqual(_classify_pending(self._entry()), "unreachable")
+
+    def test_un_vrai_absent_reste_lost(self) -> None:
+        """CONTRE-TEST : le verdict `lost` ne doit surtout pas disparaitre.
+
+        Sans lui, « ne jamais conclure » passerait le test precedent en
+        neutralisant la detection reelle de perte.
+        """
+        self.assertEqual(_classify_pending(self._entry()), "lost")
+
+    def test_l_entree_pending_SURVIT_a_un_volume_injoignable(self) -> None:
+        """Le cœur du finding : la trace doit rester pour le boot suivant."""
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self.src),
+            dst_path=str(self.dst),
+        )
+        with mock.patch.object(Path, "stat", _StatIndisponible(self.src, self.dst)):
+            report = reconcile_pending_moves(self.store)
+        self.assertEqual(report["examined"], 1)
+        self.assertEqual(len(report["unreachable"]), 1)
+        self.assertEqual(report["lost"], [])
+        self.assertEqual(self.store.apply.count_pending_moves(), 1)
+        self.assertFalse(any("FICHIER PERDU" in m for m in report["messages"]))
+        self.assertTrue(any("SUPPORT INJOIGNABLE" in m for m in report["messages"]))
+
+    def test_un_verdict_conclusif_supprime_toujours_l_entree(self) -> None:
+        """CONTRE-TEST : la conservation ne doit valoir QUE pour unreachable."""
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self.src),
+            dst_path=str(self.dst),
+        )
+        report = reconcile_pending_moves(self.store)
+        self.assertEqual(len(report["lost"]), 1)
+        self.assertEqual(self.store.apply.count_pending_moves(), 0)
+
+    def test_un_volume_injoignable_ne_declenche_AUCUNE_notification(self) -> None:
+        """Rien n'est constate : notifier une erreur serait du bruit pur."""
+        notify = MagicMock()
+        notify.notify = MagicMock()
+        self.store.apply.insert_pending_move(
+            op_type="MOVE_FILE",
+            src_path=str(self.src),
+            dst_path=str(self.dst),
+        )
+        with mock.patch.object(Path, "stat", _StatIndisponible(self.src, self.dst)):
+            report = reconcile_at_boot(self.store, notify=notify)
+        self.assertEqual(len(report["unreachable"]), 1)
+        notify.notify.assert_not_called()
 
 
 class ReconcileAtBootTests(unittest.TestCase):
