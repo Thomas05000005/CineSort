@@ -45,17 +45,38 @@ quel parseur JSON, sans dépendance à l'app.
 
 ### `settings` — préférences sanitisées
 
-Les clés sensibles (API keys, tokens, passwords) sont remplacées par
-`"***REDACTED***"` si la valeur était présente, ou `""` si vide. Listes des
-clés masquées :
+Les réglages sensibles sont remplacés par `"***REDACTED***"` si la valeur était
+présente, ou `""` si elle était vide. Le champ reste donc visible — vous savez
+qu'une clé était configurée — mais sa valeur ne quitte jamais la machine.
 
-- `tmdb_api_key`, `jellyfin_api_key`, `plex_token`, `radarr_api_key`
-- `smtp_password`, `ntfy_topic_secret`, `rest_api_token`
-- `omdb_api_key`, `osdb_api_key`
+Le critère est le **nom du réglage**, et non une liste à tenir à jour. Est
+masqué tout réglage dont le nom se termine par `_api_key`, `_apikey`,
+`_api-key`, `_token`, `_password` ou `_secret`, ainsi que ces mêmes mots
+employés nus (`api_key`, `token`, `password`, `secret`...). C'est la règle
+qu'applique déjà le nettoyage des journaux (`cinesort/infra/log_scrubber.py`) :
+un suffixe est une propriété du nom, une liste est un inventaire à maintenir.
+
+Sont donc masqués, entre autres : `tmdb_api_key`, `omdb_api_key`,
+`jellyfin_api_key`, `radarr_api_key`, `plex_token`, `rest_api_token`,
+`rest_api_token_secret` (l'enveloppe chiffrée, exclue même chiffrée) et
+`email_smtp_password`.
+
+Un nom qui *ressemble* à un secret sans en être un reste en clair, et c'est
+voulu — sinon la ré-importation, objet même de l'export, serait cassée :
+`rest_api_key_path` est un chemin de fichier, `email_smtp_user` une adresse,
+`tmdb_key_protection` un indicateur d'état.
 
 Tous les autres champs (URLs, chemins, toggles, seuils, profils qualité) sont
 exportés tels quels. À la ré-import dans un autre outil, l'utilisateur devra
 re-saisir manuellement ses clés API.
+
+> **Corrigé le 2026-09-27.** Cette section décrivait une liste fermée de neuf
+> clés. Elle nommait `smtp_password` — un réglage qu'aucun code du dépôt ne lit
+> — et omettait `email_smtp_password`, le nom réel du mot de passe SMTP, qui
+> sortait donc en clair. Le code a été corrigé le 2026-08-31 (masquage par
+> suffixe, PR #1187) ; cette page ne l'avait pas suivi. Elle mentionnait aussi
+> `ntfy_topic_secret` et `osdb_api_key`, deux réglages qui n'existent pas dans
+> le produit.
 
 ### `runs` — historique des scans
 

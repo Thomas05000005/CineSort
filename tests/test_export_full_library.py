@@ -15,7 +15,9 @@ from unittest.mock import MagicMock
 import cinesort.ui.api._validators as _validators
 from cinesort.ui.api.export_support import (
     _SECRET_KEYS,
+    _SUFFIXES_DE_SECRET,
     EXPORT_FORMAT_VERSION,
+    _est_un_secret,
     _resolve_run_dir,
     _sanitize_settings,
     _UnsafeRunId,
@@ -167,6 +169,45 @@ class SanitizeSettingsTests(unittest.TestCase):
         self.assertEqual(out["remember_key"], True)
         self.assertEqual(out["email_smtp_user"], "moi@exemple.fr")
         self.assertEqual(out["jellyfin_url"], "http://localhost:8096")
+
+    def test_la_page_publique_decrit_le_critere_REEL_de_masquage(self) -> None:
+        """La promesse PUBLIEE doit dire ce que le code fait.
+
+        `docs/EXPORT_FORMAT.md` est le document qu'un utilisateur lit pour savoir
+        ce que son export emporte (RGPD Art. 20). Le 2026-08-31, la production
+        est passee d'une liste fermee a un predicat par SUFFIXE ; la page a garde
+        la liste — avec `smtp_password`, qu'aucun code du depot ne lit, et SANS
+        `email_smtp_password`, le nom reel. Le correctif n'avait ete pose que
+        d'un cote.
+
+        Le test voisin
+        (`test_AUCUN_reglage_du_produit_qui_ressemble_a_un_secret_ne_sort_en_clair`)
+        NOMME deja cette page comme portant la promesse, sans jamais la lire :
+        c'est ce chainon-la qui manquait.
+
+        Deux ancres seulement, et le choix est delibere : la boucle sur
+        `_SUFFIXES_DE_SECRET` lie la page au CODE (ajouter un suffixe en
+        production sans le documenter fait rougir), mais elle ne PROUVE pas a
+        elle seule que la page enonce le critere — `_api_key`, `_token`,
+        `_password` et `_secret` sont aussi des sous-chaines des exemples cites,
+        donc quatre des six passaient deja sur l'ancienne page. Les deux
+        assertions qui suivent, elles, portent sur ce que SEUL le correctif
+        produit (mesure avant : 0 occurrence de chacune)."""
+        page = (Path(__file__).resolve().parents[1] / "docs" / "EXPORT_FORMAT.md").read_text(encoding="utf-8")
+
+        absents = [suffixe for suffixe in _SUFFIXES_DE_SECRET if suffixe not in page]
+        self.assertEqual(
+            absents,
+            [],
+            f"suffixe(s) qui masquent un secret en production mais absent(s) de docs/EXPORT_FORMAT.md : {absents}",
+        )
+
+        # Le mot de passe SMTP reel, celui de la fuite du 2026-08-31.
+        self.assertIn("email_smtp_password", page)
+        self.assertTrue(_est_un_secret("email_smtp_password"))
+        # L'enveloppe chiffree [SEC-2], exclue de l'export meme chiffree.
+        self.assertIn("rest_api_token_secret", page)
+        self.assertTrue(_est_un_secret("rest_api_token_secret"))
 
     def test_masking_upstream_does_not_turn_an_absent_secret_into_a_present_one(self) -> None:
         """#526 (volet ECARTE) : un secret ABSENT reste distinguable d'un secret pose.
