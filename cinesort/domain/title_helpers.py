@@ -305,19 +305,68 @@ def title_prefix_before_parenthesized_year(text: str) -> str:
     return prefix
 
 
+def _reduire_aux_tokens(s: str) -> str:
+    """Etapes de normalisation qui ne RETIRENT aucun mot du titre.
+
+    Extraite de `_norm_for_tokens` pour pouvoir etre rejouee SANS `NOISE_RE`
+    quand celle-ci a absorbe la totalite du titre (cf. la docstring ci-dessous).
+    Ces quatre etapes sont neutres sur le vocabulaire : elles retirent l'annee
+    parenthesee, deplient l'esperluette et ramenent tout separateur a une espace.
+    """
+    s = re.sub(r"\(\s*(19\d{2}|20\d{2})\s*\)", " ", s)
+    s = s.replace("&", " and ")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 @lru_cache(maxsize=512)
 def _norm_for_tokens(s: str) -> str:
+    """Titre reduit a ses tokens significatifs, pour la SIMILARITE et les CLES.
+
+    `NOISE_RE` est appliquee INCONDITIONNELLEMENT, donc aussi a l'interieur du
+    titre. Une poignee de ses ~70 jetons sont des mots ou des nombres qui sont de
+    vrais titres de films : le depot le sait et l'a ecrit noir sur blanc pour
+    l'AUTRE table de tags, celle de `scene_parser`
+    (`tests/test_scene_parser_title_mutilation_v77.py::
+    MotsAmbigusDeLaListeINCONDITIONNELLETests` nomme « Opus » (2025),
+    « Hybrid » (2007), « Limited » (2019), « Proper » (2022) ; le commentaire de
+    `scene_parser._AUDIO_RESIDUE_RE` nomme « 71 » (2014)).
+
+    Le correctif y avait ete pose, pas ici. Or `NOISE_RE` porte les MEMES jetons,
+    et quand elle absorbe la totalite du titre le resultat est la chaine VIDE —
+    ce qui est bien pire qu'une troncature. Une troncature reste SYMETRIQUE
+    (« Internal Affairs » rend « affairs » des deux cotes de la comparaison, donc
+    la similarite est juste) ; la chaine vide, elle, degenere tous ses lecteurs :
+
+        _title_similarity("Opus", "Opus")   -> 0.00   (cov et seq nuls)
+        _tmdb_prefix_equivalent(idem)       -> False  (garde `if not nq`)
+        movie_key("Opus", 2025)             -> "|2025"
+
+    Le premier est decisif : `core.build_candidates_from_tmdb` ecarte tout
+    candidat dont la similarite est sous `_TMDB_STRICT_MIN_SIM` (0,50) sans autre
+    porte de sortie qu'un `sim >= 0.35`. Le candidat TMDb EXACT, rendu en tete
+    par la recherche, etait donc rejete — le film restait non identifie a chaque
+    scan, definitivement. Le troisieme fait partager la meme cle de doublon a
+    deux films DIFFERENTS de la meme annee.
+
+    D'ou le repli : quand `NOISE_RE` ne laisse rien, on renormalise SANS elle.
+    Le comportement ne change QUE dans ce cas, et dans ce cas tout lecteur etait
+    deja degenere — `_candidate_consensus_bonus` (core.py) porte d'ailleurs deja
+    un `if not title_key: return 0.0`, la meme famille traitee a un seul site.
+    Aucun titre aujourd'hui normalise en une valeur non vide ne bouge d'un
+    caractere.
+    """
     # B02-TAGS-BRACKETS : strip {tmdb-XXX}/[imdbid-ttXXX] avant lowercasing
     # pour eviter que tmdb_id soit tokenise en chiffres / "tmdb" / "imdb".
     s = strip_provider_tags(s) if s else s
     s = s.lower()
     s = _strip_accents(s)
-    s = NOISE_RE.sub(" ", s)
-    s = re.sub(r"\(\s*(19\d{2}|20\d{2})\s*\)", " ", s)
-    s = s.replace("&", " and ")
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
+    normalise = _reduire_aux_tokens(NOISE_RE.sub(" ", s))
+    if normalise:
+        return normalise
+    # `NOISE_RE` a tout absorbe : le titre EST fait de ses jetons. Mieux vaut un
+    # titre qui porte des tags qu'un titre qui n'existe plus.
+    return _reduire_aux_tokens(s)
 
 
 def tokens(s: str) -> List[str]:
