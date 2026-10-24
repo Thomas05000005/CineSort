@@ -22,13 +22,29 @@ Les types atteignables hors de l'ancien tuple ne sont pas theoriques :
 qui leve `KeyError` (« Groupe de schema inconnu », sqlite_store.py:876), et le
 bootstrap de schema leve `RuntimeError` (sqlite_store.py:284).
 
-PIEGE EVITE (verifie par instrumentation avant d'ecrire ces tests) : le chemin
-« un film, un dossier renomme » n'emprunte PAS `atomic_move` — `apply_single`
-fait un `folder.rename(dst)` direct (apply_core.py:2426) et n'insere donc AUCUNE
-entree pending. Un test d'integration bati dessus serait VACANT : il resterait
-vert avec ou sans correctif. On passe donc par le nettoyage des dossiers
-residuels, qui lui appelle bien `atomic_move`, et chaque test d'integration
-compte les appels reellement injectes pour interdire toute vacuite future.
+POURQUOI CE FICHIER PASSE PAR LE NETTOYAGE DES DOSSIERS RESIDUELS : il appelle
+`atomic_move`, donc il insere une entree pending et le DELETE teste ici s'execute
+reellement. Chaque test d'integration compte les appels injectes, pour interdire
+toute vacuite future.
+
+CE PARAGRAPHE A LONGTEMPS DIT PLUS QUE CA, ET C'ETAIT PERIME. Il affirmait, au
+titre d'un « piege evite », que le chemin « un film, un dossier renomme »
+n'empruntait PAS `atomic_move` — « `apply_single` fait un `folder.rename(dst)`
+direct et n'insere donc AUCUNE entree pending », d'ou « un test d'integration
+bati dessus serait VACANT ».
+
+C'etait vrai a la redaction, et faux depuis T-PROD-8 (#1161) : `apply_single`
+passe desormais par `_deplacer_le_dossier_du_film`, qui enroule le renommage dans
+`journal_pose_autour` (apply_core.py) et pose donc bien le journal. Le depot en
+porte la preuve executable dans le fichier voisin —
+`test_apply_journal_write_ahead.py::test_apply_single_pose_le_journal_pendant_le_deplacement`
+OBSERVE l'entree pending pendant `apply_single`. Les deux fichiers se
+contredisaient.
+
+Le cout n'est pas la ligne fausse : c'est qu'elle DECONSEILLE la forme de test
+aujourd'hui la plus probante sur ce chemin. Un lecteur qui la croit ecarte son
+test d'integration comme vacant sans le mesurer — alors que c'est exactement
+celle qu'emploie la batterie de `journal_pose_autour`.
 """
 
 from __future__ import annotations
